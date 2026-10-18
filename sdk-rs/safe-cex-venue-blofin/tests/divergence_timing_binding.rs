@@ -419,7 +419,7 @@ fn remaining_real_sdk_paths_match_source_and_survive_a_dropped_waiter() {
             let orders: Vec<Order> = order_kind.map(|family| {
                 let id = match family { "algo" => "a__stop_loss", "trigger" => "t", _ => "n" };
                 let typ = match family { "algo" => "stop_market", "trigger" => "conditional", _ => "limit" };
-                let mut value = json!({"id":id,"symbol":"BTCUSDT","status":"open","type":typ,"side":"buy","amount":2,"filled":0,"remaining":2,"price":100,"reduceOnly":false});
+                let mut value = json!({"id":id,"symbol":"BTCUSDT","status":"open","type":typ,"side":"buy","amount":2,"filled":0,"remaining":2,"price":100,"lastUpdate":1710000000000.0,"reduceOnly":false});
                 if family == "trigger" { value["info"] = json!({"instId":"BTC-USDT","orderType":"trigger","algoId":"t"}); }
                 vec![serde_json::from_value(value).unwrap()]
             }).unwrap_or_default();
@@ -496,7 +496,7 @@ fn remaining_real_sdk_paths_match_source_and_survive_a_dropped_waiter() {
                     json!({"code":code,"data":data,"msg":"success"}),
                 );
             }
-            let pending: ExchangeFuture<'_, Value> = match kind {
+            let mut pending: ExchangeFuture<'_, Value> = match kind {
                 "active-orders" => {
                     let f = venue.fetch_orders(None);
                     Box::pin(async move { f.await.map(|v| json!(v)) })
@@ -549,18 +549,28 @@ fn remaining_real_sdk_paths_match_source_and_survive_a_dropped_waiter() {
                 wire.requests.borrow().is_empty(),
                 "source Axios terminal prefix {kind}"
             );
+            let delay = match order_kind {
+                Some("algo") => 1_000.,
+                Some("trigger") => 350.,
+                _ => 0.,
+            };
             if dropped {
                 drop(pending);
                 runtime.pump();
-                if order_kind.is_some() {
-                    runtime.now.set(runtime.now.get() + 1_000.);
-                    runtime.pump();
-                }
+                runtime.now.set(runtime.now.get() + delay);
+                runtime.pump();
             } else {
                 // Only source's real cancellation timers advance time; Promise turns do not.
-                if order_kind.is_some() {
+                if delay > 0. {
                     runtime.pump();
-                    runtime.now.set(runtime.now.get() + 1_000.);
+                    assert!(
+                        pending
+                            .as_mut()
+                            .poll(&mut Context::from_waker(Waker::noop()))
+                            .is_pending(),
+                        "real cancellation timer {kind}"
+                    );
+                    runtime.now.set(runtime.now.get() + delay);
                 }
                 let result = drive(&runtime, pending).unwrap();
                 if kind == "tickers" {
@@ -578,8 +588,8 @@ fn remaining_real_sdk_paths_match_source_and_survive_a_dropped_waiter() {
             }
             let requests: Vec<Value> = wire.requests.borrow().iter().map(|r| json!({"method":r.method.to_uppercase(),"path":r.url,"params":r.params,"body":r.body.as_ref().map(|b|b.untransformed().unwrap().clone().into_value().unwrap())})).collect();
             assert_eq!(
-                json!(requests),
-                case["requests"],
+                finite_json(json!(requests)),
+                finite_json(case["requests"].clone()),
                 "real signed HTTP {kind} dropped={dropped}"
             );
             for (symbol, row) in store.fetched_leverage().iter() {

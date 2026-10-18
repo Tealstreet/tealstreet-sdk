@@ -399,3 +399,27 @@ The failed normal family enters retry backoff while TPSL still requests both
 following cursors. No virtual time advances to complete those sibling pages.
 The generic complete-host fixture checks composition with its bounded executor;
 only the actual NativeHost regression claims scheduler ownership behavior.
+
+## Cached mode Promise reactions and FIX audit
+
+The class-bound mode and margin readers start on the existing host's generic
+`start_async` bridge. NativeHost delegates to the shared canonical Promise
+boundary and retains `Result<T, ServiceError>` directly. A cache hit still
+suspends the consuming formatter, as TS `await` does; it must not read the next
+mode inline. This matters when a worker acknowledgement changes account mode
+between the call prefix and the next reaction. Normal, TPSL, trigger and mixed
+batch placement regressions drive actual Base placement capabilities, signed
+HTTP and Store against the whole maintained class. They also drop the public
+waiter after its prefix and require the same final requests.
+
+`remaining_real_sdk_paths_match_source_and_survive_a_dropped_waiter` covers ten
+more whole-class profiles, each replayed with awaited and discarded native SDK
+waiters: active-order pagination in all three families, ticker and historical
+order reads, leverage read/write, margin change, all three cancellation families,
+and historical-position mapping. The terminal adapter is the only mocked seam.
+The finite JSON report normalizes numeric spelling (7 versus 7.0); ticker and
+leverage scalar bits are checked directly before that report. Promise progress
+keeps time fixed; only the actual 1000/350 ms cancellation sleeps advance it.
+The per-entry rulings, remaining typed boundaries and production reachability
+arguments are in `parity/BLOFIN_FIX_AUDIT.md`; these probes do not claim arbitrary
+JS alias or all-microtask equivalence.

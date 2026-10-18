@@ -5,7 +5,7 @@ const root = path.resolve(__dirname, '../../..');
 const {BlofinExchange} = require(path.join(root, 'packages/safe-cex/src/exchanges/blofin/blofin.exchange.ts'));
 const {DefaultStore} = require(path.join(root, 'packages/safe-cex/src/store/store.base.ts'));
 const market = {id:'BTC-USDT',symbol:'BTCUSDT',base:'BTC',quote:'USDT',active:true,precision:{amount:1,price:0.1},limits:{amount:{min:1,max:100},leverage:{min:1,max:100}},contractSize:1000,info:{lotSize:'1',minSize:'1',contractValue:1000}};
-const order = kind => ({id:kind==='algo'?'a__stop_loss':kind==='trigger'?'t':'n',symbol:'BTCUSDT',status:'open',type:kind==='algo'?'stop_market':kind==='trigger'?'conditional':'limit',side:'buy',amount:2,filled:0,remaining:2,price:100,reduceOnly:false,...(kind==='trigger'?{info:{instId:'BTC-USDT',orderType:'trigger',algoId:'t'}}:{})});
+const order = kind => ({id:kind==='algo'?'a__stop_loss':kind==='trigger'?'t':'n',symbol:'BTCUSDT',status:'open',type:kind==='algo'?'stop_market':kind==='trigger'?'conditional':'limit',side:'buy',amount:2,filled:0,remaining:2,price:100,lastUpdate:1710000000000,reduceOnly:false,...(kind==='trigger'?{info:{instId:'BTC-USDT',orderType:'trigger',algoId:'t'}}:{})});
 const closed = {instId:'BTC-USDT',historyId:'h',positionId:'p',positionSide:'long',closePositions:'2',maxPositions:'3',fee:'-0.5',realizedPnl:'9.5',createTime:'1700000000000',updateTime:'1700000001000',openAveragePrice:'100',closeAveragePrice:'105',leverage:'4'};
 const cases = ['active-orders','tickers','history','leverage','set-leverage','margin','cancel-normal','cancel-algo','cancel-trigger','journal'];
 (async()=>{
