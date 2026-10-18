@@ -7,12 +7,13 @@ use crate::payload::StoreWorkerPayload;
 use crate::payload::StoreWorkerStorePayload;
 use crate::settings::AppSettingsWorkerType;
 use crate::settings::ExchangeMetadataWorkerType;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::store_delivery::StoreFrame;
 use safe_cex_exchange::store_delivery::StoreUpdateThrottle;
 use safe_cex_exchange::store_delivery::StoreUpdateThrottleHost;
 use safe_cex_exchange::store_payload::StorePayloadPreparer;
 use safe_cex_exchange::{exchange::Exchange, runtime::ExchangeError};
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use std::{
     cell::{Cell, RefCell},
@@ -187,7 +188,7 @@ impl<H: ExchangeWorkerHost> ExchangeWorker<H> {
         {
             return Ok(());
         }
-        self.store_update(Rc::new(RefCell::new(self.store.serialize())), Some(true))
+        self.store_update(Rc::new(RefCell::new(self.store.serialize()?)), Some(true))
     }
     // ts: dispose. Re-read live exchange after cancellation and chaser cleanup.
     pub fn dispose(&self) -> Result<(), ExchangeError> {

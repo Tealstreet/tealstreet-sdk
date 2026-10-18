@@ -22,8 +22,8 @@ pub struct PublicDataUpdate {
 pub trait PublicDataParent {
     fn name(&self) -> String;
     fn now_ms(&self) -> f64;
-    fn loaded(&self) -> StoreDataLoaded;
-    fn tickers(&self) -> TickerBatch;
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError>;
+    fn tickers(&self) -> Result<TickerBatch, ExchangeError>;
     fn adapt_markets(&self, markets: MarketBatch) -> Result<MarketBatch, ExchangeError>;
     fn update(&self, update: PublicDataUpdate) -> Result<(), ExchangeError>;
     fn emit_log(&self, message: String, severity: LogSeverity) -> Result<(), ExchangeError>;

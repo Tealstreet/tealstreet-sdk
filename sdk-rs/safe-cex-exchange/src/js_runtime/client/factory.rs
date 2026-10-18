@@ -254,7 +254,8 @@ fn record_outcome(owner: &BaseExchange, context: &Js, response: Option<&Js>) {
         }))
     };
     if let Ok(Some(outcome)) = classify() {
-        owner.store.record_request_outcome(outcome);
+        // The source try/catch includes the Store write, not only classification.
+        let _ = owner.store.record_request_outcome(outcome);
     }
 }
 

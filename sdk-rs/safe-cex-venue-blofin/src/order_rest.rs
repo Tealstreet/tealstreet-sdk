@@ -410,7 +410,7 @@ async fn cancel_batches<E: std::fmt::Display>(
         .iter()
         .filter(|o| o.r#type.is_some_and(algo) == is_algo)
     {
-        let market = store.markets_by_symbol().get(&order.symbol).cloned();
+        let market = store.markets_by_symbol()?.get(&order.symbol).cloned();
         let Some(market) = market else { continue };
         payloads.push(if is_algo {
             json!({"instId":market.id,"tpslId":order.id.split("__").next().unwrap_or("")})
@@ -447,7 +447,7 @@ async fn cancel_batches<E: std::fmt::Display>(
                     if is_algo {
                         // Strict comparison: a numeric wire ID never equals a native string ID.
                         let ids: Vec<_> = store
-                            .orders()
+                            .orders()?
                             .iter()
                             .filter(|o| {
                                 id.and_then(Value::as_str)
@@ -508,7 +508,7 @@ pub async fn cancel_trigger_orders<E: std::fmt::Display>(
     // Validate the entire set before the first write.
     let mut payloads = Vec::new();
     for order in orders {
-        let market = store.markets_by_symbol().get(&order.symbol).cloned();
+        let market = store.markets_by_symbol()?.get(&order.symbol).cloned();
         let raw = order.info.as_ref();
         let id = raw
             .and_then(|v| v.get("algoId"))
@@ -596,7 +596,7 @@ pub async fn cancel_orders<E: std::fmt::Display>(
     {
         let root = order.id.split("__").next().unwrap_or("");
         let related: Vec<_> = store
-            .orders()
+            .orders()?
             .iter()
             .filter(|o| o.id.starts_with(root))
             .cloned()
@@ -622,7 +622,7 @@ pub async fn cancel_orders<E: std::fmt::Display>(
         let order = if order.id.contains("__") {
             let id = order.id.split("__").next().unwrap_or("");
             store
-                .orders()
+                .orders()?
                 .iter()
                 .find(|o| o.id == id)
                 .cloned()
@@ -683,8 +683,11 @@ pub async fn change_margin_type<E>(
     xhr: &dyn RestAdapter,
     host: &WriteHost<'_, E>,
 ) -> Result<(), ServiceError<E>> {
-    if store.positions().iter().any(|p| p.contracts > 0.0)
-        || store.orders().iter().any(|o| o.status == OrderStatus::Open)
+    if store.positions()?.iter().any(|p| p.contracts > 0.0)
+        || store
+            .orders()?
+            .iter()
+            .any(|o| o.status == OrderStatus::Open)
     {
         emit(host.service,Some(&Value::String("Changing margin type with open positions / orders is allowed but can cause unexpected behavior. Symbols with open positions will remain synced to previous mode until position is closed.".into())))?;
     }
@@ -728,7 +731,7 @@ pub async fn set_leverage<E>(
     host: &WriteHost<'_, E>,
 ) -> Result<(), ServiceError<E>> {
     let market = store
-        .markets_by_symbol()
+        .markets_by_symbol()?
         .get(symbol)
         .cloned()
         .ok_or_else(|| ServiceError::Input(format!("Market {symbol} not found on Blofin")))?;
@@ -737,7 +740,7 @@ pub async fn set_leverage<E>(
         market.limits.leverage.max,
     );
     let existing: Vec<_> = store
-        .positions()
+        .positions()?
         .iter()
         .filter(|p| p.symbol == symbol)
         .cloned()
@@ -746,7 +749,7 @@ pub async fn set_leverage<E>(
         return Ok(());
     }
     if existing.is_empty()
-        && store.fetched_leverage().get(symbol).is_some_and(|l| {
+        && store.fetched_leverage()?.get(symbol).is_some_and(|l| {
             l.is_fetching != Some(true) && l.buy_leverage == leverage && l.sell_leverage == leverage
         })
     {
@@ -789,7 +792,7 @@ pub async fn set_leverage<E>(
             .add_or_update_positions(updates)
             .map_err(ServiceError::Store)?;
     }
-    let mut fetched = store.fetched_leverage().clone();
+    let mut fetched = store.fetched_leverage()?.clone();
     fetched.insert(
         symbol.into(),
         FetchedLeverage {
@@ -897,7 +900,7 @@ pub async fn update_order<E: std::fmt::Display>(
     }
     let root = order.id.split("__").next().unwrap_or("");
     let related: Vec<_> = store
-        .orders()
+        .orders()?
         .iter()
         .filter(|o| o.id.starts_with(root))
         .cloned()

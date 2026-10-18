@@ -111,7 +111,7 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
             );
             let want: Vec<f64> = if live { vec![1., 6.] } else { vec![1.] };
             if kind == "position" {
-                let positions = store.positions();
+                let positions = store.positions().unwrap();
                 assert_eq!(
                     positions.len(),
                     if live { 2 } else { 1 },
@@ -138,7 +138,7 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
                     "private native initial position info marker"
                 );
             } else {
-                let orders = store.orders();
+                let orders = store.orders().unwrap();
                 assert_eq!(
                     orders.len(),
                     if live { 2 } else { 1 },
@@ -167,7 +167,7 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
             }
             if live {
                 assert_eq!(
-                    store.markets()[0].contract_size.unwrap().to_bits(),
+                    store.markets().unwrap()[0].contract_size.unwrap().to_bits(),
                     3f64.to_bits(),
                     "private native real producer replaced market"
                 );
@@ -179,7 +179,7 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
                     "private native caller changed nested producer"
                 );
                 let marker = if kind == "position" {
-                    store.positions()[0]
+                    store.positions().unwrap()[0]
                         .info
                         .as_ref()
                         .unwrap()
@@ -189,7 +189,7 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
                         .unwrap()
                         .clone()
                 } else {
-                    store.orders()[0]
+                    store.orders().unwrap()[0]
                         .info
                         .as_ref()
                         .unwrap()

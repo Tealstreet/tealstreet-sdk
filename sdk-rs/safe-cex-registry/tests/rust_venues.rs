@@ -1,4 +1,5 @@
 //! Rust venue construction through the registry table and the per-name path flag.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     http::{HttpClientOptions, HttpFuture, HttpHost, safe_cex_axios_create_no_proxy},
@@ -12,7 +13,6 @@ use safe_cex_registry::{
         BackpackDependencies, ConstructionPath, RUST_VENUES, RustVenueHost, native_constructor,
     },
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };

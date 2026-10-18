@@ -41,7 +41,7 @@ fn check_node(method: &str) {
         let shared = Rc::new(ScopeShared::new(
             native,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));

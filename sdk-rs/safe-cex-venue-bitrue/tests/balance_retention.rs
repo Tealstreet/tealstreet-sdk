@@ -1,10 +1,21 @@
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::js_runtime::value::Js;
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{BalanceHandle, Store, StoreUpdate};
 use safe_cex_types::{Balance, Ticker};
 use safe_cex_venue_bitrue::account_reads::fetch_balance;
 use std::{
     future::Future,
     task::{Context, Poll, Waker},
 };
+
+fn native(handle: &BalanceHandle) -> Js {
+    handle
+        .native_value()
+        .downcast::<Js>()
+        .unwrap()
+        .as_ref()
+        .clone()
+}
 
 fn ready<F: Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
@@ -54,16 +65,21 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
     ))
     .unwrap();
     assert_eq!(
-        [old.total, old.free, old.used, old.upnl],
+        [
+            old.read().unwrap().total,
+            old.read().unwrap().free,
+            old.read().unwrap().used,
+            old.read().unwrap().upnl
+        ],
         [101., 37., 64., -11.],
         "BITRUE-FALLBACK initial native balance"
     );
     assert!(
-        std::ptr::eq(&*old, &*same_old),
+        native(&old).same_reference(&native(&same_old)),
         "BITRUE-FALLBACK repeated read aliases current object"
     );
     assert!(
-        std::ptr::eq(&*old, &*Store::balance(&store)),
+        native(&old).same_reference(&native(&Store::balance_handle(&store).unwrap())),
         "BITRUE-FALLBACK current Store identity"
     );
 
@@ -97,25 +113,26 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
     )
     .unwrap();
     assert_eq!(
-        Store::tickers(&store).len(),
+        Store::tickers(&store).unwrap().len(),
         1,
         "BITRUE-FALLBACK native ticker write count"
     );
     assert_eq!(
-        Store::tickers(&store)[0].last,
+        Store::tickers(&store).unwrap()[0].last,
         37.,
         "BITRUE-FALLBACK native ticker write value"
     );
     assert_eq!(
-        old.total, 101.,
+        old.read().unwrap().total,
+        101.,
         "BITRUE-FALLBACK retained after ticker write"
     );
     assert!(
-        std::ptr::eq(&*old, &*same_old),
+        native(&old).same_reference(&native(&same_old)),
         "BITRUE-FALLBACK aliases survive ticker write"
     );
     assert!(
-        std::ptr::eq(&*old, &*Store::balance(&store)),
+        native(&old).same_reference(&native(&Store::balance_handle(&store).unwrap())),
         "BITRUE-FALLBACK unrelated write preserves object identity"
     );
 
@@ -129,12 +146,18 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
     )
     .unwrap();
     assert_eq!(
-        [old.total, old.free, old.used, old.upnl],
+        [
+            old.read().unwrap().total,
+            old.read().unwrap().free,
+            old.read().unwrap().used,
+            old.read().unwrap().upnl
+        ],
         [101., 37., 64., -11.],
         "BITRUE-FALLBACK old object survives replacement"
     );
     assert_eq!(
-        same_old.total, 101.,
+        same_old.read().unwrap().total,
+        101.,
         "BITRUE-FALLBACK second old alias survives replacement"
     );
     let current = ready(fetch_balance(
@@ -144,31 +167,38 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
     ))
     .unwrap();
     assert_eq!(
-        [current.total, current.free, current.used, current.upnl],
+        [
+            current.read().unwrap().total,
+            current.read().unwrap().free,
+            current.read().unwrap().used,
+            current.read().unwrap().upnl
+        ],
         [211., 43., 168., -19.],
         "BITRUE-FALLBACK current replacement native balance"
     );
     assert!(
-        !std::ptr::eq(&*old, &*current),
+        !native(&old).same_reference(&native(&current)),
         "BITRUE-FALLBACK replacement creates a new object"
     );
     assert!(
-        std::ptr::eq(&*current, &*Store::balance(&store)),
+        native(&current).same_reference(&native(&Store::balance_handle(&store).unwrap())),
         "BITRUE-FALLBACK replacement Store identity"
     );
     assert_eq!(
-        Store::serialize(&store).balance.total,
+        Store::serialize(&store).unwrap().balance.total,
         211.,
         "BITRUE-FALLBACK Store snapshot tracks replacement"
     );
 
     Store::reset(&store).unwrap();
     assert_eq!(
-        old.total, 101.,
+        old.read().unwrap().total,
+        101.,
         "BITRUE-FALLBACK original object survives reset"
     );
     assert_eq!(
-        current.total, 211.,
+        current.read().unwrap().total,
+        211.,
         "BITRUE-FALLBACK replaced object survives reset"
     );
     let reset = ready(fetch_balance(
@@ -178,12 +208,17 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
     ))
     .unwrap();
     assert_eq!(
-        [reset.total, reset.free, reset.used, reset.upnl],
+        [
+            reset.read().unwrap().total,
+            reset.read().unwrap().free,
+            reset.read().unwrap().used,
+            reset.read().unwrap().upnl
+        ],
         [0., 0., 0., 0.],
         "BITRUE-FALLBACK reset native balance"
     );
     assert!(
-        std::ptr::eq(&*reset, &*Store::balance(&store)),
+        native(&reset).same_reference(&native(&Store::balance_handle(&store).unwrap())),
         "BITRUE-FALLBACK reset Store identity"
     );
 }

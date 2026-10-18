@@ -12,8 +12,8 @@ use crate::{
     starbase_rpc::CoinbaseStarbaseRequestError,
     starbase_ws_controller::CoinbaseStarbaseActivationPromise,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{js_runtime::client, native::native_runtime};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, Order, retained_json::RetainedJsonInput as Input};
 use serde_json::json;
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};

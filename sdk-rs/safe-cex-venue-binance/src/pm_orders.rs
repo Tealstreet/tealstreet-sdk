@@ -12,11 +12,11 @@ pub fn format_pm_create_order(
     mut uuid: impl FnMut() -> String,
 ) -> Result<Vec<Map<String, Value>>, ExchangeError> {
     let client_order_id = base.resolve_caller_client_order_id(opts)?;
-    let market = base.store.markets_by_symbol().get(&opts.symbol).cloned();
-    let is_hedged = base.store.options().is_hedged;
+    let market = base.store.markets_by_symbol()?.get(&opts.symbol).cloned();
+    let is_hedged = base.store.options()?.is_hedged;
     if opts.r#type == OrderType::TrailingStopLoss {
-        let ticker = base.store.tickers_by_symbol().get(&opts.symbol).cloned();
-        let positions = base.store.positions().to_vec();
+        let ticker = base.store.tickers_by_symbol()?.get(&opts.symbol).cloned();
+        let positions = base.store.positions()?.to_vec();
         return crate::trailing_orders::format_pm_create_trailing_stop_loss_order(
             opts,
             market.as_ref(),

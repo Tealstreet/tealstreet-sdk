@@ -158,14 +158,11 @@ impl RuntimeReads for NativeReads {
         })
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'static, Option<Vec<Ticker>>> {
-        let symbols = self
-            .exchange
-            .base
-            .store
-            .markets()
-            .iter()
-            .map(|m| m.symbol.clone())
-            .collect();
+        let markets = match self.exchange.base.store.markets() {
+            Ok(markets) => markets,
+            Err(error) => return Box::pin(async move { Err(error.into()) }),
+        };
+        let symbols = markets.iter().map(|m| m.symbol.clone()).collect();
         let session = self.exchange.get_session_token();
         let this = self.clone();
         Box::pin(async move {

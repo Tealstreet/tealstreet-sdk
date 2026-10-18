@@ -1,4 +1,5 @@
 use super::*;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     runtime::{ExchangeFuture, ExchangeTask, LogSeverity},
     websocket::{
@@ -6,7 +7,7 @@ use safe_cex_exchange::{
         WsSocket,
     },
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{DirectTransport, TransportProvider, socket::TunnelHost};
 use safe_cex_types::ExchangeOptions;
 use std::{

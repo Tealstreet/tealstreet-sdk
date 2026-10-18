@@ -54,7 +54,10 @@ fn native_phemex_expiry_uses_shared_synced_dayjs_clock() {
             (markets[0].precision.amount, markets[0].precision.price),
             (0.003, 0.25)
         );
-        assert!(h.store.markets().is_empty(), "fetchMarkets read purity");
+        assert!(
+            h.store.markets().unwrap().is_empty(),
+            "fetchMarkets read purity"
+        );
         let account = h
             .exchange
             .get_account()

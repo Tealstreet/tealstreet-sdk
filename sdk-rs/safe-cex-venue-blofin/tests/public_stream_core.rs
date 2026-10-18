@@ -217,15 +217,17 @@ impl PublicStreamHost for Host {
     fn is_testnet(&self) -> bool {
         self.initial["testnet"].as_bool().unwrap_or(false)
     }
-    fn market_ids(&self) -> Vec<String> {
+    fn market_ids(&self) -> Result<Vec<std::string::String>, std::string::String> {
         let read = self.market_reads.get() + 1;
         self.market_reads.set(read);
         self.trace(json!(["markets", read]));
-        if read > 1 && self.initial["marketsAfterFirst"].is_array() {
-            serde_json::from_value(self.initial["marketsAfterFirst"].clone()).unwrap()
-        } else {
-            vec!["BTC-USDT".into(), "ETH-USDT".into()]
-        }
+        Ok(
+            if read > 1 && self.initial["marketsAfterFirst"].is_array() {
+                serde_json::from_value(self.initial["marketsAfterFirst"].clone()).unwrap()
+            } else {
+                vec!["BTC-USDT".into(), "ETH-USDT".into()]
+            },
+        )
     }
     fn has_socket(&self) -> bool {
         self.socket.get()

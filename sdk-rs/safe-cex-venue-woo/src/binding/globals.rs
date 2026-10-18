@@ -290,7 +290,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
             let currency =
                 deps.call_method("resolveSettleCurrency", vec![Js::str(&interval.symbol)])?;
             let currency: String = to_typed(&currency)?;
-            let mut resolve = |_: &str| currency.clone();
+            let mut resolve = |_: &str| Ok(currency.clone());
             let record = map_folded_interval(
                 &interval,
                 &mut FoldPositionAdapterDeps {
@@ -298,7 +298,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                     resolve_settle_currency: &mut resolve,
                     resolve_funding: None,
                 },
-            );
+            )?;
             match record {
                 Some(record) => from_typed(&record),
                 None => Ok(Js::Null),

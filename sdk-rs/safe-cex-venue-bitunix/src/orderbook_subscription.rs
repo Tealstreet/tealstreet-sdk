@@ -1,4 +1,5 @@
 //! Futures snapshots preserve the callback's shared book identity and wait timer.
+use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{JsJsonValue, js_json_stringify, js_string, parse_float};
 use serde_json::Value;
 use std::{cell::RefCell, rc::Rc};
@@ -16,19 +17,23 @@ pub struct OrderBook {
 pub trait OrderBookHost<C> {
     type Parser: Clone + PartialEq;
     type Timer;
-    fn precision(&mut self, symbol: &str) -> Result<Option<Value>, String>;
+    fn precision(&mut self, symbol: &str) -> Result<Option<Value>, ExchangeError>;
     fn allocate_parser(&mut self) -> Self::Parser;
-    fn connected(&mut self) -> Result<bool, String>;
-    fn handlers(&mut self, handler: &str) -> Result<Vec<Self::Parser>, String>;
-    fn set_handlers(&mut self, handler: &str, parsers: Vec<Self::Parser>) -> Result<(), String>;
-    fn topic_count(&mut self, topic: &str) -> Result<f64, String>;
-    fn set_topic_count(&mut self, topic: &str, count: f64) -> Result<(), String>;
-    fn send(&mut self, frame: &JsJsonValue) -> Result<(), String>;
-    fn wait(&mut self, delay: f64) -> Result<Self::Timer, String>;
+    fn connected(&mut self) -> Result<bool, ExchangeError>;
+    fn handlers(&mut self, handler: &str) -> Result<Vec<Self::Parser>, ExchangeError>;
+    fn set_handlers(
+        &mut self,
+        handler: &str,
+        parsers: Vec<Self::Parser>,
+    ) -> Result<(), ExchangeError>;
+    fn topic_count(&mut self, topic: &str) -> Result<f64, ExchangeError>;
+    fn set_topic_count(&mut self, topic: &str, count: f64) -> Result<(), ExchangeError>;
+    fn send(&mut self, frame: &JsJsonValue) -> Result<(), ExchangeError>;
+    fn wait(&mut self, delay: f64) -> Result<Self::Timer, ExchangeError>;
     fn timer_truthy(&mut self, timer: &Self::Timer) -> bool;
-    fn clear(&mut self, timer: Self::Timer) -> Result<(), String>;
-    fn cleanup_stats(&mut self, handler: &str) -> Result<(), String>;
-    fn call(&mut self, callback: &C, book: Rc<RefCell<OrderBook>>) -> Result<(), String>;
+    fn clear(&mut self, timer: Self::Timer) -> Result<(), ExchangeError>;
+    fn cleanup_stats(&mut self, handler: &str) -> Result<(), ExchangeError>;
+    fn call(&mut self, callback: &C, book: Rc<RefCell<OrderBook>>) -> Result<(), ExchangeError>;
 }
 pub struct BookSubscription<C, P, T> {
     pub callback: C,
@@ -43,9 +48,9 @@ pub fn listen_order_book<C, H: OrderBookHost<C>>(
     host: &mut H,
     symbol: &str,
     callback: C,
-) -> Result<BookSubscription<C, H::Parser, H::Timer>, String> {
+) -> Result<BookSubscription<C, H::Parser, H::Timer>, ExchangeError> {
     let precision = host.precision(symbol)?;
-    let precision = js_string(precision.as_ref()).map_err(|e| e.message.to_owned())?;
+    let precision = js_string(precision.as_ref()).map_err(ExchangeError::from)?;
     let handler = format!("market_{}_depthop_{precision}", symbol.to_lowercase());
     let frame = JsJsonValue::Object(vec![
         ("event".into(), JsJsonValue::String("sub".into())),
@@ -58,8 +63,8 @@ pub fn listen_order_book<C, H: OrderBookHost<C>>(
         ),
     ]);
     let topic = js_json_stringify(&frame)
-        .map_err(|e| e.message.to_owned())?
-        .ok_or("Missing frame")?;
+        .map_err(ExchangeError::from)?
+        .ok_or_else(|| ExchangeError::new("Missing frame"))?;
     let mut subscription = BookSubscription {
         callback,
         parser: host.allocate_parser(),
@@ -76,7 +81,7 @@ impl<C, P: Clone + PartialEq, T> BookSubscription<C, P, T> {
     pub fn subscribe<H: OrderBookHost<C, Parser = P, Timer = T>>(
         &mut self,
         host: &mut H,
-    ) -> Result<(), String> {
+    ) -> Result<(), ExchangeError> {
         if host.connected()? {
             let mut handlers = host.handlers(&self.handler)?;
             handlers.push(self.parser.clone());
@@ -99,7 +104,7 @@ impl<C, P: Clone + PartialEq, T> BookSubscription<C, P, T> {
     pub fn cancel<H: OrderBookHost<C, Parser = P, Timer = T>>(
         &mut self,
         host: &mut H,
-    ) -> Result<(), String> {
+    ) -> Result<(), ExchangeError> {
         let handlers = host
             .handlers(&self.handler)?
             .into_iter()
@@ -122,8 +127,10 @@ impl<C, P: Clone + PartialEq, T> BookSubscription<C, P, T> {
         &self,
         host: &mut H,
         raw: &Value,
-    ) -> Result<(), String> {
-        let data = raw.get("data").ok_or("Missing book data")?;
+    ) -> Result<(), ExchangeError> {
+        let data = raw
+            .get("data")
+            .ok_or_else(|| ExchangeError::new("Missing book data"))?;
         self.book.borrow_mut().bids = levels(data.get("bids"))?;
         self.book.borrow_mut().asks = levels(data.get("asks"))?;
         {
@@ -140,15 +147,17 @@ impl<C, P: Clone + PartialEq, T> BookSubscription<C, P, T> {
         host.call(&self.callback, self.book.clone())
     }
 }
-fn levels(value: Option<&Value>) -> Result<Vec<BookLevel>, String> {
+fn levels(value: Option<&Value>) -> Result<Vec<BookLevel>, ExchangeError> {
     value
         .and_then(Value::as_array)
-        .ok_or("Book side must be an array")?
+        .ok_or_else(|| ExchangeError::new("Book side must be an array"))?
         .iter()
         .map(|row| {
-            let row = row.as_array().ok_or("Book level must be an array")?;
-            let price = js_string(row.first()).map_err(|e| e.message.to_owned())?;
-            let amount = js_string(row.get(1)).map_err(|e| e.message.to_owned())?;
+            let row = row
+                .as_array()
+                .ok_or_else(|| ExchangeError::new("Book level must be an array"))?;
+            let price = js_string(row.first()).map_err(ExchangeError::from)?;
+            let amount = js_string(row.get(1)).map_err(ExchangeError::from)?;
             Ok(BookLevel {
                 price: parse_float(&price),
                 amount: parse_float(&amount),

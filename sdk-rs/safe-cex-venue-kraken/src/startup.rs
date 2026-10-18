@@ -39,7 +39,7 @@ pub trait StartupHost {
     fn init_external_public_data(&self) -> Result<ExchangeFuture<'static, bool>, ExchangeError>;
     fn fetch_markets(&self) -> Result<ExchangeFuture<'static, Rc<Self::Markets>>, ExchangeError>;
     fn fetch_tickers(&self) -> Result<ExchangeFuture<'static, Rc<Self::Tickers>>, ExchangeError>;
-    fn loaded(&self) -> StoreDataLoaded;
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError>;
     fn update(
         &self,
         update: StartupUpdate<Self::Markets, Self::Tickers>,
@@ -69,7 +69,7 @@ async fn start<H: StartupHost + ?Sized>(
         if host.state().disposed.get() {
             return Ok(());
         }
-        let mut loaded = host.loaded();
+        let mut loaded = host.loaded()?;
         loaded.markets = true;
         host.update(StartupUpdate::Markets(markets, loaded))?;
 
@@ -77,7 +77,7 @@ async fn start<H: StartupHost + ?Sized>(
         if host.state().disposed.get() {
             return Ok(());
         }
-        let mut loaded = host.loaded();
+        let mut loaded = host.loaded()?;
         loaded.tickers = true;
         host.update(StartupUpdate::Tickers(tickers, loaded))?;
 
@@ -91,7 +91,7 @@ async fn start<H: StartupHost + ?Sized>(
         connect_current(&host.state().private_socket)?;
     }
     if host.state().public_data_only.get() {
-        let mut loaded = host.loaded();
+        let mut loaded = host.loaded()?;
         loaded.balance = true;
         loaded.positions = true;
         loaded.orders = true;
@@ -116,12 +116,12 @@ pub async fn fetch_and_set_orders<
 >(
     fetch: impl FnOnce() -> Result<F, ExchangeError>,
     add_full: impl FnOnce(&Rc<B>) -> Result<(), ExchangeError>,
-    loaded: impl FnOnce() -> StoreDataLoaded,
+    loaded: impl FnOnce() -> Result<StoreDataLoaded, ExchangeError>,
     update: impl FnOnce(StoreDataLoaded) -> Result<(), ExchangeError>,
 ) -> Result<Rc<B>, ExchangeError> {
     let orders = fetch()?.await?;
     add_full(&orders)?;
-    let mut flags = loaded();
+    let mut flags = loaded()?;
     flags.orders = true;
     update(flags)?;
     Ok(orders)

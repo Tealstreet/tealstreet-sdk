@@ -1,7 +1,8 @@
 #[path = "support/retained_assert.rs"]
 mod retained_assert;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value};
-use safe_cex_store::{Store, StoreMutationError, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreMutationError, StoreUpdate};
 use safe_cex_types::{
     FetchedLeverage, MarginType, OrderSide, OrderType, PositionMode, StoreSubscriberError,
 };
@@ -171,7 +172,7 @@ fn native_confirmed_mode_cache_first_rekeys_first_id_and_preserves_fields() {
             case["updates"].as_u64().unwrap(),
             "native_single_or_no_store_update"
         );
-        let positions = Store::positions(&store);
+        let positions = Store::positions(&store).unwrap();
         let rows = case["positions"].as_array().unwrap();
         let expected_len = if case["input"].get("positions").is_none() {
             0
@@ -227,7 +228,7 @@ fn native_confirmed_mode_cache_first_rekeys_first_id_and_preserves_fields() {
             );
         }
         drop(positions);
-        let leverage = Store::fetched_leverage(&store);
+        let leverage = Store::fetched_leverage(&store).unwrap();
         let expected_leverage_count = if case["input"].get("fetchedLeverage").is_some() {
             2
         } else {
@@ -270,7 +271,7 @@ fn native_confirmed_mode_cache_first_rekeys_first_id_and_preserves_fields() {
     assert_eq!(error.cause().response(), Some(&json!({"native":17})));
     assert_eq!(state.position_mode.get(), Some(PositionMode::OneWay));
     assert_eq!(
-        Store::positions(&store).len(),
+        Store::positions(&store).unwrap().len(),
         2,
         "native_mutation_precedes_notification_error"
     );

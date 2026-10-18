@@ -104,7 +104,7 @@ where
             let usd = format!("{asset}/USD");
             let usdt = format!("{asset}/USDT");
             if let Some(ticker) = store
-                .tickers()
+                .tickers()?
                 .iter()
                 .find(|t| t.symbol == usd || t.symbol == usdt)
             {
@@ -140,7 +140,7 @@ where
             } else {
                 &error.message
             })?;
-            Ok(store.balance().clone())
+            Ok(store.balance()?.clone())
         }
     }
 }

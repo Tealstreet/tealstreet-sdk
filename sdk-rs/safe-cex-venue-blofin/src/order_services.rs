@@ -106,7 +106,7 @@ pub async fn get_or_fetch_position_mode<E>(
 ) -> Result<PositionMode, ServiceError<E>> {
     if let Some(symbol) = symbol.filter(|symbol| !symbol.is_empty())
         && let Some(mode) = store
-            .positions()
+            .positions()?
             .iter()
             .find(|p| p.symbol == symbol)
             .and_then(|p| (p.position_mode).into_value())
@@ -143,7 +143,7 @@ pub async fn get_or_fetch_margin_type<E>(
 ) -> Result<MarginType, ServiceError<E>> {
     if let Some(symbol) = symbol.filter(|symbol| !symbol.is_empty())
         && let Some(mode) = store
-            .positions()
+            .positions()?
             .iter()
             .find(|p| p.symbol == symbol && p.contracts > 0.0)
             .and_then(|p| (p.margin_type).into_value())
@@ -213,7 +213,7 @@ pub async fn fetch_leverage_for_symbol<E: std::fmt::Display>(
     host: &ServiceHost<'_, E>,
 ) -> Result<Option<FetchedLeverage>, ServiceError<E>> {
     let operation=async {
-        let market=store.markets_by_symbol().get(symbol).cloned();
+        let market=store.markets_by_symbol()?.get(symbol).cloned();
         let Some(market)=market else {log(host,&format!("Market {symbol} not found"),LogSeverity::Warning)?;return Ok(None);};
         let margin=get_or_fetch_margin_type(None,false,modes,store,xhr,host).await?;
         let data=request(xhr,"GET","LEVERAGE",Some(json!({"instId":market.id,"marginMode":if margin==MarginType::Isolated {"isolated"}else{"cross"}})),None).await?;let data=data.json();
@@ -229,7 +229,7 @@ pub async fn fetch_leverage_for_symbol<E: std::fmt::Display>(
         if !buy.is_finite()||!sell.is_finite(){return Ok(None);}
         let margin=long.get("marginMode").filter(|v|js_truthy(Some(v))).or_else(||short.get("marginMode").filter(|v|js_truthy(Some(v)))).or_else(||net.and_then(|n|n.get("marginMode")));
         let leverage=FetchedLeverage {buy_leverage:buy,sell_leverage:sell,margin_type:Some(if margin.and_then(Value::as_str)==Some("isolated"){MarginType::Isolated}else{MarginType::Cross}),position_mode:Some(if net.is_some(){PositionMode::OneWay}else{PositionMode::Hedged}),is_fetching:None};
-        let mut fetched=store.fetched_leverage().clone();fetched.insert(symbol.into(),leverage.clone());store.update(StoreUpdate {fetched_leverage:Some(fetched),..Default::default()},false).map_err(ServiceError::Store)?;Ok(Some(leverage))
+        let mut fetched=store.fetched_leverage()?.clone();fetched.insert(symbol.into(),leverage.clone());store.update(StoreUpdate {fetched_leverage:Some(fetched),..Default::default()},false).map_err(ServiceError::Store)?;Ok(Some(leverage))
     }.await;
     match operation {
         Ok(value) => Ok(value),
@@ -266,7 +266,7 @@ pub async fn change_position_mode<E>(
         &format!(
             "Current positions count: {}",
             store
-                .positions()
+                .positions()?
                 .iter()
                 .filter(|p| p.contracts > 0.0)
                 .count()
@@ -275,7 +275,7 @@ pub async fn change_position_mode<E>(
     )?;
     log(
         host,
-        &format!("Current orders count: {}", store.orders().len()),
+        &format!("Current orders count: {}", store.orders()?.len()),
         LogSeverity::Info,
     )?;
     let data = request(
@@ -353,16 +353,35 @@ pub async fn place_trigger_order<E>(
     }
     js_string(id).map_err(ServiceError::Coercion)
 }
-pub async fn cancel_symbol_orders<E, F: Future<Output = Result<(), E>>>(
+pub async fn cancel_symbol_orders<
+    E: From<safe_cex_types::StoreReadError>,
+    F: Future<Output = Result<(), E>>,
+>(
     symbol: &str,
     store: &dyn Store,
     cancel_orders: impl FnOnce(Vec<Order>) -> F,
 ) -> Result<(), E> {
     let orders = store
-        .orders()
+        .orders()?
         .iter()
         .filter(|o| o.symbol == symbol)
         .cloned()
         .collect();
     cancel_orders(orders).await
+}
+
+impl<E> From<safe_cex_types::StoreReadError> for ServiceError<E> {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error.into())
+    }
+}
+
+impl<E> From<crate::reads::MappingError> for ServiceError<E> {
+    fn from(error: crate::reads::MappingError) -> Self {
+        match error {
+            crate::reads::MappingError::Coercion(error) => Self::Coercion(error),
+            crate::reads::MappingError::Store(error) => Self::Store(error.into()),
+            crate::reads::MappingError::Input(error) => Self::Input(error),
+        }
+    }
 }

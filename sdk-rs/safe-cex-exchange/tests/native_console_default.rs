@@ -1,11 +1,11 @@
 //! Typed runtime console and BaseExchange logs reach the production native sink.
 #![cfg(all(feature = "native", not(target_arch = "wasm32")))]
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     native::native_runtime,
     runtime::ExchangeRuntime,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use std::{cell::RefCell, process::Command, rc::Rc};
 

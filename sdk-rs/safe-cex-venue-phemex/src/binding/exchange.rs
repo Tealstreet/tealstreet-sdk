@@ -141,7 +141,7 @@ impl PhemexExchange {
         };
         let js_name = from_typed(&name).map_err(err)?;
         let js_options = from_typed(&options).map_err(err)?;
-        let js_store = store::facade(store.clone());
+        let js_store = store::facade(store.clone())?;
         crate::start_order_formatting::new_exchange(&mut host, js_name, js_options, js_store)
             .map_err(err)?;
         let rt = host.rt;
