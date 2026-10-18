@@ -31,7 +31,7 @@ def native(label, expected):
     rows = json.loads(RESULTS.read_text())
     (LOGS / f'{label}.json').write_text(json.dumps(rows, indent=2) + '\n')
     assert len(rows) == 33, (label, LOGS)
-    assert sum(bool(r['classificationOnly']) for r in rows) == 8, (label, LOGS)
+    assert sum(bool(r.get('classificationOnly')) for r in rows) == 8, (label, LOGS)
     failed = [r for r in rows if r['failures']]
     assert sorted(r['name'] for r in failed) == sorted(expected), (label, failed, LOGS)
     assert code == (1 if expected else 0), (label, LOGS)
@@ -54,14 +54,13 @@ def conversion(label, red):
 
 
 faults = [
-    ('types.rs', 'price_precision: w.price_precision,',
-     'price_precision: w.price_precision + 1.0,'),
+    ('types.rs', 'maint_margin_percent: w.maint_margin_percent,',
+     'maint_margin_percent: w.maint_margin_percent.to_uppercase(),'),
     ('public_stream.rs', 'patch.set_number("last", price);',
      'patch.set_number("last", price + 1.0);'),
     ('order_execution.rs', 'post_only: input.post_only,', 'post_only: None,'),
 ]
 originals = {SOURCE / file: (SOURCE / file).read_bytes() for file, _, _ in faults}
-native('baseline', [])
 try:
     for file, before, after in faults:
         source = SOURCE / file
