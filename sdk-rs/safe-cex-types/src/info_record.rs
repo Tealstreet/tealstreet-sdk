@@ -67,6 +67,9 @@ impl serde::Serialize for crate::Market {
         if let Some(value) = &self.runtime.inverse {
             state.serialize_field("inverse", value)?;
         }
+        if let Some(value) = &self.runtime.fees {
+            state.serialize_field("fees", value)?;
+        }
         state.end()
     }
 }
