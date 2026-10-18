@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::Value;
 fn binary64(value: &Value) -> Value {
     match value {
         Value::Number(n) => serde_json::json!(n.as_f64().unwrap()),
@@ -41,8 +42,14 @@ fn market_mapping_matches_each_live_family_source() {
             _ => unreachable!(),
         };
         let result = map_market(
-            &case["raw"],
-            case["fees"].as_array().unwrap(),
+            &case["raw"].clone().into(),
+            &case["fees"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect::<Vec<_>>(),
             case["category"].as_str().unwrap(),
             family,
         );

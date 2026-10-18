@@ -7,7 +7,6 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::Store;
 use safe_cex_types::ExchangeOptions;
-use serde_json::Value;
 use std::rc::{Rc, Weak};
 pub struct Parent {
     pub owner: Weak<BackpackExchange>,
@@ -93,7 +92,7 @@ impl WsParent for Parent {
         &self,
         error: &str,
         message: Option<&str>,
-        extra: Option<&Value>,
+        extra: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         self.live()?.base.emit_and_log_error(
             safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(error.into()),

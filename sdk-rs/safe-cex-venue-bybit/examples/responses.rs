@@ -2,7 +2,8 @@ use std::io::{self, Read};
 fn main() {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input).unwrap();
-    let cases: Vec<serde_json::Value> = serde_json::from_str(&input).unwrap();
+    let cases: Vec<safe_cex_types::retained_json::RetainedJsonInput> =
+        serde_json::from_str(&input).unwrap();
     let actual: Vec<_> = cases
         .iter()
         .map(safe_cex_venue_bybit::response::get_bybit_response_meta)

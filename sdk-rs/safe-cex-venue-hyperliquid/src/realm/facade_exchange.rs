@@ -130,7 +130,12 @@ pub(crate) fn base_exchange_class(
             };
             let extra = match arg(a, 2) {
                 Value::Undefined => None,
-                x => Some(r.to_serde(&x)?),
+                x => Some(
+                    safe_cex_exchange::js_runtime::value::to_retained_input(
+                        &r.capture_typed_value(&x, 0)?,
+                    )
+                    .map_err(|error| thrown(r, error.to_exchange_error()))?,
+                ),
             };
             b.emit_and_log_error(input, message.as_deref(), extra.as_ref())
                 .map_err(|e| thrown(r, e))?;

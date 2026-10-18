@@ -1,7 +1,5 @@
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::{
-    JsNumberInput, js_from_str, js_from_value_ref, js_value_as_f64,
-};
+use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str, js_from_value_ref};
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::provider::RestBody;
 use safe_cex_types::{Market, Ticker};
@@ -36,14 +34,10 @@ static ORACLE: LazyLock<Value> = LazyLock::new(|| {
 fn number(v: f64) -> Value {
     json!({"number":format!("{:016x}",if v.is_nan(){0x7ff8000000000000}else{v.to_bits()})})
 }
-fn observe(v: &Value) -> Value {
-    match v {
-        Value::Number(_) => number(js_value_as_f64(v).unwrap()),
-        Value::Array(a) => Value::Array(a.iter().map(observe).collect()),
-        Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (k.clone(), observe(v))).collect()),
-        v => v.clone(),
-    }
-}
+#[path = "support/retained_info_values.rs"]
+mod retained_info_values;
+use retained_info_values::observe;
+
 fn optional(v: &mut Value, key: &str, x: Option<Value>) {
     if let Some(x) = x {
         v[key] = x;
@@ -110,9 +104,20 @@ fn actual_quote_reads() {
         let input = js_from_str::<JsNumberInput>(case["raw"].as_str().unwrap());
         if name == "surrogate" {
             assert_eq!(case["expected"]["codeUnit"], 55296);
-            assert!(input.is_err(), "QUOTES-UTF8 boundary {method}");
-            comparisons += 1;
-            continue;
+            let retained: safe_cex_types::retained_json::RetainedJsonInput =
+                input.as_ref().unwrap().clone().decode().unwrap();
+            let symbol = if method == "fetchMarkets" {
+                retained.as_array().unwrap()[0]
+                    .get("instrument")
+                    .unwrap()
+                    .get("symbol")
+                    .unwrap()
+            } else {
+                retained.get("events").unwrap().as_array().unwrap()[0]
+                    .get("symbol")
+                    .unwrap()
+            };
+            assert_eq!(symbol.as_text(), Some([0xd800].as_slice()));
         }
         let errors = RefCell::new(Vec::<Value>::new());
         let trace = RefCell::new(Vec::<Value>::new());
@@ -216,6 +221,37 @@ fn actual_quote_reads() {
                 )
             })
         };
+        if name == "surrogate" {
+            if method == "fetchMarkets" {
+                assert_eq!(
+                    result.unwrap(),
+                    Value::Array(store.markets().iter().map(market).collect()),
+                    "closed market symbol uses source mapping catch"
+                );
+                assert_eq!(
+                    errors.borrow().len(),
+                    1,
+                    "market projection failure reported once"
+                );
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    !error.message.is_empty(),
+                    "closed ticker symbol visibly refuses after mapping"
+                );
+                assert!(
+                    errors.borrow().is_empty(),
+                    "ticker projection remains outside source catch"
+                );
+            }
+            assert_eq!(
+                json!(*trace.borrow()),
+                case["trace"],
+                "surrogate request effects {method}"
+            );
+            comparisons += 1;
+            continue;
+        }
         let actual = match result {
             Ok(value) => json!({"ok":value,"errors":errors.borrow().clone()}),
             Err(error) => {
@@ -319,11 +355,25 @@ fn quotes_owned_info_boundary() {
         let report = |_| Ok(());
         if index == 0 {
             let mut rows = run(fetch_markets(|| ready(Ok(input)), &store, &report)).unwrap();
-            rows[0].info.as_mut().unwrap()["instrument"]["description"] = json!("changed");
+            *rows[0]
+                .info
+                .as_mut()
+                .unwrap()
+                .get_mut("instrument")
+                .unwrap()
+                .get_mut("description")
+                .unwrap() = json!("changed").into();
             let unchanged = run(fetch_markets(|| ready(Ok(saved)), &store, &report)).unwrap();
-            assert_eq!(
-                unchanged[0].info.as_ref().unwrap()["instrument"]["description"],
-                "instrument",
+            assert!(
+                unchanged[0]
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("instrument")
+                    .unwrap()
+                    .get("description")
+                    .unwrap()
+                    .text_equals("instrument"),
                 "QUOTES-OWNED market info"
             );
         } else {
@@ -344,7 +394,7 @@ fn quotes_owned_info_boundary() {
             }
             .unwrap()
             .unwrap();
-            rows[0].info.as_mut().unwrap()["symbol"] = json!("changed");
+            *rows[0].info.as_mut().unwrap().get_mut("symbol").unwrap() = json!("changed").into();
             let unchanged = run(fetch_tickers_for_symbols(
                 vec![],
                 || ready(Ok("".into())),
@@ -355,9 +405,14 @@ fn quotes_owned_info_boundary() {
             ))
             .unwrap()
             .unwrap();
-            assert_eq!(
-                unchanged[0].info.as_ref().unwrap()["symbol"],
-                "A",
+            assert!(
+                unchanged[0]
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("symbol")
+                    .unwrap()
+                    .text_equals("A"),
                 "QUOTES-OWNED ticker info"
             );
         }

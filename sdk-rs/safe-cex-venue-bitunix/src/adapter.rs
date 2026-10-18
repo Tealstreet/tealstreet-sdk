@@ -69,6 +69,47 @@ pub(crate) fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, Exchange
 pub(crate) fn from_value<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ExchangeError> {
     serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))
 }
+pub(crate) fn to_input<T: serde::Serialize>(
+    value: &T,
+) -> Result<safe_cex_types::retained_json::RetainedJsonInput, ExchangeError> {
+    use safe_cex_exchange::js_runtime::value::{from_typed, to_retained_input};
+    Ok(to_retained_input(&from_typed(value)?)?)
+}
+pub(crate) fn from_input<T: serde::de::DeserializeOwned>(
+    value: safe_cex_types::retained_json::RetainedJsonInput,
+) -> Result<T, ExchangeError> {
+    use safe_cex_exchange::js_runtime::value::{from_retained_input, to_typed};
+    Ok(to_typed(&from_retained_input(value))?)
+}
+pub(crate) fn request_payload(
+    value: safe_cex_types::retained_json::RetainedJsonInput,
+) -> Result<JsJsonValue, ExchangeError> {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    Ok(match value {
+        Input::Undefined => JsJsonValue::Undefined,
+        Input::Null => JsJsonValue::Null,
+        Input::Bool(value) => JsJsonValue::Bool(value),
+        Input::Float(value) => JsJsonValue::Number(value),
+        Input::Lexeme(value) => {
+            JsJsonValue::Number(value.parse().map_err(|error: std::num::ParseFloatError| {
+                ExchangeError::new(error.to_string())
+            })?)
+        }
+        Input::Text(value) => JsJsonValue::String(utf8(&value)?),
+        Input::Array(values) => JsJsonValue::Array(
+            values
+                .into_iter()
+                .map(request_payload)
+                .collect::<Result<_, _>>()?,
+        ),
+        Input::Object(values) => JsJsonValue::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| Ok((utf8(&key)?, request_payload(value)?)))
+                .collect::<Result<_, ExchangeError>>()?,
+        ),
+    })
+}
 pub(crate) fn units(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
 }
@@ -303,7 +344,7 @@ impl BitunixVenue {
         let report = self.runtime.clone();
         let handle = self.runtime.spawn_local(Box::pin(async move {
             if let Err(e) = task.await {
-                report.report_exception(&e, &serde_json::json!({ "operation": label }));
+                report.report_exception(&e, &serde_json::json!({ "operation": label }).into());
             }
         }));
         self.tasks.borrow_mut().push(handle);

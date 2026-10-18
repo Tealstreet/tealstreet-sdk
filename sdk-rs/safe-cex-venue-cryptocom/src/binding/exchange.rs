@@ -173,7 +173,7 @@ impl CryptocomExchange {
                 Ok(typed) => callback(typed),
                 Err(error) => reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source": "cryptocom listener payload"}),
+                    &serde_json::json!({"source": "cryptocom listener payload"}).into(),
                 ),
             }
             Ok(Js::Undefined)

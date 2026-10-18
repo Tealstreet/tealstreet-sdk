@@ -1808,3 +1808,29 @@ receipts above do not replace those measurements. NOT RUN here: canonical wasm
 clippy, workspace check/full workspace tests, extractor check and the central
 wiring/layers/routing sweep. The user owns wasm and the central sweep. Remote
 parity-job green remains unconfirmed because integration jobs are cancelled.
+
+The retained-info cutover executes `transport_binding::retained_info_native::native_http_and_store_keep_opaque_coinbase_info`
+against the production NativeRuntime, reqwest HTTP host, Coinbase binding and
+DefaultStore. Maintained `CoinbaseExchange.fetchMarkets` supplies the expected
+native observations. Overflow infinities, negative zero and lone UTF-16 pass
+through actual HTTP; native NaN, own undefined and array values then pass through
+the model codec and Store. The same test compiled against archived master
+`2e703b7b8ee3a2a083e63530bde1a657b340f601` fails product admission (0 versus 1)
+after the old JSON projection rejects the opaque lone surrogate. The retained
+implementation passes. The observer reads numeric bits, UTF-16 units and own
+field counts before any JSON output.
+
+The same HTTP witness includes lone UTF-16 values and keys on the preceding
+`/portfolios` response. Serde's flattened metadata buffer compiled and failed
+actual product admission before the decoder cutover. PortfolioState now captures
+one retained object, requires only string uuid/type, and keeps opaque UTF-16
+metadata directly. The actual HTTP witness and existing portfolio corpus pass.
+The constructed Host.merge_rest regression separately compiled RED when undefined
+array info was refused, then passed with the native Frame::Undefined carrier;
+its maintained source oracle pins undefined, NaN and infinity before output.
+
+`scripts/retained-info-contracts.mjs` runs the canonical inventory and native
+production probes for 4 selected retained-input decoder owners. Each contract
+observes direct typed fields plus numeric bits or UTF-16 units on distinct
+positive cases and rejected inputs. These selected contracts pass independently
+of whole-package accepted-set coverage; no package-wide green claim is made.

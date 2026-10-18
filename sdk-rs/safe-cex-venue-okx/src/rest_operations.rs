@@ -216,10 +216,17 @@ pub async fn find_order_by_client_order_id(
     // TableHit identity, never a made-up "live" JSON string.
     map_orders: &dyn Fn(&Value, TableHit<&'static str>) -> Result<Vec<Order>, RestFailure>,
 ) -> Result<ClientOrderLookup, RestFailure> {
-    if let Some(order) = orders.iter().find(|order| {
-        order.symbol == symbol && order_carries_client_order_id(order, client_order_id)
-    }) {
-        return Ok(ClientOrderLookup::Found(Box::new(order.clone())));
+    for order in orders.iter().filter(|order| order.symbol == symbol) {
+        if order_carries_client_order_id(order, client_order_id).map_err(|error| RestFailure {
+            code: None,
+            message: error.message.into(),
+            transport_error: None,
+            response: None,
+            request: Box::default(),
+            context: Some(Box::new(json!({"name": error.name}))),
+        })? {
+            return Ok(ClientOrderLookup::Found(Box::new(order.clone())));
+        }
     }
     let Some(market) = market else {
         return Ok(ClientOrderLookup::NotFound { definitive: false });

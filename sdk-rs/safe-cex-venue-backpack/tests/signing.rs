@@ -1,3 +1,5 @@
+#[path = "support/retained_input_observations.rs"]
+mod retained_input_observations;
 use safe_cex_num::JsJsonValue;
 use safe_cex_venue_backpack::signing::{build_signing_payload, build_sorted_query_string};
 use serde_json::{Value, json};
@@ -106,12 +108,20 @@ fn actual_typescript_signing_preimages() {
         compared[1] += 1;
     }
     for (i, case) in corpus["utf16"].as_array().unwrap().iter().enumerate() {
+        let retained = retained_input_observations::capture(case["raw"].as_str().unwrap());
+        let expected_units = match i {
+            0 => vec!["field".encode_utf16().collect::<Vec<_>>(), vec![0xd800]],
+            1 => vec![vec![0xdc00]],
+            _ => panic!("unexpected UTF-16 signing case"),
+        };
+        assert_eq!(
+            retained_input_observations::string_units(&retained),
+            expected_units,
+            "native retained preimage UTF-16 units {i}"
+        );
         assert!(
-            safe_cex_num::numeric_ingress::js_from_str::<
-                safe_cex_num::numeric_ingress::JsNumberInput,
-            >(case["raw"].as_str().unwrap())
-            .is_err(),
-            "shared UTF8 preimage ingress refusal {i}"
+            retained.into_value().is_err(),
+            "legacy prepared signing JSON projection still refuses UTF-16 {i}"
         );
         compared[2] += 1;
     }

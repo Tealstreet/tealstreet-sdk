@@ -1,3 +1,5 @@
+#[path = "support/retained_observe.rs"]
+mod retained_observe;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -101,7 +103,7 @@ fn position(v: &Position) -> Value {
         out["marginSize"] = number(s);
     }
     if let Some(s) = v.info.as_ref() {
-        out["info"] = observe(s);
+        out["info"] = retained_observe::observe(s);
     }
     assert!(
         v.extra.is_none() && v.realized_pnl.is_none() && v.last_update.is_none(),
@@ -168,11 +170,15 @@ impl ExchangeRuntime for Host {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.exceptions.borrow_mut().push(error.message.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {

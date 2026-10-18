@@ -184,3 +184,16 @@ Order.reduceOnly follows the same ModelField overlay policy: an absent incoming
 property retains the existing value, while own undefined replaces it. The native
 Store facade regression exercises all four presence states across single/bulk
 upsert and updateOrder, alongside the actual TypeScript Store.
+
+Model info patches carry canonical RetainedJsonInput directly through PatchSource.
+No JSON copy precedes native Store mutation, and emptiness detection checks carried
+StoreUpdate fields without serializing them. Ticker info stripping retains the
+source truthiness rule; Order/Position own-undefined merge semantics are unchanged.
+
+Opaque zkLinkConfig uses the same retained carrier through Store.update and its
+borrowed getter. The source snapshot still omits this configuration. The core
+native Store witness compares thirteen configuration profiles with TypeScript.
+
+Required numeric Ticker patch fields reject own Undefined as a typed patch error.
+Candidate publication remains atomic; optional-field and info presence policies
+are unchanged. Orderly's real socket census covers per-row refusal and siblings.

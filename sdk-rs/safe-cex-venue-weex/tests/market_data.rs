@@ -1,10 +1,11 @@
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_types::Market;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_venue_weex::{
     market_data::{normalize_market, normalize_ticker},
     utils::{WeexUtilityError, WeexUtilityInput},
 };
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::{path::Path, process::Command};
 
 fn input(raw: &str, route: usize) -> WeexUtilityInput {
@@ -113,7 +114,7 @@ fn market_data_matches_actual_typescript() {
                     }
                     assert_eq!(
                         value.info.as_ref().unwrap(),
-                        raw.as_value(),
+                        &raw.as_value().clone(),
                         "{label}::native_info"
                     );
                     assert!(
@@ -189,18 +190,19 @@ fn market_data_matches_actual_typescript() {
                         number(n, &case["numbers"][key], &format!("{label}::{key}"));
                         fields += 1;
                     }
-                    let mut info = Map::new();
-                    if let Some(raw) = &raw {
-                        info.insert("ticker".to_owned(), raw.as_value().clone());
-                    }
-                    if let Some(book) = &book {
-                        info.insert("bookTicker".to_owned(), book.as_value().clone());
-                    }
-                    assert_eq!(
-                        value.info,
-                        Some(Value::Object(info)),
-                        "{label}::native_info"
-                    );
+                    let info = Input::Object(vec![
+                        (
+                            "ticker".encode_utf16().collect(),
+                            raw.as_ref()
+                                .map_or(Input::Undefined, |raw| raw.as_value().clone()),
+                        ),
+                        (
+                            "bookTicker".encode_utf16().collect(),
+                            book.as_ref()
+                                .map_or(Input::Undefined, |raw| raw.as_value().clone()),
+                        ),
+                    ]);
+                    assert_eq!(value.info, Some(info), "{label}::native_info");
                     assert!(value.mid_price.is_none(), "{label}::mid_price_absent");
                     assert!(value.timestamp.is_none(), "{label}::timestamp_absent");
                     ticker_success += 1;
@@ -223,7 +225,14 @@ fn market_data_matches_actual_typescript() {
     }
     assert_eq!(corpus["callable"]["bits"], "401d000000000000");
     assert!(
-        js_from_str::<WeexUtilityInput>(r#"{"extra":"\ud800"}"#).is_err(),
+        js_from_str::<WeexUtilityInput>(r#"{"extra":"\ud800"}"#)
+            .unwrap()
+            .as_value()
+            .get("extra")
+            .unwrap()
+            .as_text()
+            .unwrap()
+            == [0xd800],
         "market_data::utf16_refusal"
     );
 }

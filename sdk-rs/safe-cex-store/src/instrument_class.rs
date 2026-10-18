@@ -1,6 +1,6 @@
 use safe_cex_num::{ProtoMember, TableHit, js_table_lookup, js_trim};
 use safe_cex_types::Market;
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetClass {
@@ -88,12 +88,16 @@ pub fn venues_with_instrument_class_fn() -> Vec<InstrumentClassVenue> {
         .collect()
 }
 
-fn text(value: Option<&Value>) -> Option<String> {
+fn text(value: Option<&Input>) -> Result<Option<String>, std::string::FromUtf16Error> {
     value
-        .and_then(Value::as_str)
-        .map(js_trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
+        .and_then(Input::as_text)
+        .map(String::from_utf16)
+        .transpose()
+        .map(|value| {
+            value
+                .map(|value| js_trim(&value).to_owned())
+                .filter(|value| !value.is_empty())
+        })
 }
 pub fn bybit_instrument_class(market: &Market) -> InstrumentClassResult {
     let unknown = |reason: String| InstrumentClassResult::Unknown { reason };
@@ -105,18 +109,21 @@ pub fn bybit_instrument_class(market: &Market) -> InstrumentClassResult {
         return unknown("bybit market carries no instruments-info payload".into());
     };
     let raw = info.get("symbolType");
-    let Some(raw) = raw.filter(|v| !v.is_null()) else {
+    let Some(raw) = raw.filter(|v| !matches!(v, Input::Null | Input::Undefined)) else {
         return unknown("bybit instrument has no symbolType field".into());
     };
-    let Some(label) = raw.as_str() else {
+    let Some(label) = raw.as_text() else {
         let kind = match raw {
-            Value::Bool(_) => "boolean",
-            Value::Number(_) => "number",
+            Input::Bool(_) => "boolean",
+            Input::Float(_) | Input::Lexeme(_) => "number",
             _ => "object",
         };
         return unknown(format!("bybit symbolType is {kind}, not a string"));
     };
-    let label = js_trim(label);
+    let Ok(label) = String::from_utf16(label) else {
+        return unknown("bybit symbolType is outside the UTF-8 classification boundary".into());
+    };
+    let label = js_trim(&label);
     let table = [
         ("", AssetClass::Crypto),
         ("innovation", AssetClass::Crypto),
@@ -131,11 +138,19 @@ pub fn bybit_instrument_class(market: &Market) -> InstrumentClassResult {
         TableHit::Inherited(member) => AssetClass::PrototypeProperty(member),
         TableHit::Missing => return unknown(format!("unrecognised bybit symbolType \"{label}\"")),
     };
+    let (Ok(underlying_ticker), Ok(market_region)) = (
+        text(info.get("underlyingTicker")),
+        text(info.get("marketRegion")),
+    ) else {
+        return unknown(
+            "bybit instrument metadata is outside the UTF-8 classification boundary".into(),
+        );
+    };
     InstrumentClassResult::Classified {
         asset_class,
         venue_label: label.into(),
-        underlying_ticker: text(info.get("underlyingTicker")),
-        market_region: text(info.get("marketRegion")),
+        underlying_ticker,
+        market_region,
     }
 }
 pub fn asset_class_label(ac: AssetClass) -> &'static str {

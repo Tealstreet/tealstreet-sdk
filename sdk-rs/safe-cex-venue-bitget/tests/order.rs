@@ -1,6 +1,6 @@
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::js_number_string;
-use safe_cex_types::{PlaceOrderOpts, Position};
+use safe_cex_types::{PlaceOrderOpts, Position, retained_json::RetainedJsonInput as Input};
 use safe_cex_venue_bitget::{
     inverse_logic::*, normalization::*, numeric::*, order_logic::*, pnl::*,
 };
@@ -28,6 +28,24 @@ fn decode(v: &Value) -> Value {
         _ => v.clone(),
     }
 }
+fn retained(v: &Value) -> Input {
+    if v.get("$number").is_some() {
+        return Input::Float(number(v));
+    }
+    if v.get("$undefined") == Some(&json!(true)) {
+        return Input::Undefined;
+    }
+    match v {
+        Value::Array(items) => Input::Array(items.iter().map(retained).collect()),
+        Value::Object(fields) => Input::Object(
+            fields
+                .iter()
+                .map(|(key, value)| (key.encode_utf16().collect(), retained(value)))
+                .collect(),
+        ),
+        _ => v.clone().into(),
+    }
+}
 fn error(e: ExchangeError) -> Value {
     json!({"error":{"name":e.name,"message":e.message}})
 }
@@ -40,18 +58,12 @@ fn finite_input(v: &Value) -> FiniteNumberInput<'_> {
         FiniteNumberInput::Other
     }
 }
-fn encode_json_numbers(v: &Value) -> Value {
-    match v {
-        Value::Number(n) => encoded(n.as_f64().unwrap()),
-        Value::Array(a) => a.iter().map(encode_json_numbers).collect(),
-        Value::Object(o) => Value::Object(
-            o.iter()
-                .map(|(k, v)| (k.clone(), encode_json_numbers(v)))
-                .collect(),
-        ),
-        _ => v.clone(),
-    }
+#[path = "../../parity/evidence/retained_model_values.rs"]
+pub mod retained_model_values;
+fn encode_json_numbers(value: &(impl serde::Serialize + ?Sized)) -> Value {
+    retained_model_values::observe(value, encoded)
 }
+
 fn encoded_position(p: Position) -> Value {
     let mut value = json!({
         "id":p.id,"symbol":p.symbol,"side":p.side,"entryPrice":encoded(p.entry_price),
@@ -69,14 +81,16 @@ fn encoded_position(p: Position) -> Value {
     }
     value
 }
-// JSON inputs cannot carry own undefined members. Preserve their source tags in
-// the fixture, then explicitly project only this declared input-domain axis.
+// Native field presence is checked before the legacy JSON fixture comparison.
 fn omit_undefined(value: &Value) -> Value {
     match value {
         Value::Object(fields) => Value::Object(
             fields
                 .iter()
-                .filter(|(_, v)| v.get("$undefined") != Some(&json!(true)))
+                .filter(|(_, v)| {
+                    v.get("$undefined") != Some(&json!(true))
+                        && v.get("undefined") != Some(&json!(true))
+                })
                 .map(|(k, v)| (k.clone(), omit_undefined(v)))
                 .collect(),
         ),
@@ -119,7 +133,7 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
         .chain(oracle["mapOrderCases"].as_array().unwrap())
     {
         visited += 1;
-        let input = decode(&omit_undefined(&case["input"]));
+        let input = retained(&case["input"]);
         let mut clock_calls = 0;
         let actual = map_order(
             Some(&input),
@@ -182,13 +196,28 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
         );
         let mut own_undefined = false;
         for (order, expected) in actual.iter().zip(expected) {
+            assert_eq!(
+                encode_json_numbers(order.info.as_ref().unwrap()),
+                encode_json_numbers(&input),
+                "raw info retains every native field before fixture comparison"
+            );
             own_undefined |= native_undefined_fields(order, expected, &case["name"]);
         }
         accepted_undefined += usize::from(own_undefined);
         let actual: Vec<_> = actual
             .into_iter()
             .map(|order| {
-                let mut value = encode_json_numbers(&serde_json::to_value(&order).unwrap());
+                let mut value = encode_json_numbers(&order);
+                for (key, undefined) in [
+                    ("status", order.status.is_undefined()),
+                    ("type", order.r#type.is_undefined()),
+                    ("side", order.side.is_undefined()),
+                    ("timeInForce", order.time_in_force.is_undefined()),
+                ] {
+                    if undefined {
+                        value.as_object_mut().unwrap().remove(key);
+                    }
+                }
                 for (key, n) in [
                     ("price", order.price.to_number()),
                     ("amount", order.amount),
@@ -202,7 +231,7 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
             })
             .collect();
         assert_eq!(
-            json!(actual),
+            omit_undefined(&json!(actual)),
             omit_undefined(&case["result"]["value"]),
             "mapOrder value {}",
             case["name"]
@@ -266,16 +295,28 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
         encoded(f64::NAN),
         "mapOrder source info holds NaN before any alias mutation"
     );
-    let mut numeric_input = decode(&oracle["mapOrderReference"][0]["input"]);
-    numeric_input["nested"] = json!({"amount":f64::NAN});
-    assert!(
-        numeric_input["nested"]["amount"].is_null(),
-        "Value excludes native NaN BEFORE mapOrder"
-    );
+    let mut numeric_input = retained(&oracle["mapOrderReference"][0]["input"]);
+    numeric_input.as_object_mut().unwrap().push((
+        "nested".encode_utf16().collect(),
+        Input::Object(vec![(
+            "amount".encode_utf16().collect(),
+            Input::Float(f64::NAN),
+        )]),
+    ));
     let numeric_order = map_order(Some(&numeric_input), "usdt-futures", || 1.0).unwrap();
     assert!(
-        numeric_order[0].info.as_ref().unwrap()["nested"]["amount"].is_null(),
-        "CHOSEN JSON input price is already present before mapOrder"
+        numeric_order[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("nested")
+            .unwrap()
+            .get("amount")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .is_nan(),
+        "native mapOrder info retains NaN"
     );
     let alias = &oracle["mapOrderAlias"];
     assert_eq!(
@@ -295,18 +336,26 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
         alias["afterOutput"]["label"], "after-output",
         "mapOrder info relabel propagates to gateway"
     );
-    let mut input = decode(&oracle["mapOrderReference"][0]["input"]);
-    input["label"] = json!("before");
+    let mut input = retained(&oracle["mapOrderReference"][0]["input"]);
+    input
+        .as_object_mut()
+        .unwrap()
+        .push(("label".encode_utf16().collect(), json!("before").into()));
     let mut orders = map_order(Some(&input), "usdt-futures", || 1.0).unwrap();
-    input["label"] = json!("after-input");
-    assert_eq!(
-        orders[0].info.as_ref().unwrap()["label"],
-        "before",
+    *input.get_mut("label").unwrap() = json!("after-input").into();
+    assert!(
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("label")
+            .unwrap()
+            .text_equals("before"),
         "CHOSEN mapOrder owned info does not observe gateway mutation"
     );
-    orders[0].info.as_mut().unwrap()["label"] = json!("after-output");
-    assert_eq!(
-        input["label"], "after-input",
+    *orders[0].info.as_mut().unwrap().get_mut("label").unwrap() = json!("after-output").into();
+    assert!(
+        input.get("label").unwrap().text_equals("after-input"),
         "CHOSEN mapOrder gateway does not observe owned info mutation"
     );
 }
@@ -321,7 +370,7 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
     for case in reference["cases"].as_array().unwrap() {
         visited += 1;
         let name = case["name"].as_str().unwrap();
-        let input = decode(&omit_undefined(&case["input"]));
+        let input = retained(&case["input"]);
         let mut calls = Vec::new();
         let mut clock_calls = 0;
         let actual = map_inverse_order(
@@ -389,13 +438,28 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         );
         let mut own_undefined = false;
         for (order, expected) in actual.iter().zip(expected) {
+            assert_eq!(
+                encode_json_numbers(order.info.as_ref().unwrap()),
+                encode_json_numbers(&input),
+                "raw info retains every native field before fixture comparison"
+            );
             own_undefined |= native_undefined_fields(order, expected, &case["name"]);
         }
         accepted_undefined += usize::from(own_undefined);
         let mapped: Vec<_> = actual
             .into_iter()
             .map(|order| {
-                let mut value = encode_json_numbers(&serde_json::to_value(&order).unwrap());
+                let mut value = encode_json_numbers(&order);
+                for (key, undefined) in [
+                    ("status", order.status.is_undefined()),
+                    ("type", order.r#type.is_undefined()),
+                    ("side", order.side.is_undefined()),
+                    ("timeInForce", order.time_in_force.is_undefined()),
+                ] {
+                    if undefined {
+                        value.as_object_mut().unwrap().remove(key);
+                    }
+                }
                 for (key, n) in [
                     ("price", order.price.to_number()),
                     ("amount", order.amount),
@@ -411,7 +475,7 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
             })
             .collect();
         assert_eq!(
-            json!(mapped),
+            omit_undefined(&json!(mapped)),
             omit_undefined(&case["result"]["value"]),
             "inverse mapOrder value {name}"
         );
@@ -475,17 +539,29 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         encoded(f64::NAN),
         "inverse mapOrder source info holds NaN independently of alias mutation"
     );
-    let mut numeric_input = decode(&reference["numericInfo"]["input"]);
-    numeric_input["nested"] = json!({"amount":f64::NAN});
-    assert!(
-        numeric_input["nested"]["amount"].is_null(),
-        "Value excludes native NaN BEFORE inverse mapOrder"
-    );
+    let mut numeric_input = retained(&reference["numericInfo"]["input"]);
+    numeric_input.as_object_mut().unwrap().push((
+        "nested".encode_utf16().collect(),
+        Input::Object(vec![(
+            "amount".encode_utf16().collect(),
+            Input::Float(f64::NAN),
+        )]),
+    ));
     let numeric_order =
         map_inverse_order(Some(&numeric_input), "coin-futures", |_| None, || 1.0).unwrap();
     assert!(
-        numeric_order[0].info.as_ref().unwrap()["nested"]["amount"].is_null(),
-        "CHOSEN JSON input price is already present before inverse mapOrder"
+        numeric_order[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("nested")
+            .unwrap()
+            .get("amount")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .is_nan(),
+        "native inverse mapOrder info retains NaN"
     );
     let extra_alias = &reference["extraAlias"];
     assert_eq!(
@@ -531,12 +607,17 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         alias["afterOutput"]["label"], "after-output",
         "inverse mapOrder attached info relabel propagates to gateway"
     );
-    let mut input = json!({"orderId":"x","status":"new","orderType":"limit","side":"buy","symbol":"BTCUSD","size":"3","price":"2","presetStopLossPrice":"2","presetStopSurplusPrice":"3","label":"before"});
+    let mut input: Input = json!({"orderId":"x","status":"new","orderType":"limit","side":"buy","symbol":"BTCUSD","size":"3","price":"2","presetStopLossPrice":"2","presetStopSurplusPrice":"3","label":"before"}).into();
     let mut orders = map_inverse_order(Some(&input), "coin-futures", |_| None, || 1.0).unwrap();
-    input["label"] = json!("after-input");
-    assert_eq!(
-        orders[0].info.as_ref().unwrap()["label"],
-        "before",
+    *input.get_mut("label").unwrap() = json!("after-input").into();
+    assert!(
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("label")
+            .unwrap()
+            .text_equals("before"),
         "CHOSEN inverse mapOrder info snapshot retains old input"
     );
     assert_eq!(
@@ -561,14 +642,19 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         Some(3.0),
         "CHOSEN inverse mapOrder attached extra mutation leaves sibling unchanged"
     );
-    orders[1].info.as_mut().unwrap()["label"] = json!("after-output");
-    assert_eq!(
-        input["label"], "after-input",
+    *orders[1].info.as_mut().unwrap().get_mut("label").unwrap() = json!("after-output").into();
+    assert!(
+        input.get("label").unwrap().text_equals("after-input"),
         "CHOSEN inverse mapOrder gateway does not share owned leg info"
     );
-    assert_eq!(
-        orders[0].info.as_ref().unwrap()["label"],
-        "before",
+    assert!(
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("label")
+            .unwrap()
+            .text_equals("before"),
         "CHOSEN inverse mapOrder legs do not share info"
     );
 }
@@ -595,7 +681,7 @@ fn check(oracle: Value, field_identity: bool) {
         .enumerate()
     {
         let mut position: Position=serde_json::from_value(json!({"id":"p","symbol":"BTCUSDT","side":"long","contracts":1,"entryPrice":1,"notional":1,"leverage":1,"unrealizedPnl":0,"liquidationPrice":0})).unwrap();
-        position.info = (c.get("info").map(decode)).into();
+        position.info = c.get("info").map(|value| decode(value).into()).into();
         let result = get_position_payload_update_time(&position)
             .map(encoded)
             .unwrap_or_else(|| json!({"$undefined":true}));

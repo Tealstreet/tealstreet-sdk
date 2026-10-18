@@ -1,5 +1,5 @@
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref, js_value_as_f64};
+use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref};
 use safe_cex_store::{StoreUpdate, store::DefaultStore};
 use safe_cex_types::{Balance, Order, Position};
 use safe_cex_venue_breakoutprop::portfolio_reads::*;
@@ -28,14 +28,10 @@ static ORACLE: LazyLock<Value> = LazyLock::new(|| {
 fn number(value: f64) -> Value {
     json!({"number":format!("{:016x}",if value.is_nan() {0x7ff8000000000000} else {value.to_bits()})})
 }
-fn observe(value: &Value) -> Value {
-    match value {
-        Value::Number(_) => number(js_value_as_f64(value).unwrap()),
-        Value::Array(v) => Value::Array(v.iter().map(observe).collect()),
-        Value::Object(v) => Value::Object(v.iter().map(|(k, v)| (k.clone(), observe(v))).collect()),
-        v => v.clone(),
-    }
-}
+#[path = "support/retained_info_values.rs"]
+mod retained_info_values;
+use retained_info_values::observe;
+
 fn optional(value: &mut Value, name: &str, field: Option<Value>) {
     if let Some(field) = field {
         value[name] = field;
@@ -401,10 +397,72 @@ fn inherited_and_utf8_read_boundaries() {
     }
     for case in ORACLE["utf8"].as_array().unwrap() {
         assert_eq!(case["codeUnit"], 55296, "read_source_surrogate");
-        assert!(
-            serde_json::from_str::<JsNumberInput>(case["raw"].as_str().unwrap()).is_err(),
-            "read_utf8_boundary"
-        );
+        let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        let fetch = || std::future::ready(Ok::<_, String>(Some(input.clone())));
+        let report = |_: &str| -> Result<(), ExchangeError> {
+            panic!("retained symbol is not a source mapping error")
+        };
+        match case["method"].as_str().unwrap() {
+            "fetchBalance" => {
+                let balance = run(fetch_balance(fetch, &store, &|ms| ms, &report, |e| {
+                    e.message
+                }))
+                .unwrap();
+                assert_eq!(
+                    balance
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("portfolios")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .get("positions")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .get("symbol")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+                assert!(balance.used > 0.0);
+            }
+            "fetchOpenPositions" => assert!(
+                run(fetch_open_positions(
+                    fetch,
+                    &store,
+                    &|ms| ms,
+                    &report,
+                    |e| e.message
+                ))
+                .is_err(),
+                "closed Position symbol refusal"
+            ),
+            "fetchOrders" => assert!(
+                run(fetch_orders(fetch, &store, &|ms| ms, &report, |e| e.message)).is_err(),
+                "closed Order symbol refusal"
+            ),
+            "fetchPositions" => {
+                assert!(
+                    serde_json::from_str::<Vec<String>>(r#"["\ud800"]"#).is_err(),
+                    "closed requested-symbol input"
+                );
+                assert!(
+                    run(fetch_positions(
+                        fetch,
+                        &store,
+                        &|ms| ms,
+                        None,
+                        &report,
+                        |e| e.message
+                    ))
+                    .unwrap()
+                    .is_empty()
+                );
+            }
+            method => panic!("unknown surrogate read {method}"),
+        }
     }
 }
 
@@ -475,11 +533,17 @@ fn owned_read_info_and_fallbacks() {
             _ => unreachable!(),
         };
         if method == "fetchBalance" {
-            info["portfolios"][0]["positions"][0]["symbol"] = json!("changed");
+            *info.get_mut("portfolios").unwrap().as_array_mut().unwrap()[0]
+                .get_mut("positions")
+                .unwrap()
+                .as_array_mut()
+                .unwrap()[0]
+                .get_mut("symbol")
+                .unwrap() = json!("changed").into();
         } else if method == "fetchOrders" {
-            info["instrument"] = json!("changed");
+            *info.get_mut("instrument").unwrap() = json!("changed").into();
         } else {
-            info["symbol"] = json!("changed");
+            *info.get_mut("symbol").unwrap() = json!("changed").into();
         }
         let decoded: safe_cex_venue_breakoutprop::types::PortfolioResponse =
             input.decode().unwrap();

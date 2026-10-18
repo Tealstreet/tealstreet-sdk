@@ -15,11 +15,11 @@ pub fn format_symbol_in(symbol: Option<&str>) -> String {
 }
 
 /// The first matching market wins even when its info symbol is falsy.
-/// JSON-domain info is returned without converting its type or numeric lexeme.
+/// Native info is returned without projecting its type or numeric value.
 pub fn format_symbol_out(
     markets: Option<&[safe_cex_types::Market]>,
     symbol: Option<&str>,
-) -> serde_json::Value {
+) -> safe_cex_types::retained_json::RetainedJsonInput {
     let found = markets
         .and_then(|markets| {
             markets
@@ -28,10 +28,12 @@ pub fn format_symbol_out(
         })
         .and_then(|market| market.info.as_ref())
         .and_then(|info| info.get("symbol"));
-    if safe_cex_num::js_truthy(found) {
+    if found.is_some_and(|value| value.is_truthy()) {
         found.expect("truthy value exists").clone()
     } else {
-        serde_json::Value::String(symbol.unwrap_or("").to_owned())
+        safe_cex_types::retained_json::RetainedJsonInput::Text(
+            symbol.unwrap_or("").encode_utf16().collect(),
+        )
     }
 }
 

@@ -1,3 +1,5 @@
+#[path = "support/retained_mutation.rs"]
+mod retained_mutation;
 use safe_cex_venue_coinbase::{
     market_position_reads::{ReadItem, ReadItems, ReadReply},
     portfolios_balances::{PortfolioFailure, PortfolioThrown},
@@ -56,10 +58,14 @@ fn assert_num(actual: f64, expected: &Value, name: &str) {
 }
 fn assert_frame(actual: Option<Frame>, expected: &Value, name: &str) {
     if expected.get("$undefined") == Some(&json!(true)) {
-        assert!(actual.is_none(), "{name}: native undefined");
+        assert!(
+            matches!(actual, None | Some(Frame::Undefined)),
+            "{name}: native undefined"
+        );
         return;
     }
     match actual.expect("native property") {
+        Frame::Undefined => assert_eq!(expected["$undefined"], true, "native undefined"),
         Frame::Null => assert!(expected.is_null(), "{name}: null"),
         Frame::Bool(v) => assert_eq!(Some(v), expected.as_bool(), "{name}: bool"),
         Frame::Number(v) => assert_num(v, expected, name),
@@ -262,7 +268,13 @@ fn read_receiver(
                 {
                     let a = Rc::new(RefCell::new(
                         a.iter()
-                            .map(|v| Rc::new(RefCell::new(v.clone())))
+                            .map(|v| {
+                                Rc::new(RefCell::new(
+                                    safe_cex_types::retained_json::RetainedJsonInput::from(
+                                        v.clone(),
+                                    ),
+                                ))
+                            })
                             .collect::<Vec<_>>(),
                     ));
                     original.extend(a.borrow().clone());
@@ -275,7 +287,11 @@ fn read_receiver(
                         .as_array()
                         .unwrap()
                         .iter()
-                        .map(|v| Rc::new(RefCell::new(v.clone())))
+                        .map(|v| {
+                            Rc::new(RefCell::new(
+                                safe_cex_types::retained_json::RetainedJsonInput::from(v.clone()),
+                            ))
+                        })
                         .collect::<Vec<_>>(),
                 ));
                 original.extend(a.borrow().clone());
@@ -1059,7 +1075,7 @@ fn catalog_launches_children_eagerly_preserves_input_order_and_fails_fast() {
     );
     let item = |id| {
         Rc::new(RefCell::new(
-            json!({"product_id":id,"base_currency_id":"X","quote_currency_id":"USD","status":"TRADING","price_increment":"1","base_increment":"2","base_min_size":"3","base_max_size":"4"}),
+            json!({"product_id":id,"base_currency_id":"X","quote_currency_id":"USD","status":"TRADING","price_increment":"1","base_increment":"2","base_min_size":"3","base_max_size":"4"}).into(),
         ))
     };
     let a = item("A");
@@ -1075,7 +1091,11 @@ fn catalog_launches_children_eagerly_preserves_input_order_and_fails_fast() {
     // A queued mutation before resuming the first response must affect the retained info root.
     let changed = a.clone();
     tasks.enqueue(move || {
-        changed.borrow_mut()["base_currency_id"] = json!("CHANGED");
+        retained_mutation::set(
+            &mut changed.borrow_mut(),
+            "base_currency_id",
+            json!("CHANGED").into(),
+        );
     });
     tasks.drain();
     first_resolve.resolve(Ok(ReadReply {

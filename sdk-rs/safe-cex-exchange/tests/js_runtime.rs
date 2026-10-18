@@ -25,7 +25,7 @@ struct Runtime {
     consoled: RefCell<Vec<(String, String)>>,
     console_arguments: RefCell<Vec<Vec<Js>>>,
     raw_exceptions: RefCell<Vec<Js>>,
-    exceptions: RefCell<Vec<(String, Value)>>,
+    exceptions: RefCell<Vec<(String, safe_cex_types::retained_json::RetainedJsonInput)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
     worker: std::cell::Cell<bool>,
@@ -79,12 +79,20 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.exceptions
             .borrow_mut()
             .push((error.to_string(), context.clone()));
     }
-    fn report_raw_exception(&self, error: &Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.raw_exceptions.borrow_mut().push(error.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -4322,6 +4330,9 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
     assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
     assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }
+
+#[path = "support/retained_info.rs"]
+mod retained_info;
 
 #[test]
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]

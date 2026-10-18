@@ -20,6 +20,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::*;
 #[cfg(test)]
 use safe_cex_venue_breakoutprop::native_reads::NativeRuntimeHost;
@@ -28,6 +29,43 @@ use safe_cex_venue_breakoutprop::{
     lifecycle::BreakoutpropExchange,
 };
 use serde_json::{Value, json};
+fn assert_finite_native(actual: &Input, expected: &Value) {
+    match (actual, expected) {
+        (Input::Null, Value::Null) => {}
+        (Input::Bool(actual), Value::Bool(expected)) => assert_eq!(actual, expected),
+        (Input::Float(_) | Input::Lexeme(_), Value::Number(expected)) => {
+            assert_eq!(
+                actual.as_f64().unwrap().to_bits(),
+                expected.as_f64().unwrap().to_bits(),
+                "retained numeric bits"
+            );
+        }
+        (Input::Text(actual), Value::String(expected)) => {
+            assert!(
+                actual.iter().copied().eq(expected.encode_utf16()),
+                "retained text units"
+            );
+        }
+        (Input::Array(actual), Value::Array(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "retained array cardinality");
+            for (actual, expected) in actual.iter().zip(expected) {
+                assert_finite_native(actual, expected);
+            }
+        }
+        (Input::Object(actual), Value::Object(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "retained own-key count");
+            for ((key, actual), (expected_key, expected)) in actual.iter().zip(expected) {
+                assert!(
+                    key.iter().copied().eq(expected_key.encode_utf16()),
+                    "retained own-key order/units"
+                );
+                assert_finite_native(actual, expected);
+            }
+        }
+        _ => panic!("retained native kind differs from finite fixture: {actual:?}, {expected:?}"),
+    }
+}
+
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
@@ -79,6 +117,7 @@ struct Wire {
     faults: RefCell<VecDeque<(String, u16, Value)>>,
     errors: RefCell<VecDeque<(String, Js)>>,
     candle_response: RefCell<Option<Value>>,
+    native_responses: RefCell<VecDeque<(String, Js)>>,
 }
 fn instrument() -> Value {
     json!({"type":"FOREX","symbol":"BTCUSD","version":1,"description":"Bitcoin","priceIncrement":0.1,"pipSize":0.01,"currency":"USD","lotSize":1,"multiplier":1,"firstCurrency":"BTC"})
@@ -143,10 +182,20 @@ impl JsHttpHost for Wire {
                 _ => panic!("unscripted DXtrade request {method} {url}"),
             }
         };
+        let data = if self
+            .native_responses
+            .borrow()
+            .front()
+            .is_some_and(|(target, _)| target == &url)
+        {
+            self.native_responses.borrow_mut().pop_front().unwrap().1
+        } else {
+            from_json(&data)
+        };
         Box::pin(async move {
             Ok(Js::object(vec![
                 ("status", Js::Number(status as f64)),
-                ("data", from_json(&data)),
+                ("data", data),
                 ("headers", Js::object(vec![])),
                 ("config", config),
             ]))
@@ -567,7 +616,7 @@ fn refusal_fixture(input: &Value) -> Fixture {
                     free: 3.5,
                     total: 4.75,
                     upnl: -0.0,
-                    info: Some(json!({"refusal":"retained-info"})),
+                    info: Some(json!({"refusal":"retained-info"}).into()),
                     currencies: None,
                     coins: None,
                 }),
@@ -1263,7 +1312,7 @@ fn ticker_reads_ignore_missing_unused_declaration_fields() {
         (rows[0].bid, rows[0].ask, rows[0].last),
         (91.25, 94.5, 91.25)
     );
-    assert_eq!(rows[0].info, Some(row));
+    assert_finite_native(rows[0].info.as_ref().unwrap(), &row);
 }
 
 #[test]
@@ -1278,7 +1327,7 @@ fn ticker_reads_ignore_malformed_unused_declaration_fields() {
         (rows[0].bid, rows[0].ask, rows[0].mark),
         (81.25, 84.5, 81.25)
     );
-    assert_eq!(rows[0].info, Some(row));
+    assert_finite_native(rows[0].info.as_ref().unwrap(), &row);
 }
 
 fn malformed_ticker_fallback(prefix: Value) {
@@ -1406,9 +1455,9 @@ fn portfolio_orders_ignore_unused_declaration_fields_and_unread_collections() {
     assert_eq!(orders[0].id, "source-order");
     assert_eq!(orders[0].amount, 3.0);
     assert_eq!(orders[0].price.value(), Some(&101.25));
-    assert_eq!(
-        orders[0].info.value(),
-        Some(&data["portfolios"][0]["orders"][0])
+    assert_finite_native(
+        orders[0].info.value().unwrap(),
+        &data["portfolios"][0]["orders"][0],
     );
 }
 #[test]
@@ -1425,9 +1474,9 @@ fn portfolio_positions_ignore_unused_declaration_fields_and_unread_collections()
     assert_eq!(positions[0].symbol, "BTCUSD");
     assert_eq!(positions[0].contracts, 2.0);
     assert_eq!(positions[0].margin_size.value(), Some(&10.0));
-    assert_eq!(
-        positions[0].info.value(),
-        Some(&data["portfolios"][0]["positions"][0])
+    assert_finite_native(
+        positions[0].info.value().unwrap(),
+        &data["portfolios"][0]["positions"][0],
     );
 }
 #[test]
@@ -1444,7 +1493,7 @@ fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
     assert_eq!(balance.upnl, -2.0);
     assert_eq!(balance.used, 10.0);
     assert_eq!(balance.free, 38.25);
-    assert_eq!(balance.info, Some(data));
+    assert_finite_native(balance.info.as_ref().unwrap(), &data);
     f.exchange.dispose().unwrap();
 }
 
@@ -1457,18 +1506,18 @@ fn portfolio_array_like_root_retains_order_and_position_info() {
     queue_portfolio(&f, data.clone());
     let orders = f.run(f.exchange.fetch_orders(None)).unwrap();
     assert_eq!(orders.len(), 1);
-    assert_eq!(
-        orders[0].info.value(),
-        Some(&data["portfolios"]["0"]["orders"][0])
+    assert_finite_native(
+        orders[0].info.value().unwrap(),
+        &data["portfolios"]["0"]["orders"][0],
     );
     queue_portfolio(&f, data.clone());
     let positions = f
         .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
         .unwrap();
     assert_eq!(positions.len(), 1);
-    assert_eq!(
-        positions[0].info.value(),
-        Some(&data["portfolios"]["0"]["positions"][0])
+    assert_finite_native(
+        positions[0].info.value().unwrap(),
+        &data["portfolios"]["0"]["positions"][0],
     );
 }
 
@@ -1793,4 +1842,276 @@ fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
             "cancel then guarded replacement {label}"
         );
     }
+}
+
+fn retained_probe() -> Js {
+    let probe = Js::object(vec![
+        ("nan", Js::Number(f64::from_bits(0x7ff8000000000042))),
+        ("infinity", Js::Number(f64::INFINITY)),
+        ("negativeInfinity", Js::Number(f64::NEG_INFINITY)),
+        ("zero", Js::Number(-0.0)),
+        ("undefined", Js::Undefined),
+        ("text", Js::utf16(&[0xd800])),
+    ]);
+    probe.define_key(&[0xdfff], Js::utf16(&[0xd800])).unwrap();
+    probe
+}
+fn assert_retained_probe(model: &impl serde::Serialize, path: &[&str]) {
+    let mut value = safe_cex_exchange::js_runtime::value::from_typed(model)
+        .unwrap()
+        .get("info")
+        .unwrap();
+    for key in path {
+        value = value.get(key).unwrap();
+    }
+    let probe = value.get("retained_probe").unwrap();
+    for (field, bits) in [
+        ("nan", 0x7ff8000000000042),
+        ("infinity", f64::INFINITY.to_bits()),
+        ("negativeInfinity", f64::NEG_INFINITY.to_bits()),
+        ("zero", (-0.0f64).to_bits()),
+    ] {
+        assert_eq!(
+            probe.get(field).unwrap().as_f64().unwrap().to_bits(),
+            bits,
+            "native info {field}"
+        );
+    }
+    assert!(probe.has_own("undefined"));
+    assert!(probe.get("undefined").unwrap().is_undefined());
+    assert!(matches!(probe.get("text").unwrap(), Js::String(units) if units.as_ref() == [0xd800]));
+    assert!(
+        matches!(probe.get_key(&[0xdfff]).unwrap(), Js::String(units) if units.as_ref() == [0xd800])
+    );
+}
+#[test]
+fn native_market_info_retains_nonfinite_undefined_and_utf16() {
+    let f = fixture();
+    let row = from_json(&instrument());
+    row.set("retained_probe", retained_probe()).unwrap();
+    f.wire.native_responses.borrow_mut().push_back((
+        "instruments/query".into(),
+        Js::object(vec![("instruments", Js::array(vec![row]))]),
+    ));
+    let rows = f.run(f.exchange.fetch_markets()).unwrap();
+    assert_eq!(rows.len(), 1, "native market raw info row retained");
+    assert_retained_probe(&rows[0], &["instrument"]);
+    Store::update(
+        f.store.as_ref(),
+        StoreUpdate {
+            markets: Some(rows),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    assert_retained_probe(&f.store.markets()[0], &["instrument"]);
+}
+#[test]
+fn native_portfolio_info_retains_nonfinite_undefined_and_utf16() {
+    for method in ["order", "position"] {
+        let f = fixture();
+        f.fetch_markets();
+        let body = from_json(&source_only_portfolio());
+        let portfolio = body.get("portfolios").unwrap().get("0").unwrap();
+        portfolio
+            .get(if method == "order" {
+                "orders"
+            } else {
+                "positions"
+            })
+            .unwrap()
+            .get("0")
+            .unwrap()
+            .set("retained_probe", retained_probe())
+            .unwrap();
+        f.wire
+            .native_responses
+            .borrow_mut()
+            .push_back(("accounts/default:A/portfolio".into(), body));
+        if method == "order" {
+            let rows = f.run(f.exchange.fetch_orders(None)).unwrap();
+            assert_eq!(rows.len(), 1, "native order raw info row retained");
+            assert_retained_probe(&rows[0], &[]);
+        } else {
+            let rows = f
+                .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+                .unwrap();
+            assert_eq!(rows.len(), 1, "native position raw info row retained");
+            assert_retained_probe(&rows[0], &[]);
+        }
+    }
+}
+#[test]
+fn native_ticker_info_retains_nonfinite_undefined_and_utf16() {
+    let f = fixture();
+    f.fetch_markets();
+    let row = from_json(&json!({"symbol":"BTCUSD","bid":91.25,"ask":94.5}));
+    row.set("retained_probe", retained_probe()).unwrap();
+    f.wire.native_responses.borrow_mut().push_back((
+        "marketdata".into(),
+        Js::object(vec![("events", Js::array(vec![row]))]),
+    ));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1, "native ticker raw info row retained");
+    assert_retained_probe(&rows[0], &[]);
+}
+
+#[test]
+fn native_balance_keeps_surrogate_symbol_info_without_premature_ticker_projection() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let raw = source_only_portfolio()
+        .to_string()
+        .replace("\"symbol\":\"BTCUSD\"", "\"symbol\":\"\\ud800\"");
+    let mut source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/balance-symbol-oracle.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    source
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(raw.as_bytes())
+        .unwrap();
+    let output = source.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(expected["symbolUnits"], json!([0xd800]));
+    assert_eq!(expected["errors"], json!([]));
+    let input: retained_json::RetainedJsonInput = serde_json::from_str(&raw).unwrap();
+    let f = fixture();
+    let errors = portfolio_error_log(&f);
+    for _ in 0..2 {
+        f.wire.native_responses.borrow_mut().push_back((
+            "accounts/default:A/portfolio".into(),
+            safe_cex_exchange::js_runtime::value::from_retained_input(input.clone()),
+        ));
+    }
+    f.run(f.exchange.start()).unwrap();
+    let balance = f.store.balance().clone();
+    for (name, number) in [
+        ("total", balance.total),
+        ("free", balance.free),
+        ("used", balance.used),
+        ("upnl", balance.upnl),
+    ] {
+        assert_eq!(
+            format!("{:016x}", number.to_bits()),
+            expected[name].as_str().unwrap(),
+            "actual native balance {name}"
+        );
+    }
+    let info = balance.info.as_ref().unwrap();
+    let symbol = info.get("portfolios").unwrap().as_array().unwrap()[0]
+        .get("positions")
+        .unwrap()
+        .as_array()
+        .unwrap()[0]
+        .get("symbol")
+        .unwrap();
+    assert_eq!(symbol.as_text(), Some([0xd800].as_slice()));
+    assert_eq!(
+        errors.borrow().len(),
+        0,
+        "ticker miss is not a mapping failure"
+    );
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|request| request["url"] == "accounts/default:A/portfolio")
+            .count(),
+        2
+    );
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn native_candles_ignore_surrogate_symbol_without_declared_record_validation() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/candles_oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let raw = source["supplements"]["surrogate"]["raw"].as_str().unwrap();
+    let input: Input = serde_json::from_str(raw).unwrap();
+    assert_eq!(
+        input.get("events").unwrap().as_array().unwrap()[0]
+            .get("symbol")
+            .unwrap()
+            .as_text(),
+        Some([0xd800].as_slice())
+    );
+    let f = fixture();
+    let errors = portfolio_error_log(&f);
+    f.wire.native_responses.borrow_mut().push_back((
+        "marketdata".into(),
+        safe_cex_exchange::js_runtime::value::from_retained_input(input),
+    ));
+    let rows = f
+        .run(f.exchange.fetch_ohlcv(OHLCVOptions {
+            symbol: "BTCUSD".into(),
+            interval: AnyTimeframe::Variant1(Timeframe::M1),
+            from: None,
+            to: None,
+            limit: Some(1.0),
+        }))
+        .expect("source ignores the raw symbol field");
+    assert_eq!(
+        rows.len(),
+        source["supplements"]["surrogate"]["count"]
+            .as_u64()
+            .unwrap() as usize
+    );
+    let expected = source["cases"][0]["expected"]["ok"].as_array().unwrap();
+    assert_eq!(rows.len(), expected.len());
+    for (row, expected) in rows.iter().zip(expected) {
+        for (field, value) in [
+            ("timestamp", row.timestamp),
+            ("open", row.open),
+            ("high", row.high),
+            ("low", row.low),
+            ("close", row.close),
+            ("volume", row.volume),
+        ] {
+            assert_eq!(
+                format!("{:016x}", value.to_bits()),
+                expected[field]["number"].as_str().unwrap(),
+                "actual candle field {field}"
+            );
+        }
+    }
+    assert!(errors.borrow().is_empty());
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "marketdata")
+            .count(),
+        1
+    );
+    f.exchange.dispose().unwrap();
 }

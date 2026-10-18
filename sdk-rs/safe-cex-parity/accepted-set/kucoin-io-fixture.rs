@@ -186,14 +186,14 @@ impl safe_cex_exchange::runtime::ExchangeRuntime for ConnectedRuntime {
     fn report_raw_exception(
         &self,
         value: &safe_cex_exchange::js_runtime::value::Js,
-        context: &serde_json::Value,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         self.inner.report_raw_exception(value, context);
     }
     fn report_exception(
         &self,
         error: &safe_cex_exchange::runtime::ExchangeError,
-        context: &serde_json::Value,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         self.inner.report_exception(error, context);
     }

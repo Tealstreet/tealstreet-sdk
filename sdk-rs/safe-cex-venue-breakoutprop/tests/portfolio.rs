@@ -1,5 +1,5 @@
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref, js_value_as_f64};
+use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref};
 use safe_cex_store::{StoreUpdate, store::DefaultStore};
 use safe_cex_types::{Balance, ModelField, Order, Position};
 use safe_cex_venue_breakoutprop::portfolio::*;
@@ -28,14 +28,10 @@ static ORACLE: LazyLock<Value> = LazyLock::new(|| {
 fn number(value: f64) -> Value {
     json!({"number":format!("{:016x}",if value.is_nan() {0x7ff8000000000000} else {value.to_bits()})})
 }
-fn observe(value: &Value) -> Value {
-    match value {
-        Value::Number(_) => number(js_value_as_f64(value).unwrap()),
-        Value::Array(v) => Value::Array(v.iter().map(observe).collect()),
-        Value::Object(v) => Value::Object(v.iter().map(|(k, v)| (k.clone(), observe(v))).collect()),
-        v => v.clone(),
-    }
-}
+#[path = "support/retained_info_values.rs"]
+mod retained_info_values;
+use retained_info_values::observe;
+
 fn optional(value: &mut Value, name: &str, field: Option<Value>) {
     if let Some(field) = field {
         value[name] = field;
@@ -228,11 +224,17 @@ fn owned_info_boundary() {
             _ => panic!("method inventory"),
         };
         if method == "formatBalance" {
-            info["portfolios"][0]["positions"][0]["openPrice"] = json!(999);
+            *info.get_mut("portfolios").unwrap().as_array_mut().unwrap()[0]
+                .get_mut("positions")
+                .unwrap()
+                .as_array_mut()
+                .unwrap()[0]
+                .get_mut("openPrice")
+                .unwrap() = json!(999).into();
         } else if method == "formatOrders" {
-            info["orderCode"] = json!("changed-through-result");
+            *info.get_mut("orderCode").unwrap() = json!("changed-through-result").into();
         } else {
-            info["openPrice"] = json!(999);
+            *info.get_mut("openPrice").unwrap() = json!(999).into();
         }
         let decoded: safe_cex_venue_breakoutprop::types::PortfolioResponse =
             input.clone().decode().unwrap();
@@ -262,11 +264,66 @@ fn portfolio_utf8_boundary() {
             "source_lone_surrogate_{}",
             case["method"]
         );
-        assert!(
-            serde_json::from_str::<JsNumberInput>(case["raw"].as_str().unwrap()).is_err(),
-            "portfolio_utf8_{}",
-            case["method"]
+        let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        let retained: safe_cex_types::retained_json::RetainedJsonInput =
+            input.clone().decode().unwrap();
+        assert_eq!(
+            retained.get("portfolios").unwrap().as_array().unwrap()[0]
+                .get("positions")
+                .unwrap()
+                .as_array()
+                .unwrap()[0]
+                .get("symbol")
+                .unwrap()
+                .as_text(),
+            Some([0xd800].as_slice())
         );
+        let store = DefaultStore::new();
+        let report = |_: &str| -> Result<(), ExchangeError> {
+            panic!("retained symbol is not a source mapping error")
+        };
+        match case["method"].as_str().unwrap() {
+            "formatBalance" => {
+                let balance = format_balance(&input, &store, &|ms| ms, &report).unwrap();
+                let info = balance.info.as_ref().unwrap();
+                assert_eq!(
+                    info.get("portfolios").unwrap().as_array().unwrap()[0]
+                        .get("positions")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .get("symbol")
+                        .unwrap()
+                        .as_text(),
+                    Some([0xd800].as_slice())
+                );
+                assert!(
+                    balance.used > 0.0,
+                    "native position reduction precedes closed model projection"
+                );
+            }
+            "formatOpenPositions" => assert!(
+                format_open_positions(&input, &store, &|ms| ms, &report).is_err(),
+                "closed Position symbol refusal"
+            ),
+            "formatOrders" => assert!(
+                format_orders(&input, &store, &|ms| ms, &report).is_err(),
+                "closed Order symbol refusal"
+            ),
+            "formatPositions" => {
+                assert!(
+                    serde_json::from_str::<Vec<String>>(r#"["\ud800"]"#).is_err(),
+                    "source requested symbol cannot enter typed filter"
+                );
+                assert!(
+                    format_positions(&input, &store, None, &|ms| ms, &report)
+                        .unwrap()
+                        .is_empty(),
+                    "default empty Store symbol filter"
+                );
+            }
+            method => panic!("unknown surrogate formatter {method}"),
+        }
     }
 }
 

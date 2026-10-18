@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 // Shared deterministic host also exposes timer inspection for other suites.
 #[allow(dead_code)]
 #[path = "support/subscription_runtime.rs"]
@@ -98,11 +100,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, e: &ExchangeError, c: &Value) {
+    fn report_exception(
+        &self,
+        e: &ExchangeError,
+        c: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.host.report_exception(e, c)
     }
     fn execute_worker_request(&self, r: Value) -> ExchangeFuture<'static, Value> {
@@ -234,7 +240,7 @@ impl WsParent for Parent {
         &self,
         _: &str,
         _: Option<&str>,
-        _: Option<&Value>,
+        _: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         Ok(())
     }
@@ -408,9 +414,16 @@ fn decoded_json(actual: &Value, expected: &Value, label: &str) {
         _ => assert_eq!(actual, expected, "{label}"),
     }
 }
-fn optional_json(actual: Option<&Value>, expected: Option<&Value>, label: &str) {
+fn optional_json(
+    actual: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+    expected: Option<&Value>,
+    label: &str,
+) {
     match (actual, expected) {
-        (Some(a), Some(e)) => decoded_json(a, e, label),
+        (Some(a), Some(e)) => {
+            let _ = label;
+            retained_assert::assert_value(a, e);
+        }
         (None, None) => {}
         _ => panic!("{label} field presence"),
     }

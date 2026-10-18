@@ -232,10 +232,17 @@ fn numeric_capture_and_boundary() {
         oracle()["capture"]["negativeNan"],
         "negative NaN capture"
     );
-    // Chosen shared UTF-8 wire boundary: refuse, never substitute lone code units.
+    let raw = r#"{"fill_id":"\ud800"}"#;
+    let retained: safe_cex_types::retained_json::RetainedJsonInput =
+        serde_json::from_str(raw).unwrap();
+    assert_eq!(
+        retained.get("fill_id").unwrap().as_text(),
+        Some([0xd800].as_slice())
+    );
+    let input: JsNumberInput = serde_json::from_str(raw).unwrap();
     assert!(
-        serde_json::from_str::<JsNumberInput>(r#"{"fill_id":"\ud800"}"#).is_err(),
-        "shared UTF-8 boundary refusal"
+        fills::map_kraken_fill(input, &mut |_| Ok(None), &mut |ms| ms).is_err(),
+        "legacy fill wire refuses only when consumed"
     );
 }
 
@@ -245,11 +252,58 @@ fn chosen_boundary_live_witnesses() {
     assert_eq!(boundaries.len(), 12, "boundary row census");
     for case in cardinality::cases("utilities", "boundaries", oracle()) {
         let raw = case["raw"].as_str().unwrap();
-        assert!(
-            serde_json::from_str::<JsNumberInput>(raw).is_err(),
-            "CHOSEN input refusal {}",
-            case["name"]
-        );
+        let name = case["name"].as_str().unwrap();
+        if name.ends_with(".depth") {
+            assert!(
+                serde_json::from_str::<JsNumberInput>(raw).is_err(),
+                "depth refusal {name}"
+            );
+        } else {
+            let input: JsNumberInput = serde_json::from_str(raw).unwrap();
+            let retained: safe_cex_types::retained_json::RetainedJsonInput =
+                serde_json::from_str(raw).unwrap();
+            let row = retained.as_array().map_or(&retained, |rows| &rows[0]);
+            let unit = if row.as_text().is_some() {
+                row
+            } else {
+                let key = match name {
+                    "income.isPositionSizeLeg" => "asset",
+                    "fills.mapKrakenFill" | "fills.mapKrakenFills" => "fill_id",
+                    _ => "booking_uid",
+                };
+                row.get(key).unwrap()
+            };
+            assert_eq!(
+                unit.as_text(),
+                Some([0xd800].as_slice()),
+                "native units {name}"
+            );
+            match name {
+                "fills.mapKrakenFill" => {
+                    assert!(fills::map_kraken_fill(input, &mut |_| Ok(None), &mut |ms| ms).is_err())
+                }
+                "fills.mapKrakenFills" => assert!(
+                    fills::map_kraken_fills(input, &mut |_| Ok(None), &mut |ms| ms).is_err()
+                ),
+                "income.mapKrakenAccountLogRow" => assert!(
+                    income::map_kraken_account_log_row(input, &mut |_| Ok(None), &mut |ms| ms)
+                        .is_err()
+                ),
+                "income.mapKrakenAccountLog" => assert!(
+                    income::map_kraken_account_log(input, &mut |_| Ok(None), &mut |ms| ms).is_err()
+                ),
+                "income.isPositionSizeLeg" => assert!(
+                    input
+                        .decode::<std::collections::BTreeMap<String, String>>()
+                        .is_err(),
+                    "closed leg text admission"
+                ),
+                _ => assert!(
+                    input.decode::<String>().is_err(),
+                    "closed scalar text admission {name}"
+                ),
+            }
+        }
         match case["name"].as_str().unwrap() {
             "fills.num" | "fills.toSeconds" | "income.toMs" => {
                 assert_eq!(case["output"], number(0.0), "TS surrogate numeric output")

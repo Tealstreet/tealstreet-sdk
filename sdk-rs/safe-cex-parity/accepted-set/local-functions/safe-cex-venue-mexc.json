@@ -17,7 +17,7 @@
   "safe-cex-venue-mexc/src/utils.rs::LOCAL_FUNCTION:row_balance": {
     "category": "decoder-helper",
     "runtimeOwner": "safe_cex_venue_mexc::utils::normalize_balance",
-    "reason": "Inside normalize_balance: picks aliased balance fields from one raw row and coerces them to numbers, retaining the row as info. Raw JSON to typed Balance; its runtime owner's probes exercise it.",
-    "sourceSha256": "cc256268f5e0a1af606563e1d4427e0ef5deab6673d06ab231f02d790742267f"
+    "reason": "Inside normalize_balance: picks aliased balance fields from one raw row and coerces them to numbers, retaining the row as info. Raw JSON to typed Balance; its runtime owner's probes exercise it. Retained-info review: row_balance body is byte-identical; common to_number now delegates the canonical retained numeric operation, while market-only native readers add no waiter or callback effects. The source utility corpus preserves all 595 outcomes.",
+    "sourceSha256": "653047d3a6d864ed1e8448c294110b4a60927b7891f53d554b267aeb03d5fc9e"
   }
 }

@@ -1,8 +1,6 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
-use safe_cex_num::numeric_ingress::{
-    js_from_str, js_from_value, js_from_value_ref, js_value_as_f64,
-};
+use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::{Market, Ticker};
 use safe_cex_venue_blofin::tickers::*;
@@ -11,14 +9,24 @@ use std::{process::Command, rc::Rc};
 fn bits(value: f64) -> Value {
     json!({"number":if value.is_nan(){"nan".into()}else{format!("{:016x}",value.to_bits())}})
 }
-fn info(value: Value) -> Value {
+fn info(value: safe_cex_types::retained_json::RetainedJsonInput) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match value {
-        Value::Number(_) => bits(js_value_as_f64(&value).unwrap()),
-        Value::Array(v) => Value::Array(v.into_iter().map(info).collect()),
-        Value::Object(v) => Value::Object(v.into_iter().map(|(k, v)| (k, info(v))).collect()),
-        other => other,
+        Input::Float(v) => bits(v),
+        Input::Lexeme(v) => bits(v.parse().unwrap()),
+        Input::Array(v) => Value::Array(v.into_iter().map(info).collect()),
+        Input::Object(v) => Value::Object(
+            v.into_iter()
+                .map(|(k, v)| (String::from_utf16(&k).unwrap(), info(v)))
+                .collect(),
+        ),
+        Input::Text(v) => Value::String(String::from_utf16(&v).unwrap()),
+        Input::Bool(v) => Value::Bool(v),
+        Input::Null => Value::Null,
+        Input::Undefined => panic!("source corpus has no native undefined in JSON info"),
     }
 }
+
 fn native(ticker: Ticker) -> Value {
     assert!(ticker.mid_price.is_none(), "ticker_mid_price_absent");
     let mut value = json!({"id":ticker.id,"symbol":ticker.symbol,"bid":bits(ticker.bid),"ask":bits(ticker.ask),
@@ -184,10 +192,33 @@ fn live_tickers_corpus() {
     pin.finish_comparisons(3);
     for index in 0..pin.count("/boundaries") {
         let raw = &corpus["boundaries"][index];
-        assert!(
-            js_from_str::<TickerInput>(raw.as_str().unwrap()).is_err(),
-            "ticker_ingress_boundary"
-        );
+        let result = js_from_str::<TickerInput>(raw.as_str().unwrap());
+        if index == 0 {
+            let input = result.expect("ticker opaque native UTF-16 ingress");
+            assert_eq!(
+                input.retained().as_array().unwrap()[0]
+                    .get("instId")
+                    .unwrap()
+                    .as_text(),
+                Some([0xd800].as_slice()),
+                "ticker_retained_input_units"
+            );
+            // A retained row reaches the source mapper; typed Market IDs remain
+            // strict and produce the existing fallback when lookup is impossible.
+            let store = DefaultStore::new();
+            let mut logs = Vec::new();
+            assert!(
+                format_tickers(&input, &store, |message| {
+                    logs.push(message.to_owned());
+                    Ok::<_, ()>(())
+                })
+                .unwrap()
+                .is_empty()
+            );
+            assert_eq!(logs.len(), 1, "ticker named-ID refusal remains visible");
+        } else {
+            assert!(result.is_err(), "ticker_numeric_ingress_depth_boundary");
+        }
         pin.hit("boundaries-raw-1");
     }
     pin.finish("boundaries-raw-1", pin.count("/boundaries"));

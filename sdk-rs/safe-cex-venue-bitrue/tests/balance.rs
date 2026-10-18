@@ -1,5 +1,5 @@
 include!("cardinality.rs.inc");
-use safe_cex_num::{js_number, numeric_ingress::js_from_str};
+use safe_cex_num::numeric_ingress::js_from_str;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::Balance;
 use safe_cex_venue_bitrue::{balance::parse_balance, wire::OpaqueValue};
@@ -8,15 +8,18 @@ use std::process::Command;
 fn number(n: f64) -> Value {
     json!({"type":"number","bits":if n.is_nan(){"NaN".into()}else{format!("{:016x}",n.to_bits())}})
 }
-fn native(value: &Value) -> Value {
-    match value {
-        Value::Null => json!({"type":"null"}),
-        Value::Bool(v) => json!({"type":"boolean","value":v}),
-        Value::String(v) => json!({"type":"string","value":v}),
-        Value::Number(_) => number(js_number(Some(value)).unwrap()),
-        Value::Array(v) => json!({"type":"array","items":v.iter().map(native).collect::<Vec<_>>()}),
-        Value::Object(v) => {
-            json!({"type":"object","entries":v.iter().map(|(k,v)|json!([k,native(v)])).collect::<Vec<_>>()})
+fn native(value: &(impl serde::Serialize + ?Sized)) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let value = safe_cex_num::numeric_ingress::js_capture_output(value).unwrap();
+    match &value {
+        Input::Undefined => json!({"type":"undefined"}),
+        Input::Null => json!({"type":"null"}),
+        Input::Bool(v) => json!({"type":"boolean","value":v}),
+        Input::Text(v) => json!({"type":"string","value":String::from_utf16(v).unwrap()}),
+        Input::Float(_) | Input::Lexeme(_) => number(value.as_f64().unwrap()),
+        Input::Array(v) => json!({"type":"array","items":v.iter().map(native).collect::<Vec<_>>()}),
+        Input::Object(v) => {
+            json!({"type":"object","entries":v.iter().map(|(k,v)|json!([String::from_utf16(k).unwrap(),native(v)])).collect::<Vec<_>>()})
         }
     }
 }
@@ -91,7 +94,7 @@ fn balance_matches_actual_typescript() {
             (0., 0., 0., 0.)
         );
         assert!(balance.currencies.as_ref().unwrap().is_empty());
-        assert_eq!(balance.info.as_ref(), Some(&input.value));
+        assert_eq!(balance.info.as_ref(), Some(&input.value.into()));
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("Balance.upnl"));
     }

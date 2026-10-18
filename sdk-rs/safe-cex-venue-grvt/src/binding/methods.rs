@@ -4,7 +4,7 @@ use crate::{account_runtime, trading_runtime};
 use safe_cex_exchange::{
     js_runtime::{
         promise::await_js,
-        value::{Js, Thrown, arg, from_json, from_typed, to_json, to_typed},
+        value::{Js, Thrown, arg, from_json, from_typed, to_json, to_retained_input, to_typed},
     },
     runtime::{ExchangeError, LogSeverity},
 };
@@ -139,7 +139,7 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
             )
             .map_err(|e| Thrown::error("Error", &e))?;
             Ok(Js::object(vec![
-                ("ih", Js::str(hash)),
+                ("ih", Js::str(&hash)),
                 ("bd", Js::Number(base)),
                 ("qd", Js::Number(quote)),
             ]))
@@ -201,12 +201,21 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                 from_typed(
                     &crate::markets::fetch_markets(
                         |path, body| {
-                            request(
-                                h.clone(),
-                                "xhr",
-                                "post",
-                                vec![Js::str(path), from_json(&body)],
-                            )
+                            let response = h.0.this.get("xhr").and_then(|xhr| {
+                                xhr.call_method("post", vec![Js::str(path), from_json(&body)])
+                            });
+                            async move {
+                                let response =
+                                    await_js(response.map_err(|cause| cause.to_exchange_error())?)
+                                        .await
+                                        .map_err(|cause| cause.to_exchange_error())?;
+                                to_retained_input(
+                                    &response
+                                        .get("data")
+                                        .map_err(|cause| cause.to_exchange_error())?,
+                                )
+                                .map_err(|cause| cause.to_exchange_error())
+                            }
                         },
                         |text, level| log(&h, text, level),
                     )

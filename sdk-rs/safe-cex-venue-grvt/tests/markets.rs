@@ -1,6 +1,5 @@
 #![cfg(not(target_arch = "wasm32"))]
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::js_value_as_f64;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::Market;
 use safe_cex_venue_grvt::markets::{fetch_markets, refresh_markets};
@@ -118,16 +117,23 @@ fn native_market(actual: &Market, expected: &Value) {
     let info = actual.info.as_ref().unwrap();
     for key in ["ih", "bd", "qd"] {
         if expected["info"][key]["undefined"] == true {
-            assert!(info.get(key).is_none(), "MARKETS absent JSON-data {key}");
+            assert!(
+                matches!(
+                    info.get(key),
+                    Some(safe_cex_types::retained_json::RetainedJsonInput::Undefined)
+                ),
+                "MARKETS own undefined {key}"
+            );
         } else if expected["info"][key].get("bits").is_some() {
             number(
-                js_value_as_f64(&info[key]).unwrap(),
+                info.get(key).unwrap().as_f64().unwrap(),
                 &expected["info"][key],
                 &format!("MARKETS native info {key}"),
             );
         } else {
             assert_eq!(
-                info[key], expected["info"][key],
+                info.get(key).unwrap(),
+                &expected["info"][key].clone().into(),
                 "MARKETS native info {key}"
             );
         }
@@ -201,9 +207,7 @@ fn fetch_markets_native_source_outcomes() {
                 ]);
                 std::future::ready(Ok(safe_cex_transport::how::json_parse(
                     row["raw"].as_str().unwrap(),
-                )
-                .into_value()
-                .unwrap()))
+                )))
             },
             |message, severity| {
                 logs += 1;
@@ -254,7 +258,7 @@ fn fetch_markets_native_source_outcomes() {
 fn fetch_markets_reports_typed_row_refusal_after_source_logging() {
     let effects = RefCell::new(Vec::new());
     let result = run(fetch_markets(
-        |_, _| std::future::ready(Ok(json!({"r":[{"i":"x","b":{},"q":"USD"}]}))),
+        |_, _| std::future::ready(Ok(json!({"r":[{"i":"x","b":{},"q":"USD"}]}).into())),
         |text, severity| {
             effects
                 .borrow_mut()
@@ -318,9 +322,14 @@ fn refresh_markets_declared_owned_old_value_boundary() {
         1,
         "REFRESH owned native removed count"
     );
-    assert_eq!(
-        changes.removed[0].info.as_ref().unwrap()["ih"],
-        "old-a",
+    assert!(
+        changes.removed[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("ih")
+            .unwrap()
+            .text_equals("old-a"),
         "REFRESH declared owned old metadata"
     );
     assert_eq!(
@@ -432,8 +441,19 @@ fn refresh_markets_native_store_and_effect_order() {
                 "REFRESH native stored id"
             );
             assert_eq!(
-                market.info.as_ref().unwrap()["ih"],
-                expected["info"]["ih"],
+                market
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("ih")
+                    .unwrap()
+                    .as_text()
+                    .unwrap(),
+                expected["info"]["ih"]
+                    .as_str()
+                    .unwrap()
+                    .encode_utf16()
+                    .collect::<Vec<_>>(),
                 "REFRESH native replaced signing hash"
             );
             assert_eq!(
@@ -465,8 +485,19 @@ fn refresh_markets_native_store_and_effect_order() {
                         "REFRESH native added id"
                     );
                     assert_eq!(
-                        market.info.as_ref().unwrap()["ih"],
-                        expected["info"]["ih"],
+                        market
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("ih")
+                            .unwrap()
+                            .as_text()
+                            .unwrap(),
+                        expected["info"]["ih"]
+                            .as_str()
+                            .unwrap()
+                            .encode_utf16()
+                            .collect::<Vec<_>>(),
                         "REFRESH native added hash"
                     );
                 }
@@ -481,8 +512,19 @@ fn refresh_markets_native_store_and_effect_order() {
                         "REFRESH native removed id"
                     );
                     assert_eq!(
-                        market.info.as_ref().unwrap()["ih"],
-                        expected["info"]["ih"],
+                        market
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("ih")
+                            .unwrap()
+                            .as_text()
+                            .unwrap(),
+                        expected["info"]["ih"]
+                            .as_str()
+                            .unwrap()
+                            .encode_utf16()
+                            .collect::<Vec<_>>(),
                         "REFRESH native removed hash"
                     );
                 }

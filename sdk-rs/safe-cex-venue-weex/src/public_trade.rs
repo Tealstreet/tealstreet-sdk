@@ -2,8 +2,8 @@
 use crate::utils::{
     WeexUtilityError, WeexUtilityInput, normalize_timestamp_to_ms, to_integer_string, to_number,
 };
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{OrderSide, PublicTrade};
-use serde_json::Value;
 
 pub fn normalize_public_trade(
     raw: &WeexUtilityInput,
@@ -35,9 +35,9 @@ pub fn normalize_public_trade(
         ),
     };
     let quote_qty = to_number(pick(&["quoteQty", "v"]).as_ref(), None)?;
-    let side = if value.get("buyer") == Some(&Value::Bool(false))
-        || value.get("m") == Some(&Value::Bool(true))
-        || value.get("isBuyerMaker") == Some(&Value::Bool(true))
+    let side = if value.get("buyer") == Some(&Input::Bool(false))
+        || value.get("m") == Some(&Input::Bool(true))
+        || value.get("isBuyerMaker") == Some(&Input::Bool(true))
     {
         OrderSide::Sell
     } else {

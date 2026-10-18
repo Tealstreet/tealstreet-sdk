@@ -34,11 +34,8 @@ pub(crate) fn number_input(v: &Js) -> Result<Option<JsNumberInput>, Thrown> {
     if v.is_undefined() {
         return Ok(None);
     }
-    let text =
-        serde_json::to_string(&to_json(v)?).map_err(|e| Thrown::type_error(&e.to_string()))?;
-    serde_json::from_str::<JsNumberInput>(&text)
-        .map(Some)
-        .map_err(|e| Thrown::type_error(&e.to_string()))
+    safe_cex_exchange::js_runtime::value::to_retained_input(v)
+        .map(|input| Some(JsNumberInput::from(input)))
 }
 
 pub(crate) fn json_value(v: &JsJsonValue) -> Js {
@@ -349,7 +346,10 @@ pub(crate) fn dispatch(
                 store.as_ref(),
                 |endpoint, pair, interval, since| {
                     let params = Js::object(vec![
-                        ("pair", json_value(&pair)),
+                        (
+                            "pair",
+                            safe_cex_exchange::js_runtime::value::from_retained_input(pair),
+                        ),
                         (
                             "interval",
                             match interval {

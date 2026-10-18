@@ -1,5 +1,7 @@
 #[path = "support/oracle_clock.rs"]
 mod oracle_clock;
+#[path = "support/retained_observe.rs"]
+mod retained_observe;
 
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
@@ -81,7 +83,7 @@ fn order_value(o: &Order) -> Value {
         v["timeInForce"] = json!(t);
     }
     if let Some(info) = o.info.as_ref() {
-        v["info"] = observe(info);
+        v["info"] = retained_observe::observe(info);
     }
     if let Some(t) = o.sl_trigger_type.into_value() {
         v["slTriggerType"] = json!(t);
@@ -174,11 +176,15 @@ impl ExchangeRuntime for Host {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, e: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        e: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.exceptions.borrow_mut().push(e.message.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -335,13 +341,19 @@ impl PrivateDispatchOperations for Host {
             Ok(())
         })
     }
-    fn account(&self, events: Vec<Value>) -> ExchangeFuture<'_, ()> {
+    fn account(
+        &self,
+        events: Vec<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> ExchangeFuture<'_, ()> {
         Box::pin(async move {
             self.call(json!({"op":"account","events":events}));
             Ok(())
         })
     }
-    fn order(&self, events: &[Value]) -> Result<(), ExchangeError> {
+    fn order(
+        &self,
+        events: &[safe_cex_types::retained_json::RetainedJsonInput],
+    ) -> Result<(), ExchangeError> {
         self.call(json!({"op":"order","events":events}));
         Ok(())
     }
@@ -912,7 +924,7 @@ fn stream_representation_boundaries_are_explicit() {
     let mut input = corpus()["cases"][28]["input"].clone();
     input["raw"] = json!("{\"ping\":\"\\ud800\"}");
     let (_, _, _, host) = fixture(input);
-    let e = ready(
+    ready(
         BingxPrivateDispatcher {
             host: host.clone(),
             operations: host.clone(),
@@ -921,15 +933,11 @@ fn stream_representation_boundaries_are_explicit() {
             host.input["raw"].as_str().unwrap().into(),
         )),
     )
-    .unwrap_err();
-    assert!(
-        e.message.contains("refuses a lone surrogate"),
-        "BINGX-RS private UTF8 refusal visible"
-    );
+    .expect("retained private ping accepts lone UTF16");
     assert_eq!(
-        host.calls.borrow().len(),
-        2,
-        "BINGX-RS private refusal after diagnostic before send"
+        *host.calls.borrow(),
+        *source["utfFrame"]["calls"].as_array().unwrap(),
+        "BINGX-RS native retained ping diagnostics and Pong match source"
     );
     assert!(
         source["bookUnits"]

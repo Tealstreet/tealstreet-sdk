@@ -30,7 +30,12 @@ pub struct Runtime {
     pub now: Rc<Cell<u64>>,
     pub tasks: RefCell<Vec<Task>>,
     pub discard_spawn: Cell<bool>,
-    pub exceptions: RefCell<Vec<(ExchangeError, serde_json::Value)>>,
+    pub exceptions: RefCell<
+        Vec<(
+            ExchangeError,
+            safe_cex_types::retained_json::RetainedJsonInput,
+        )>,
+    >,
 }
 impl Runtime {
     pub fn advance(&self, now: u64) {
@@ -106,11 +111,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, context: &serde_json::Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.exceptions
             .borrow_mut()
             .push((error.clone(), context.clone()));

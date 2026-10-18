@@ -504,7 +504,7 @@ fn lookup_store_hit_prices_owned_snapshot_in_both_directions() {
     let reference = oracle();
     assert_eq!(reference["alias"]["sameReference"], true);
     let mut stored = order();
-    stored.info = (Some(json!({"clOrdId":"client"}))).into();
+    stored.info = (Some(json!({"clOrdId":"client"}).into())).into();
     let mut orders = vec![stored];
     let wire = Wire {
         whole_body: false,

@@ -155,7 +155,7 @@ where
             p.realized_pnl = (Some(numeric(row, &["realizedPNL", "realizedPnl"], 0.0)?)).into();
             p.contracts = contracts.abs();
             p.liquidation_price = numeric(row, &["liqPrice", "liquidationPrice", "liqPx"], 0.0)?;
-            p.info = (Some(row.clone())).into();
+            p.info = (Some(row.clone().into())).into();
             positions.push(p);
         }
         let mode = account_mode();

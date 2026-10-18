@@ -475,15 +475,15 @@ Limit/fee coercions finish before required-string admission; record_boundaries
 pairs fifteen malformed-field/coercion inputs with actual source errors.
 The market_data target also retains its three malformed-record witnesses.
 Ticker retains nullish alias precedence, book quote priority, numerical defaults,
-percentage branches, and missing versus present-null info entries. Its typed
+percentage branches, and own Undefined versus present-null info entries. Its typed
 Market argument carries id and symbol unchanged.
 
 `tests/market_data.rs` executes actual source plus the imported CCXT helper for
 12 market cases and 14 ticker cases, comparing four ingress routes, 80 successful
 records, 24 errors and 816 native numeric fields. It asserts retained info
 without re-encoding model outputs. The finite inventory stops at these cases;
-it is not a claim of exhaustive dynamic-object coverage. Callable and UTF16
-source supplements witness the retained-input restriction. Run the affected
+it is not a claim of exhaustive dynamic-object coverage. Callable source supplements retain their separate executable-value boundary.
+Unpaired UTF-16 data is admitted and retained before typed String projection. Run the affected
 `--test market_data` target with the configured TypeScript compiler. The two
 serial controls in `tests/market-data-mutations.py` swap market price/amount and
 ticker volume/quoteVolume separately, require their named native assertions,
@@ -568,3 +568,14 @@ overflow, signed zero and false follow the actual TS exchange and DefaultStore.
 The shared ticker census records the witness. The compiling
 `parity/scripts/ticker-native-controls.py weex` fault must fail that test and
 pass after exact source restoration.
+
+Utility inputs directly own canonical RetainedJsonInput. Ticker info always creates
+both ticker and bookTicker keys, with absent arguments as Undefined. The constructed
+REST regression checks raw UTF-16 units, nonfinite bits and own property presence.
+
+Retained utility inputs admit lone UTF-16 surrogates. Enum and numeric witnesses
+inspect the native units before invoking the actual normalizers; numeric results
+use binary64 bits. Closed String outputs still visibly refuse lone units.
+Ignored surrogate fields reach the fill guard/mapper without narrowing the whole
+record; depth-budget refusal remains separate. The existing source corpus and
+all ordinary ingress-route comparison counts are unchanged.

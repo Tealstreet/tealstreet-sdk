@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 use safe_cex_num::numeric_ingress::js_from_value;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{
@@ -297,9 +299,12 @@ fn native_json(actual: &Value, expected: &Value) {
         _ => assert_eq!(actual, expected, "native retained JSON value"),
     }
 }
-fn opt_json(actual: Option<&Value>, expected: Option<&Value>) {
+fn opt_json(
+    actual: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+    expected: Option<&Value>,
+) {
     match (actual, optional(expected)) {
-        (Some(a), Some(e)) => native_json(a, e),
+        (Some(a), Some(e)) => retained_assert::assert_value(a, e),
         (None, None) => (),
         _ => panic!("native JSON presence"),
     }
@@ -729,8 +734,13 @@ fn run(case: &Value, variant: u8, boundary: bool) {
                         before,
                         "native owned position snapshot"
                     );
-                    if let Some(Value::Object(info)) = v[0].info.as_mut() {
-                        info.insert("__native_probe".into(), json!(true));
+                    if let Some(safe_cex_types::retained_json::RetainedJsonInput::Object(info)) =
+                        v[0].info.as_mut()
+                    {
+                        info.push((
+                            "__native_probe".encode_utf16().collect(),
+                            json!(true).into(),
+                        ));
                         assert!(
                             store.positions()[0]
                                 .info

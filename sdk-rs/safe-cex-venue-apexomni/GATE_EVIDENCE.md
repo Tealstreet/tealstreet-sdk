@@ -976,3 +976,47 @@ Independent draft review found no issues. CodeRabbit returned a review limit;
 that status is not evidence of a completed bot review. These results classify
 only the selected23 native/default bodies; remaining owners, aliases, receiver
 policies, locals, construction, feature and wasm accepted behavior stay open.
+
+
+## Retained Apex REST/config cutover
+
+Baseline 10198169fe compiles the real binding regression against the previous
+response path. `rest_info_keeps_opaque_utf16_and_native_numbers` fails at exit101:
+Order.info opaque text has units [65533] instead of original [55296]. This is
+silent replacement, not a compiler failure. Actual maintained TS exchange methods
+preserve opaque order/balance/market/config text and keys, NaN/infinity/-0 and own
+undefined (`scripts/exchange.cjs --retained-info`).
+
+The canonical terminal response/host/mapper cutover removes the UTF8 prepared
+projection. Three new real-binding tests passed on the restored implementation;
+market/config observations inspect the committed native config first, then model
+info and Store, and finally run actual signed placement with those opaque siblings.
+Strict named string/bool row refusals remain visible and keep valid siblings.
+The obsolete nested `fields::retained` local-function key is retired: that nested
+function no longer exists; canonical typed diagnostic projection and prepared
+request capture have distinct direct call sites.
+
+
+Compiled terminal projection control: temporarily replace terminal Input capture
+with the old whole-body `to_js_json` projection, then restore the native value for
+capture. This compiled and made all three real opaque order/balance/market-config
+witnesses fail at exit101 on D800->FFFD; the unrelated wallet control still passed.
+Exact source restoration passed all four selected tests. The initial control
+harness's unused-import compiler failure was rejected as evidence and corrected.
+
+Restored integration gates: binding54, exchange72 (maintained source corpora),
+native_clock2 passed. Strict-field reports use canonical text at the actual warning
+boundary, retaining the source value and native kind; the final continuation and
+unmapped checks exercise that diagnostic without weakening refusal assertions.
+
+
+Final retry cleanup removes the default-callable restoration loop needed only
+by the previous lossy response ABI. Native config now retains the original
+adapter/serializer itself. With that loop absent, the entire actual binding54
+(including shared custom adapter on both legacy attempts and signed retry cases),
+factory/request/response source comparisons3, native all-target strict Clippy
+and Wasm library strict Clippy pass. Final malformed-enum6 and continuation1
+checks pass; the earlier exchange72 and native_clock2 are retained.
+The core owner separately reports integrated all-features cancellation6 and
+override_contract7 passing for shared PR901; no duplicate inventory rebuild
+was run in this worktree. The extractor reports0updated/0added/0orphaned.

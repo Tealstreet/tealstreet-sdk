@@ -1,10 +1,9 @@
 //! Inline TP/SL fallback projection; actual algo records remain authoritative.
-use safe_cex_num::{js_trim, js_truthy, parse_float};
+use safe_cex_num::{js_retained_parse_float, js_retained_string as js_string, js_trim};
 use safe_cex_types::{
-    Order, OrderExtra, OrderSide, OrderStatus, OrderType,
-    js_coercion::{JsCoercionError, js_string},
+    Order, OrderExtra, OrderSide, OrderStatus, OrderType, js_coercion::JsCoercionError,
+    retained_json::RetainedJsonInput as Input,
 };
-use serde_json::Value;
 use std::collections::HashSet;
 
 fn protective_type(kind: OrderType) -> Option<&'static str> {
@@ -25,7 +24,7 @@ pub fn add_inline_tpsl_fallback_orders(
             continue;
         };
         let raw_parent = order.info.as_ref().and_then(|info| info.get("orderId"));
-        let parent = if js_truthy(raw_parent) {
+        let parent = if raw_parent.is_some_and(Input::is_truthy) {
             js_string(raw_parent)?
         } else {
             String::new()
@@ -46,11 +45,12 @@ pub fn add_inline_tpsl_fallback_orders(
             continue;
         }
         let info = order.info.as_ref();
-        if js_truthy(info.and_then(|v| v.get("tpslId")))
-            || info
+        if info
+            .and_then(|v| v.get("tpslId"))
+            .is_some_and(Input::is_truthy)
+            || !info
                 .and_then(|v| v.get("orderCategory"))
-                .and_then(Value::as_str)
-                != Some("normal")
+                .is_some_and(|v| v.text_equals("normal"))
         {
             continue;
         }
@@ -77,10 +77,10 @@ pub fn add_inline_tpsl_fallback_orders(
             ("tpTriggerPrice", OrderType::TakeProfit, "__take_profit"),
             ("slTriggerPrice", OrderType::StopLoss, "__stop_loss"),
         ] {
-            let raw = info.and_then(|v| v.get(field)).filter(|v| !v.is_null());
+            let raw = info.and_then(|v| v.get(field)).filter(|v| !v.is_nullish());
             let price = match raw {
-                Some(v) => parse_float(&js_string(Some(v))?),
-                None => parse_float(""),
+                Some(v) => js_retained_parse_float(Some(v))?,
+                None => f64::NAN,
             };
             if price.is_finite() && price > 0.0 {
                 let key = format!(

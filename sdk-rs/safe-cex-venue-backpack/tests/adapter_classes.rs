@@ -16,17 +16,9 @@ use safe_cex_venue_backpack::{
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
-    future::Future,
     rc::Rc,
-    task::{Context, Poll, Waker},
 };
-fn ready<F: Future>(f: F) -> F::Output {
-    let mut f = std::pin::pin!(f);
-    match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-        Poll::Ready(v) => v,
-        Poll::Pending => panic!("fixture must resolve"),
-    }
-}
+use support::ready;
 fn units(s: &str) -> JsString {
     s.encode_utf16().collect()
 }
@@ -79,7 +71,7 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
         "/api/v1/markPrices",
         json!([{"symbol":"BTC_USDC","markPrice":"101","indexPrice":"102","fundingRate":"0.0001","nextFundingTimestamp":7}]),
     );
-    let markets = ready(Exchange::fetch_markets(owner.as_ref())).unwrap();
+    let markets = ready(&runtime, Exchange::fetch_markets(owner.as_ref())).unwrap();
     assert_eq!(markets[0].precision.price, 0.125);
     assert_eq!(markets[0].limits.leverage.max, 20.0);
     Store::update(
@@ -91,7 +83,7 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
         false,
     )
     .unwrap();
-    let tickers = ready(Exchange::fetch_tickers(owner.as_ref())).unwrap();
+    let tickers = ready(&runtime, Exchange::fetch_tickers(owner.as_ref())).unwrap();
     assert_eq!(
         (tickers[0].mark, tickers[0].index, tickers[0].percentage),
         (101.0, 102.0, 5.0)
@@ -110,6 +102,7 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
     runtime.dial_sockets.borrow_mut().push(socket.clone());
     let public = owner.public_websocket.get().unwrap();
     ready(
+        &runtime,
         public
             .base
             .create_websocket("ws://market-fixture".into(), vec![], None),
@@ -228,7 +221,7 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
 
 #[test]
 fn concrete_exchange_owns_api_and_sdk_bindings() {
-    let (o, _, store, wire) = support::fixture();
+    let (o, runtime, store, wire) = support::fixture();
     assert_eq!(
         o.account_leverage_limit.get().to_bits(),
         1.0f64.to_bits(),
@@ -281,7 +274,7 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
             .unwrap(),
         ),
     );
-    let e = ready(o.fetch_markets()).err().unwrap();
+    let e = ready(&runtime, o.fetch_markets()).err().unwrap();
     assert!(e.message.contains("same-base"), "CLASS native API error");
     assert_eq!(
         errors.borrow().len(),
@@ -306,7 +299,7 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
     };
     let before = wire.requests.lock().unwrap().len();
     assert!(
-        ready(o.place_order(opts.clone()))
+        ready(&runtime, o.place_order(opts.clone()))
             .unwrap_err()
             .message
             .contains("plain Limit/Market"),
@@ -318,7 +311,7 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
         "CLASS preflight before network"
     );
     opts.take_profit = None;
-    let ids = ready(o.place_order(opts)).unwrap();
+    let ids = ready(&runtime, o.place_order(opts)).unwrap();
     assert_eq!(
         ids,
         [units("native-id")],
@@ -477,17 +470,20 @@ fn concrete_private_handler_and_throttle_state() {
 }
 #[test]
 fn concrete_transport_preserves_successful_text() {
-    let (o, _, _, wire) = support::fixture();
+    let (o, runtime, _, wire) = support::fixture();
     wire.bodies.lock().unwrap().insert(
         "/api/v1/klines".into(),
         safe_cex_transport::RestResponseBody::Encoded(b"<html>no klines</html>".to_vec()),
     );
-    let c = ready(o.fetch_ohlcv(rest_reads::OHLCVOptions {
-        symbol: units("BTC_USDC"),
-        interval: units("1m"),
-        from: None,
-        to: None,
-    }))
+    let c = ready(
+        &runtime,
+        o.fetch_ohlcv(rest_reads::OHLCVOptions {
+            symbol: units("BTC_USDC"),
+            interval: units("1m"),
+            from: None,
+            to: None,
+        }),
+    )
     .unwrap();
     assert!(
         c.is_empty(),
@@ -499,12 +495,15 @@ fn concrete_transport_preserves_successful_text() {
 fn concrete_exchange_limits_to_ten_requests_per_second() {
     let (o, rt, _, wire) = support::fixture();
     for _ in 0..10 {
-        ready(o.xhr.request(
-            "GET",
-            "/api/v1/time",
-            safe_cex_num::JsJsonValue::Undefined,
-            safe_cex_num::JsJsonValue::Undefined,
-        ))
+        ready(
+            &rt,
+            o.xhr.request(
+                "GET",
+                "/api/v1/time",
+                safe_cex_num::JsJsonValue::Undefined,
+                safe_cex_num::JsJsonValue::Undefined,
+            ),
+        )
         .unwrap();
     }
     assert_eq!(
@@ -519,10 +518,7 @@ fn concrete_exchange_limits_to_ten_requests_per_second() {
         safe_cex_num::JsJsonValue::Undefined,
     );
     assert!(
-        eleventh
-            .as_mut()
-            .poll(&mut Context::from_waker(Waker::noop()))
-            .is_pending(),
+        rt.poll_checkpoint(eleventh.as_mut()).is_pending(),
         "CLASS native eleventh request throttled"
     );
     assert_eq!(
@@ -531,7 +527,7 @@ fn concrete_exchange_limits_to_ten_requests_per_second() {
         "CLASS native throttle before transport"
     );
     rt.now.set(1000.0);
-    ready(eleventh).unwrap();
+    ready(&rt, eleventh).unwrap();
     assert_eq!(
         wire.requests.lock().unwrap().len(),
         11,

@@ -25,6 +25,115 @@ fn signature(payload: &str) -> String {
 }
 
 #[test]
+fn bybit_ret_msg_keeps_utf16_through_native_http_and_exchange_error() {
+    use safe_cex_exchange::js_runtime::value::Thrown;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+
+    support::run_local(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+            for (encoded, expected) in [
+                (r#"\ud800"#, vec![0xd800]),
+                (r#"\udc00"#, vec![0xdc00]),
+                (r#"\ud800x\udc00"#, vec![0xd800, 120, 0xdc00]),
+                (
+                    "ordinary rejection",
+                    "ordinary rejection".encode_utf16().collect(),
+                ),
+            ] {
+                let body = format!(
+                    "{{\"retCode\":10001,\"retMsg\":\"{encoded}\",\"result\":{{\"list\":[]}}}}"
+                );
+                let h = support::venue_harness(
+                    name.clone(),
+                    Rc::new(move |request| match request.path.as_str() {
+                        "/v5/account/fee-rate" => Some(json!({
+                            "retCode":0,"retMsg":"OK","result":{"list":[]}
+                        })),
+                        "/v5/market/instruments-info" => Some(json!({"__rawBody":body})),
+                        _ => None,
+                    }),
+                    json!({"key":"native-bybit-key","secret":support::SECRET}),
+                    None,
+                    safe_cex_exchange::native::native_runtime(),
+                )
+                .await;
+                let error = h.exchange.fetch_markets().await.unwrap_err();
+                let value = Thrown::from(error).value;
+                assert_eq!(
+                    value
+                        .get("message")
+                        .unwrap()
+                        .to_js_string()
+                        .unwrap()
+                        .as_ref(),
+                    expected.as_slice(),
+                    "Bybit ret_msg UTF-16 survives the actual HTTP client and typed error: {name:?}/{encoded}"
+                );
+                assert_eq!(value.get("name").unwrap().to_display(), "Error");
+                assert!(
+                    h.reports.borrow().iter().any(|context| {
+                        context
+                            .get("extra")
+                            .and_then(|extra| extra.get("originalMessage"))
+                            .and_then(|message| message.as_text())
+                            .is_some_and(|units| units.ends_with(&expected))
+                    }),
+                    "the real native reporter receives original UTF-16 context"
+                );
+                let seen = h.seen.borrow();
+                let request = seen
+                    .iter()
+                    .find(|request| request.path == "/v5/market/instruments-info")
+                    .expect("actual market HTTP request");
+                assert!(request.query.contains("requestId="));
+                let payload = format!(
+                    "{}{}{}{}",
+                    request.headers["x-bapi-timestamp"],
+                    request.headers["x-bapi-api-key"],
+                    request.headers["x-bapi-recv-window"],
+                    request.query
+                );
+                assert_eq!(request.headers["x-bapi-sign"], signature(&payload));
+                drop(seen);
+                let extra = Input::Object(vec![
+                    (
+                        "retMsg".encode_utf16().collect(),
+                        Input::Text(expected.clone()),
+                    ),
+                    ("missing".encode_utf16().collect(), Input::Undefined),
+                    ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
+                    ("zero".encode_utf16().collect(), Input::Float(-0.)),
+                ]);
+                h.exchange
+                    .base()
+                    .emit_and_log_error(
+                        safe_cex_exchange::error_reporting::ExchangeErrorInput::Raw(Js::str(
+                            "retained context",
+                        )),
+                        None,
+                        Some(&extra),
+                    )
+                    .unwrap();
+                let reports = h.reports.borrow();
+                let report = reports.last().unwrap().get("extra").unwrap();
+                assert_eq!(
+                    report.get("retMsg").unwrap().as_text(),
+                    Some(expected.as_slice())
+                );
+                assert!(matches!(report.get("missing"), Some(Input::Undefined)));
+                assert!(report.get("nan").unwrap().as_f64().unwrap().is_nan());
+                assert_eq!(
+                    report.get("zero").unwrap().as_f64().unwrap().to_bits(),
+                    (-0f64).to_bits()
+                );
+                drop(reports);
+                h.exchange.dispose().unwrap();
+            }
+        }
+    });
+}
+
+#[test]
 fn bybit_ticker_socket_preserves_coercion_type_errors_through_native_registry() {
     use safe_cex_exchange::socket_lifecycle::SocketSlot;
     use safe_cex_transport::socket::SocketFrame;
