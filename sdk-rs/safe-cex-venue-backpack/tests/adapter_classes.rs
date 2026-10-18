@@ -597,3 +597,66 @@ fn shared_runtime_graph_reaches_backpack_throttled_ticker_without_projection() {
         "shared storage keeps the explicit UTF-8 projection refusal"
     );
 }
+
+#[test]
+fn native_message_receiver_compares_utf16_without_coercion() {
+    use safe_cex_venue_backpack::socket_events::MessageValue;
+    let text = "account.orderUpdate";
+    for (value, expected) in [
+        (Native::str(text), true),
+        (Native::str("account.positionUpdate"), false),
+        (Native::utf16(&[0xd800]), false),
+        (Native::Number(1.0), false),
+        (Native::Bool(true), false),
+        (Native::Null, false),
+        (Native::Undefined, false),
+        (Native::object(vec![("toString", Native::str(text))]), false),
+    ] {
+        assert_eq!(MessageValue::equals_string(&value, text), expected);
+    }
+    for text in ["", "日本語", "🦀", "é", "e\u{301}"] {
+        let value = Native::str(text);
+        assert!(MessageValue::equals_string(&value, text));
+        assert!(!MessageValue::equals_string(&value, "different"));
+    }
+}
+
+#[test]
+fn native_field_receiver_forwards_own_cells_without_projection() {
+    let child = Native::object(vec![
+        ("text", Native::utf16(&[0xd800, 0xdc00, 0xdfff])),
+        ("number", Native::Number(f64::NAN)),
+    ]);
+    let row = Native::object(vec![
+        ("child", child.clone()),
+        ("ownUndefined", Native::Undefined),
+        ("negativeZero", Native::Number(-0.0)),
+    ]);
+    assert!(row.field("child").unwrap().same_reference(&child));
+    assert!(row.field("ownUndefined").unwrap().is_undefined());
+    assert!(row.has_own("ownUndefined"));
+    assert!(row.field("absent").unwrap().is_undefined());
+    assert!(!row.has_own("absent"));
+    assert!(
+        matches!(row.field("negativeZero").unwrap(), Native::Number(n) if n.to_bits() == (-0.0f64).to_bits())
+    );
+    assert_eq!(
+        child.field("text").unwrap().string().unwrap(),
+        [0xd800, 0xdc00, 0xdfff]
+    );
+    assert!(matches!(child.field("number").unwrap(), Native::Number(n) if n.is_nan()));
+    assert!(row.field("toString").unwrap().is_undefined());
+    for (value, kind) in [(Native::Null, "null"), (Native::Undefined, "undefined")] {
+        assert_eq!(
+            value.field("x").unwrap_err().message,
+            format!("Cannot read properties of {kind} (reading 'x')")
+        );
+    }
+    for value in [
+        Native::Number(2.0),
+        Native::Bool(false),
+        Native::str("text"),
+    ] {
+        assert!(value.field("x").unwrap().is_undefined());
+    }
+}
