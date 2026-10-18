@@ -137,6 +137,9 @@ pub async fn serve_http(listener: TcpListener, handler: Handler, seen: Rc<RefCel
             let answer = handler(&request);
             seen.borrow_mut().push(request);
             let (status, body) = match answer {
+                Some(reply) if reply.get("__rawBody").and_then(Value::as_str).is_some() => {
+                    ("200 OK", reply["__rawBody"].as_str().unwrap().to_owned())
+                }
                 // A handler picks a non-200 status with {"__status": 400, "body": ...}.
                 Some(reply) if reply.get("__status").is_some() => (
                     match reply["__status"].as_u64() {

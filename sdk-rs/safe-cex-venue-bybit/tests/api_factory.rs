@@ -1690,7 +1690,7 @@ fn native_request_retry_override_retains_source_budget() {
 }
 
 #[test]
-fn retained_response_factory_keeps_opaque_payload_and_refuses_only_message_boundary() {
+fn retained_response_factory_keeps_opaque_payload_and_utf16_messages() {
     use safe_cex_types::retained_json::RetainedJsonInput as Input;
     let opaque = Input::Object(vec![
         ("text".encode_utf16().collect(), Input::Text(vec![0xd800])),
@@ -1719,10 +1719,10 @@ fn retained_response_factory_keeps_opaque_payload_and_refuses_only_message_bound
     assert!(opaque.get("number").unwrap().as_f64().unwrap().is_nan());
     assert_eq!(f.wire.requests.borrow().len(), 1);
     let f = fixture(vec![response(r#"{"retCode":0,"retMsg":"\ud800"}"#)]);
-    let failure = ready(f.api.execute(get("/v5/position/list"))).unwrap_err();
+    let response = ready(f.api.execute(get("/v5/position/list"))).unwrap();
     assert_eq!(
-        failure.message,
-        "Bybit ret_msg cannot be represented as a Rust string"
+        response.body.into_data().get("retMsg").unwrap().as_text(),
+        Some([0xd800].as_slice())
     );
     assert_eq!(f.wire.requests.borrow().len(), 1);
 }
