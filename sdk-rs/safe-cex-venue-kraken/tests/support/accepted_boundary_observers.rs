@@ -212,11 +212,21 @@ fn fill_and_income_bindings_keep_raw_units_before_typed_model_projection() {
         }))
         .unwrap();
     assert_rows(
-        &actual.array_values().unwrap(),
+        &actual
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap(),
         income["output"].as_array().unwrap(),
         true,
     );
-    assert_eq!(actual.array_values().unwrap().len(), 4);
+    assert_eq!(
+        actual
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()
+            .len(),
+        4
+    );
     let raw = to_retained_input(&body).unwrap();
     assert_eq!(
         raw.get("logs").unwrap().as_array().unwrap()[0]
