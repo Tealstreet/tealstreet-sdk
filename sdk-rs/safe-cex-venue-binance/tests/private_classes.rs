@@ -4717,3 +4717,76 @@ fn production_ticker_coercion_pm_matches_constructed_typescript() {
 fn production_ticker_coercion_spot_matches_constructed_typescript() {
     native_ticker_coercion(Venue::Spot, "binancespot", 48);
 }
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_position_fetch_starter_runs_real_http_and_store() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use safe_cex_venue_binance::position_refresh::PositionFetchStarter;
+    use std::sync::{Arc, Mutex};
+    struct Positions(Arc<Mutex<Vec<String>>>);
+    impl RestAdapter for Positions {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.lock().unwrap().push(request.url);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Encoded(b"[]".to_vec()),
+                })
+            })
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let requests = Arc::<Mutex<Vec<String>>>::default();
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        Arc::new(Positions(requests.clone())),
+        Rc::new(|_, _| panic!("no external provider is configured")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let owner = ExchangeOwner::new(
+        Venue::Futures,
+        safe_cex_types::ExchangeName::Binance,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        store,
+        dependencies,
+    )
+    .unwrap();
+    owner.private.position.last_fetch_time.set(-10_000.0);
+    owner.private.position.pending_events.set(true);
+    let private = owner.private.clone();
+    let starter: PositionFetchStarter<Failure> = Rc::new(move || private.throttled_positions());
+    starter().unwrap();
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    let mut paths: Vec<_> = requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|url| url.split('?').next().unwrap().to_owned())
+        .collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        ["/fapi/v1/symbolConfig", "/fapi/v3/positionRisk"],
+        "the actual starter reaches both configured native REST requests"
+    );
+    assert!(
+        owner.base.store.loaded().positions,
+        "the actual refresh publishes loaded positions"
+    );
+    assert!(!owner.private.position.pending_events.get());
+    assert!(!owner.private.position.in_flight.get());
+    assert_eq!(
+        owner.private.position.last_fetch_time.get(),
+        runtime.now.get()
+    );
+    owner.dispose().unwrap();
+}
