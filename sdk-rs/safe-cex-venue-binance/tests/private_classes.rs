@@ -1,5 +1,8 @@
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
+#[cfg(feature = "native")]
+#[path = "support/private_order_aliases.rs"]
+mod private_order_aliases;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
@@ -32,6 +35,7 @@ impl ExchangeTask for Task {
 #[derive(Default)]
 struct Runtime {
     now: Cell<f64>,
+    monotonic_clock: Cell<Option<f64>>,
     sleep_clock: Rc<Cell<f64>>,
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
@@ -57,7 +61,7 @@ impl ExchangeRuntime for Runtime {
         self.now.get()
     }
     fn monotonic_now_ms(&self) -> f64 {
-        22000.0
+        self.monotonic_clock.get().unwrap_or(22000.0)
     }
     fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
         self.sleeps.borrow_mut().push(delay);
