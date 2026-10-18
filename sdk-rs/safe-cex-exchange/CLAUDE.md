@@ -1647,3 +1647,8 @@ listener arguments, including Unicode, NUL, empty strings and formatting tokens.
 `scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
 missing classifications or changed default bodies; the receiver classification
 applies only to this typed forwarding method.
+
+JsHttpHost wire results receive the shared default HTTP status check. Typed API
+hosts declare `settles_http_status` when their pipeline has already settled and
+intercepted the response. Keep HOW non-2xx fulfillment intact across that bridge;
+a direct response-bearing failure remains rejected with its original payload.

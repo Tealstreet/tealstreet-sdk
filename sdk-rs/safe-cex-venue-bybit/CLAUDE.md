@@ -907,3 +907,7 @@ finite Store resets and native binary64 assertions. Spot's ignored funding time
 and truthy rate-to-zero behavior remain source-equal. The shared control runner
 must fail all four family witnesses and the configured Hyro witness under live
 last/bid misrouting, then pass after exact source restoration.
+
+The binding's TypedHttpHost returns the API pipeline's settled result. It keeps
+HOW 4xx fulfillment and rejects direct response-bearing failures with their
+message, code and response, without a second shared-client status check.

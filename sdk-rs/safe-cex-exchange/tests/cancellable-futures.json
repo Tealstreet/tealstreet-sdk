@@ -1704,9 +1704,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "77e8723e6add1784439b75d6089c53c58a1d4fcfab2e6f18ed42b21b6bb248bb",
+      "producer_sha256": "6bfefbb431088ca5731962f14d9b1afb4cd5dc729ac83a08d65e0dc76638a520",
       "classification": "no-owned-latch",
-      "reason": "The adapter attempt now awaits only the selected callable adapter Promise or host send. Rate waiting moved to its source registration point in the request interceptor chain. This function owns config and settlement, with no reservation, waiter registration or RefCell borrow across either await. Configured response transforms run synchronously after adapter settlement, adding no future or cancellation latch. Reviewed master custom-adapter settlement: its local boolean and conditional status rejection add no awaits or ownership; HOW fulfillment and default-host rejection retain both existing child futures."
+      "reason": "The adapter attempt now awaits only the selected callable adapter Promise or host send. Rate waiting moved to its source registration point in the request interceptor chain. This function owns config and settlement, with no reservation, waiter registration or RefCell borrow across either await. Configured response transforms run synchronously after adapter settlement, adding no future or cancellation latch. Reviewed master custom-adapter settlement: its local boolean and conditional status rejection add no awaits or ownership; HOW fulfillment and default-host rejection retain both existing child futures. The typed API host settlement capability only narrows the synchronous status check after settlement; both awaited branches and all cancellation ownership stay unchanged."
     },
     {
       "owner": "src/js_runtime/client.rs::send_once",

@@ -18,6 +18,11 @@ pub mod factory;
 pub trait JsHttpHost {
     fn runtime(&self) -> Rc<dyn ExchangeRuntime>;
     fn send(&self, config: Js) -> JsFuture<'static>;
+    /// Typed API hosts settle status before their response interceptors run.
+    /// Raw wire hosts leave default-adapter settlement to this client.
+    fn settles_http_status(&self) -> bool {
+        false
+    }
     /// Bind a fresh host to the exchange whose createAPI clients use it.
     fn configure_exchange(&self, _name: safe_cex_types::ExchangeName) -> Result<(), Thrown> {
         Ok(())
@@ -508,9 +513,9 @@ async fn dispatch_request(host: &Host, config: Js) -> Result<Js, Thrown> {
         response.define("config", config.clone())?;
     }
     transform_response(&response, &config)?;
-    // Axios custom adapters settle their own responses. HOW deliberately
-    // fulfills every HTTP status; only the default HTTP host settles here.
-    if !custom_adapter {
+    // Custom adapters and typed API hosts return their final settlement.
+    // Only raw wire hosts need the default adapter's status check here.
+    if !custom_adapter && !host.settles_http_status() {
         let status = response.get("status")?.to_number().unwrap_or(200.0);
         if !(200.0..300.0).contains(&status) {
             return Err(axios_error(&response, &config)?);

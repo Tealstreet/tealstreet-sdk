@@ -318,3 +318,7 @@ receives eight malformed/coercion values between distinct good rows. Every
 native Ticker number is compared by bits with the constructed TS exchange and
 DefaultStore. The shared control runner independently misroutes futures and
 Spot bid fields and requires compiled assertion failures and restored passes.
+
+ApiHost marks its response as already settled by the KuCoin/Spot API pipeline.
+The shared JS bridge preserves HOW non-2xx fulfillment, including the source
+validation fallback and Spot's absence of an error event on that resolved path.

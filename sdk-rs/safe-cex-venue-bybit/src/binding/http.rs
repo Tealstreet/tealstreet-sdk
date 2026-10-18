@@ -84,20 +84,33 @@ fn failure(failure: RestFailure, config: Js) -> Result<Js, Thrown> {
             safe_cex_exchange::runtime::ExchangeError::from(failure),
         ));
     }
-    match failure.response {
-        Some(answer) => response(*answer, config),
-        None => {
-            let error = super::value::error_object("Error", &failure.message);
-            error.define("config", config)?;
-            if let Some(code) = failure.code {
-                error.define("code", Js::str(&code))?;
-            }
-            Err(Thrown::new(error))
-        }
+    let name = failure
+        .context
+        .as_ref()
+        .and_then(|context| context.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(if failure.response.is_some() {
+            "AxiosError"
+        } else {
+            "Error"
+        });
+    let error = super::value::error_object(name, &failure.message);
+    error.define("config", config.clone())?;
+    if let Some(code) = failure.code {
+        error.define("code", Js::str(&code))?;
     }
+    if let Some(answer) = failure.response {
+        error.define("status", Js::Number(f64::from(answer.status)))?;
+        error.define("response", response(*answer, config)?)?;
+        error.define("isAxiosError", Js::Bool(true))?;
+    }
+    Err(Thrown::new(error))
 }
 
 impl JsHttpHost for TypedHttpHost {
+    fn settles_http_status(&self) -> bool {
+        true
+    }
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.runtime.clone()
     }

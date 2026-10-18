@@ -161,6 +161,9 @@ impl ApiHost {
 }
 
 impl JsHttpHost for ApiHost {
+    fn settles_http_status(&self) -> bool {
+        true
+    }
     fn hosted_signer(&self) -> Option<HostedSigner> {
         self.hosted_signer.clone()
     }
