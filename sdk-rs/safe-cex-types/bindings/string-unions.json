@@ -27,6 +27,10 @@
       "value": "binance"
     },
     {
+      "name": "Binanceinverse",
+      "value": "binanceinverse"
+    },
+    {
       "name": "Binancespot",
       "value": "binancespot"
     },

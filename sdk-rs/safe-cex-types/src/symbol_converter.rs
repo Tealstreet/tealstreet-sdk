@@ -8,6 +8,7 @@ fn name(exchange: &ExchangeName) -> &'static str {
         ExchangeName::Asterdex => "asterdex",
         ExchangeName::Backpack => "backpack",
         ExchangeName::Binance => "binance",
+        ExchangeName::Binanceinverse => "binanceinverse",
         ExchangeName::Binancespot => "binancespot",
         ExchangeName::Binancepm => "binancepm",
         ExchangeName::Bingx => "bingx",
