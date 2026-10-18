@@ -33,6 +33,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
 #[derive(Default)]
 pub struct Runtime {
+    pub transport_provider: RefCell<Option<Arc<dyn TransportProvider>>>,
     sleep_wakers: virtual_time::SleepWakers,
     pub now: Rc<Cell<f64>>,
     pub id: RefCell<Option<String>>,
@@ -170,7 +171,10 @@ impl WsSocket for Socket {
 }
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
-        Arc::new(safe_cex_transport::DirectTransport)
+        self.transport_provider
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| Arc::new(safe_cex_transport::DirectTransport))
     }
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         panic!("WOO binding E2E never tunnels")
