@@ -68,9 +68,19 @@ fn response(response: RestResponse, config: Js) -> Result<Js, Thrown> {
     ]))
 }
 
-/// A failure the venue answered keeps its response, so the client rejects it as an
-/// AxiosError; one with no response (signing, network) rejects with its own message.
+/// Retained callback rejections keep their typed error. Ordinary venue failures
+/// keep their response; network failures keep their message and request config.
 fn failure(failure: RestFailure, config: Js) -> Result<Js, Thrown> {
+    if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+        failure.transport_error.as_deref()
+        && origin
+            .error()
+            .is::<safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError>()
+    {
+        return Err(Thrown::from(
+            safe_cex_exchange::runtime::ExchangeError::from(failure),
+        ));
+    }
     match failure.response {
         Some(answer) => response(*answer, config),
         None => {
