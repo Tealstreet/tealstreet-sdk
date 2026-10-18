@@ -235,4 +235,48 @@ const deduplicatedZeroIsPositive=Object.is(zeroStore.positions[0],0);
 const defaultSnapshot=new DefaultStore().serialize();
 const defaultProjection={starkConfigOwn:Object.hasOwn(defaultSnapshot,'starkConfig'),starkConfigUndefined:defaultSnapshot.starkConfig===undefined,wire:JSON.parse(JSON.stringify(defaultSnapshot))};
 assert.equal(defaultProjection.starkConfigOwn,true);assert.equal(defaultProjection.starkConfigUndefined,true);assert.equal(Object.hasOwn(defaultProjection.wire,'starkConfig'),false);
-process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances,ordering,defaultProjection,deduplicatedZeroIsPositive}));
+
+const patchAudit=[];
+const auditMethods=[['updateOrder','orders'],['updatePosition','positions'],['updatePositions','positions'],['updateTicker','tickers'],['updateMarket','markets']];
+const auditBits=value=>{const bytes=Buffer.alloc(8);bytes.writeDoubleBE(Number.isNaN(value)?NaN:value);return bytes.toString('hex')};
+for(const [method,key] of auditMethods){
+ for(const number of [-0,NaN,Infinity,-Infinity,7.25]){
+  const store=new DefaultStore();store.update({[key]:[{id:'a',symbol:'A',contracts:1,keep:7}]});
+  const rows=store[key],row=rows[0],extension={text:'\uD800',values:[undefined,NaN,Infinity,-0]};
+  const changes={probeNumber:number,probeUndefined:undefined,probeText:'\uD800',extension,info:extension};
+  let notices=0;store.subscribe(()=>{notices++});
+  const selector={id:'a'};store[method](...(method==='updatePositions'?[[[selector,changes]]]:[selector,changes]));
+  assert.equal(store[key],rows);assert.equal(store[key][0],row);assert.equal(row.extension,extension);
+  assert.equal(Object.hasOwn(row,'probeUndefined'),true);assert.equal(row.probeUndefined,undefined);
+  assert.equal(row.keep,7);assert.equal(notices,1);assert.equal(row.info,method==='updateTicker'?undefined:extension);
+  const map=key==='markets'?store.marketsById:key==='tickers'?store.tickersById:null;
+  if(map)assert.equal(map.a,row);
+  patchAudit.push({kind:'patch',method,bits:auditBits(row.probeNumber),keys:Object.keys(row),text:[...row.probeText].map(c=>c.charCodeAt(0)),undefinedOwn:Object.hasOwn(row,'probeUndefined'),extensionSame:row.extension===extension,rowSame:store[key][0]===row,arraySame:store[key]===rows,infoSame:row.info===extension,keep:row.keep,notices,revision:key==='orders'||key==='positions'?store.updateIds[key]:null,mapSame:map?map.a===row:null});
+ }
+ {
+  const store=new DefaultStore();store.update({[key]:[{id:'a',symbol:'A',contracts:1}]});
+  const row=store[key][0],cause={text:'\uD800'},events=[];let notices=0;store.subscribe(()=>{notices++});
+  const changes={get first(){events.push('first');return -0},get second(){events.push('second');throw cause},get third(){events.push('third');return 3}};
+  let error;try{store[method](...(method==='updatePositions'?[[[{id:'a'},changes]]]:[{id:'a'},changes]))}catch(e){error=e}
+  assert.equal(error,cause);assert.deepEqual(events,['first','second']);assert.equal(Object.is(row.first,-0),true);assert.equal(Object.hasOwn(row,'third'),false);assert.equal(notices,0);
+  patchAudit.push({kind:'throw',method,events,bits:auditBits(row.first),sameCause:error===cause,thirdOwn:Object.hasOwn(row,'third'),notices,revision:key==='orders'||key==='positions'?store.updateIds[key]:null});
+ }
+}
+for(const method of ['addOrUpdateOrders','updatePositions']){
+ for(const stored of [1,2])for(const incoming of [1,2]){
+  const key=method==='addOrUpdateOrders'?'orders':'positions',store=new DefaultStore();
+  store.update({[key]:[{id:'a',symbol:'A',contracts:1,probeNumber:1}]});
+  if(stored===2)store[key].push({id:'a',symbol:'A',contracts:1,probeNumber:2});
+  const rows=store[key],first=rows[0],last=rows.at(-1),extension={text:'\uD800'};let notices=0;store.subscribe(()=>{notices++});
+  const changes={probeNumber:-0,probeUndefined:undefined,extension};
+  const values=Array.from({length:incoming},(_,i)=>i===0?{id:'a',...changes}:{id:'miss',probeNumber:9});
+  store[method](method==='addOrUpdateOrders'?values:values.map(({id,...patch})=>[{id},patch]));
+  const selected=stored>1&&incoming>1?last:first;
+  assert.equal(Object.is(selected.probeNumber,-0),true);assert.equal(selected.extension,extension);assert.equal(notices,1);
+  if(method==='addOrUpdateOrders'&&incoming>1)assert.equal(rows.at(-1),values[1]);
+  patchAudit.push({kind:'threshold',method,stored,incoming,bits:rows.map(row=>auditBits(row.probeNumber)),selectedSame:selected.extension===extension,arraySame:rows===store[key],undefinedOwn:Object.hasOwn(selected,'probeUndefined'),notices});
+ }
+}
+assert.equal(patchAudit.length,38,'STORE_AUDIT complete mutation profiles');
+
+process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances,ordering,defaultProjection,deduplicatedZeroIsPositive,patchAudit}));

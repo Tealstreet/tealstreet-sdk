@@ -222,3 +222,7 @@ replace it with a typed snapshot. Internal emitter and native account observers
 use it, while `subscribe` keeps its explicit typed projection semantics.
 
 Socket health reads and partial merges carry canonical RetainedJsonInput. An own undefined property overwrites a previous number without deleting its insertion position; JSON serialization omits it only at the wire boundary.
+
+The seven historical non-UTF-8 mutation claims are reconciled in
+`per-row-rulings.md`. The actual native facade accepts open fields and preserves
+references/partial writes; do not insert typed patch admission into that path.
