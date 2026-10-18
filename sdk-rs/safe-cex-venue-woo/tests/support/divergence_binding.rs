@@ -232,3 +232,98 @@ fn rest_adapter_refuses_conflicting_query_carriers_before_any_http() {
     );
     assert!(h.http.requests.borrow().is_empty());
 }
+
+#[test]
+fn history_reports_retained_response_messages_like_the_source() {
+    assert_history_reports(false);
+}
+
+#[test]
+fn history_reports_retained_utf16_messages_like_the_source() {
+    assert_history_reports(true);
+}
+
+fn assert_history_reports(surrogates: bool) {
+    use std::{cell::RefCell, rc::Rc};
+    let cases = [
+        r#"{"message":7}"#,
+        r#"{"message":true}"#,
+        r#"{"message":{"venue":"busy","attempt":2}}"#,
+        r#"{"message":["busy",7]}"#,
+        r#"{"message":{"message":"nested reason"}}"#,
+        r#"{"message":"prefix\ud800suffix\udc00"}"#,
+        r#"{"message":["\udc00",7]}"#,
+        r#"{"message":{"message":"\ud800"}}"#,
+        r#"{"message":0}"#,
+        r#"{"message":false}"#,
+        r#"{"message":""}"#,
+        r#"{"message":null}"#,
+        r#"{}"#,
+    ];
+    for method in ["fetchHistoricalFills", "fetchHistoricalTradesInternal"] {
+        for raw in cases
+            .into_iter()
+            .filter(|raw| raw.contains("\\ud") == surrogates)
+        {
+            let source = Command::new("node")
+                .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/history-query-source.cjs"))
+                .arg(json!({"kind":"report", "method":method, "raw":raw, "timestamps":vec![1700000000000_i64; 20]}).to_string())
+                .output().unwrap();
+            assert!(
+                source.status.success(),
+                "source {method} {raw}: {}",
+                String::from_utf8_lossy(&source.stderr)
+            );
+            let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+            let h = harness(ExchangeName::Woo, options(), |http| {
+                let input: safe_cex_types::retained_json::RetainedJsonInput =
+                    serde_json::from_str(raw).unwrap();
+                let body = safe_cex_exchange::js_runtime::value::from_retained_input(input);
+                http.route_native("GET", HISTORY, 500.0, body.clone());
+                http.route_native("GET", "/v1/client/trades", 500.0, body);
+            });
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let record = seen.clone();
+            h.venue().base().on(
+                "error",
+                Rc::new(move |_, value| {
+                    let text = value.as_str().expect("native error string");
+                    record.borrow_mut().push(text.to_vec());
+                    Ok(())
+                }),
+            );
+            let args = if method == "fetchHistoricalFills" {
+                Js::object(vec![])
+            } else {
+                Js::object(vec![("symbol", Js::str("BTCUSDT"))])
+            };
+            let result: Vec<serde_json::Value> = h
+                .drive(h.exchange.invoke(method, vec![args]))
+                .unwrap_or_else(|error| {
+                    panic!("source reports then resolves []: {method} {raw}: {error:?}")
+                });
+            assert!(result.is_empty());
+            let units: Vec<u16> = serde_json::from_value(expected["units"].clone()).unwrap();
+            assert_eq!(
+                &*seen.borrow(),
+                &[units],
+                "native UTF16 message: {method} {raw}"
+            );
+            let requests = h.http.requests.borrow();
+            assert_eq!(
+                requests.len(),
+                expected["calls"].as_u64().unwrap() as usize,
+                "request count: {method} {raw}"
+            );
+            for request in requests.iter() {
+                assert_eq!(request.method, "GET");
+                assert!(
+                    !request.headers["x-api-signature"]
+                        .as_str()
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+    }
+}

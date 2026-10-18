@@ -6,7 +6,10 @@ use crate::{
     transaction::{ParsedWooTransaction, parse_transaction_history_row},
 };
 use safe_cex_exchange::{
-    error_reporting::ExchangeErrorInput, exchange::Exchange, runtime::ExchangeError,
+    error_reporting::ExchangeErrorInput,
+    exchange::Exchange,
+    js_runtime::value::{Thrown, from_retained_input},
+    runtime::ExchangeError,
 };
 use safe_cex_transport::{RestAdapter, RestFailure};
 use safe_cex_types::{Execution, ExecutionsOptions, HistoricalTrade, HistoricalTradeOptions};
@@ -32,18 +35,13 @@ fn report(venue: &dyn Exchange, error: ExchangeError) -> Result<(), ExchangeErro
         .as_ref()
         .and_then(|v| v.get("data"))
         .and_then(|v| v.get("message"));
-    let input = match response_message.filter(|v| safe_cex_num::js_retained_truthy(v)) {
-        Some(safe_cex_types::retained_json::RetainedJsonInput::Text(message)) => {
-            ExchangeErrorInput::Message(String::from_utf16_lossy(message))
-        }
-        Some(_) => {
-            return Err(ExchangeError::new(
-                "history error reporter cannot retain a non-string response message",
-            ));
-        }
-        None => ExchangeErrorInput::Message(error.message),
+    let message = match response_message.filter(|v| safe_cex_num::js_retained_truthy(v)) {
+        Some(value) => from_retained_input(value.clone()),
+        None => Thrown::from(error).value.get("message")?,
     };
-    venue.base().emit_and_log_error(input, None, None)
+    venue
+        .base()
+        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)
 }
 fn parse_rows(rows: Vec<Value>) -> Result<Vec<ParsedWooTransaction>, ExchangeError> {
     let mut parsed = Vec::new();
