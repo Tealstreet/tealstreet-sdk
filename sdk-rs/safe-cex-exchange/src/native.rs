@@ -446,6 +446,14 @@ impl HttpHost for NativeHttpHost {
             .emit(event, crate::js_runtime::value::Js::str(message))
             .map_err(|error| error.message)
     }
+    fn note_response(&self, response: &RestResponse, request: &RestRequest) {
+        if let Some(exchange) = self.events.borrow().as_ref().and_then(Weak::upgrade) {
+            exchange.base().note_http_response(
+                &serde_json::json!({"status":response.status,"statusText":response.reason}),
+                Some(&request.url),
+            );
+        }
+    }
     fn note_success(&self, _exchange: &ExchangeName, _response: &RestResponse) {}
     fn note_failure(&self, _exchange: &ExchangeName, _error: &RestFailure) {}
     fn mark_start(&self, _request: &mut RestRequest) {}
