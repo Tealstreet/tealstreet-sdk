@@ -464,19 +464,13 @@ fn domain_hash(contract: &str, chain: u64) -> Result<[u8; 32], Thrown> {
 }
 
 #[cfg(test)]
+#[path = "../../tests/support/binding_harness.rs"]
+#[allow(dead_code)]
+mod signing_test_host;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        future::Future,
-        task::{Context, Poll, Waker},
-    };
-    fn ready<T>(f: impl Future<Output = T>) -> T {
-        let mut f = Box::pin(f);
-        match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-            Poll::Ready(v) => v,
-            Poll::Pending => panic!("native signer unexpectedly suspended"),
-        }
-    }
     #[test]
     fn pinned_sdk_and_actual_source_signatures() {
         let output = std::process::Command::new("node")
@@ -495,6 +489,11 @@ mod tests {
             serde_json::from_slice(&output.stdout).expect("source capture");
         let cases = corpus["cases"].as_array().unwrap();
         assert_eq!(cases.len(), 96, "independent SDK corpus floor");
+        let host = signing_test_host::harness(
+            safe_cex_types::ExchangeName::Polymarket,
+            signing_test_host::options(),
+            |_| {},
+        );
         let wallet = wallet(from_json(&corpus["key"])).unwrap();
         let globals = Js::object(vec![]);
         install(&globals, Weak::new());
@@ -518,7 +517,7 @@ mod tests {
             ]);
             let now = corpus["now"].as_f64().unwrap();
             let builder = Builder {
-                runtime: rt.exchange_runtime(),
+                runtime: host.runtime.clone(),
                 signer,
                 chain: Js::Number(137.),
                 signature_type: from_json(&params["signatureType"]),
@@ -536,8 +535,13 @@ mod tests {
                 ("tickSize", from_json(&params["tickSize"])),
                 ("negRisk", from_json(&params["negRisk"])),
             ]);
-            let order = ready(build_order(builder, user, options, Js::Number(2.)))
-                .unwrap_or_else(|e| panic!("SDK params {params}: {}", e.message()));
+            let order = host
+                .drive(Box::pin(async move {
+                    build_order(builder, user, options, Js::Number(2.))
+                        .await
+                        .map_err(|e| e.to_exchange_error())
+                }))
+                .unwrap_or_else(|e| panic!("SDK params {params}: {}", e.message));
             let native = to_json(&order).unwrap();
             let expected = case["order"].as_object().unwrap();
             assert_eq!(

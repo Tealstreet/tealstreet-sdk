@@ -112,7 +112,7 @@ fn native_async_facade_returns_rejections_for_pre_await_failures() {
                         recorded.set(true);
                         Ok(Js::Undefined)
                     })]).unwrap();
-                    await_js(&_context.runtime, checked).await.unwrap();
+                    await_js(&(_context.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>), checked).await.unwrap();
                     rows.push(serde_json::json!({"method":method,"syncThrow":false,"promise":promise,"caught":caught.get()}));
                 }
             }
@@ -149,7 +149,12 @@ fn native_snapshot_guards_precede_tries_coercion() {
                 result.is_ok(),
                 "snapshot guard must return its async result"
             );
-            await_js(&_context.runtime, result.unwrap()).await.unwrap();
+            await_js(
+                &(_context.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>),
+                result.unwrap(),
+            )
+            .await
+            .unwrap();
             rows.push(serde_json::json!({"kind":kind,"coerced":coerced.get()}));
         }
         assert_eq!(serde_json::json!(rows), expected["guarded"]);

@@ -1715,11 +1715,17 @@ that same scope-owned root. `tests/js_series_iteration.rs` compares forty-eight 
 installed-package cases and checks escaped exports, signed-zero stringify and
 scope/module release; its three compiled mutation controls restore exact source.
 
-Promise.resolve and the installed Promise constructor share the core thenable
-resolution operation. Serial helpers use it before awaiting input and callback
-results, preserving synchronous then lookup, deferred invocation, first-call
-settlement and original rejection identity. General direct await/async-return
-and combinator adoption remains a separately recorded follow-up after #901.
+Promise.resolve, the installed Promise constructor, direct await and async-return
+adoption share the core thenable resolution operation. `await_js` receives the
+owning runtime explicitly and returns a future that retains it; REST adapters and
+venue hosts pass their existing runtime through that boundary. Serial helpers use
+it before awaiting input and callback results. Promise.all/allSettled resolve and
+register each yielded input before the next IteratorRecord step. Synchronous then
+lookup, deferred invocation, first-call settlement, original rejection identity
+and scalar/native-Promise FIFO behavior remain intact. The real NativeRuntime
+matrix in `tests/js_thenable_adoption.rs` compares 108 cases with Node; its iterator
+ordering control restores eager consumption, compiles, and fails the ordering
+assertion before exact restoration passes. See THENABLE_ADOPTION_REVIEW.md.
 
 Ordinary Js objects, including host-resource objects, allocate with the active
 PrototypeRealm's real Object.prototype reference. A None prototype slot is null,
