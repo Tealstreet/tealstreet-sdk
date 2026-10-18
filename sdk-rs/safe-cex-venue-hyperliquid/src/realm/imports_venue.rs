@@ -475,3 +475,8 @@ pub(crate) fn bind(realm: &Realm) {
             .map_err(|e| r.error(&e))
     });
 }
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/byteslike_signing.rs"]
+mod byteslike_signing;
