@@ -536,6 +536,18 @@
     ]
   },
   {
+    "file": "safe-cex-exchange/src/js_runtime/client/factory.rs",
+    "function": "create_no_proxy",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "name",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-exchange/src/js_runtime/promise.rs",
     "function": "spawn",
     "edges": [
@@ -2872,6 +2884,18 @@
         "kind": "call",
         "hook": "listen_order_book",
         "count": 3
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-binance/src/inverse/exchange.rs",
+    "function": "capabilities",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "start",
+        "count": 1
       }
     ]
   },
