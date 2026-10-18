@@ -1,5 +1,10 @@
 # Binance gate evidence
 
+Current scope: FINAL_FIX_AUDIT.md retires the four unused Futures/PM wire
+codecs and their standalone record/depth/field-identity fixtures. References to
+those fixtures below are historical receipts at the stated revisions. All live
+native binding and surviving union/inverse guards remain in force.
+
 ## Generated types and endpoint slice
 
 Implemented the three source type modules (43 manifest rows). Remaining venue

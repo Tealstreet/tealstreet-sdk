@@ -102,9 +102,9 @@ note = "Generated from the live source AST and values; safe-cex-venue-binance/sr
 ts = "GET_POSITION_RISK_RESPONSE"
 kind = "type"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/generated/binance.rs::GetPositionRiskResponse", "safe-cex-venue-binance/src/generated/binance.rs::GetPositionRiskResponseRow" ]
-status = "divergent"
-note = "CHOSEN: shared numeric capture enforces a 128-level recursion budget, including unknown record fields. Node accepts a record with a 140-deep unknown array while this Rust decoder refuses the whole record across raw str/slice, owned/borrowed Value and shared js_from_* routes; shallow unknown fields remain accepted and ignored. A streaming capture or configurable budget could retain that acceptance, but the shared bounded capture is deliberately retained. tests/numeric_depth.rs witnesses the acceptance cost separately from the repaired raw overflow and unchanged signed-zero bits. Generated from the live source AST and values; safe-cex-venue-binance/src/generated/binance.rs::GetPositionRiskResponse safe-cex-venue-binance/src/generated/binance.rs::GetPositionRiskResponseRow preserve the source constants or wire shape. Split array alias and its row type. Shared numeric-ingress opt-in captures JsNumberInput before typed map decoding and exhaustively registers output fields. Raw overflow refusal is repaired; existing signed-zero bits remain unchanged. Nine numeric fields across four records match live Node bits through raw str, raw slice, owned Value, borrowed Value, js_from_str, js_from_value and js_from_value_ref. Map-only, string-only union and optional-null guards remain; no Value rebuffer is introduced."
+rs = "safe-cex-venue-binance/src/position_snapshots.rs::fetch_futures_positions"
+status = "ported"
+note = "Erased TypeScript annotation; the unused generated Rust codec and its standalone tests were deleted after zero-consumer searches in this mirror and tealstreet-next (exchange-server/connect-edge use safe-cex-ffi). The actual positions binding reads the canonical native graph through position_snapshots.rs::fetch_futures_positions; no duplicate record or decoder remains. See safe-cex-venue-binance/FINAL_FIX_AUDIT.md for both-repo census, compiler proof and constructed native witnesses. This deletion does not authorize any shared numeric depth bound."
 
 [[symbol]]
 ts = "BinanceIncomeType"
@@ -118,14 +118,14 @@ note = "Generated from the live source AST and values; safe-cex-venue-binance/sr
 ts = "BinanceIncomeRecord"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-binance/src/generated/binance.rs::BinanceIncomeRecord"
-status = "divergent"
-note = "CHOSEN: shared numeric capture enforces a 128-level recursion budget, including unknown record fields. Node accepts a record with a 140-deep unknown array while this Rust decoder refuses the whole record across raw str/slice, owned/borrowed Value and shared js_from_* routes; shallow unknown fields remain accepted and ignored. A streaming capture or configurable budget could retain that acceptance, but the shared bounded capture is deliberately retained. tests/numeric_depth.rs witnesses the acceptance cost separately from the repaired raw overflow and unchanged signed-zero bits. Shared numeric-ingress opt-in captures JsNumberInput before typed map decoding and exhaustively registers output fields. Raw overflow refusal is repaired; existing signed-zero bits remain unchanged. Nine numeric fields across four records match live Node bits through raw str, raw slice, owned Value, borrowed Value, js_from_str, js_from_value and js_from_value_ref. Map-only, string-only union and optional-null guards remain; no Value rebuffer is introduced."
+rs = "safe-cex-venue-binance/src/rest_history.rs::income_page"
+status = "ported"
+note = "Erased TypeScript annotation; the unused generated Rust codec and its standalone tests were deleted after zero-consumer searches in this mirror and tealstreet-next (exchange-server/connect-edge use safe-cex-ffi). The actual income rows binding reads the canonical native graph through rest_history.rs::income_page; no duplicate record or decoder remains. See safe-cex-venue-binance/FINAL_FIX_AUDIT.md for both-repo census, compiler proof and constructed native witnesses. This deletion does not authorize any shared numeric depth bound."
 
 [[symbol]]
 ts = "BinanceIncomeHistoryOptions"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-binance/src/generated/binance.rs::BinanceIncomeHistoryOptions"
-status = "divergent"
-note = "CHOSEN: shared numeric capture enforces a 128-level recursion budget, including unknown record fields. Node accepts a record with a 140-deep unknown array while this Rust decoder refuses the whole record across raw str/slice, owned/borrowed Value and shared js_from_* routes; shallow unknown fields remain accepted and ignored. A streaming capture or configurable budget could retain that acceptance, but the shared bounded capture is deliberately retained. tests/numeric_depth.rs witnesses the acceptance cost separately from the repaired raw overflow and unchanged signed-zero bits. Shared numeric-ingress opt-in captures JsNumberInput before typed map decoding and exhaustively registers output fields. Raw overflow refusal is repaired; existing signed-zero bits remain unchanged. Nine numeric fields across four records match live Node bits through raw str, raw slice, owned Value, borrowed Value, js_from_str, js_from_value and js_from_value_ref. Map-only, string-only union and optional-null guards remain; no Value rebuffer is introduced."
+rs = "safe-cex-venue-binance/src/rest_history.rs::income_history"
+status = "ported"
+note = "Erased TypeScript annotation; the unused generated Rust codec and its standalone tests were deleted after zero-consumer searches in this mirror and tealstreet-next (exchange-server/connect-edge use safe-cex-ffi). The actual income options binding reads the canonical native graph through rest_history.rs::income_history; no duplicate record or decoder remains. See safe-cex-venue-binance/FINAL_FIX_AUDIT.md for both-repo census, compiler proof and constructed native witnesses. This deletion does not authorize any shared numeric depth bound."
