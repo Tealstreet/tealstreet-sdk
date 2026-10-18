@@ -127,7 +127,11 @@ pub fn sanitize_for_post_message(
     let orders = (!omit_orders).then(|| {
         let mut orders = orders.clone();
         for order in &mut orders {
-            if safe_cex_num::js_truthy(order.info.as_ref()) {
+            if order
+                .info
+                .as_ref()
+                .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
+            {
                 order.info = safe_cex_types::ModelField::Absent;
             }
         }
@@ -136,7 +140,11 @@ pub fn sanitize_for_post_message(
     let positions = (!omit_positions).then(|| {
         let mut positions = positions.clone();
         for position in &mut positions {
-            if safe_cex_num::js_truthy(position.info.as_ref()) {
+            if position
+                .info
+                .as_ref()
+                .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
+            {
                 position.info = safe_cex_types::ModelField::Absent;
             }
         }
@@ -144,7 +152,12 @@ pub fn sanitize_for_post_message(
     });
     let mut displayed_positions = displayed_positions.clone();
     for position in &mut displayed_positions {
-        if safe_cex_num::js_truthy(position.position.info.as_ref()) {
+        if position
+            .position
+            .info
+            .as_ref()
+            .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
+        {
             position.position.info = safe_cex_types::ModelField::Absent;
         }
     }

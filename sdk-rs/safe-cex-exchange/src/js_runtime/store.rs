@@ -2,7 +2,7 @@
 //! (owned snapshots, not the TS live arrays); writes cross the typed boundary.
 use super::{
     value::arg,
-    value::{Getter, Js, Thrown, from_typed, to_json, to_typed},
+    value::{Getter, Js, Thrown, from_typed, to_json, to_retained_input, to_typed},
 };
 use crate::runtime::ExchangeError;
 use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
@@ -62,18 +62,23 @@ fn patch(value: &Js) -> Result<ModelPatch, Thrown> {
     let fields = Js::object(vec![]);
     let mut numbers = vec![];
     let mut undefined = vec![];
+    let mut info = None;
     for (key, value) in value.own_entries()? {
         let field = String::from_utf16_lossy(&key);
-        // `info` is explicitly opaque JSON, rather than a typed model number.
-        if value.is_undefined() {
+        if field == "info" && !value.is_undefined() {
+            info = Some(to_retained_input(&value)?);
+        } else if value.is_undefined() {
             undefined.push(field);
-        } else if field != "info" && matches!(value, Js::Number(_)) {
+        } else if matches!(value, Js::Number(_)) {
             numbers.push((field, to_typed::<f64>(&value)?));
         } else {
             fields.define_key(&key, value)?;
         }
     }
     let mut changes = ModelPatch::from(json_patch(&fields)?);
+    if let Some(info) = info {
+        changes.set_native("info", info);
+    }
     for key in undefined {
         changes.set_undefined(key);
     }

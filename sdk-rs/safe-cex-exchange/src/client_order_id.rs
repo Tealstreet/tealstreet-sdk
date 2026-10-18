@@ -159,20 +159,23 @@ fn js_string(value: &serde_json::Value) -> String {
     }
 }
 
-pub fn order_carries_client_order_id(order: &Order, id: &str) -> bool {
+pub fn order_carries_client_order_id(
+    order: &Order,
+    id: &str,
+) -> Result<bool, safe_cex_num::JsCoercionError> {
     if id.is_empty() || id == "0" || id == "undefined" {
-        return false;
+        return Ok(false);
     }
     if order.id == id
         || order.parent_id.as_deref() == Some(id)
         || order.client_order_id.as_deref() == Some(id)
     {
-        return true;
+        return Ok(true);
     }
     let Some(info) = order.info.value() else {
-        return false;
+        return Ok(false);
     };
-    [
+    for key in [
         "clOrdId",
         "clientOrderId",
         "orderLinkId",
@@ -182,10 +185,20 @@ pub fn order_carries_client_order_id(order: &Order, id: &str) -> bool {
         "client_id",
         "client_order_id",
         "clientId",
-    ]
-    .iter()
-    .any(|key| {
-        info.get(key)
-            .is_some_and(|value| same_client_order_id(Some(value), id))
-    })
+    ] {
+        if let Some(value) = info.get(key) {
+            if !matches!(
+                value,
+                safe_cex_types::retained_json::RetainedJsonInput::Null
+                    | safe_cex_types::retained_json::RetainedJsonInput::Undefined
+            ) && safe_cex_types::js_coercion::js_retained_string_utf16(value)?
+                .iter()
+                .copied()
+                .eq(id.encode_utf16())
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }

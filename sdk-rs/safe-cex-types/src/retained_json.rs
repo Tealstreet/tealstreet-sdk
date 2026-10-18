@@ -4,7 +4,10 @@ use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Error, Value};
 use std::fmt;
+mod codec;
 mod parser;
+mod writer;
+pub use codec::{RETAINED_NATIVE, deserialize_native_payload};
 const RAW_TOKEN: &str = "$serde_json::private::RawValue";
 #[derive(Debug, Clone, PartialEq)]
 pub enum RetainedJsonInput {
@@ -115,7 +118,7 @@ impl<'de> Visitor<'de> for Capture {
 
 impl<'de> Deserialize<'de> for RetainedJsonInput {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_newtype_struct(RAW_TOKEN, Capture)
+        deserializer.deserialize_newtype_struct(RETAINED_NATIVE, codec::RetainedVisitor)
     }
 }
 
@@ -394,5 +397,88 @@ mod tests {
                 .info,
             Some(Value::Null)
         );
+    }
+}
+
+impl From<Value> for RetainedJsonInput {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Null => Self::Null,
+            Value::Bool(value) => Self::Bool(value),
+            Value::String(value) => Self::Text(value.encode_utf16().collect()),
+            Value::Number(value) => Self::Lexeme(value.to_string()),
+            Value::Array(values) => Self::Array(values.into_iter().map(Self::from).collect()),
+            Value::Object(values) => Self::Object(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key.encode_utf16().collect(), Self::from(value)))
+                    .collect(),
+            ),
+        }
+    }
+}
+impl RetainedJsonInput {
+    pub fn get(&self, key: &str) -> Option<&Self> {
+        match self {
+            Self::Object(values) => values
+                .iter()
+                .rev()
+                .find(|(name, _)| name.iter().copied().eq(key.encode_utf16()))
+                .map(|(_, value)| value),
+            _ => None,
+        }
+    }
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Self::Float(value) => Some(*value),
+            Self::Lexeme(value) => value.parse().ok(),
+            _ => None,
+        }
+    }
+}
+pub fn deserialize_present_retained_info<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<RetainedJsonInput>, D::Error> {
+    RetainedJsonInput::deserialize(d).map(Some)
+}
+
+impl RetainedJsonInput {
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Self::Undefined | Self::Null => false,
+            Self::Bool(value) => *value,
+            Self::Text(value) => !value.is_empty(),
+            Self::Float(value) => *value != 0.0 && !value.is_nan(),
+            Self::Lexeme(value) => value
+                .parse::<f64>()
+                .is_ok_and(|value| value != 0.0 && !value.is_nan()),
+            Self::Array(_) | Self::Object(_) => true,
+        }
+    }
+}
+
+impl RetainedJsonInput {
+    pub fn as_text(&self) -> Option<&[u16]> {
+        if let Self::Text(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+    pub fn as_bool(&self) -> Option<bool> {
+        if let Self::Bool(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+    pub fn is_object(&self) -> bool {
+        matches!(self, Self::Object(_))
+    }
+    pub fn is_array(&self) -> bool {
+        matches!(self, Self::Array(_))
+    }
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
     }
 }
