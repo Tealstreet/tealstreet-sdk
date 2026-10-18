@@ -7452,3 +7452,11 @@ reason = "Native terminal presentation after the console capability receives ret
 [[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::exception_text"
 reason = "Text-only recording-host observation for existing fixture report lists after report_raw_exception receives the original Js exception. Native Error messages remain visible; non-Error finite fixture views preserve their prior explicit JSON observation. Production NativeRuntime reports through console_text, and rich sinks retain Js directly. The unchanged KuCoin default-binding witness and separate native identity assertions cover these distinct observations."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::host_object"
+reason = "Native host ABI allocation: stores an already existing opaque Rc<dyn Any> on the canonical ordinary object referent. Client/socket/cache/wallet algorithms keep their source mappings; this Rust storage operation has no standalone TypeScript declaration. Actual native identity, type, hidden-slot and lifetime witnesses cover the retention capability."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::resource"
+reason = "Native host ABI typed lookup: clones and downcasts only this ordinary object's immutable opaque Rc attachment, preserving the original native owner and returning None for wrong types or other receivers. This Rust type-erasure observation has no standalone TypeScript declaration; inherited properties and object spread do not transfer it."

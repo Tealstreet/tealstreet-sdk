@@ -7,6 +7,7 @@ use crate::runtime::ExchangeError;
 use indexmap::IndexMap;
 use safe_cex_num::{JsCoercionError, js_number_string, parse_float};
 use std::{
+    any::Any,
     cell::{Cell, RefCell},
     fmt,
     rc::Rc,
@@ -53,6 +54,7 @@ fn same_optional_value(left: &Option<Js>, right: &Option<Js>) -> bool {
 }
 
 pub struct ObjectData {
+    resource: Option<Rc<dyn Any>>,
     extensible: Cell<bool>,
     pub class: &'static str,
     pub(crate) iterator_next: RefCell<Option<NativeFn>>,
@@ -415,7 +417,24 @@ impl Js {
         Js::object_with_class("Object", fields)
     }
     pub fn object_with_class(class: &'static str, fields: Vec<(&str, Js)>) -> Js {
+        Self::object_with_resource(class, fields, None)
+    }
+    pub fn host_object(resource: Rc<dyn Any>) -> Js {
+        Self::object_with_resource("Object", vec![], Some(resource))
+    }
+    pub fn resource<T: Any>(&self) -> Option<Rc<T>> {
+        let Js::Object(object) = self else {
+            return None;
+        };
+        object.resource.as_ref()?.clone().downcast::<T>().ok()
+    }
+    fn object_with_resource(
+        class: &'static str,
+        fields: Vec<(&str, Js)>,
+        resource: Option<Rc<dyn Any>>,
+    ) -> Js {
         Js::Object(Rc::new(ObjectData {
+            resource,
             extensible: Cell::new(true),
             class,
             iterator_next: RefCell::new(None),
