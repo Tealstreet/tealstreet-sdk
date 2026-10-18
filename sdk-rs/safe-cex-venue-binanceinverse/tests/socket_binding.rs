@@ -28,9 +28,9 @@ use serde_json::json;
 use std::{cell::RefCell, rc::Rc};
 const SYMBOL: &str = "BTCUSD_PERP";
 fn seed(h: &support::Harness) {
-    h.store.update(StoreUpdate{
+    Store::update(h.store.as_ref(), StoreUpdate{
  markets:Some(vec![serde_json::from_value(json!({"id":SYMBOL,"symbol":SYMBOL,"base":"BTC","quote":"USD","active":true,"isInverse":true,"contractSize":100,"precision":{"amount":1,"price":0.1},"limits":{"amount":{"min":1,"max":10000},"leverage":{"min":1,"max":125}}})).unwrap()]),
- tickers:Some(vec![serde_json::from_value(json!({"id":SYMBOL,"symbol":SYMBOL,"bid":49999,"ask":50001,"last":50000,"mark":50000,"index":50000,"percentage":0,"fundingRate":0,"fundingTime":0,"volume":0,"quoteVolume":0})).unwrap()]),
+ tickers:Some(vec![serde_json::from_value(json!({"id":SYMBOL,"symbol":SYMBOL,"bid":49999,"ask":50001,"last":50000,"mark":50000,"index":50000,"percentage":0,"fundingRate":0,"fundingTime":0,"volume":0,"quoteVolume":0,"openInterest":0})).unwrap()]),
  ..StoreUpdate::default()},false).unwrap();
 }
 fn connect(h: &support::Harness, slot: SocketSlot) -> Rc<BaseWebSocket> {
@@ -43,7 +43,18 @@ fn connect(h: &support::Harness, slot: SocketSlot) -> Rc<BaseWebSocket> {
     h.runtime.pump();
     assert!(
         socket.is_connected(),
-        "real source socket opens through runtime"
+        "real source socket opens through runtime; reports={:?}, logs={:?}, HTTP={:?}",
+        h.runtime.reports.borrow(),
+        h.runtime.logs.borrow(),
+        h.http
+            .requests
+            .borrow()
+            .iter()
+            .map(|r| (
+                r.get("method").unwrap().to_display(),
+                r.get("url").unwrap().to_display()
+            ))
+            .collect::<Vec<_>>()
     );
     socket
 }
@@ -205,7 +216,19 @@ fn depth_buffers_snapshot_requires_previous_id_and_resyncs_gap() {
         json!({"e":"depthUpdate","s":SYMBOL,"U":101,"u":101,"pu":100,"b":[["100","4"]],"a":[]}),
     );
     h.runtime.pump();
-    assert_eq!(seen.borrow().len(), 1);
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "depth callbacks; reports={:?}, logs={:?}, HTTP={:?}",
+        h.runtime.reports.borrow(),
+        h.runtime.logs.borrow(),
+        h.http
+            .requests
+            .borrow()
+            .iter()
+            .map(|r| r.get("url").unwrap().to_display())
+            .collect::<Vec<_>>()
+    );
     assert_eq!(seen.borrow()[0]["bids"][0]["amount"], 4.);
     assert_eq!(seen.borrow()[0]["bids"][0]["total"], 4.);
     frame(
@@ -310,7 +333,7 @@ fn account_frame_converts_inverse_contracts_and_preserves_existing_fields() {
     seed(&h);
     key(&h, "key");
     let socket = connect(&h, SocketSlot::Private);
-    h.store.update(StoreUpdate{positions:Some(vec![serde_json::from_value(json!({"id":SYMBOL,"symbol":SYMBOL,"side":"long","entryPrice":40000,"contracts":0.1,"notional":1000,"unrealizedPnl":0,"leverage":17,"liquidationPrice":20000,"marginType":"isolated","positionMode":"oneway","info":{"old":true}})).unwrap()]),..StoreUpdate::default()},false).unwrap();
+    Store::update(h.store.as_ref(), StoreUpdate{positions:Some(vec![serde_json::from_value(json!({"id":SYMBOL,"symbol":SYMBOL,"side":"long","entryPrice":40000,"contracts":0.1,"notional":1000,"unrealizedPnl":0,"leverage":17,"liquidationPrice":20000,"marginType":"isolated","positionMode":"oneway","info":{"old":true}})).unwrap()]),..StoreUpdate::default()},false).unwrap();
     h.exchange
         .receiver()
         .set(

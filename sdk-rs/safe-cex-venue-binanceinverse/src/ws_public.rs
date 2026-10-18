@@ -38,6 +38,10 @@ pub(crate) fn new(parent: &Rt) -> Result<(Js, Rc<BaseWebSocket>), Thrown> {
     )?;
     socket.define("topics", Js::object(vec![]))?;
     socket.define("nextSubscriptionId", Js::Number(2.))?;
+    let Js::Object(object) = &socket else {
+        unreachable!("socket is an object")
+    };
+    let lexical = Rc::downgrade(object);
     let weak = Rc::downgrade(&parent.shared);
     for name in [
         "connectAndSubscribe",
@@ -51,9 +55,15 @@ pub(crate) fn new(parent: &Rt) -> Result<(Js, Rc<BaseWebSocket>), Thrown> {
         "listenOrderBook",
     ] {
         let weak = weak.clone();
+        let lexical = lexical.clone();
         socket.define(
             name,
-            Js::function(name, move |this, args| {
+            Js::function(name, move |_, args| {
+                let this = Js::Object(
+                    lexical
+                        .upgrade()
+                        .ok_or_else(|| Thrown::error("Error", "socket receiver dropped"))?,
+                );
                 let rt = scope_of(&weak)?.with_this(this);
                 match name {
                     "connectAndSubscribe" => {
@@ -147,10 +157,15 @@ pub(crate) fn new(parent: &Rt) -> Result<(Js, Rc<BaseWebSocket>), Thrown> {
         ("bookTicker", "handleBookTickersStreamEvents"),
     ] {
         let weak = weak.clone();
-        let this = socket.clone();
+        let lexical = lexical.clone();
         let callback = Js::function(method, move |_, args| {
+            let this = Js::Object(
+                lexical
+                    .upgrade()
+                    .ok_or_else(|| Thrown::error("Error", "socket receiver dropped"))?,
+            );
             scope_of(&weak)?
-                .with_this(this.clone())
+                .with_this(this)
                 .call_path(method, vec![arg(&args, 0)])
         });
         socket

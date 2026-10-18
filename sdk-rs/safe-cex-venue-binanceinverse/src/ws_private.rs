@@ -39,6 +39,10 @@ pub(crate) fn new(parent: &Rt) -> Result<(Js, Rc<BaseWebSocket>), Thrown> {
     ] {
         socket.define(key, Js::Undefined)?;
     }
+    let Js::Object(object) = &socket else {
+        unreachable!("socket is an object")
+    };
+    let lexical = Rc::downgrade(object);
     let weak = Rc::downgrade(&parent.shared);
     for name in [
         "dispose",
@@ -59,9 +63,19 @@ pub(crate) fn new(parent: &Rt) -> Result<(Js, Rc<BaseWebSocket>), Thrown> {
         "fetchThrottledOrders",
     ] {
         let weak = weak.clone();
+        let lexical = lexical.clone();
         socket.define(
             name,
             Js::function(name, move |this, args| {
+                let this = if name == "dispose" {
+                    this
+                } else {
+                    Js::Object(
+                        lexical
+                            .upgrade()
+                            .ok_or_else(|| Thrown::error("Error", "socket receiver dropped"))?,
+                    )
+                };
                 let rt = scope_of(&weak)?.with_this(this);
                 match name {
                     "connectAndSubscribe"
@@ -322,7 +336,9 @@ fn on_message(rt: &Rt, data: Js) -> Result<(), Thrown> {
     rt.call_path("trackLastReceived", vec![])?;
     rt.call_path("emitWsDiagnosticReceive", vec![data.clone()])?;
     let json = if let Js::String(text) = &data {
-        from_retained_input(safe_cex_transport::how::big_int_as_string_json_parse_utf16(text))
+        from_retained_input(safe_cex_transport::how::big_int_as_string_json_parse_utf16(
+            text,
+        ))
     } else {
         data
     };
