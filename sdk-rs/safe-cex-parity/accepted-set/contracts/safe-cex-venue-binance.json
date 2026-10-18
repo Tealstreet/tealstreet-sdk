@@ -20911,6 +20911,358 @@
     "evidence": "Individual source-role review: safe-cex-venue-binance/src/private_events.rs::PrivateHandler. Authenticated acceptedAliasContext plus the actual native Deserialize/conversion probes in scripts/private-order-alias-contracts.mjs decide this exact alias classification. Separate production behavior is exercised through native_dependencies, real owner/HTTP/socket/Store and primitive terminal ports in tests/private_classes.rs::private_order_aliases::native_private_handler_and_event_array_keep_numeric_fields_before_transport; scripts/private-order-alias-controls.py requires a compiled named fault and exact-restoration pass for this alias. This finite native/default evidence does not exempt argument/result DTOs, arbitrary callbacks or other feature combinations.",
     "reason": "Executable variadic Store/event callback, retaining native argument values. The actual captured handler updates the real Store with signed-zero filled and exact price bits."
   },
+  "safe_cex_venue_binance::cancel_symbol_orders::CancelOrderHandle": {
+    "category": "decoder",
+    "shape": "map",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Order",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "The public CancelOrderHandle is the actual Rc<RefCell<safe_cex_types::Order>> alias. Its qualified Deserialize path forwards the strict map-only Order decoder; it is not a non-decoder capability exemption. Direct native observations inspect required fields, numeric bits, optional ModelField absence/value and rejected fields before projection, plus shared-cell mutation through a cloned handle. The separate constructed Futures Method::CancelSymbol witness holds both real signed DELETEs, observes unchanged pending Store rows, then checks regular/algo terminal states, a retained rejection and an untouched symbol. Portfolio Margin/Spot use live Store rows directly and are not claimed as handle callers. scripts/cancel-order-handle-controls.py independently breaks the live Futures symbol filter and requires compiled native assertion failure and exact restoration success.",
+    "entrypoints": [],
+    "sample": {
+      "id": "sample",
+      "parentId": "sample",
+      "status": "open",
+      "symbol": "sample",
+      "type": "market",
+      "side": "buy",
+      "price": 1,
+      "amount": 1,
+      "filled": 1,
+      "remaining": 1,
+      "reduceOnly": false,
+      "close": false,
+      "info": null,
+      "timeInForce": "GoodTillCancel",
+      "lastUpdate": 1,
+      "triggerType": "mark_price",
+      "tpTriggerType": "mark_price",
+      "slTriggerType": "mark_price",
+      "takeProfit": 1,
+      "stopLoss": 1,
+      "extra": {
+        "remainingNative": 1,
+        "filledInPlacementUnits": 1,
+        "remainingNotional": 1,
+        "conditionalOrderPrice": 1,
+        "rejectReason": "PostOnly",
+        "isFromChaser": false,
+        "chaserId": "sample",
+        "chaserAttempts": 1,
+        "chaserMaxAttempts": 1
+      }
+    },
+    "observation": {
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(handle) => { let alias = std::rc::Rc::clone(&handle); let shared_cell = std::rc::Rc::ptr_eq(&handle, &alias); alias.borrow_mut().remaining = -0.0; let decoded = handle.borrow(); serde_json::json!({\"sharedCell\":shared_cell,\"mutationVisible\":decoded.remaining.to_bits() == (-0.0f64).to_bits(),\"ok\":true,\"id\":decoded.id,\"amountBits\":decoded.amount.to_bits().to_string(),\"priceBits\":decoded.price.value().map(|value| value.to_bits().to_string()),\"priceAbsent\":decoded.price.is_absent(),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,safe_cex_types::ModelField::Value(safe_cex_types::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,safe_cex_types::ModelField::Value(safe_cex_types::OrderSide::Buy)),\"reduceOnlyAbsent\":decoded.reduce_only.is_absent(),\"reduceOnlyUndefined\":decoded.reduce_only.is_undefined(),\"reduceOnly\":decoded.reduce_only.value().copied(),\"statusOpen\":matches!(decoded.status,safe_cex_types::ModelField::Value(safe_cex_types::OrderStatus::Open))}) }, Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "cases": [
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "left-order",
+              "symbol": "BTCUSD",
+              "amount": 7,
+              "filled": 2,
+              "remaining": 5,
+              "reduceOnly": false,
+              "lastUpdate": 1700000000000
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "id": "right-order",
+            "symbol": "BTCUSD",
+            "amount": 13,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "price": 31.25,
+            "type": "limit",
+            "side": "buy",
+            "status": "open",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "right-order",
+            "priceAbsent": false,
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "statusOpen": true,
+            "amountBits": "4623507967449235456",
+            "priceBits": "4629489310704336896",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "right-order",
+              "symbol": "BTCUSD",
+              "amount": 13,
+              "filled": 2,
+              "remaining": 5,
+              "reduceOnly": false,
+              "price": 31.25,
+              "type": "limit",
+              "side": "buy",
+              "status": "open",
+              "lastUpdate": 1700000000000
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "right-order",
+            "priceAbsent": false,
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "statusOpen": true,
+            "amountBits": "4623507967449235456",
+            "priceBits": "4629489310704336896",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "type": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "side": "unknown",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "price": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": null,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": true,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": true,
+            "sharedCell": true,
+            "mutationVisible": true
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": "true",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": 1,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_venue_binance::order_operations::OperationFuture": {
     "category": "non-decoder",
     "target": {
@@ -41004,6 +41356,517 @@
           "infoAbsent": true
         }
       }
+    ]
+  },
+  "safe_cex_venue_binance::orderbook::load_binance_order_book_snapshot": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "load_binance_order_book_snapshot",
+      "signature": {
+        "inputs": [
+          [
+            "order_book",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::OrderBook",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "bids",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "alloc::vec::Vec",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "asks",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "alloc::vec::Vec",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "last_update_id",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "state",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::orderbook::BinanceOrderBookSyncState",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Mutates the real native book and sequence state from typed string rows and a native ID. The 36 live source cases read every level price/amount/total and both sequence IDs as binary64 before JSON; duplicate rows, missing cells, nonfinite values and signed zero remain visible. scripts/orderbook-function-source.cjs executes maintained binance.orderbook.ts/updateOrderBook.ts; scripts/orderbook-function-observers.rs calls the real Rust owner. Actual native_dependencies/constructor/socket/HTTP tests and independently compiled production-body faults separately witness assembled consumers. Scope is this typed/JSON input surface, not arbitrary getters, prototype changes, wasm or unrelated owners.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/orderbook-function-observers.rs\")); } witness::snapshot($value, $type) }"
+  ,
+    "cases": [
+      {"input":{"bids":[],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[[]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[[]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[[]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[[]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[[]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[[]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["1"]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["1"]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["1"]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["1"]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["3ff0000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["1"]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["3ff0000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["1"]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["3ff0000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["2","-0"],["1","1e400"],["2","NaN"]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["2","-0"],["1","1e400"],["2","NaN"]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["2","-0"],["1","1e400"],["2","NaN"]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["2","-0"],["1","1e400"],["2","NaN"]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["2","-0"],["1","1e400"],["2","NaN"]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["2","-0"],["1","1e400"],["2","NaN"]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["4000000000000000","8000000000000000","0000000000000000"],["3ff0000000000000","7ff0000000000000","0000000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["0x10","12tail","unused"]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["0000000000000000","4028000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["0x10","12tail","unused"]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["0000000000000000","4028000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["0x10","12tail","unused"]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["0000000000000000","4028000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["0x10","12tail","unused"]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["0000000000000000","4028000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["0x10","12tail","unused"]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["0000000000000000","4028000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["0x10","12tail","unused"]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["0000000000000000","4028000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["\ud83d\ude001","-Infinity"]],"asks":[],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","fff0000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["\ud83d\ude001","-Infinity"]],"asks":[],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","fff0000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[["\ud83d\ude001","-Infinity"]],"asks":[],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[["7ff8000000000000","fff0000000000000","0000000000000000"]],"asks":[]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["\ud83d\ude001","-Infinity"]],"id":"-0","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","fff0000000000000","0000000000000000"]]},"state":{"snapshot":["number","8000000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["\ud83d\ude001","-Infinity"]],"id":"NaN","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","fff0000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff8000000000000"],"applied":["unset"]}}},
+      {"input":{"bids":[],"asks":[["\ud83d\ude001","-Infinity"]],"id":"Infinity","state":{"snapshot":"1","applied":"99"}},"output":{"book":{"bids":[],"asks":[["7ff8000000000000","fff0000000000000","0000000000000000"]]},"state":{"snapshot":["number","7ff0000000000000"],"applied":["unset"]}}}
+    ]
+  },
+  "safe_cex_venue_binance::orderbook::get_buffered_binance_depth_updates": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_buffered_binance_depth_updates",
+      "signature": {
+        "inputs": [
+          [
+            "updates",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_venue_binance::orderbook::BinanceDepthUpdate",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "snapshot_last_update_id",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_venue_binance::orderbook::BinanceDepthUpdate",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the actual borrowed-record selector. The 25 live source cases read original record identity/order and native u values, with exact Number coercion failure names, missing/null/bool/array/object cells, overflowing JSON exponents and finite/nonfinite snapshot IDs. scripts/orderbook-function-source.cjs executes maintained binance.orderbook.ts/updateOrderBook.ts; scripts/orderbook-function-observers.rs calls the real Rust owner. Actual native_dependencies/constructor/socket/HTTP tests and independently compiled production-body faults separately witness assembled consumers. Scope is this typed/JSON input surface, not arbitrary getters, prototype changes, wasm or unrelated owners.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/orderbook-function-observers.rs\")); } witness::buffered($value, $type) }"
+  ,
+    "cases": [
+      {"input":{"raw":"[]","snapshot":"10"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[]","snapshot":"-0"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[]","snapshot":"NaN"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[]","snapshot":"Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[]","snapshot":"-Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"10"},"output":{"ok":true,"indices":[0,2,3],"values":[["number","4026000000000000"],["number","4028000000000000"],["number","4026000000000000"]]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"-0"},"output":{"ok":true,"indices":[0,1,2,3],"values":[["number","4026000000000000"],["number","4024000000000000"],["number","4028000000000000"],["number","4026000000000000"]]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"NaN"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":11},{\"u\":10},{\"u\":12},{\"u\":11}]","snapshot":"-Infinity"},"output":{"ok":true,"indices":[0,1,2,3],"values":[["number","4026000000000000"],["number","4024000000000000"],["number","4028000000000000"],["number","4026000000000000"]]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"10"},"output":{"ok":true,"indices":[0,3],"values":[["number","7ff0000000000000"],["string",[73,110,102,105,110,105,116,121]]]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"-0"},"output":{"ok":true,"indices":[0,3],"values":[["number","7ff0000000000000"],["string",[73,110,102,105,110,105,116,121]]]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"NaN"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{\"u\":1e400},{\"u\":-1e400},{\"u\":-0},{\"u\":\"Infinity\"}]","snapshot":"-Infinity"},"output":{"ok":true,"indices":[0,2,3],"values":[["number","7ff0000000000000"],["number","8000000000000000"],["string",[73,110,102,105,110,105,116,121]]]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"10"},"output":{"ok":true,"indices":[5],"values":[["array",[["number","4028000000000000"]]]]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"-0"},"output":{"ok":true,"indices":[3,5],"values":[["bool",true],["array",[["number","4028000000000000"]]]]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"NaN"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"Infinity"},"output":{"ok":true,"indices":[],"values":[]}},
+      {"input":{"raw":"[{},{\"u\":null},{\"u\":false},{\"u\":true},{\"u\":[]},{\"u\":[12]},{\"u\":{}}]","snapshot":"-Infinity"},"output":{"ok":true,"indices":[1,2,3,4,5],"values":[["null"],["bool",false],["bool",true],["array",[]],["array",[["number","4028000000000000"]]]]}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"10"},"output":{"ok":false,"name":"TypeError"}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"-0"},"output":{"ok":false,"name":"TypeError"}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"NaN"},"output":{"ok":false,"name":"TypeError"}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"Infinity"},"output":{"ok":false,"name":"TypeError"}},
+      {"input":{"raw":"[{\"u\":12},{\"u\":{\"toString\":null}},{\"u\":13}]","snapshot":"-Infinity"},"output":{"ok":false,"name":"TypeError"}}
+    ]
+  },
+  "safe_cex_venue_binance::orderbook::apply_binance_depth_update": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "apply_binance_depth_update",
+      "signature": {
+        "inputs": [
+          [
+            "order_book",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::OrderBook",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "update",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::orderbook::BinanceDepthUpdate",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "state",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::orderbook::BinanceOrderBookSyncState",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "require_previous_final_update_id",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::protocol_types::BinanceOrderBookApplyResult",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the actual live update algorithm. The 36 live source cases read the native result variant, both sequence IDs and every resulting level before JSON, including nonfinite sequence guards, previous-ID policy, skipped updates, partial mutation before TypeError, array-like levels and numeric coercion. scripts/orderbook-function-source.cjs executes maintained binance.orderbook.ts/updateOrderBook.ts; scripts/orderbook-function-observers.rs calls the real Rust owner. Actual native_dependencies/constructor/socket/HTTP tests and independently compiled production-body faults separately witness assembled consumers. Scope is this typed/JSON input surface, not arbitrary getters, prototype changes, wasm or unrelated owners.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/orderbook-function-observers.rs\")); } witness::apply($value, $type) }"
+  ,
+    "cases": [
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":10,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"ignored"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":10,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"ignored"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":13,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":13,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":\"NaN\",\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":\"NaN\",\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":{\"toString\":null},\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":{\"toString\":null},\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,\"-0\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,\"-0\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,\"NaN\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","7ff8000000000000","4045000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,\"NaN\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","7ff8000000000000","4045000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[11,\"Infinity\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","7ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[11,\"Infinity\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","7ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,2],null],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","4000000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[9,2],null],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","4000000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":{\"0\":[9,2],\"1\":[8,3],\"length\":2},\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","4000000000000000","4045000000000000"],["4020000000000000","4008000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":{\"0\":[9,2],\"1\":[8,3],\"length\":2},\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","4000000000000000","4045000000000000"],["4020000000000000","4008000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":\"12\",\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"],["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":\"12\",\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"],["4000000000000000","7ff8000000000000","0000000000000000"],["3ff0000000000000","7ff8000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":\"\ud83d\ude001\",\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"],["7ff8000000000000","7ff8000000000000","0000000000000000"],["7ff8000000000000","7ff8000000000000","0000000000000000"],["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":\"\ud83d\ude001\",\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["3ff0000000000000","7ff8000000000000","0000000000000000"],["7ff8000000000000","7ff8000000000000","0000000000000000"],["7ff8000000000000","7ff8000000000000","0000000000000000"],["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[{\"toString\":null},1]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[{\"toString\":null},1]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[12,3],[11,{\"toString\":null}]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","4008000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[12,3],[11,{\"toString\":null}]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"error":"TypeError"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","4008000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":1e400,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":1e400,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":-1e400,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4024000000000000"]}}},
+      {"input":{"raw":"{\"u\":-1e400,\"U\":11,\"pu\":10,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"gap"},"book":{"bids":[["4024000000000000","3ff0000000000000","4044800000000000"],["4022000000000000","3ff0000000000000","4045000000000000"]],"asks":[["4026000000000000","3ff0000000000000","4045800000000000"],["4028000000000000","3ff0000000000000","4046000000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["unset"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":1e400,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":1e400,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":-1e400,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10","applied":"10"},"previous":true},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}},
+      {"input":{"raw":"{\"u\":12,\"U\":11,\"pu\":-1e400,\"b\":[[\"9\",\"5\"],[\"10\",\"0\"],[\"8\",\"2\"]],\"a\":[[\"12\",\"0\"],[\"11\",\"3\"]]}","state":{"snapshot":"10"},"previous":false},"output":{"result":{"value":"applied"},"book":{"bids":[["4022000000000000","4014000000000000","4045000000000000"],["4020000000000000","4000000000000000","0000000000000000"]],"asks":[["4026000000000000","4008000000000000","4045800000000000"]]},"state":{"snapshot":["number","4024000000000000"],"applied":["number","4028000000000000"]}}}
+    ]
+  },
+  "safe_cex_venue_binance::orderbook::depth_index": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "depth_index",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "index",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the private indexed-cell reader used only by apply_binance_depth_update. The 26 source cases evaluate unchanged actual TS o[0]/o[1]/bids[i] expressions: raw cells retain type, native number bits and whole-string UTF16 units. Four split-surrogate string-index cases observe the real immediate String/parseFloat consumer result (NaN), not raw lone-unit identity; the private Rust UTF8 replacement is not asserted equivalent as a standalone string. scripts/orderbook-function-source.cjs executes maintained binance.orderbook.ts/updateOrderBook.ts; scripts/orderbook-function-observers.rs calls the real Rust owner. Actual native_dependencies/constructor/socket/HTTP tests and independently compiled production-body faults separately witness assembled consumers. Scope is this typed/JSON input surface, not arbitrary getters, prototype changes, wasm or unrelated owners.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/orderbook-function-observers.rs\")); } witness::index($value, $type) }"
+  ,
+    "cases": [
+      {"input":{"raw":"[]","index":0},"output":["undefined"]},
+      {"input":{"raw":"[]","index":1},"output":["undefined"]},
+      {"input":{"raw":"[\"1\",\"-0\"]","index":0},"output":["string",[49]]},
+      {"input":{"raw":"[\"1\",\"-0\"]","index":1},"output":["string",[45,48]]},
+      {"input":{"raw":"[1e400,-0]","index":0},"output":["number","7ff0000000000000"]},
+      {"input":{"raw":"[1e400,-0]","index":1},"output":["number","8000000000000000"]},
+      {"input":{"raw":"[null,true]","index":0},"output":["null"]},
+      {"input":{"raw":"[null,true]","index":1},"output":["bool",true]},
+      {"input":{"raw":"[{\"n\":1e400,\"z\":-0},[\"\ud83d\ude00\",\"-0\"]]","index":0},"output":["object",[[[110],["number","7ff0000000000000"]],[[122],["number","8000000000000000"]]]]},
+      {"input":{"raw":"[{\"n\":1e400,\"z\":-0},[\"\ud83d\ude00\",\"-0\"]]","index":1},"output":["array",[["string",[55357,56832]],["string",[45,48]]]]},
+      {"input":{"raw":"{\"0\":\"12tail\",\"1\":false}","index":0},"output":["string",[49,50,116,97,105,108]]},
+      {"input":{"raw":"{\"0\":\"12tail\",\"1\":false}","index":1},"output":["bool",false]},
+      {"input":{"raw":"\"12\"","index":0},"output":["string",[49]]},
+      {"input":{"raw":"\"12\"","index":1},"output":["string",[50]]},
+      {"input":{"raw":"[[\"1\",\"2\"],[\"3\",\"4\"],[\"5\",\"6\"]]","index":0,"role":"levels"},"output":["array",[["string",[49]],["string",[50]]]]},
+      {"input":{"raw":"[[\"1\",\"2\"],[\"3\",\"4\"],[\"5\",\"6\"]]","index":1,"role":"levels"},"output":["array",[["string",[51]],["string",[52]]]]},
+      {"input":{"raw":"[[\"1\",\"2\"],[\"3\",\"4\"],[\"5\",\"6\"]]","index":2,"role":"levels"},"output":["array",[["string",[53]],["string",[54]]]]},
+      {"input":{"raw":"[[\"1\",\"2\"],[\"3\",\"4\"],[\"5\",\"6\"]]","index":3,"role":"levels"},"output":["undefined"]},
+      {"input":{"raw":"{\"length\":3,\"0\":[1,2],\"2\":[5,6]}","index":0,"role":"levels"},"output":["array",[["number","3ff0000000000000"],["number","4000000000000000"]]]},
+      {"input":{"raw":"{\"length\":3,\"0\":[1,2],\"2\":[5,6]}","index":1,"role":"levels"},"output":["undefined"]},
+      {"input":{"raw":"{\"length\":3,\"0\":[1,2],\"2\":[5,6]}","index":2,"role":"levels"},"output":["array",[["number","4014000000000000"],["number","4018000000000000"]]]},
+      {"input":{"raw":"{\"length\":3,\"0\":[1,2],\"2\":[5,6]}","index":3,"role":"levels"},"output":["undefined"]},
+      {"input":{"raw":"\"\ud83d\ude001\"","index":0,"consumer":"parseFloat"},"output":{"consumerBits":"7ff8000000000000"}},
+      {"input":{"raw":"\"\ud83d\ude001\"","index":1,"consumer":"parseFloat"},"output":{"consumerBits":"7ff8000000000000"}},
+      {"input":{"raw":"\"1\ud83d\ude00\"","index":0,"consumer":"parseFloat"},"output":{"consumerBits":"3ff0000000000000"}},
+      {"input":{"raw":"\"1\ud83d\ude00\"","index":1,"consumer":"parseFloat"},"output":{"consumerBits":"7ff8000000000000"}}
     ]
   }
 }

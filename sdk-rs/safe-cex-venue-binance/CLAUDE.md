@@ -154,6 +154,17 @@ This selected native/default scope does not cover other owners or the feature
 matrix. Keep the existing [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
 and [typed-output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) boundaries.
 
+The public `CancelOrderHandle` alias retains the strict map-only Order decoder
+through `Rc<RefCell<Order>>`. Its native decoder observations inspect fields,
+numeric bits, optional presence and shared-cell mutation before projection.
+The constructed `private_classes` test `native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symbols`
+holds both signed Futures DELETEs, then checks each successful category and the
+untouched symbol in the actual Store. Its source witness constructs the actual
+TS parent, Store and API clients and scripts only terminal Axios I/O. PM/Spot
+do not use this handle alias.
+`scripts/cancel-order-handle-controls.py` breaks the live symbol filter, requires
+that compiled native assertion to fail and restores exact source bytes for GREEN.
+
 Spot order formatting consumes BaseExchange's client-ID resolution and final
 native-count assertion directly. Its market snapshot is cloned before errors
 can emit through the store. Preserve attached-order field inheritance, post-only
@@ -905,3 +916,13 @@ observations are compared with the maintained TS constructors. The ordinary
 private_classes source-case guard keeps all 164 cases live in CI. Preserve the
 208 constructed native Store cases and seven independent compiled body controls
 when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
+
+The four orderbook function contracts execute the real snapshot, borrowed update
+selector, apply algorithm and private indexed-cell reader. Native number bits,
+sequence state, borrowed record identity and partial mutation are observed before
+JSON output. `scripts/orderbook-function-source.cjs` derives 123 cases from the
+maintained TypeScript functions; the ordinary `orderbook_function_contracts` target
+keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell's
+immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
+requires four independent compiled faults to fail actual constructed native
+socket/HTTP tests, with exact source restoration and a passing rerun after each.
