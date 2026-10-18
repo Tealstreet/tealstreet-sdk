@@ -968,7 +968,10 @@ fn create_api_routes_through_the_provider_and_tunnel_adapter() {
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(balance()),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(balance())
+                            .unwrap(),
+                    ),
                 })
             })
         }
@@ -1341,6 +1344,38 @@ fn private_balance_frames_replace_rest_currency_shape_and_ignore_empty_updates()
         before
     );
     h.venue().dispose().expect("dispose");
+}
+
+#[test]
+fn releasing_shared_http_gate_resumes_both_native_market_reads() {
+    use std::task::{Context, Poll, Waker};
+    let h = venue(|_| {});
+    let released = h.http.hold("/public/get-instruments");
+    let mut first = h.venue().fetch_markets();
+    let mut second = h.venue().fetch_markets();
+    for _ in 0..64 {
+        for future in [&mut first, &mut second] {
+            assert!(matches!(
+                future
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop())),
+                Poll::Pending
+            ));
+        }
+        h.runtime.advance(50.0);
+        if h.http.calls("/public/get-instruments").len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(h.http.calls("/public/get-instruments").len(), 2);
+    h.runtime.pump();
+    released.set(true);
+    let first = h.drive(first).expect("first native market read resumes");
+    let second = h.drive(second).expect("second native market read resumes");
+    for rows in [first, second] {
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].symbol, SYMBOL);
+    }
 }
 
 #[test]

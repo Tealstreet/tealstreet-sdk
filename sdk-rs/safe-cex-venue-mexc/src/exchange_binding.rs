@@ -657,7 +657,9 @@ impl Host {
                 let venue = host.venue()?;
                 let (body, config) = if method == "post" {
                     (
-                        Some(RestBody::Untransformed(to_json(&arg(&a, 1))?)),
+                        Some(RestBody::Untransformed(
+                            safe_cex_exchange::js_runtime::value::to_retained_input(&arg(&a, 1))?,
+                        )),
                         arg(&a, 2),
                     )
                 } else {
@@ -967,7 +969,9 @@ impl ExchangeRuntimeHost for Host {
         from_json(&types::REVERSE_POSITION_MODE).get_key(&mode.to_js_string()?)
     }
     fn promise_all(&self, values: Vec<Js>) -> Result<Rc<Pending>, Thrown> {
-        Ok(Pending::of(Box::pin(promise::all(values))))
+        Ok(Pending::of(Box::pin(
+            promise::all(&self.runtime, values).wait(),
+        )))
     }
     fn for_of(&self, value: Js, visitor: &mut Iteration<'_, Js, Thrown>) -> Result<(), Thrown> {
         // This opaque typed settings view has no JS object protocol. Preserve

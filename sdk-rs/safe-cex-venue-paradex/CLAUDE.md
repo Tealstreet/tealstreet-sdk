@@ -232,3 +232,12 @@ pipeline, with unchanged identity-only refusal messages. Twelve mixed-page nativ
 profiles plus all-refused/Date-error regressions execute the real Exchange. A
 separate maintained-method probe pins TS retaining the raw malformed fields;
 this per-row loss is intentional and does not widen shared IDs or assets.
+
+The constructed ticker corpus in `tests/exchange_trait.rs` observes 264 cases / 504 summary, BBO, book and trade frames, including numeric aliases and all book level forms
+through the production socket protocol and DefaultStore. Independent null,
+string, NaN-producing, object, overflow, signed-zero and false fields accompany
+distinct good rows. The maintained TS constructor and actual DefaultStore provide
+native numeric-bit expectations. Fresh TS receivers and advancing native clocks
+isolate numeric mapping from throttle timing. `ticker-native-controls.py paradex paradex-book`
+compiles a live publication fault, requires a native assertion failure, then
+restores exact source bytes and requires the named test to pass.

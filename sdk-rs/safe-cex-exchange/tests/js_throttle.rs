@@ -102,7 +102,7 @@ impl ExchangeRuntime for Runtime {
         }
         Box::new(Task(cancelled))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -115,7 +115,7 @@ impl ExchangeRuntime for Runtime {
     fn report_exception(&self, e: &ExchangeError, _: &Value) {
         panic!("unexpected timer error: {}", e.message)
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
         panic!("unexpected raw error")
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {

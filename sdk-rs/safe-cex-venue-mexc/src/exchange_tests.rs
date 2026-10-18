@@ -29,7 +29,9 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected spawn")
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.1
             .borrow_mut()
             .push(json!({"message": message, "severity": severity}));
@@ -43,7 +45,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -89,7 +95,10 @@ impl RestAdapter for AccountFailure {
                 status: 401,
                 reason: Some("Unauthorized".into()),
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(data.clone()),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone())
+                        .unwrap(),
+                ),
             })
         });
         Box::pin(async move { Err(failure) })
@@ -638,7 +647,10 @@ fn mexc_cancel_orders_matches_live_source() {
                     .unwrap()
                     .untransformed()
                     .unwrap(),
-                &expected["data"],
+                &safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    expected["data"].clone()
+                )
+                .unwrap(),
                 "cancelOrders payload identity: {name}/{request_index}"
             );
         }
@@ -3095,7 +3107,12 @@ impl RestAdapter for CancelTransportFailure {
             status: 401,
             reason: Some("Unauthorized".into()),
             headers: Default::default(),
-            body: RestResponseBody::Untransformed(json!({"message":"response detail"})),
+            body: RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    json!({"message":"response detail"}),
+                )
+                .unwrap(),
+            ),
         }));
         Box::pin(async move { Err(failure) })
     }
@@ -3153,7 +3170,7 @@ fn mexc_cancel_transport_projection_finding() {
     };
     assert_eq!(
         body,
-        &json!(["regular"]),
+        &safe_cex_types::retained_json::RetainedJsonInput::from_value(json!(["regular"])).unwrap(),
         "MEXC cancellation native original IDs"
     );
     assert_eq!(
@@ -3248,7 +3265,12 @@ fn mexc_uncaught_rest_rejections_retain_native_origins() {
             status: 401,
             reason: Some("Unauthorized".into()),
             headers: Default::default(),
-            body: RestResponseBody::Untransformed(json!({"message":"response detail","marker":7})),
+            body: RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    json!({"message":"response detail","marker":7}),
+                )
+                .unwrap(),
+            ),
         }));
         let producer = Rc::new(RefCell::new(failure));
         let adapter = Rc::new(RetainedRestRejection {
@@ -3305,10 +3327,15 @@ fn mexc_uncaught_rest_rejections_retain_native_origins() {
             panic!("MEXC REST native phase")
         };
         assert_eq!(
-            data["message"], "response detail",
+            data.clone().into_value().unwrap()["message"],
+            "response detail",
             "MEXC REST native response payload {name}"
         );
-        assert_eq!(data["marker"], 7, "MEXC REST native original marker {name}");
+        assert_eq!(
+            data.clone().into_value().unwrap()["marker"],
+            7,
+            "MEXC REST native original marker {name}"
+        );
         assert_eq!(
             adapter.calls.borrow().len(),
             1,
@@ -3325,10 +3352,15 @@ fn mexc_uncaught_rest_rejections_retain_native_origins() {
             "MEXC REST retained native context {name}"
         );
         // Existing adapter ownership is retained, not relabelled as a live JS alias.
-        producer.borrow_mut().response.as_mut().unwrap().body =
-            RestResponseBody::Untransformed(json!({"message":"response detail","marker":42}));
+        producer.borrow_mut().response.as_mut().unwrap().body = RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                json!({"message":"response detail","marker":42}),
+            )
+            .unwrap(),
+        );
         assert_eq!(
-            data["marker"], 7,
+            data.clone().into_value().unwrap()["marker"],
+            7,
             "MEXC REST chosen native response snapshot {name}"
         );
         assert_eq!(
@@ -4045,7 +4077,10 @@ fn mexc_history_rejection_keeps_native_request_and_typed_origin() {
         status: 418,
         reason: None,
         headers: Default::default(),
-        body: RestResponseBody::Untransformed(json!({"marker":7})),
+        body: RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"marker":7}))
+                .unwrap(),
+        ),
     }));
     let producer = Rc::new(RefCell::new(failure));
     let adapter = Rc::new(RetainedRestRejection {
@@ -4099,7 +4134,8 @@ fn mexc_history_rejection_keeps_native_request_and_typed_origin() {
         panic!("history rejected native original body phase");
     };
     assert_eq!(
-        data["marker"], 7,
+        data.clone().into_value().unwrap()["marker"],
+        7,
         "history rejected native original body field"
     );
     let Some(Q::Object(params)) = &original.request.query_params else {
@@ -4125,10 +4161,12 @@ fn mexc_history_rejection_keeps_native_request_and_typed_origin() {
         original.request.params.is_none(),
         "history rejected native absent legacy projection"
     );
-    producer.borrow_mut().response.as_mut().unwrap().body =
-        RestResponseBody::Untransformed(json!({"marker":42}));
+    producer.borrow_mut().response.as_mut().unwrap().body = RestResponseBody::Untransformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"marker":42})).unwrap(),
+    );
     assert_eq!(
-        data["marker"], 7,
+        data.clone().into_value().unwrap()["marker"],
+        7,
         "history rejected chosen owned native error response snapshot"
     );
     assert_eq!(

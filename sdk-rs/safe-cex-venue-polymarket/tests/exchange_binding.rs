@@ -470,9 +470,11 @@ fn concrete_public_ohlcv_and_orderbook_socket() {
 }
 
 fn wire(request: &binding_harness::Request) -> Vec<u8> {
-    safe_cex_transport::RestBody::Untransformed(request.data.clone())
-        .wire_bytes_for_content_type(Some("application/json"))
-        .unwrap()
+    safe_cex_transport::RestBody::Untransformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(request.data.clone()).unwrap(),
+    )
+    .wire_bytes_for_content_type(Some("application/json"))
+    .unwrap()
 }
 
 #[test]

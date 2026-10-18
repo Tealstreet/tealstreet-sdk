@@ -577,16 +577,21 @@ impl BybitExchange {
     ) -> Result<Vec<(RestResponse, serde_json::Value)>, E> {
         crate::submission::submit_create_orders(
             payloads,
-            |payload| {
-                self.xhr().request(RestRequest {
+            |payload| async move {
+                let mut request = RestRequest {
                     method: "post".into(),
                     url: crate::types::ENDPOINTS["CREATE_ORDER"]
                         .as_str()
                         .expect("static endpoint")
                         .into(),
-                    body: Some(RestBody::Untransformed(payload)),
                     ..Default::default()
-                })
+                };
+                let data = safe_cex_types::retained_json::RetainedJsonInput::from_value(payload)
+                    .map_err(|error| {
+                        RestFailure::pre_transmit(error.to_string(), request.clone())
+                    })?;
+                request.body = Some(RestBody::Untransformed(data));
+                self.xhr().request(request).await
             },
             report_failure,
         )

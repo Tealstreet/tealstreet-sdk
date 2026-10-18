@@ -10,7 +10,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_transport::{RestAdapter, RestFailure};
 use safe_cex_types::{Execution, ExecutionsOptions, HistoricalTrade, HistoricalTradeOptions};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 fn bounds(value: Option<f64>, milliseconds: bool) -> Result<Option<f64>, ExchangeError> {
     // Source ignores nonfinite bounds; do not project NaN through JSON.
@@ -22,21 +22,20 @@ fn bounds(value: Option<f64>, milliseconds: bool) -> Result<Option<f64>, Exchang
     };
     result.map_err(|error| ExchangeError::new(error.message))
 }
-fn rest_error(mut failure: RestFailure) -> ExchangeError {
-    let mut error = ExchangeError::new(failure.message);
-    error.response = failure
+fn rest_error(failure: RestFailure) -> ExchangeError {
+    let context_view = failure
         .context
         .as_deref()
         .and_then(|value| value.get("response"))
         .cloned();
-    if error.response.is_none() {
-        error.response = failure
-            .response
-            .take()
-            .map(|response| json!({"data":response.body.into_data()}));
+    // Shared conversion owns the explicit JSON error view and retained origin.
+    let mut error: ExchangeError = failure.into();
+    if let Some(view) = context_view {
+        error.response = Some(view);
     }
     error
 }
+
 fn report(venue: &dyn Exchange, error: ExchangeError) -> Result<(), ExchangeError> {
     let response_message = error
         .response
