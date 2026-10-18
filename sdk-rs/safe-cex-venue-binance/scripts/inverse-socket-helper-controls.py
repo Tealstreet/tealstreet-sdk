@@ -24,12 +24,6 @@ for module,name,before,after in controls:
  path=base/(module+'.rs');original=path.read_bytes();text=original.decode();assert text.count(before)==1,(module,name)
  owner='safe_cex_venue_binance::inverse::'+module+'::'+name
  log=pathlib.Path('/tmp/port-txflow-socket-helper-control-'+module+'-'+name+'.log')
- if log.exists():
-  previous=log.read_text()
-  if '1 failed owners' in previous and previous.rstrip().endswith('Inverse socket helpers: 1 real native owners pass. Scope excludes other owners.'):
-   receipts.append({'owner':owner,'compiledRed':True,'exactRestoredGreen':True,'log':str(log)})
-   print(owner+' retained checked RED -> exact restored GREEN receipt',flush=True)
-   continue
  try:
   path.write_text(text.replace(before,after))
   with log.open('w') as output:

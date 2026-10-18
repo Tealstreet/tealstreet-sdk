@@ -32,3 +32,8 @@ compiles one isolated fault per helper, requires named runtime failure (compiler
 errors do not count), restores exact production bytes, and requires the same
 owner to pass. The script writes measured receipts under `/tmp`; it must finish
 successfully before claiming those controls complete.
+
+Measured result: all eleven isolated production faults compiled and produced
+named native failures. Exact restoration passed each corresponding owner. The
+complete baseline executed eleven owners and 79 cases; the maintained whole-class
+source oracle passed eleven groups. No production helper body was changed.
