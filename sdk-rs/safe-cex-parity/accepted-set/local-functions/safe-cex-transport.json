@@ -7,22 +7,22 @@
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:depth_error": {
     "category": "non-decoder",
     "reason": "The axios_form_encode error formatter takes a typed usize and constructs TransportError::Host text; it admits no raw model input. Native public RestBody form serialization exercises both metadata and recursive traversal depth failures and asserts the exact 101-level diagnostic. Phase2 retains native numbers/text until scalar/form output; public form boundary regressions retain all depth, omission and encoding assertions. Reviewed provider delta 3419b2a3b1: only RestRequest.config_extensions changes to retained native data; this form helper body is unchanged.",
-    "sourceSha256": "77fb8ec084cb4d4344a79006360211096de9e438bdda40ada6ef38ac85e59efa"
+    "sourceSha256": "643c535bc611a5ef9a17acdcd7145b76f2336a820f66670346f80c6457af6e99"
   },
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:check_json_depth": {
     "category": "non-decoder",
     "reason": "The axios_form_encode metadata-output depth validator walks an already decoded canonical RetainedJsonInput solely before JSON stringification into a form field. It neither parses JSON nor constructs a domain model. Native public form serialization proves metadata depth100 admission and depth101 refusal, with exact encoded bytes and error; this is bounded output validation, not a general Value-input exception. Phase2 retains native numbers/text until scalar/form output; public form boundary regressions retain all depth, omission and encoding assertions. Reviewed provider delta 3419b2a3b1: only RestRequest.config_extensions changes to retained native data; this form helper body is unchanged.",
-    "sourceSha256": "77fb8ec084cb4d4344a79006360211096de9e438bdda40ada6ef38ac85e59efa"
+    "sourceSha256": "643c535bc611a5ef9a17acdcd7145b76f2336a820f66670346f80c6457af6e99"
   },
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:append": {
     "category": "non-decoder",
     "reason": "The axios_form_encode output writer applies shared JavaScript string coercion to an already retained native value and appends a URLSearchParams-encoded pair to the serializer. Native public form fixtures assert actual boolean/number/string coercions, percent/space encoding, array order and null omission; no inbound DTO decoding is classified away. Phase2 retains native numbers/text until scalar/form output; public form boundary regressions retain all depth, omission and encoding assertions. Reviewed provider delta 3419b2a3b1: only RestRequest.config_extensions changes to retained native data; this form helper body is unchanged.",
-    "sourceSha256": "77fb8ec084cb4d4344a79006360211096de9e438bdda40ada6ef38ac85e59efa"
+    "sourceSha256": "643c535bc611a5ef9a17acdcd7145b76f2336a820f66670346f80c6457af6e99"
   },
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:visit": {
     "category": "non-decoder",
     "reason": "The axios_form_encode recursive output traversal renders bracketed form keys into the output serializer. Its internal parse::<usize> selects canonical indices from an already decoded array-like object; it does not decode a wire/domain owner. Native public fixtures cover nested paths, flat/array-like items, numeric ordering, invalid length and recursive path depth101 admission/depth102 refusal. The separately reviewed metadata validator and error formatter retain their own exact source-pinned roles. Phase2 retains native numbers/text until scalar/form output; public form boundary regressions retain all depth, omission and encoding assertions. Reviewed provider delta 3419b2a3b1: only RestRequest.config_extensions changes to retained native data; this form helper body is unchanged.",
-    "sourceSha256": "77fb8ec084cb4d4344a79006360211096de9e438bdda40ada6ef38ac85e59efa"
+    "sourceSha256": "643c535bc611a5ef9a17acdcd7145b76f2336a820f66670346f80c6457af6e99"
   },
   "safe-cex-transport/src/query.rs::LOCAL_FUNCTION:encode": {
     "category": "non-decoder",
@@ -72,11 +72,11 @@
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:composite": {
     "category": "non-decoder",
     "reason": "Tests native array/object variants solely to select the existing outgoing form traversal; does not decode or construct a domain model. Native public form tests pin traversal and null omission.",
-    "sourceSha256": "77fb8ec084cb4d4344a79006360211096de9e438bdda40ada6ef38ac85e59efa"
+    "sourceSha256": "643c535bc611a5ef9a17acdcd7145b76f2336a820f66670346f80c6457af6e99"
   },
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:nullish": {
     "category": "non-decoder",
     "reason": "Tests native null/undefined variants solely for outgoing URLSearchParams omission; no inbound domain validation. Native public form tests pin traversal and null omission.",
-    "sourceSha256": "77fb8ec084cb4d4344a79006360211096de9e438bdda40ada6ef38ac85e59efa"
+    "sourceSha256": "643c535bc611a5ef9a17acdcd7145b76f2336a820f66670346f80c6457af6e99"
   }
 }

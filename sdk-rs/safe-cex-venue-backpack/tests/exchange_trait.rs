@@ -209,3 +209,67 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     assert_eq!(trades.message, "Not implemented");
     assert!(calls(&wire).is_empty(), "inherited rejections send nothing");
 }
+
+#[test]
+fn leverage_refresh_failure_emits_the_source_error_object() {
+    use safe_cex_exchange::js_runtime::value::Js;
+    use std::cell::RefCell;
+
+    let (owner, runtime, _store, wire) = support::fixture();
+    let venue: Rc<dyn Exchange> = owner.clone();
+    script(&wire, "/api/v1/account", json!({"leverageLimit":"5"}));
+    script(&wire, "/api/v1/position", Value::Null);
+    let emitted = Rc::new(RefCell::new(Vec::new()));
+    let sink = emitted.clone();
+    venue.base().on(
+        "error",
+        Rc::new(move |_, value| {
+            sink.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let failure = drive(&runtime, venue.set_leverage("BTC_USDC".into(), 5.0, None))
+        .expect_err("malformed position refresh must still reject");
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.method.eq_ignore_ascii_case("PATCH") && r.url == "/api/v1/account")
+            .count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.url == "/api/v1/position")
+            .count(),
+        1
+    );
+    assert_eq!(
+        owner.account_leverage_limit.get().to_bits(),
+        5.0_f64.to_bits()
+    );
+    let events = emitted.borrow();
+    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(&events[0], Js::Object(object) if object.class == "Error"),
+        "Backpack leverage catch must emit the source Error object, got {:?}",
+        events[0]
+    );
+    assert!(
+        events[0]
+            .get("name")
+            .unwrap()
+            .strict_equals(&Js::str("Error"))
+    );
+    assert!(
+        events[0]
+            .get("message")
+            .unwrap()
+            .strict_equals(&Js::str(&format!(
+                "Failed to set leverage: {}",
+                failure.js_error_string()
+            )))
+    );
+    owner.dispose().unwrap();
+}

@@ -425,7 +425,11 @@ fn apexomni_native_hosted_ws_refusal_and_throw_send_no_private_frames() {
             h.exchange.base().on(
                 "error",
                 Rc::new(move |_, payload| {
-                    observed.borrow_mut().push(payload.to_string());
+                    observed.borrow_mut().push(
+                        safe_cex_exchange::js_runtime::value::to_json(payload)
+                            .unwrap()
+                            .to_string(),
+                    );
                     Ok(())
                 }),
             );

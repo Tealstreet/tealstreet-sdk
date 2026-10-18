@@ -22,7 +22,7 @@ fn futures_candles_live_source() {
         let make = |message: &str, id| {
             let mut e = ExchangeError::new(message);
             e.metadata.store_subscriber_ids = vec![id, id + 1];
-            e.metadata.code = Some(json!(id));
+            e.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::Number(id as f64));
             e
         };
         let read_error = make(case["message"].as_str().unwrap_or("read failure"), 201);

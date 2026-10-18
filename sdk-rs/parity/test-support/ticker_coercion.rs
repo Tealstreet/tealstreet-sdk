@@ -25,21 +25,52 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
         .into_iter()
         .map(|asset| {
             let (id, symbol) = match venue {
+                "polymarket" => (format!("{asset}-token"), format!("{asset}-Yes")),
                 "bitunix" => (format!("{asset}/USDT"), format!("{asset}USDT")),
                 "bitrue" => (format!("E-{asset}-USDT"), format!("E-{asset}-USDT")),
                 "apexomni" => (format!("{asset}-USDC"), format!("{asset}USDC")),
-                "weex" | "phemex" => (format!("{asset}USDT"), format!("{asset}USDT")),
+                "weex" | "phemex" | "binance" | "binancepm" | "binancespot" => {
+                    (format!("{asset}USDT"), format!("{asset}USDT"))
+                }
                 "kucoin" => (
                     format!("{}USDTM", if asset == "BTC" { "XBT" } else { asset }),
                     format!("{asset}USDT"),
                 ),
                 "kucoinspot" => (format!("{asset}-USDT"), format!("{asset}-USDT")),
+                "blofin" => (format!("{asset}-USDT"), format!("{asset}USDT")),
+                "cryptocom" => (format!("{asset}USD-PERP"), format!("{asset}USD-PERP")),
+                "coinbase" => (format!("{asset}-USDC"), format!("{asset}-USDC")),
+                "hyperliquid" => (asset.to_string(), format!("{asset}/USDC")),
+                "hyperliquidspot" => (
+                    format!(
+                        "@{}",
+                        ["BTC", "ETH", "ADA"]
+                            .iter()
+                            .position(|v| *v == asset)
+                            .unwrap()
+                    ),
+                    format!("{asset}/USDC"),
+                ),
+                "lighter" => (
+                    (["BTC", "ETH", "ADA"]
+                        .iter()
+                        .position(|v| *v == asset)
+                        .unwrap()
+                        + 1)
+                    .to_string(),
+                    asset.to_string(),
+                ),
                 _ => panic!("unsupported ticker seed {venue}"),
             };
-            serde_json::from_value(json!({"id":id,"symbol":symbol,"bid":101,"ask":102,
+            let mut ticker: Ticker =
+                serde_json::from_value(json!({"id":id,"symbol":symbol,"bid":101,"ask":102,
             "last":103,"mark":104,"index":105,"percentage":106,"volume":107,
             "quoteVolume":108,"fundingRate":109,"fundingTime":110,"openInterest":111}))
-            .unwrap()
+                .unwrap();
+            if venue.starts_with("hyperliquid") {
+                ticker.mid_price = Some(112.0);
+            }
+            ticker
         })
         .collect()
 }
@@ -53,6 +84,19 @@ pub fn assert_native(tickers: &[Ticker], case: &Value) {
             .find(|t| t.id == row["id"].as_str().unwrap())
             .unwrap();
         assert_eq!(ticker.symbol, row["symbol"].as_str().unwrap());
+        if row["fields"].get("midPrice").is_some() {
+            let number = ticker.mid_price.expect("native ticker midPrice present");
+            let bits = if number.is_nan() {
+                0x7ff8_0000_0000_0000
+            } else {
+                number.to_bits()
+            };
+            assert_eq!(
+                bits,
+                u64::from_str_radix(row["fields"]["midPrice"].as_str().unwrap(), 16).unwrap(),
+                "native ticker midPrice {case}"
+            );
+        }
         for (field, number) in [
             ("bid", ticker.bid),
             ("ask", ticker.ask),

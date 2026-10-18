@@ -3,6 +3,7 @@
 #[allow(dead_code)]
 mod binding_harness;
 use binding_harness::{Harness, Http, harness, options};
+use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_store::StoreUpdate;
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -796,9 +797,17 @@ fn concrete_private_matched_order_commits_store_and_emits_fill() {
     private_frame(&h, row);
     assert_eq!(h.store.orders()[0].status, OrderStatus::Closed);
     assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0]["id"], "rest-order");
-    assert_eq!(fills.borrow()[0]["price"].as_f64(), Some(0.57));
-    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(10.25));
+    assert!(
+        fills.borrow()[0]
+            .get("id")
+            .unwrap()
+            .strict_equals(&Js::str("rest-order"))
+    );
+    assert_eq!(fills.borrow()[0].get("price").unwrap().as_f64(), Some(0.57));
+    assert_eq!(
+        fills.borrow()[0].get("amount").unwrap().as_f64(),
+        Some(10.25)
+    );
     h.venue().dispose().unwrap();
 }
 
@@ -826,9 +835,19 @@ fn concrete_private_trade_emits_fill_and_refreshes_positions_with_rest_balance_r
         json!({"event_type":"trade","id":"trade-42","asset_id":"123","side":"BUY","price":"0.62","size":"7"}),
     );
     assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0]["id"], "trade-42");
-    assert_eq!(fills.borrow()[0]["symbol"], "event-Yes");
-    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(7.0));
+    assert!(
+        fills.borrow()[0]
+            .get("id")
+            .unwrap()
+            .strict_equals(&Js::str("trade-42"))
+    );
+    assert!(
+        fills.borrow()[0]
+            .get("symbol")
+            .unwrap()
+            .strict_equals(&Js::str("event-Yes"))
+    );
+    assert_eq!(fills.borrow()[0].get("amount").unwrap().as_f64(), Some(7.0));
     let positions = h.store.positions();
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].contracts, 7.0);
@@ -863,4 +882,64 @@ fn offline_recovery_requests_account_reload_for_source_owned_sockets() {
         h.venue().recover_after_offline().unwrap(),
         "disposed accounts do not request another reload"
     );
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::exchange::Exchange;
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("polymarket");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 24);
+    let h = harness(ExchangeName::Polymarket, options(), |http| {
+        let rows: Vec<_> = ["BTC", "ETH", "ADA"].into_iter().map(|asset| json!({
+            "conditionId":asset, "slug":asset, "question":"Question?", "description":"description",
+            "endDate":"2026-12-01", "active":true, "closed":false,
+            "enableOrderBook":true, "acceptingOrders":true,
+            "clobTokenIds":format!("[\"{asset}-token\"]"), "outcomes":"[\"Yes\"]",
+            "orderPriceMinTickSize":"0.01", "orderMinSize":"5", "negRisk":false,
+        })).collect();
+        http.ok("GET", "/markets", json!(rows));
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert_eq!(markets.len(), 3, "production token-to-symbol mappings");
+    let venue = h.exchange.clone();
+    let runtime = h.runtime.clone();
+    let store = h.store.clone();
+    let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
+    socket.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    assert!(socket.is_connected(), "production ticker socket opens");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("polymarket")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            runtime.now.set(runtime.now.get() + 1100.0);
+            runtime.pump();
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            runtime.pump();
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(
+        runtime.reports.borrow().is_empty(),
+        "{:?}",
+        runtime.reports.borrow()
+    );
+    venue.dispose().unwrap();
 }

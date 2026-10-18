@@ -493,7 +493,7 @@
   },
   "safe_cex_registry::native_account::NativeAccountFuture": {
     "canonical": "core::pin::Pin",
-    "expectedType": "::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output=::core::result::Result<bool,::serde_json::Value>>+'static>>",
+    "expectedType": "::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output=::core::result::Result<bool,::safe_cex_exchange::js_runtime::value::OwnedJsValue>>+'static>>",
     "file": "safe-cex-registry/src/native_account.rs",
     "generics": {
       "params": [
@@ -553,7 +553,7 @@
                                                             {
                                                               "type": {
                                                                 "resolved_path": {
-                                                                  "path": "serde_json::value::Value",
+                                                                  "path": "safe_cex_exchange::js_runtime::value::owned::OwnedJsValue",
                                                                   "args": null
                                                                 }
                                                               }
@@ -635,7 +635,7 @@
                                                             {
                                                               "type": {
                                                                 "resolved_path": {
-                                                                  "path": "serde_json::value::Value",
+                                                                  "path": "safe_cex_exchange::js_runtime::value::owned::OwnedJsValue",
                                                                   "args": null
                                                                 }
                                                               }

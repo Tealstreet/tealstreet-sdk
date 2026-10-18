@@ -202,6 +202,7 @@ fn order_execution_matches_live_typescript() {
         base.on(
             "error",
             Rc::new(move |_, value| {
+                let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
                 e.borrow_mut().push(value.as_str().unwrap().to_owned());
                 if mutate_error {
                     error_store.set_setting("isHedged", true).unwrap();
@@ -214,6 +215,7 @@ fn order_execution_matches_live_typescript() {
             base.on(
                 "log",
                 Rc::new(move |_, v| {
+                    let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
                     if v.as_str().unwrap().contains("Bulk open-interest") && !failed.replace(true) {
                         return Err(ExchangeError::new("log down"));
                     }

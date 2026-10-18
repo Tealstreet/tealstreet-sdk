@@ -14,6 +14,93 @@ mod exchange_data;
 use exchange_data::script;
 
 #[test]
+fn constructed_aster_rejection_keeps_native_string_code_units() {
+    use safe_cex_exchange::{
+        js_runtime::{
+            client::JsHttpHost,
+            promise::JsFuture,
+            value::{Js, Thrown, error_object},
+        },
+        runtime::ExchangeRuntime,
+    };
+    use safe_cex_store::store::DefaultStore;
+    use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
+    use std::cell::Cell;
+    struct RejectingHost {
+        runtime: Rc<support::Runtime>,
+        code: Vec<u16>,
+        calls: Rc<Cell<usize>>,
+    }
+    impl JsHttpHost for RejectingHost {
+        fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+            self.runtime.clone()
+        }
+        fn send(&self, config: Js) -> JsFuture<'static> {
+            let code = self.code.clone();
+            let calls = self.calls.clone();
+            let now = self.runtime.now.get();
+            Box::pin(async move {
+                if config.get("url")?.to_display().contains("/time") {
+                    return Ok(Js::object(vec![
+                        ("status", Js::Number(200.0)),
+                        ("data", Js::object(vec![("serverTime", Js::Number(now))])),
+                        ("config", config),
+                    ]));
+                }
+                assert!(config.get("url")?.to_display().contains("/openOrders"));
+                calls.set(calls.get() + 1);
+                let error = error_object("AxiosError", "native Aster rejection");
+                error.define("code", Js::utf16(&code))?;
+                error.define("isAxiosError", Js::Bool(true))?;
+                error.define("config", config)?;
+                Err(Thrown::new(error))
+            })
+        }
+    }
+    for code in [
+        "ERR_NATIVE".encode_utf16().collect::<Vec<_>>(),
+        "ERR_λ".encode_utf16().collect::<Vec<_>>(),
+    ] {
+        let runtime = support::runtime_fixture();
+        let calls = Rc::new(Cell::new(0));
+        let host = Rc::new(RejectingHost {
+            runtime: runtime.clone(),
+            code: code.clone(),
+            calls: calls.clone(),
+        });
+        let venue = AsterDEXExchange::new(
+            safe_cex_types::ExchangeName::Asterdex,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            Rc::new(DefaultStore::new()),
+            AsterDEXDependencies {
+                runtime: runtime.clone(),
+                http: Rc::new(move |_| Ok(host.clone())),
+                external_public_data: None,
+            },
+        )
+        .unwrap();
+        let error = drive(&runtime, venue.fetch_orders(None)).unwrap_err();
+        assert_eq!(
+            calls.get(),
+            4,
+            "actual Aster read reaches terminal HTTP host with its three source retries"
+        );
+        let Some(Js::String(actual)) = error.code.as_ref() else {
+            panic!(
+                "native rejection code remains a JS string: {:?}",
+                error.code
+            );
+        };
+        assert_eq!(
+            actual.as_ref(),
+            code,
+            "real Aster rejection retains exact code units"
+        );
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
 fn candle_reads_follow_source_fields_without_decoding_unused_tuple_columns() {
     use std::io::Write;
     let cases = json!([
@@ -264,6 +351,7 @@ fn cancel_already_gone(status: u16) {
     venue.base().on(
         "error",
         Rc::new(move |_, args| {
+            let args = safe_cex_exchange::js_runtime::value::to_json(args).unwrap();
             capture.borrow_mut().push(args.clone());
             Ok(())
         }),
@@ -1073,6 +1161,7 @@ fn production_private_fill_frame_updates_store_and_emits_fill() {
     venue.base().on(
         "fill",
         Rc::new(move |_, data| {
+            let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
             saved.borrow_mut().push(data.clone());
             Ok(())
         }),

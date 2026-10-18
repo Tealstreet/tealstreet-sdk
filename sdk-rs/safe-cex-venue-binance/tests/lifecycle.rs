@@ -204,7 +204,9 @@ fn setup(f: Value, venue: &'static str, family: &'static str) -> Bind {
     );
     let mut e = ExchangeError::new("lifecycle fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!("lifecycle-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "lifecycle-code"
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"lifecycle detail"}}));
     let count = f
         .get("count")
@@ -503,7 +505,7 @@ fn original(e: &Failure, st: &State, label: &str) {
         "{label}: native error message"
     );
     assert_eq!(
-        e.code,
+        observed_error_code(&e.code),
         Some(json!("lifecycle-code")),
         "{label}: native code"
     );
@@ -514,7 +516,7 @@ fn original(e: &Failure, st: &State, label: &str) {
     );
 }
 fn failure(e: Option<&Failure>, st: &State) -> Value {
-    e.map(|e|json!({"original":Rc::ptr_eq(e,&st.error),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})).unwrap_or(Value::Null)
+    e.map(|e|json!({"original":Rc::ptr_eq(e,&st.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})).unwrap_or(Value::Null)
 }
 fn project(st: &State, result: &Result<(), Failure>, timer_error: Option<&Failure>) -> Value {
     let effects=st.effects.borrow().iter().map(|e|{let refs=if e.k==LifecycleSync::Update{let row=&e.args[0];json!({"markets":p(row,"markets").same(&st.markets),"tickers":p(row,"tickers").same(&st.tickers),"orders":p(row,"orders").same(&st.orders),"risk":p(row,"positions").same(&st.risk),"positions":p(row,"positions").same(&st.positions),"balance":p(row,"balance").same(&st.balance),"loadedFresh":if own(row,"loaded"){json!(!p(row,"loaded").same(&e.loaded_before))}else{Value::Null},"loadedNested":own(row,"loaded")&&p(&p(row,"loaded"),"nested").same(&p(&st.initial_loaded,"nested"))})}else{Value::Null};json!({"name":syn(e.k),"args":e.args.iter().map(wire).collect::<Vec<_>>(),"receiver":e.receiver,"refs":refs})}).collect::<Vec<_>>();
@@ -654,7 +656,11 @@ fn start_native(st: &State, result: &Result<(), Failure>, label: &str) {
                 e.message, "Cannot read properties of null (reading 'length')",
                 "{label}: native length read precedes conversion"
             );
-            assert_eq!(e.code, None, "{label}: native generated code");
+            assert_eq!(
+                observed_error_code(&e.code),
+                None,
+                "{label}: native generated code"
+            );
             assert_eq!(e.response, None, "{label}: native generated response");
         } else {
             original(e, st, label)
@@ -1301,4 +1307,17 @@ fn pm_tick() {
 #[ignore = "requires direct TypeScript oracle"]
 fn spot_tick() {
     test("spot", "tick")
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

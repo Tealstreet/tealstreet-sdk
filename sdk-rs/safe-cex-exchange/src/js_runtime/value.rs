@@ -1,5 +1,8 @@
 //! Native JS value model handed to host-trait-generic ported venue bodies.
 //! Strings are UTF-16, arrays keep holes, objects keep own-key order and accessors.
+pub mod owned;
+pub use owned::OwnedJsValue;
+
 use crate::runtime::ExchangeError;
 use indexmap::IndexMap;
 use safe_cex_num::{JsCoercionError, js_number_string, parse_float};
@@ -112,16 +115,13 @@ impl Thrown {
     }
     pub fn to_exchange_error(&self) -> ExchangeError {
         let mut error = self.error_fields();
-        if self.native.is_some() || !self.value.is_object() {
+        if !self.value.is_object() {
             return error;
         }
-        let code = self.value.get("code").and_then(|code| {
-            if code.is_undefined() {
-                Ok(None)
-            } else {
-                to_json(&code).map(Some)
-            }
-        });
+        let code = self
+            .value
+            .get("code")
+            .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
         match code {
             Ok(code) => error.code = code,
             Err(cause) => return cause.error_fields(),
@@ -139,6 +139,11 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
+        if let Some(code) = &error.code {
+            value
+                .define("code", code.clone())
+                .expect("fresh error code property");
+        }
         Self {
             value,
             native: Some(Rc::new(error)),

@@ -83,6 +83,22 @@ status = "ported"
 note = "Live TypeScript oracle runs under cargo test; adapted Rust representation preserves the source data and helper behavior on finite JSON and Unicode scalar strings. NEXT_PUBLIC simulator origins are supplied at Cargo build time, corresponding to bundled application configuration; rebuild when configuration changes."
 
 [[symbol]]
+ts = "HYROTRADER_PROD_URL"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HYROTRADER_PROD_WS_URL"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "ENDPOINTS"
 kind = "const"
 layer = "adapted"
