@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Thirteen rows are reconciled below; the other
-24 remain pending individual production-binding audits.
+`divergence-cluster-rulings.md`. Eighteen rows are reconciled below; the other
+19 remain pending individual production-binding audits.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -106,7 +106,6 @@ bytes and requires GREEN. Its existing instruments-info exclusion control stays.
 
 Evidence: `/tmp/bybit-retry-mutating-evidence.json` records the initial three
 source replays; the reproducible maintained oracle is
-<<<<<<< HEAD
 `scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is an accepted safety residual. The seven earlier verdicts
 and their proof are in PR #1182.
 
@@ -136,8 +135,3 @@ and prove that shadowed `__proto__` accessors are not read.
 `scripts/hyro-account-controls.py` mutates each accepted guard/result and the
 Error classification separately, requires compiled named native failures, then
 restores exact source bytes and replays the receiver.
-=======
-`scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is the
-eighth reconciled audit row, followed by the five-row position-index batch
-above. The seven earlier verdicts and their proof are in PR #1182.
->>>>>>> origin/master
