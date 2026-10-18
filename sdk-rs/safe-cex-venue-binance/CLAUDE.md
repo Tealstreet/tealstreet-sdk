@@ -57,6 +57,15 @@ Default cargo tests remain hermetic.
 
 ## Integration boundaries
 
+Futures and PM keep `market_websocket` nested under the public socket, as the
+maintained TS constructors do. The parent owns its connection, candle listeners
+and disposal; it is not an exchange-level `PublicSecondary` socket. Registering
+it there incorrectly merges market handler stats and health timestamps into the
+top-level public group. The production addon regression
+`native-binance-nested-socket.test.mjs` replays four recorded frames through both
+TLS sockets and checks worker-delivered stats and the public timestamp while
+requiring nested candle delivery to remain live.
+
 The native API factory attaches the constructed exchange's canonical Store to
 every shared HTTP client, including the public no-proxy client. The shared
 factory observer owns outcome classification and silent counter increments;
@@ -1048,3 +1057,9 @@ only to the canonical order_logic/request_weight helpers. The actual interceptor
 and post-only classifier bindings already call those helpers directly. Keep the
 native signed-client and batch-rejection canaries in DEAD_STATE_FORWARDER_REVIEW.md
 when changing either live binding. The complete State receipt remains separate.
+
+The inverse private warning witness uses the complete maintained API/factory for
+terminal rejections: primitive throws become setup errors with `undefined`, while
+Error messages retain their UTF16 units inside the enhanced prefix. A fulfilled
+negative-code response rejects in the later venue interceptor and stays unenhanced.
+Keep both paths in `inverse_socket_binding` and `inverse-socket-source.cjs`.

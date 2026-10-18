@@ -1244,11 +1244,18 @@ impl JsHttpHost for RestHttpHost {
                 Err(failure) => {
                     if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
                         failure.transport_error.as_deref()
-                        && let Some(cause) = origin
+                        && origin
                             .error()
-                            .downcast_ref::<super::value::owned::OwnedCallbackError>()
+                            .is::<super::value::owned::OwnedCallbackError>()
                     {
-                        return Err(Thrown::new(cause.value().to_js()));
+                        let config = if remote.is_some() {
+                            effective_config(&config, (*failure.request).clone())?
+                        } else {
+                            config
+                        };
+                        let error = Thrown::from(crate::runtime::ExchangeError::from(failure));
+                        error.value.define("config", config)?;
+                        return Err(error);
                     }
                     let config = if remote.is_some() {
                         effective_config(&config, *failure.request)?

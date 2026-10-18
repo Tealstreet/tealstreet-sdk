@@ -5,7 +5,9 @@ use crate::{
     exchange::Exchange,
     http::{HttpFuture, HttpHost},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
-    websocket::{UpgradeHeaders, WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
+    websocket::{
+        FrameDrainReceipt, UpgradeHeaders, WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket,
+    },
 };
 use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{
@@ -89,6 +91,7 @@ impl Future for HostTask {
 /// `ExchangeRuntime` + `WsRuntime` on the current tokio `LocalSet`.
 pub struct NativeRuntime {
     pub replay_clock: Option<Rc<crate::replay_clock::ReplayClock>>,
+    parser_receipts: RefCell<Vec<Rc<RefCell<Vec<FrameDrainReceipt>>>>>,
     frame_counts: Rc<
         RefCell<
             Vec<(
@@ -134,6 +137,15 @@ pub fn native_frame_receipts(runtime: &NativeRuntime) -> Vec<Value> {
         .map(|(url, counts)| serde_json::json!({"url": url, "counts": counts.borrow().clone()}))
         .collect()
 }
+/// Parser histories from every diagnostic socket, including nested/disposed owners.
+pub fn native_parser_receipts(runtime: &NativeRuntime) -> Vec<FrameDrainReceipt> {
+    runtime
+        .parser_receipts
+        .borrow()
+        .iter()
+        .flat_map(|receipts| receipts.borrow().clone())
+        .collect()
+}
 /// The account's proxy token (ts: the accessToken facade; exchange-server's per-account provider).
 pub type ProxyTokenSource = Rc<dyn Fn() -> TransportFuture<'static, String>>;
 /// ts: registerTealstreetTransport for a native host. `tealstreetTunnel` REST goes over
@@ -164,6 +176,7 @@ fn runtime_over(
     let random = random_unit();
     Rc::new_cyclic(|owner| NativeRuntime {
         replay_clock,
+        parser_receipts: RefCell::default(),
         frame_counts: Rc::default(),
         origin: Instant::now(),
         owner: owner.clone(),
@@ -364,6 +377,11 @@ impl ExchangeRuntime for NativeRuntime {
 impl WsRuntime for NativeRuntime {
     fn frame_receipts_enabled(&self) -> bool {
         self.replay_clock.is_some()
+    }
+    fn register_frame_receipts(&self, receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>) {
+        if self.replay_clock.is_some() {
+            self.parser_receipts.borrow_mut().push(receipts);
+        }
     }
     fn transport(&self) -> Arc<dyn TransportProvider> {
         self.transport.clone()

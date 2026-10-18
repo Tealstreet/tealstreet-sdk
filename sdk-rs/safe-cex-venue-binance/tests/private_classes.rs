@@ -1536,6 +1536,18 @@ fn exchange_class_quiescent_ownership_releases_after_last_lease() {
                 },
             )
             .unwrap();
+            assert!(
+                owner
+                    .base
+                    .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::PublicSecondary)
+                    .is_none(),
+                "nested market sockets are not exchange-level secondary sockets: {venue:?}"
+            );
+            assert_eq!(
+                owner.public.market_websocket.get().is_some(),
+                venue != Venue::Spot,
+                "Futures/PM retain their nested market owner"
+            );
             let state = Rc::downgrade(&owner.state);
             let socket = Rc::downgrade(owner.public.base());
             let public = Rc::downgrade(&owner.public);
