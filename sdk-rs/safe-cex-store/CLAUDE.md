@@ -220,3 +220,7 @@ snapshots retain null; packing a null field intentionally omits its delta.
 owner borrows its actual state referent at each reached slot; lower layers cannot
 replace it with a typed snapshot. Internal emitter and native account observers
 use it, while `subscribe` keeps its explicit typed projection semantics.
+
+`orderbook::sort_order_book` delegates directly to safe-cex-num TimSort. Its
+112-profile native/source test pins both sides and retained fields against
+CI Node 24.20.0 / V8 13.6, including inconsistent NaN-price comparisons.

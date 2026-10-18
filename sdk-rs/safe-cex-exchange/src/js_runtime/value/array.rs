@@ -158,7 +158,7 @@ impl Js {
                 }
             }
         }
-        super::super::sorting::stable_sort(&mut values, &mut compare)?;
+        safe_cex_num::sorting::stable_sort(&mut values, &mut compare)?;
         let count = values.len() + undefined;
         for (index, value) in values
             .into_iter()
