@@ -538,12 +538,11 @@ impl BaseExchange {
     ) -> Self {
         let listeners: ListenerRows = Rc::default();
         let events = listeners.clone();
-        let unsubscribe = store.subscribe(Box::new(move |data, _| {
-            let data = from_typed(data).map_err(|error| {
-                safe_cex_types::StoreSubscriberError::new(error.message())
-                    .with_cause(Rc::new(error.to_exchange_error()))
+        let unsubscribe = store.subscribe_native(Box::new(move |data, _| {
+            let data = data.downcast_ref::<Js>().ok_or_else(|| {
+                safe_cex_types::StoreSubscriberError::new("Unsupported native Store state")
             })?;
-            emit_listeners(&events, "update", &[data]).map_err(Into::into)
+            emit_listeners(&events, "update", std::slice::from_ref(data)).map_err(Into::into)
         }));
         let active = options
             .tuning
