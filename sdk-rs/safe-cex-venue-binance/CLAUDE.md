@@ -1,5 +1,14 @@
 # Binance family port
 
+The public REST receipt group executes ten private production decoders directly,
+observing borrowed row identity, native numeric bits and mapper fields before
+reporting. Its finite stock JSON/UTF8 cases use the maintained TS REST oracle and
+Node coercion/property outcomes. Endpoint lookup, inclusion predicate and strict
+equality have separate non-decoder roles; those receipts do not execute behavior.
+Canonical `--measure --module=public_rest` retains full compiler discovery and
+existing alias/helper obligations. It does not claim arbitrary JS graphs or the
+native feature matrix; public socket owners have a separate receipt group.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/binance/CLAUDE.md).
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
@@ -144,6 +153,17 @@ shared `loadPolicy` API; never restore deleted flat maps. See the
 This selected native/default scope does not cover other owners or the feature
 matrix. Keep the existing [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
 and [typed-output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) boundaries.
+
+The public `CancelOrderHandle` alias retains the strict map-only Order decoder
+through `Rc<RefCell<Order>>`. Its native decoder observations inspect fields,
+numeric bits, optional presence and shared-cell mutation before projection.
+The constructed `private_classes` test `native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symbols`
+holds both signed Futures DELETEs, then checks each successful category and the
+untouched symbol in the actual Store. Its source witness constructs the actual
+TS parent, Store and API clients and scripts only terminal Axios I/O. PM/Spot
+do not use this handle alias.
+`scripts/cancel-order-handle-controls.py` breaks the live symbol filter, requires
+that compiled native assertion to fail and restores exact source bytes for GREEN.
 
 Spot order formatting consumes BaseExchange's client-ID resolution and final
 native-count assertion directly. Its market snapshot is cloned before errors
@@ -864,12 +884,31 @@ depth and historical-position witnesses and compiled live history flag control
 are documented in DELEGATED_ROUTE_REVIEW.md; do not recreate forwarding helpers
 to satisfy accepted-owner discovery.
 
+The five `order_operations` function contracts distinguish two typed command/table
+roles from three executed native collection/property outputs. Keep their alias
+records separate. `ORDER_OPERATION_CONTRACT_REVIEW.md` documents the real signed
+cancel/amendment witnesses, five isolated compiled controls and canonical scoped
+measurement; classification receipts alone do not execute those effects.
+
 The ten `signing` accepted-set owners are outbound codecs and request-signing
 transformations, with individual non-decoder role records and exact compiler APIs.
 Their classification receipts do not execute signing or establish arbitrary-JS
 parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
+
+The exchange assembly's legacy JSON error port forwards the selected raw value
+to BaseExchange. Do not String-coerce it first: Base distinguishes strings,
+falsy values, objects and primitives when formatting and reporting an error.
+`json_error_binding --features native` constructs the actual Futures/PM venues,
+configured signers/clients and Store, rejecting only terminal HTTP. The object
+profile checks native reporter name/message/detail bits and console/reporter
+identity before diagnostic projection. Its ignored source test constructs the
+whole maintained classes and real Axios/Store for six profiles. Run
+`scripts/json-error-controls.py` to compile the old String conversion, require
+both named native failures, then restore exact bytes and require all three
+tests to pass. This preserves the existing JSON input boundary; it does not
+claim arbitrary input graph identity across that boundary.
 
 The seven `public_ticker_events` function contracts execute the real raw-data
 readers; they are not typed/non-decoder exemptions. Native bit and ordered-effect
@@ -878,9 +917,21 @@ private_classes source-case guard keeps all 164 cases live in CI. Preserve the
 208 constructed native Store cases and seven independent compiled body controls
 when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
 
+<<<<<<< HEAD
 `PrivateSocket` has a specific typed constructor/Deref accepted-set record.
 `scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
 including full dependency discovery and actual compiler features, then checks the
 one resulting classification receipt. It does not claim decoder execution;
 `private_owner_binding` and its independently compiled controls establish the
 separate real constructor/Store/authentication effects described above.
+=======
+The four orderbook function contracts execute the real snapshot, borrowed update
+selector, apply algorithm and private indexed-cell reader. Native number bits,
+sequence state, borrowed record identity and partial mutation are observed before
+JSON output. `scripts/orderbook-function-source.cjs` derives 123 cases from the
+maintained TypeScript functions; the ordinary `orderbook_function_contracts` target
+keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell's
+immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
+requires four independent compiled faults to fail actual constructed native
+socket/HTTP tests, with exact source restoration and a passing rerun after each.
+>>>>>>> origin/master
