@@ -110,18 +110,26 @@ impl WeexExchange {
         member: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
-        let runtime = self.host.0.exchange_runtime();
-        let value = self.host.this().call_method(member, args);
+        let receiver = self.host.this();
         Box::pin(async move {
-            let value = await_js(&runtime, value.map_err(err)?).await.map_err(err)?;
+            let value = await_js(
+                &self.host.0.exchange_runtime(),
+                receiver.call_method(member, args).map_err(err)?,
+            )
+            .await
+            .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
     fn unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
-        let runtime = self.host.0.exchange_runtime();
-        let value = self.host.this().call_method(member, args);
+        let receiver = self.host.this();
         Box::pin(async move {
-            await_js(&runtime, value.map_err(err)?).await.map_err(err)?;
+            await_js(
+                &self.host.0.exchange_runtime(),
+                receiver.call_method(member, args).map_err(err)?,
+            )
+            .await
+            .map_err(err)?;
             Ok(())
         })
     }
