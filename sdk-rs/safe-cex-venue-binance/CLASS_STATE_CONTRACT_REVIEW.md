@@ -80,6 +80,25 @@ The missing-contract replay also completed through the full canonical inventory:
 all four owners produced named unclassified results before their records were
 added. Neither compiler failures nor infrastructure failures count as RED.
 
-The CI wiring suite passes376 tests. This new venue integration target is covered
+The CI wiring suite passes 376 tests. This new venue integration target is covered
 by the existing Binance `--all-targets -- --include-ignored` registration; no parity
 Node test was added or renamed, so the fixed parity-test expected list is unchanged.
+
+Final normal-master integration at `9533bc90fe` preserves all 219 pre-existing
+Binance contracts with exact numeric spellings and adds only these four owners.
+The production source remains byte-identical to the four control restorations.
+The ordinary native binding targets pass 12 tests, including both maintained TS
+oracles. Full canonical default/native replay retains all 201 dependency decoder
+owners: four explicitly unexecuted native-gated default rows delegate to four
+executed native receipts with zero failures and zero classification-only results.
+Workspace formatting, strict Binance native and Wasm all-target Clippy, the
+all-features cancellation inventory (six pass, one existing opt-in exporter
+ignored), wiring (376 tests), extractor (zero drift), and the rebuilt full parity
+index (7,563 rows / 16,339 public Rust items) all pass.
+
+Two inherited failures remain disclosed and separately owned: the general
+inherited-constant suite stops at old Bitget/GRVT source pins (routed to l89ogr),
+and CI parity stops at Bitget's `allowed-ECONNRESET` retry count (routed to kxakrb).
+The Binance-specific exact-method guard passes all three tests. This cohort
+changes neither production behavior nor those unrelated guards.
+Strict host `--all-targets` Clippy for the parity tooling crate also passes.
