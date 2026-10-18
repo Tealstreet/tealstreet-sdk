@@ -588,7 +588,7 @@ fn shared_runtime_graph_enters_bound_private_orders_without_projection() {
             Js::object(vec![("o", data.clone())])
         };
         let events = Js::array(vec![event]);
-        events.splice_array(0, 0, vec![Js::Undefined]).unwrap();
+        events.splice_array(1, 0, 0, vec![Js::Undefined]).unwrap();
         events.delete(&[u16::from(b'0')]).unwrap();
         owner.handle_events(1, events).unwrap();
         let effects = parent.effects.borrow();
