@@ -236,8 +236,14 @@ pub fn post_worker_array_edge(post: js_sys::Function, mode: u32) -> Result<(), J
         0 => array
             .call_method("push", vec![Js::Number(-0.0)])
             .map(|_| ()),
-        1 => array.splice_array(u32::MAX as usize, 0, vec![Js::Number(-0.0)]),
+        1 => array.splice_array(
+            u32::MAX as usize,
+            u32::MAX as usize,
+            0,
+            vec![Js::Number(-0.0)],
+        ),
         2 => array.splice_array(
+            u32::MAX as usize,
             (u32::MAX - 1) as usize,
             0,
             vec![Js::Number(11.0), Js::Number(-0.0)],
