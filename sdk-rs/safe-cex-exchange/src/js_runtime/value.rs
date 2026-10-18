@@ -1300,6 +1300,12 @@ impl Js {
         Ok(self.clone())
     }
     pub(super) fn freeze(&self) -> Result<Js, Thrown> {
+        self.set_integrity(true)
+    }
+    pub(super) fn seal(&self) -> Result<Js, Thrown> {
+        self.set_integrity(false)
+    }
+    fn set_integrity(&self, frozen: bool) -> Result<Js, Thrown> {
         self.prevent_extensions()?;
         if let Some(props) = self.own_props() {
             for property in props.borrow_mut().values_mut() {
@@ -1307,7 +1313,7 @@ impl Js {
                     Prop::Data(value) => {
                         *property = Prop::DataDescriptor {
                             value: value.clone(),
-                            writable: false,
+                            writable: !frozen,
                             enumerable: true,
                             configurable: false,
                         }
@@ -1317,7 +1323,9 @@ impl Js {
                         configurable,
                         ..
                     } => {
-                        *writable = false;
+                        if frozen {
+                            *writable = false;
+                        }
                         *configurable = false;
                     }
                     Prop::Accessor { configurable, .. } => *configurable = false,

@@ -16,6 +16,14 @@ Graph-backed typed reads return `StoreReadError` with property/projection phase
 and the opaque original cause; conversion recovers that cause before diagnostics.
 The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
 
+Native snapshots retain their own undefined properties; JSON serialization is a
+separate boundary. Retained config reads keep absence distinct from an own
+undefined or null value. Source `for` loops recheck live input lengths, while
+`forEach`, `map`, `filter` and `findIndex` keep their captured iteration lengths.
+Object literal spreads finish before evaluating the following explicit fields.
+`Object.seal` and `Object.freeze` share the canonical descriptor integrity
+operation; sealing preserves existing writable bits and both retain accessors.
+
 ## Abstract venue hooks
 
 `Exchange` is the object-safe venue protocol surface. Venue implementations

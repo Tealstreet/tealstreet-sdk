@@ -85,7 +85,7 @@ fn reduce_only_native_presence_and_store_updates_match_actual_source() {
             );
         }
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native.clone());
+        let facade = store::facade(native.clone()).unwrap();
         facade
             .call_method("addOrUpdateOrder", vec![row(2., old_state)])
             .unwrap();
@@ -106,10 +106,10 @@ fn reduce_only_native_presence_and_store_updates_match_actual_source() {
             "actual maintained Store {case}"
         );
         let expected: Value = serde_json::from_str(case["wire"].as_str().unwrap()).unwrap();
-        let actual = serde_json::to_value(&native.orders()[0]).unwrap();
+        let actual = serde_json::to_value(&native.orders().unwrap()[0]).unwrap();
         assert_eq!(actual.get("reduceOnly"), expected.get("reduceOnly"));
         assert_eq!(
-            native.orders()[0].amount,
+            native.orders().unwrap()[0].amount,
             3.,
             "presence handling keeps other carried fields"
         );

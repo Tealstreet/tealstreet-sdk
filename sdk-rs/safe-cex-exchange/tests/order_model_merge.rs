@@ -53,7 +53,7 @@ fn order_upserts_match_source_absent_undefined_and_value_for_all_model_fields() 
         let field = case["field"].as_str().unwrap();
         fields.insert(field.to_owned());
         let native = Rc::new(DefaultStore::new());
-        let facade = store::facade(native.clone());
+        let facade = store::facade(native.clone()).unwrap();
         let old = order(2.0);
         carry(
             &old,
@@ -71,7 +71,7 @@ fn order_upserts_match_source_absent_undefined_and_value_for_all_model_fields() 
         );
         let method = case["method"].as_str().unwrap();
         upsert(&facade, method, incoming);
-        assert_eq!(native.orders().len(), 1);
+        assert_eq!(native.orders().unwrap().len(), 1);
         let actual = facade.get("orders").unwrap().get("0").unwrap();
         let state = if !actual.has_own(field) {
             0
@@ -92,7 +92,7 @@ fn order_upserts_match_source_absent_undefined_and_value_for_all_model_fields() 
                 "ORDER-MERGE {field} retained value"
             );
         }
-        assert_eq!(native.orders()[0].amount, 3.0);
+        assert_eq!(native.orders().unwrap()[0].amount, 3.0);
         compared += 1;
     }
     assert_eq!(compared, 270, "ORDER-MERGE native comparison floor");
@@ -128,7 +128,7 @@ fn absent_order_number_properties_preserve_native_bits_and_undefined_overwrites(
         for field in ["price", "takeProfit", "stopLoss"] {
             for number in [-0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
                 let native = Rc::new(DefaultStore::new());
-                let facade = store::facade(native);
+                let facade = store::facade(native).unwrap();
                 let old = order(2.0);
                 old.define(field, Js::Number(number)).unwrap();
                 upsert(&facade, "addOrUpdateOrder", old);

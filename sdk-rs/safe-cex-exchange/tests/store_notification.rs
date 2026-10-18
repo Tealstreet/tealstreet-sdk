@@ -60,7 +60,7 @@ fn first_subscriber_failure_surfaces_after_committed_setting_and_skips_fanout() 
                     "first failing subscriber retains its identity"
                 );
                 assert!(
-                    store.options().is_hedged,
+                    store.options().unwrap().is_hedged,
                     "mutation commits before callback error surfaces"
                 );
                 let emit = |message: &str| -> Result<(), &str> {
@@ -85,7 +85,7 @@ fn first_subscriber_failure_surfaces_after_committed_setting_and_skips_fanout() 
             row["rejected"].as_bool().unwrap(),
             "only caller emitter failure escapes"
         );
-        assert!(store.options().is_hedged);
+        assert!(store.options().unwrap().is_hedged);
         first();
         second();
     }

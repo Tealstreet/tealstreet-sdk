@@ -98,7 +98,7 @@ impl Wake for Sentinel {
 #[test]
 fn dropped_position_waiter_releases_waker_before_shared_task_finishes() {
     let store = Rc::new(DefaultStore::new());
-    let mut loaded = store.loaded().clone();
+    let mut loaded = store.loaded().unwrap().clone();
     loaded.positions = true;
     Store::update(
         store.as_ref(),

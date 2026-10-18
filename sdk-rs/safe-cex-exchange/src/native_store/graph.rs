@@ -143,7 +143,10 @@ fn row(value: &Js, index: usize) -> Result<Js, Thrown> {
 fn id_index(items: &Js) -> Result<Js, Thrown> {
     let out = Js::object(vec![]);
     out.set_prototype(Js::Null)?;
-    for index in 0..length(items)? {
+    let mut next = 0;
+    while next < length(items)? {
+        let index = next;
+        next += 1;
         let key = row(items, index)?.get("id")?;
         out.set_key(&key.to_js_string()?, Js::Number(index as f64))?;
     }
@@ -153,7 +156,10 @@ fn id_index(items: &Js) -> Result<Js, Thrown> {
 fn id_lookup(items: &Js) -> Result<Js, Thrown> {
     let out = Js::object(vec![]);
     out.set_prototype(Js::Null)?;
-    for index in 0..length(items)? {
+    let mut next = 0;
+    while next < length(items)? {
+        let index = next;
+        next += 1;
         let key = row(items, index)?.get("id")?;
         out.set_key(&key.to_js_string()?, Js::Bool(true))?;
     }
@@ -670,11 +676,13 @@ impl Graph {
     }
 
     fn worker_patch(&self, key: &str, incoming: &Js) -> Result<Option<bool>, Thrown> {
-        let count = length(incoming)?;
-        if count == 0 || count != length(&self.get(key)?)? {
+        if length(incoming)? == 0 || length(incoming)? != length(&self.get(key)?)? {
             return Ok(None);
         }
-        for at in 0..count {
+        let mut next = 0;
+        while next < length(incoming)? {
+            let at = next;
+            next += 1;
             let current = row(&self.get(key)?, at)?;
             let incoming = row(incoming, at)?;
             if !current.get("id")?.strict_equals(&incoming.get("id")?)
@@ -686,7 +694,10 @@ impl Graph {
             }
         }
         let mut changed = false;
-        for at in 0..count {
+        let mut next = 0;
+        while next < length(incoming)? {
+            let at = next;
+            next += 1;
             let current = row(&self.get(key)?, at)?;
             let incoming = row(incoming, at)?;
             if key == "tickers" {
@@ -711,8 +722,14 @@ impl Graph {
     }
 
     fn packed_in_place(&self, values: &Js) -> Result<bool, Thrown> {
+        if length(values)? == 0 {
+            return Ok(false);
+        }
         let mut changed = false;
-        for at in 0..length(values)? {
+        let mut next = 0;
+        while next < length(values)? {
+            let at = next;
+            next += 1;
             let delta = row(values, at)?;
             let index = delta.get("0")?;
             let mask = delta.get("1")?;
@@ -744,8 +761,14 @@ impl Graph {
     }
 
     pub fn apply_deltas(&self, values: &Js, worker: bool) -> Result<(), Thrown> {
+        if length(values)? == 0 {
+            return Ok(());
+        }
         let mut changed = false;
-        for at in 0..length(values)? {
+        let mut next = 0;
+        while next < length(values)? {
+            let at = next;
+            next += 1;
             let delta = row(values, at)?;
             let index = delta.get("0")?;
             if ops::less_equal(&index, &Js::Number(-1.0))?
@@ -799,6 +822,8 @@ impl Graph {
                 normalized.delete(&utf16("tickers"))?;
                 patched_tickers = changed;
             } else {
+                // Object literal spread is evaluated before the explicit RHS.
+                normalized = changes.spread_object()?;
                 let input = changes.get("tickers")?;
                 let mapped = input.call_method(
                     "map",
@@ -806,7 +831,6 @@ impl Graph {
                         strip_info(&arg(&args, 0), true)
                     })],
                 )?;
-                normalized = changes.spread_object()?;
                 normalized.define("tickers", mapped)?;
             }
         }
@@ -1276,3 +1300,10 @@ impl Graph {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "legacy_owner_tests.rs"]
+mod legacy_owner_tests;
+#[cfg(test)]
+#[path = "legacy_request_tests.rs"]
+mod legacy_request_tests;

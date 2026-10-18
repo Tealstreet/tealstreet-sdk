@@ -27,7 +27,7 @@ fn retained_store_tables_read_current_native_entries() {
     }))
     .unwrap();
     Store::update(native.as_ref(), update, false).unwrap();
-    let facade = store::facade(native.clone());
+    let facade = store::facade(native.clone()).unwrap();
     let cases = source["storeCases"].as_array().unwrap();
     let tables: Vec<Js> = cases
         .iter()
@@ -72,10 +72,10 @@ fn full_replacement_keeps_old_map_and_dto_generation_separate() {
             "precision":{"amount":1,"price":0.5},"limits":{"amount":{"min":1,"max":1000},"leverage":{"min":1,"max":100}}}]
     })).unwrap();
     Store::update(native.as_ref(), update, false).unwrap();
-    let facade = store::facade(native.clone());
+    let facade = store::facade(native.clone()).unwrap();
     let old_map = facade.get("marketsById").unwrap();
     let first = old_map.get("m").unwrap();
-    let mut replacement = native.markets()[0].clone();
+    let mut replacement = native.markets().unwrap()[0].clone();
     replacement.active = false;
     Store::update(
         native.as_ref(),
@@ -119,7 +119,7 @@ fn granular_writes_preserve_previously_read_dto_reference_identity() {
             "precision":{"amount":1,"price":0.5},"limits":{"amount":{"min":1,"max":1000},"leverage":{"min":1,"max":100}}}]
     })).unwrap();
     Store::update(native.as_ref(), update, false).unwrap();
-    let facade = store::facade(native.clone());
+    let facade = store::facade(native.clone()).unwrap();
     let table = facade.get("marketsById").unwrap();
     let first = table.get("m").unwrap();
     let patch = ModelPatch::from(json!({"active":false}).as_object().unwrap().clone());

@@ -307,7 +307,7 @@ fn any_healthy_public_socket_wins_and_durable_diagnostics_survive_recovery() {
     b.track_last_received().unwrap();
     b.record_close_diagnostics(Some(1013), false);
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap();
+    let health = store.socket_health().unwrap().unwrap();
     assert_eq!(health["publicHealthy"], true);
     assert_eq!(health["publicInitialized"], true);
     assert_eq!(health["publicCloseCode"].as_f64(), Some(1013.0));
@@ -433,6 +433,7 @@ fn replacing_socket_clears_old_optional_close_and_message_evidence() {
         store
             .socket_health()
             .unwrap()
+            .unwrap()
             .get("publicCloseCode")
             .is_some()
     );
@@ -440,13 +441,14 @@ fn replacing_socket_clears_old_optional_close_and_message_evidence() {
         store
             .socket_health()
             .unwrap()
+            .unwrap()
             .get("publicLastMessage")
             .is_some()
     );
     let fresh = socket(&venue, &runtime, 2);
     venue.base().set_socket(SocketSlot::Public, Some(fresh));
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap();
+    let health = store.socket_health().unwrap().unwrap();
     assert!(health.get("publicCloseCode").is_none());
     assert!(health.get("publicLastMessage").is_none());
     assert_eq!(health["publicCloseCountTotal"].as_f64(), Some(0.0));
@@ -601,7 +603,7 @@ fn cleared_socket_diagnostics_preserve_retained_key_order() {
         )
         .unwrap();
     venue.base().sync_socket_health_to_store().unwrap();
-    let health = store.socket_health().unwrap();
+    let health = store.socket_health().unwrap().unwrap();
     let retained: Vec<_> = health
         .as_object()
         .unwrap()
@@ -1279,7 +1281,11 @@ mod js_sockets {
         assert_eq!(socket.get("pingAt").unwrap().as_f64(), Some(sent_at));
         runtime.now.set(sent_at + 100.0);
         socket.call_method("handlePongEvent", vec![]).unwrap();
-        assert_eq!(store.latency(), 50.0, "latency is half the ping round trip");
+        assert_eq!(
+            store.latency().unwrap(),
+            50.0,
+            "latency is half the ping round trip"
+        );
     }
 
     /// A socket whose connectAndSubscribe counts redials and registers `this.onClose`.

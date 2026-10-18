@@ -34,7 +34,7 @@ fn batch_threshold_and_returns_truthiness_are_preserved_from_actual_source() {
                 )
                 .unwrap();
             store.add_or_update_orders(incoming).unwrap();
-            let prices: Vec<_> = store.orders().iter().map(|o| o.price).collect();
+            let prices: Vec<_> = store.orders().unwrap().iter().map(|o| o.price).collect();
             let expected: Vec<f64> = serde_json::from_value(row["prices"].clone()).unwrap();
             assert_eq!(prices, expected, "BUCKET-WITNESS batch duplicate threshold");
         } else {

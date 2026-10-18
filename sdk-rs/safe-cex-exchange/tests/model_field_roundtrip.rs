@@ -93,12 +93,12 @@ fn absent_undefined_and_known_order_fields_survive_the_native_bridge() {
 #[test]
 fn store_insert_and_partial_patch_retain_own_undefined() {
     let store = Rc::new(DefaultStore::new());
-    let facade = store::facade(store.clone());
+    let facade = store::facade(store.clone()).unwrap();
     let value = from_json(&order());
     value.define("type", Js::Undefined).unwrap();
     value.define("price", Js::Undefined).unwrap();
     facade.call_method("addOrUpdateOrder", vec![value]).unwrap();
-    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.orders().unwrap().len(), 1);
     let inserted = facade.get("orders").unwrap().get("0").unwrap();
     assert!(inserted.has_own("type") && inserted.get("type").unwrap().is_undefined());
     assert!(inserted.has_own("price") && inserted.get("price").unwrap().is_undefined());

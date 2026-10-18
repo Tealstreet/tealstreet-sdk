@@ -178,4 +178,41 @@ const balances=[];
  assert.equal(thrown,cause);
  balances.push({case:'getter-cause-after-owner-drop',sameCause:true});
 }
-process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances}));
+const ordering=[];
+for(const throws of [false,true]){
+ const store=new DefaultStore(),events=[],cause={opaque:'\uD800'};
+ const row={id:'t',symbol:'BTCUSD',get info(){events.push('row.info');return undefined}};
+ const changes={get tickers(){events.push('changes.tickers');return [row]},get latency(){events.push('changes.latency');if(throws)throw cause;return 7}};
+ let error;try{store.update(changes)}catch(e){error=e}
+ const expected=throws?['changes.tickers','changes.tickers','changes.latency']:['changes.tickers','changes.tickers','changes.latency','changes.tickers','row.info'];
+ assert.deepEqual(events,expected);assert.equal(error,throws?cause:undefined);
+ ordering.push({case:'spread-before-strip',throws,events,sameCause:error===cause});
+}
+{
+ const store=new DefaultStore();store.update({orders:[{id:'a'},{id:'b'}]});
+ let expanded=false;const selectors=[{get id(){if(!expanded){expanded=true;selectors.push({id:'b'})}return 'a'}}];
+ store.removeOrders(selectors);assert.deepEqual(store.orders,[]);assert.equal(selectors.length,2);
+ ordering.push({case:'dynamic-id-lookup-length',remaining:store.orders,selectorCount:selectors.length});
+}
+for(const packed of [false,true]){
+ const f=fixture('tickersById'),deltas=[];
+ const append=()=>{if(deltas.length===1)deltas.push(packed?[0,1,9]:[0,{bid:9}]);return packed?7:0};
+ deltas.push(packed?[0,1]:[]);
+ Object.defineProperty(deltas[0],packed?'2':'0',{enumerable:true,configurable:true,get:append});
+ if(!packed)deltas[0][1]={bid:7};
+ f.store[packed?'applyPackedTickerDeltas':'applyTickerDeltas'](deltas);
+ assert.equal(f.view.t.bid,9);ordering.push({case:packed?'live-packed-length':'live-legacy-length',bid:f.view.t.bid});
+}
+{
+ const store=new DefaultStore(),a={id:'a',symbol:'A',active:true},b={id:'b',symbol:'B',active:true};store.update({markets:[a]});
+ const incoming=[{id:'a',symbol:'A',get active(){if(incoming.length===1){store.markets.push(b);incoming.push({...b,active:false})}return false}}];
+ store.update({markets:incoming},true);assert.equal(b.active,false);
+ ordering.push({case:'live-worker-patch-length',active:b.active});
+}
+{
+ const store=new DefaultStore(),positions=[{id:'a',contracts:1},{id:'b',contracts:1}];let appended=false;store.update({positions});
+ Object.defineProperty(positions[0],'id',{enumerable:true,configurable:true,get(){if(!appended){appended=true;positions.push({id:'c',contracts:1})}return 'a'}});
+ store.updatePositions([[{id:'c'},{contracts:7}],[{id:'x'},{contracts:8}]]);
+ assert.equal(positions[2].contracts,7);ordering.push({case:'live-id-index-length',contracts:positions[2].contracts});
+}
+process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites,reentry,balances,ordering}));

@@ -17,7 +17,7 @@ fn snapshot_health_flags_and_leverage_keep_native_identity() {
         }
         let update: StoreUpdate=serde_json::from_value(json!({"socketHealth":health,"fetchedLeverage":{"identity":{"buyLeverage":11,"sellLeverage":23}}})).unwrap();
         Store::update(&real, update, false).unwrap();
-        let actual = Store::socket_health(&real).unwrap();
+        let actual = Store::socket_health(&real).unwrap().unwrap();
         for flag in flags {
             assert_eq!(
                 actual[flag],
@@ -25,7 +25,7 @@ fn snapshot_health_flags_and_leverage_keep_native_identity() {
                 "STORE-NATIVE one-hot socket flag {flag}"
             );
         }
-        let leverage = real.fetched_leverage();
+        let leverage = real.fetched_leverage().unwrap();
         assert_eq!(
             (
                 leverage["identity"].buy_leverage,

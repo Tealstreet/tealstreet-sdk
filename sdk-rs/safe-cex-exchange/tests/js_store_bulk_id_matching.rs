@@ -76,7 +76,7 @@ fn bulk_remove_selector_ids_match_source_property_keys_and_early_returns() {
     let cases = source["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 30, "source array cases and empty Store floor");
     for row in cases {
-        let facade = store::facade(Rc::new(DefaultStore::new()));
+        let facade = store::facade(Rc::new(DefaultStore::new())).unwrap();
         let seeds = if row["empty"] == true {
             vec![]
         } else {

@@ -501,7 +501,16 @@ impl Store for DefaultStore {
         self.read("starkConfig")
     }
     fn zk_link_config(&self) -> Result<Option<retained_json::RetainedJsonInput>, StoreReadError> {
-        self.read("zkLinkConfig")
+        let state = self.graph.state();
+        let present = state.has_own("zkLinkConfig");
+        let value = state.get("zkLinkConfig").map_err(property)?;
+        if !present && value.is_undefined() {
+            Ok(None)
+        } else {
+            // The outer presence is independent of the retained payload: an
+            // own undefined (or null) remains a present opaque config value.
+            project(&value).map(Some)
+        }
     }
     fn user_data(&self) -> Result<Option<Value>, StoreReadError> {
         self.read("userData")

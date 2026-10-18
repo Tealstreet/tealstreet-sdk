@@ -155,13 +155,13 @@ fn currency_rows_keep_source_shapes_through_typed_store_updates() {
         "BTC":{"used":1.0,"free":2.0,"total":3.0,"upnl":4.0}
     }});
     let native = Rc::new(DefaultStore::new());
-    let facade = store::facade(native.clone());
+    let facade = store::facade(native.clone()).unwrap();
     facade
         .call_method("update", vec![from_json(&json!({"balance":source}))])
         .unwrap();
-    let actual = native.balance();
+    let actual = native.balance().unwrap();
     assert_eq!(
-        serde_json::to_value(&*actual).unwrap(),
+        serde_json::to_value(&actual).unwrap(),
         source,
         "Store preserves currency field names without normalization"
     );

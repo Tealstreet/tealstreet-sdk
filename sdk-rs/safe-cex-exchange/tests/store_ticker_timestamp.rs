@@ -17,12 +17,18 @@ fn ticker_timestamp_survives_store_insert_and_numeric_patch() {
         )
         .unwrap();
     assert_eq!(
-        store.tickers_by_id()["x"].timestamp.unwrap().to_bits(),
+        store.tickers_by_id().unwrap()["x"]
+            .timestamp
+            .unwrap()
+            .to_bits(),
         123.25_f64.to_bits(),
         "TICKER-TIMESTAMP Store insert identity"
     );
     assert_eq!(
-        store.tickers_by_symbol()["Y"].timestamp.unwrap().to_bits(),
+        store.tickers_by_symbol().unwrap()["Y"]
+            .timestamp
+            .unwrap()
+            .to_bits(),
         123.25_f64.to_bits(),
         "TICKER-TIMESTAMP Store symbol insert identity"
     );
@@ -32,17 +38,23 @@ fn ticker_timestamp_survives_store_insert_and_numeric_patch() {
         patch.set_number("timestamp", timestamp);
         store.update_ticker("x", &patch).unwrap();
         assert_eq!(
-            store.tickers_by_id()["x"].timestamp.unwrap().to_bits(),
+            store.tickers_by_id().unwrap()["x"]
+                .timestamp
+                .unwrap()
+                .to_bits(),
             timestamp.to_bits(),
             "TICKER-TIMESTAMP Store numeric patch identity"
         );
         assert_eq!(
-            store.tickers_by_id()["x"].quote_volume.to_bits(),
+            store.tickers_by_id().unwrap()["x"].quote_volume.to_bits(),
             17_f64.to_bits(),
             "TICKER-TIMESTAMP Store unrelated field identity"
         );
         assert_eq!(
-            store.tickers_by_symbol()["Y"].timestamp.unwrap().to_bits(),
+            store.tickers_by_symbol().unwrap()["Y"]
+                .timestamp
+                .unwrap()
+                .to_bits(),
             timestamp.to_bits(),
             "TICKER-TIMESTAMP Store symbol numeric patch identity"
         );
@@ -61,12 +73,12 @@ fn ticker_timestamp_survives_store_insert_and_numeric_patch() {
         )
         .unwrap();
     assert_eq!(
-        store.tickers_by_id()["x"].timestamp,
+        store.tickers_by_id().unwrap()["x"].timestamp,
         None,
         "TICKER-TIMESTAMP Store id absence replacement"
     );
     assert_eq!(
-        store.tickers_by_symbol()["Y"].timestamp,
+        store.tickers_by_symbol().unwrap()["Y"].timestamp,
         None,
         "TICKER-TIMESTAMP Store symbol absence replacement"
     );

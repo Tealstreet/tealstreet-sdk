@@ -70,7 +70,7 @@ fn singular_store_ids_match_actual_source_property_access_and_lookup_rules() {
         "six mutators,eleven selectors,empty/nonempty stores"
     );
     for row in cases {
-        let facade = store::facade(Rc::new(DefaultStore::new()));
+        let facade = store::facade(Rc::new(DefaultStore::new())).unwrap();
         let state = row["state"].as_str().unwrap();
         let seed = &source["seeds"][state];
         let seeds = if row["empty"] == true {
