@@ -10,7 +10,10 @@
 //! keys are not. Imported history/client-ID helpers are caller bindings; existing
 //! typed history helper's inherited-output refusal is not changed or claimed here.
 use crate::{
-    private_event_value::*,
+    private_event_value::{
+        EventOps, EventValue, PrivateEnum, array_values, fallback, find, nullish, number, record,
+        string, table,
+    },
     request_weight::{Failure, type_error},
 };
 use safe_cex_types::{OrderStatus, OrderType};

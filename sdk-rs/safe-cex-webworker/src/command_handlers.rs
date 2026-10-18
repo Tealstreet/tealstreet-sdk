@@ -88,7 +88,7 @@ impl<H: CommandHandlerHost> ChaserOrderHandler<H> {
                         if let Err(e) = h.handle(&p) {
                             report.base().runtime.report_exception(
                                 &e,
-                                &serde_json::json!({"handler":"ChaserOrderHandler"}),
+                                &serde_json::json!({"handler":"ChaserOrderHandler"}).into(),
                             );
                         }
                     }
@@ -156,7 +156,7 @@ impl<H: CommandHandlerHost> TwapHandler<H> {
                         if let Err(e) = h.handle(&p) {
                             report.base().runtime.report_exception(
                                 &e,
-                                &serde_json::json!({"handler":"TwapHandler"}),
+                                &serde_json::json!({"handler":"TwapHandler"}).into(),
                             );
                         }
                     }
@@ -301,7 +301,7 @@ impl<H: CommandHandlerHost> UiStateHandler<H> {
                         if let Err(e) = h.handle(&p) {
                             report.base().runtime.report_exception(
                                 &e,
-                                &serde_json::json!({"handler":"UiStateHandler"}),
+                                &serde_json::json!({"handler":"UiStateHandler"}).into(),
                             );
                         }
                     }

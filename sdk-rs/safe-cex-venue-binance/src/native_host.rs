@@ -10,12 +10,17 @@ use crate::{
     class_jobs::NativeFuture,
     exchange_classes::{ExchangeDependencies, ExchangeImports, ExchangeState, HttpMethod, Method},
     lifecycle::TickTimer,
-    orderbook::*,
+    orderbook::{
+        apply_binance_depth_update, load_binance_order_book_snapshot,
+        reset_binance_order_book_sync_state,
+    },
     private_classes::{
         Action, CapturedAction, NativePrivateSocket, PrivateBase, PrivateCallback, PrivateParent,
         PrivateTimers,
     },
-    private_event_value::*,
+    private_event_value::{
+        EventOps, EventValue, array_values, native_json, number, record, string,
+    },
     private_rest::{SnapshotCompletion, SnapshotRequestFuture},
     private_session::{Factory, RateHook, Venue},
     protocol_types::BinanceOrderBookApplyResult,
@@ -1099,10 +1104,8 @@ impl ExchangeImports for NativeImports {
             Ok(record([
                 (
                     "records",
-                    EventValue::from_json(
-                        serde_json::to_value(&result.records)
-                            .map_err(|e| failure(e.to_string()))?,
-                    ),
+                    safe_cex_exchange::js_runtime::value::from_typed(&result.records)
+                        .map_err(|error| exchange_failure(error.to_exchange_error()))?,
                 ),
                 ("truncated", EventValue::Bool(result.truncated)),
                 ("exhaustedChunks", number(result.exhausted_chunks)),
@@ -1214,7 +1217,7 @@ impl ExchangeImports for NativeImports {
             if let Err(error) = result {
                 reporter.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"binance tick loop"}),
+                    &serde_json::json!({"operation":"binance tick loop"}).into(),
                 );
             }
         }));
@@ -1258,7 +1261,10 @@ fn schedule_timer(
             timers.live.borrow_mut().remove(&(id as u64));
         }
         if let Err(error) = action() {
-            runtime.report_exception(&error, &serde_json::json!({"operation":"binance timer"}));
+            runtime.report_exception(
+                &error,
+                &serde_json::json!({"operation":"binance timer"}).into(),
+            );
         }
     }));
     this.live.borrow_mut().insert(id as u64, task);
@@ -1356,7 +1362,7 @@ impl ListenerHost for NativeListenerOperations {
             if let Err(error) = job.await {
                 runtime.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"binance listener job"}),
+                    &serde_json::json!({"operation":"binance listener job"}).into(),
                 );
             }
         }));
@@ -1666,7 +1672,7 @@ impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData
     fn connect(&self) {
         self.0.report_exception(
             &ExchangeError::new(NO_EXTERNAL),
-            &serde_json::json!({"operation":"external public data"}),
+            &serde_json::json!({"operation":"external public data"}).into(),
         );
     }
     fn dispose(&self) {}

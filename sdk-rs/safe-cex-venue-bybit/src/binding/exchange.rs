@@ -781,7 +781,7 @@ impl Exchange for BybitExchange {
         if let Err(error) = self.listen_public_ohlcvs(options, callback) {
             self.base.runtime.report_exception(
                 &error,
-                &serde_json::json!({"operation":"Bybit listenOHLCVs"}),
+                &serde_json::json!({"operation":"Bybit listenOHLCVs"}).into(),
             );
         }
     }

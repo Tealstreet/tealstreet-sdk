@@ -1759,7 +1759,11 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
 
     def(
         "BigNumber",
-        func("BigNumber", |a| Ok(big_number(decimal_of(&arg(&a, 0))?))),
+        Js::constructor(
+            "BigNumber",
+            Some(Rc::new(|_, a| Ok(big_number(decimal_of(&arg(&a, 0))?)))),
+            |_, a| Ok(big_number(decimal_of(&arg(&a, 0))?)),
+        ),
     );
     if let Ok(ctor) = g.get("BigNumber") {
         for (name, pick) in [

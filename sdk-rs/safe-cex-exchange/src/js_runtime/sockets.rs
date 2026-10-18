@@ -226,7 +226,7 @@ impl JsProtocol {
             Err(thrown) => {
                 core.context.runtime.report_exception(
                     &core_error(thrown),
-                    &serde_json::json!({ "operation": "recoversAfterOffline" }),
+                    &serde_json::json!({ "operation": "recoversAfterOffline" }).into(),
                 );
                 false
             }
@@ -257,7 +257,7 @@ impl JsProtocol {
         read().unwrap_or_else(|thrown| {
             core.context.runtime.report_exception(
                 &core_error(thrown),
-                &serde_json::json!({ "operation": member }),
+                &serde_json::json!({ "operation": member }).into(),
             );
             None
         })
@@ -286,7 +286,8 @@ impl JsProtocol {
             if let Err(thrown) = listener.call(Js::Undefined, vec![payload.clone()]) {
                 core.context.runtime.report_exception(
                     &core_error(thrown),
-                    &serde_json::json!({ "operation": "websocket listener", "event": event }),
+                    &serde_json::json!({ "operation": "websocket listener", "event": event })
+                        .into(),
                 );
                 // RWS invokes its listeners in one host callback; plain EventTarget
                 // reports each exception independently and continues dispatch.
@@ -387,7 +388,7 @@ impl WsProtocol for JsProtocol {
         if let Err(thrown) = result {
             core.context.runtime.report_exception(
                 &core_error(thrown),
-                &serde_json::json!({ "operation": "dispose" }),
+                &serde_json::json!({ "operation": "dispose" }).into(),
             );
         }
     }
@@ -463,7 +464,7 @@ impl WsProtocol for JsProtocol {
             Err(thrown) => {
                 core.context.runtime.report_exception(
                     &core_error(thrown),
-                    &serde_json::json!({ "operation": "resyncsPrivateStateOnReopen" }),
+                    &serde_json::json!({ "operation": "resyncsPrivateStateOnReopen" }).into(),
                 );
                 None
             }
