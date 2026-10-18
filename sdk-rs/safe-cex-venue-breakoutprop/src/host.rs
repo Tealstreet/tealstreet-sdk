@@ -220,6 +220,7 @@ impl NativeRuntimeHost for ProductionHost {
             Ok(())
         });
         let host = safe_cex_exchange::loop_util::LoopHost {
+            runtime: runtime.clone(),
             sleep: Rc::new(move |ms| {
                 let pending = sleep_runtime.sleep(ms.max(0.0) as u64);
                 Box::pin(async move { pending.await.map_err(|error| error.message) })
@@ -242,7 +243,7 @@ impl NativeRuntimeHost for ProductionHost {
             .await
             {
                 runtime.report_exception(
-                    &ExchangeError::new(error),
+                    &error,
                     &json!({"venue":"breakoutprop","source":"poll loop"}).into(),
                 );
             }
