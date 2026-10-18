@@ -98,6 +98,11 @@ One borrowed read-only byte view lasts only through visit_bytes; the codec copie
 pairs back into u16 storage. The wire payload keeps numeric unit sequences and
 their existing range, type and cardinality checks. The single retained JSON
 writer lives here below Num and applies JSON.stringify projection only on output.
+Payload tags decode directly into the closed eight-variant tag enum. Short ASCII
+field identifiers use stack storage; long and Unicode names retain the existing
+String projection. Explicit key context preserves StringDeserializer's rejection
+of optional and newtype map keys. retained_utf16 checks these admissions against
+stock Serde and covers borrowed/owned UTF-8 byte tags independently.
 `safe-cex-exchange/tests/js_runtime.rs` runs the maintained TS model/Store corpus
 against actual typed bridges and the production Store facade before wire checks.
 StoreData and StoreUpdate use the same native Store record profile: undefined
