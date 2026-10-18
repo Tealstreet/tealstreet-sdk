@@ -4355,15 +4355,18 @@ dependencies = [
  "futures",
  "hmac 0.12.1",
  "indexmap 2.14.2",
+ "js-sys",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
  "safe-cex-transport",
  "safe-cex-types",
+ "safe-cex-webworker",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "wasm-bindgen",
 ]
 
 [[package]]

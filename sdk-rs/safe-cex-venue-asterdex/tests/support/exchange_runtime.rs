@@ -1,4 +1,4 @@
-//! Scripted AsterDEX transport and deterministic scheduler.
+// Scripted AsterDEX transport and deterministic scheduler.
 mod virtual_time {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),

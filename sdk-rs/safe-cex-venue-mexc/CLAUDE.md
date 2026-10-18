@@ -368,3 +368,16 @@ Independent null, string, NaN-producing, object, overflow, signed-zero and false
 inputs accompany distinct good rows, with finite Store resets before every case.
 The shared `ticker-native-controls.py` compiles live field-publication faults,
 requires named native failures, restores exact bytes and requires passing tests.
+
+Reporting regressions retain the actual Error at the production worker post sink:
+read `name`/`message` before JSON projection, and compare the shared JS stringifier
+separately against actual source `JSON.stringify`. Numeric reports compare IEEE
+bits rather than serde's integer/float storage variants. The 120 reporting cases
+and six throwing-listener cases retain their original call and fallback floors.
+`examples/reporting_worker_host.rs` constructs the real MEXC venue and drives
+all three failing REST readers through `install_exchange_event_bridge` and
+`WorkerDataPost::for_browser`. Build that example for wasm32, run wasm-bindgen
+with `--target nodejs`, then run `tests/reporting-worker-host.mjs <generated-js>`
+with `SAFE_CEX_TYPESCRIPT_PATH` set. Its six cases compare actual source readers
+and worker registration to the native browser post and UI structured clone.
+A cloned Error keeps its message but resets a custom name, matching JavaScript.
