@@ -13,6 +13,9 @@ const axiosRetry = require('axios-retry').default;
   try {
     const capture = {};
     const client = axios.create({baseURL: `http://127.0.0.1:${server.address().port}`, timeout: 5000, proxy: false});
+    let dispatched = 0;
+    const adapter = axios.getAdapter(client.defaults.adapter);
+    client.defaults.adapter = config => { dispatched++; return adapter(config); };
     axiosRetry(client, {
       retries: 1,
       retryCondition: () => true,
@@ -21,7 +24,7 @@ const axiosRetry = require('axios-retry').default;
     let completed;
     const done = new Promise((resolve, reject) => { completed = {resolve, reject}; });
     client.get('/retry').then(completed.resolve, completed.reject);
-    capture.immediate = requests;
+    capture.immediate = dispatched;
     await done;
     capture.afterReplay = requests;
     process.stdout.write(JSON.stringify(capture));
