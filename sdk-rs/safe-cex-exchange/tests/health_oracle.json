@@ -448,29 +448,29 @@
     {
       "exchange": "unknown",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "unknown",
@@ -3064,29 +3064,29 @@
     {
       "exchange": "bybitdemo",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "bybitdemo",
@@ -4372,29 +4372,29 @@
     {
       "exchange": "bybitinverse",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "bybitinverse",
@@ -5680,29 +5680,29 @@
     {
       "exchange": "bybitspot",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "bybitspot",
@@ -6814,29 +6814,29 @@
     {
       "exchange": "hyrotrader",
       "message": "retCode﻿:10003",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "retCode﻿:10003",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "retCode﻿:10003",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: retCode﻿:10003"
+      "summary": "ERROR - auth_invalid: retCode﻿:10003"
     },
     {
       "exchange": "hyrotrader",
@@ -6907,29 +6907,29 @@
     {
       "exchange": "hyrotrader",
       "message": "retCode=10003",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "retCode=10003",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "retCode=10003",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: retCode=10003"
+      "summary": "ERROR - auth_invalid: retCode=10003"
     },
     {
       "exchange": "hyrotrader",
@@ -6988,29 +6988,29 @@
     {
       "exchange": "hyrotrader",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "hyrotrader",
@@ -8296,29 +8296,29 @@
     {
       "exchange": "binance",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "binance",
@@ -9604,29 +9604,29 @@
     {
       "exchange": "bingx",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "bingx",
@@ -10912,29 +10912,29 @@
     {
       "exchange": "okx",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "okx",
@@ -12220,29 +12220,29 @@
     {
       "exchange": "hyperliquid",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "hyperliquid",
@@ -13528,29 +13528,29 @@
     {
       "exchange": "blofin",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "blofin",
@@ -14836,29 +14836,29 @@
     {
       "exchange": "coinbase",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "coinbase",
@@ -16144,29 +16144,29 @@
     {
       "exchange": "phemex",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "phemex",
@@ -17452,29 +17452,29 @@
     {
       "exchange": "bitunix",
       "message": "API key is invalid.",
-      "category": "unknown",
+      "category": "auth_invalid",
       "state": {
-        "status": "degraded",
+        "status": "error",
         "recentErrors": [
           {
-            "category": "unknown",
+            "category": "auth_invalid",
             "message": "API key is invalid.",
             "timestamp": 100000,
-            "severity": "warning"
+            "severity": "critical"
           }
         ],
         "errorCounts": {
-          "unknown": 1
+          "auth_invalid": 1
         },
         "lastUpdated": 100000,
         "lastError": {
-          "category": "unknown",
+          "category": "auth_invalid",
           "message": "API key is invalid.",
           "timestamp": 100000,
-          "severity": "warning"
+          "severity": "critical"
         }
       },
-      "summary": "DEGRADED - unknown: API key is invalid."
+      "summary": "ERROR - auth_invalid: API key is invalid."
     },
     {
       "exchange": "bitunix",

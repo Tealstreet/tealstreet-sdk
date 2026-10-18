@@ -366,6 +366,9 @@ hooks also dispatch through `Exchange`; multi-symbol subscriptions emit one
 `SubscribedCandle` carrying `candle`, `symbol`, and `interval` (flattened on wire).
 The committed health-feature policy test checks Cargo's actual default graphs:
 regex stays out of the core graph and remains present through the host facade.
+Regenerate health patterns and the monitor oracle together with
+`node safe-cex-exchange/scripts/generate-health.cjs` from `sdk-rs` after TS changes.
+The focused auth regression covers spaced API keys and Hyro's labelled code 10003.
 
 Proxy JWT expiration lives in `proxy_token::is_token_expired(token, &VirtualClock)`. Hosts return a clone of their existing service clock through `ProxyTokenHost::virtual_clock`; both proxy token client and future access-token adapters must use this shared helper.
 
