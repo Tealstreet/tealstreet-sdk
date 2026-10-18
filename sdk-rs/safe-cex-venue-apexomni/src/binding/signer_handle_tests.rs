@@ -57,12 +57,12 @@ fn native_contract_handle_refuses_foreign_opaque_payloads() {
     let signer = NativeSigner::module();
     let handle: ZkLinkHandle = Rc::new(std::cell::Cell::new(19));
     let same = handle.clone();
+    let error = match signer.new_transaction(TransactionKind::Contract, handle) {
+        Ok(_) => panic!("foreign opaque handle must refuse"),
+        Err(error) => error,
+    };
     assert_eq!(
-        signer
-            .new_transaction(TransactionKind::Contract, handle)
-            .err()
-            .expect("foreign opaque handle must refuse")
-            .message,
+        error.message,
         "ApexOmni native zkLink capability supports contracts only"
     );
     assert_eq!(
