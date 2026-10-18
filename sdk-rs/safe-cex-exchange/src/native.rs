@@ -303,12 +303,13 @@ impl NativeRuntime {
     fn spawn_observed(
         &self,
         kind: Option<RuntimeTaskKind>,
+        origin: Option<&'static std::panic::Location<'static>>,
         future: Pin<Box<dyn Future<Output = ()>>>,
     ) -> Box<dyn ExchangeTask> {
         let registration = self
             .replay_clock
             .as_ref()
-            .map(|_| crate::task_receipts::register(&self.raw_tasks, kind));
+            .map(|_| crate::task_receipts::register(&self.raw_tasks, kind, origin));
         Box::new(LocalTask(spawn_local_task(Box::pin(HostTask {
             future,
             runtime: self.owner.clone(),
@@ -365,14 +366,14 @@ impl ExchangeRuntime for NativeRuntime {
         }))
     }
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
-        self.spawn_observed(None, future)
+        self.spawn_observed(None, Some(std::panic::Location::caller()), future)
     }
     fn spawn_classified(
         &self,
         kind: RuntimeTaskKind,
         future: Pin<Box<dyn Future<Output = ()>>>,
     ) -> Box<dyn ExchangeTask> {
-        self.spawn_observed(Some(kind), future)
+        self.spawn_observed(Some(kind), None, future)
     }
     fn task_work_started(&self) {
         crate::task_receipts::work_started();

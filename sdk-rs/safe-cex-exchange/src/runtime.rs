@@ -414,6 +414,7 @@ pub trait ExchangeRuntime {
     fn now_ms(&self) -> f64;
     /// Schedule on the monotonic clock; even zero delay yields a scheduler turn.
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()>;
+    #[track_caller]
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask>;
     /// Unclassified spawn_local calls remain unknown to diagnostic drain receipts.
     /// Hosts without receipts retain their ordinary scheduling implementation.

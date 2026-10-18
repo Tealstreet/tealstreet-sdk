@@ -23,7 +23,8 @@ fn unknown_and_finite_work_block_even_when_awaiting_future_timers() {
         let runtime = native_replay_runtime(1_800_000_000_000.0);
         replay_clock::activate(runtime.replay_clock.as_ref().unwrap()).unwrap();
         let sleep = runtime.sleep(100);
-        let unknown = runtime.spawn_local(Box::pin(async move {
+        let dynamic: Rc<dyn ExchangeRuntime> = runtime.clone();
+        let unknown = dynamic.spawn_local(Box::pin(async move {
             sleep.await.unwrap();
         }));
         let sleep = runtime.sleep(100);
@@ -36,6 +37,13 @@ fn unknown_and_finite_work_block_even_when_awaiting_future_timers() {
         settle().await;
         let receipt = replay_raw_tasks(&runtime);
         assert_eq!(receipt["unknown"], 1);
+        assert!(
+            receipt["unknownTasks"][0]["origin"]
+                .as_str()
+                .unwrap()
+                .contains("tests/raw_task_receipts.rs")
+        );
+        assert_eq!(receipt["unknownTasks"][0]["waitHint"], "timer");
         assert_eq!(receipt["finite"], 1);
         assert_eq!(receipt["waitingTimers"], 0);
         assert_eq!(receipt["blocking"], 2);

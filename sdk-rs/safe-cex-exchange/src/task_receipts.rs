@@ -27,6 +27,8 @@ pub(crate) struct Tasks {
 pub(crate) struct State {
     kind: Option<RuntimeTaskKind>,
     finite_callback: AtomicBool,
+    origin: Option<String>,
+    hint: AtomicUsize,
     status: AtomicUsize,
 }
 pub(crate) struct Registration {
@@ -41,10 +43,16 @@ impl Drop for Registration {
         }
     }
 }
-pub(crate) fn register(owner: &Rc<RefCell<Tasks>>, kind: Option<RuntimeTaskKind>) -> Registration {
+pub(crate) fn register(
+    owner: &Rc<RefCell<Tasks>>,
+    kind: Option<RuntimeTaskKind>,
+    origin: Option<&'static std::panic::Location<'static>>,
+) -> Registration {
     let state = Arc::new(State {
         kind,
         finite_callback: AtomicBool::new(false),
+        origin: origin.map(ToString::to_string),
+        hint: AtomicUsize::new(ACTIVE),
         status: AtomicUsize::new(ACTIVE),
     });
     let mut tasks = owner.borrow_mut();
@@ -97,6 +105,7 @@ impl Wake for Signal {
 }
 impl Registration {
     pub(crate) fn enter(&self, parent: &Waker) -> (Enter, Waker, usize) {
+        self.state.hint.store(ACTIVE, Ordering::SeqCst);
         let version = self.state.status.fetch_and(!STATUS_MASK, Ordering::SeqCst) & !STATUS_MASK;
         let previous =
             with_current(|current| current.borrow_mut().replace((self.state.clone(), version)));
@@ -124,21 +133,21 @@ impl Registration {
 /// A finite/unknown task remains blocking even if it happens to await a timer.
 pub(crate) fn waiting(kind: RuntimeTaskKind) {
     with_current(|current| {
-        if let Some((state, version)) = current.borrow().as_ref()
-            && state.kind == Some(kind)
-            && !state.finite_callback.load(Ordering::SeqCst)
-        {
+        if let Some((state, version)) = current.borrow().as_ref() {
             let status = match kind {
                 RuntimeTaskKind::Timer => TIMER,
                 RuntimeTaskKind::SocketReader => SOCKET,
                 _ => return,
             };
-            let _ = state.status.compare_exchange(
-                *version | ACTIVE,
-                *version | status,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            );
+            state.hint.store(status, Ordering::SeqCst);
+            if state.kind == Some(kind) && !state.finite_callback.load(Ordering::SeqCst) {
+                let _ = state.status.compare_exchange(
+                    *version | ACTIVE,
+                    *version | status,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                );
+            }
         }
     });
 }
@@ -157,6 +166,7 @@ pub(crate) fn work_started() {
 pub(crate) fn receipt(owner: &Rc<RefCell<Tasks>>) -> serde_json::Value {
     let tasks = owner.borrow();
     let mut unknown = 0;
+    let mut unknown_tasks = Vec::new();
     let mut finite = 0;
     let mut ready = 0;
     let mut timers = 0;
@@ -171,7 +181,10 @@ pub(crate) fn receipt(owner: &Rc<RefCell<Tasks>>) -> serde_json::Value {
             state.kind,
             state.status.load(Ordering::SeqCst) & STATUS_MASK,
         ) {
-            (None, _) => unknown += 1,
+            (None, _) => {
+                unknown += 1;
+                unknown_tasks.push(serde_json::json!({"origin": state.origin, "waitHint": match state.hint.load(Ordering::SeqCst) { TIMER => "timer", SOCKET => "socket", _ => "unclassified" }}));
+            }
             (Some(RuntimeTaskKind::Timer), TIMER) => timers += 1,
             (Some(RuntimeTaskKind::SocketReader), SOCKET) => sockets += 1,
             (Some(RuntimeTaskKind::PromiseDriver), DELEGATED) => drivers += 1,
@@ -181,7 +194,7 @@ pub(crate) fn receipt(owner: &Rc<RefCell<Tasks>>) -> serde_json::Value {
     }
     serde_json::json!({
         "version": 1, "scope": "exchange-runtime", "unknown": unknown,
-        "finite": finite, "ready": ready, "waitingTimers": timers,
+        "unknownTasks": unknown_tasks, "finite": finite, "ready": ready, "waitingTimers": timers,
         "waitingSockets": sockets, "promiseDrivers": drivers,
         "blocking": unknown + finite + ready,
     })
@@ -194,7 +207,7 @@ mod tests {
     #[test]
     fn wake_invalidates_waiting_before_repoll_and_survives_a_racing_wait_mark() {
         let tasks = Rc::new(RefCell::new(Tasks::default()));
-        let task = register(&tasks, Some(RuntimeTaskKind::SocketReader));
+        let task = register(&tasks, Some(RuntimeTaskKind::SocketReader), None);
         let (entered, waker, version) = task.enter(Waker::noop());
         waiting(RuntimeTaskKind::SocketReader);
         task.pending(version);

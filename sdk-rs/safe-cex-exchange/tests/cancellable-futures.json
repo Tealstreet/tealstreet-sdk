@@ -2261,9 +2261,9 @@
       "boundaries": [
         "future-signature"
       ],
-      "producer_sha256": "ea92b03912841057604541e4ed12c6952f2355c48c2cdecf2d73e164fe605ce9",
+      "producer_sha256": "d56c46a97c6896b7315f41b48d8046861ea94fc4b530c9d165dcc567a579daf0",
       "classification": "delegated",
-      "reason": "Delegates to spawn_observed with explicit diagnostic classification; classification neither polls nor owns the supplied body.",
+      "reason": "Delegates to spawn_observed with explicit diagnostic classification; classification neither polls nor owns the supplied body. Reviewed diagnostic source Location capture: stores only static source coordinates, never the future, runtime or callback arguments; task/drop ownership is unchanged.",
       "delegate": "src/native.rs::NativeRuntime::spawn_observed"
     },
     {
@@ -2271,9 +2271,9 @@
       "boundaries": [
         "future-signature"
       ],
-      "producer_sha256": "b38d28d766c0b4756b765125bd3eeb9ee4e921b954244a5474a97866b04c745c",
+      "producer_sha256": "19bdfa3e2f1b050e5b1f6911b062148bf286044a11428f206b3d8f8d373ee2f1",
       "classification": "no-owned-latch",
-      "reason": "Hands HostTask to tokio spawn_local and returns LocalTask, whose cancel aborts it. HostTask keeps only a weak runtime and drops the caller future with its host task; the queue lifetime belongs to its detached OwnedTasks driver. Reviewed raw-task receipt instrumentation: diagnostic classification/pending-leaf observations add no scheduling turn; existing producer ownership, cancellation guards and cleanup remain. Native unpolled cancellation and pending timer/socket tests execute the registration lifetime."
+      "reason": "Hands HostTask to tokio spawn_local and returns LocalTask, whose cancel aborts it. HostTask keeps only a weak runtime and drops the caller future with its host task; the queue lifetime belongs to its detached OwnedTasks driver. Reviewed raw-task receipt instrumentation: diagnostic classification/pending-leaf observations add no scheduling turn; existing producer ownership, cancellation guards and cleanup remain. Native unpolled cancellation and pending timer/socket tests execute the registration lifetime. Reviewed diagnostic source Location capture: stores only static source coordinates, never the future, runtime or callback arguments; task/drop ownership is unchanged."
     },
     {
       "owner": "src/native.rs::NativeRuntime as WsRuntime::dial",
@@ -2292,9 +2292,9 @@
       "boundaries": [
         "future-signature"
       ],
-      "producer_sha256": "436ea08fa805d01615be5866c5337ce92153ae3c0180e9d185474545f52a7b0d",
+      "producer_sha256": "6e159386092579c76fda0d80715eb2e25b76ea8c00e11442dcd77854c51d9333",
       "classification": "guarded",
-      "reason": "A pre-spawn Registration removes its diagnostic entry on HostTask drop, including cancellation before first poll. It owns no task body/account; LocalTask keeps existing Tokio abort semantics.",
+      "reason": "A pre-spawn Registration removes its diagnostic entry on HostTask drop, including cancellation before first poll. It owns no task body/account; LocalTask keeps existing Tokio abort semantics. Reviewed diagnostic source Location capture: stores only static source coordinates, never the future, runtime or callback arguments; task/drop ownership is unchanged.",
       "guards": [
         {
           "type": "Registration",
@@ -2308,7 +2308,7 @@
       "source_dependencies": [
         {
           "file": "src/task_receipts.rs",
-          "sha256": "f8fec391e1a2bdfa10575f3025201ef62ec2bcd580ed129501969c4793c915de"
+          "sha256": "91be6c94e2d5c029d41d34b281248d38d6a7b413d112711582d691b539f94ee4"
         }
       ]
     },
