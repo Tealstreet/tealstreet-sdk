@@ -465,10 +465,10 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "37729f25cedef3d50538e87684d5966df0ddaf084cbe443e2c8c0fc40c5bc519",
+      "producer_sha256": "16447185fcb7972eeba68bf39ae582de8932ef2eba4b6ac9d2fb81ca57bb500f",
       "classification": "delegated",
       "delegate": "src/exchange.rs::BaseExchange::worker_reply",
-      "reason": "call_method_in_worker delegates pending lifetime to the named correlated-reply owner without creating a second cancellation reservation. The synchronous after-hook now propagates its original error after reply settlement; it introduces no later await or owned latch."
+      "reason": "call_method_in_worker delegates pending lifetime to the named correlated-reply owner without creating a second cancellation reservation. The synchronous after-hook now propagates its original error after reply settlement; it introduces no later await or owned latch. Reviewed native reply/code projection: the correlated worker_reply still owns the only pending lifetime; final success JSON projection and the after-hook are synchronous, with no new await or reservation."
     },
     {
       "owner": "src/exchange.rs::BaseExchange::cancel_all_orders",
@@ -729,9 +729,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "b56c064825ea6c67d49718de82ee4a0373c440ca72ba5a2a10ae02055aa363ac",
+      "producer_sha256": "2f7976aadf6602908b38a3dd38a178dc726d5901e62e100b25e2dee083c3d895",
       "classification": "no-owned-latch",
-      "reason": "The old snapshot is owned while the venue fetch is pending; Store changes are committed after success with no caller-specific reservation."
+      "reason": "The old snapshot is owned while the venue fetch is pending; Store changes are committed after success with no caller-specific reservation. Reviewed native market event serialization after the existing awaits: no new pending slot, task registry or cancellation boundary; native callback failure still propagates at emission."
     },
     {
       "owner": "src/exchange.rs::BaseExchange::set_all_leverage",
@@ -815,10 +815,10 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "d81fa202c79c3e77aa7674aa81ef29ca465d887bcb69d6f06bd03b9bd8f81c32",
+      "producer_sha256": "8e7c48b7bb4dccf6acff537b50dcde7b7a1f045bf9ad858807f392067f383a83",
       "classification": "delegated",
       "delegate": "src/exchange.rs::BaseExchange::worker_reply",
-      "reason": "update_positions_in_webworker delegates pending lifetime to the named core owner without creating a second cancellation reservation."
+      "reason": "update_positions_in_webworker delegates pending lifetime to the named core owner without creating a second cancellation reservation. Reviewed native success/reason property reads after the same delegated worker_reply await; no new owner or asynchronous continuation."
     },
     {
       "owner": "src/exchange.rs::BaseExchange::wait_for_external_public_data_loaded",
@@ -845,9 +845,9 @@
         "await",
         "poll-fn"
       ],
-      "producer_sha256": "4c95769d169248e81cc09c2ff483173c37af9ccd3608e1ce1c1870acf03f757f",
+      "producer_sha256": "95bd9ae9d6488d6fe6f617c31c9e15a19bb610c6df5a5f7c584fe6f1710db3d0",
       "classification": "guarded",
-      "reason": "Invocation registers eagerly; the pre-pin SignerWaitGuard owns subscription and waker cleanup even for unpolled Drop. Callback throw retains the source settled-but-unresolved state. Caller cancellation remains an explicit owned-continuation choice.",
+      "reason": "Invocation registers eagerly; the pre-pin SignerWaitGuard owns subscription and waker cleanup even for unpolled Drop. Callback throw retains the source settled-but-unresolved state. Caller cancellation remains an explicit owned-continuation choice. Reviewed Js status payloads only; availability registration, guard construction, completion and Drop cleanup retain their prior sequencing and boundaries.",
       "witnesses": [
         "tests/core_lifecycle.rs::cancelled_signer_waits_release_subscription_and_ignore_late_callbacks",
         "tests/core_lifecycle.rs::signer_wait_starts_before_first_poll_and_unpolled_drop_cleans_up"
@@ -872,16 +872,16 @@
         "await",
         "poll-fn"
       ],
-      "producer_sha256": "66c1af8009ca5fda0845db84a5369be74cffefec10d8fa755d2fb54f21ce3ee8",
+      "producer_sha256": "da083f089ffc3f499de819abc11912d625d4c547121ffad1f21cb82402cd8120",
       "classification": "guarded",
-      "reason": "WorkerReplyGuard unregisters the correlation listener on caller Drop; its listener closure owns reply/waker state. Reviewed owned-timer cutover: disposal closes owned work before fallible reset; listener callback failures report after interval rearm or timeout completion. Review and limits: CANCELLATION_REVIEW.md. Reviewed wrapper addition at 6fe4d89c24; existing guard, registry and disposal bodies are unchanged. Incoming 49a942e761 adds synchronous recovery/redaction only; the guard, producer and named TASK-drop witnesses remain byte-identical, so the combined-file dependency pin is reconciled after review. Incoming 53ee502232 signing predicate extraction leaves this producer, WorkerReplyGuard and its Drop and named witness byte-identical; only the coarse exchange.rs dependency digest changes after review. Incoming aab488a8e2 changes the eager signer-wait entrypoint outside these guarded producers; worker_reply, WorkerReplyGuard, Base disposal and the merged owned-task implementation remain unchanged. The exchange.rs dependency pin follows that reviewed file change. Reviewed socket-lookup changes: synchronous weak resolution does not change this guard or its drop cleanup. Reviewed setter helper adds only a synchronous Cell write; worker reply and owned-task guards and disposal remain unchanged. Reviewed offline recovery routing: set_online_status now synchronously delegates to recover_after_offline instead of reconnect; this guarded creator, its guard and Drop bodies remain unchanged.",
+      "reason": "WorkerReplyGuard unregisters the correlation listener on caller Drop; its listener closure owns reply/waker state. Reviewed owned-timer cutover: disposal closes owned work before fallible reset; listener callback failures report after interval rearm or timeout completion. Review and limits: CANCELLATION_REVIEW.md. Reviewed wrapper addition at 6fe4d89c24; existing guard, registry and disposal bodies are unchanged. Incoming 49a942e761 adds synchronous recovery/redaction only; the guard, producer and named TASK-drop witnesses remain byte-identical, so the combined-file dependency pin is reconciled after review. Incoming 53ee502232 signing predicate extraction leaves this producer, WorkerReplyGuard and its Drop and named witness byte-identical; only the coarse exchange.rs dependency digest changes after review. Incoming aab488a8e2 changes the eager signer-wait entrypoint outside these guarded producers; worker_reply, WorkerReplyGuard, Base disposal and the merged owned-task implementation remain unchanged. The exchange.rs dependency pin follows that reviewed file change. Reviewed socket-lookup changes: synchronous weak resolution does not change this guard or its drop cleanup. Reviewed setter helper adds only a synchronous Cell write; worker reply and owned-task guards and disposal remain unchanged. Reviewed Js reply storage and correlation reads: the same WorkerReplyGuard removes the listener and timer on TASK drop; no guard, registration or await was removed or reordered. Reviewed offline recovery routing: set_online_status now synchronously delegates to recover_after_offline instead of reconnect; this guarded creator, its guard and Drop bodies remain unchanged. Reviewed listener-removal helper: off synchronously removes correlation listeners and drops displaced captures outside the listener borrow; this creator and guard Drop retain their registration and cancellation boundaries. Reviewed Raw(Js) reporter: only the synchronous error-reporting body and imports change this coarse dependency; WorkerReplyGuard, worker_reply, disposal, OwnedTasks producer and Driver Drop are byte-identical to c123551c1d.",
       "witnesses": [
         "tests/core_lifecycle.rs::dropping_worker_waiter_releases_its_listener_and_waker"
       ],
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "6fd7379a66becfd3670ff075d23b458d42817bb0de17eb710506bd71b0777d6d"
+          "sha256": "ed278c0a9945f0ef324a6b287ab1edd3145b48d83bd21ab1628bf51e2c738ecf"
         }
       ],
       "guards": [
@@ -1582,9 +1582,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "5554b68ece7b0b317ce5691e8db381a5b6cbfd10e91291edf143092cf9989456",
+      "producer_sha256": "94d8e4e82e5c05ea0caf21b440d1ccb0d3175cb6d93e51410945c34699278ab9",
       "classification": "no-owned-latch",
-      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention. Reviewed direct source-field initializer cutover: the callback and isSpot/isDemo getter reads complete synchronously before Rc publication and before external provider construction. Failure returns the original throw before callbacks are installed. All twelve existing async/await boundaries are unchanged; no new future, task, waiter or slot is introduced. Async facade review: fallible snapshot/order/position preparation runs inside its existing eager Promise body. Only owned arguments and weak socket context are newly captured; public/disposed snapshot exits precede tries coercion. No new latch or registry."
+      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention. Reviewed direct source-field initializer cutover: the callback and isSpot/isDemo getter reads complete synchronously before Rc publication and before external provider construction. Failure returns the original throw before callbacks are installed. All twelve existing async/await boundaries are unchanged; no new future, task, waiter or slot is introduced. Reviewed native emitter forwarding and error-code materialization within the existing factory: all async/socket/worker setup boundaries and task ownership remain unchanged. Reviewed synchronous emitter removal: live function-alias getters run outside listener borrows; a successful filter commits the captured rows, while a getter throw preserves its side effects and propagates. Existing async boundaries and lifecycle ownership are unchanged. Reviewed Raw(Js) facade: the synchronous emitAndLogError callback passes the original Js instead of eager Error/JSON projection. All twelve async/await boundaries and existing task, socket, worker-RPC and provider ownership are unchanged. Async facade review: fallible snapshot/order/position preparation runs inside its existing eager Promise body. Only owned arguments and weak socket context are newly captured; public/disposed snapshot exits precede tries coercion. No new latch or registry."
     },
     {
       "owner": "src/js_runtime/base_exchange.rs::worker_rpc",
@@ -1592,10 +1592,10 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "a6b0d7009c0cb2ea8817bb822ec16d3619e4b894737150161b628cee955b8487",
+      "producer_sha256": "d4a302bfe9c81040b37185809bb0cf4a982552dc5243b3b7585a082be1c4632e",
       "classification": "delegated",
       "delegate": "src/exchange.rs::BaseExchange::call_method_in_worker",
-      "reason": "The runtime-owned Promise keeps local venue/JSON arguments and awaits the existing core worker owner. WorkerReplyGuard owns the exact reply listener and timeout; no second listener, timer or independent latch is installed by this wrapper. Observer loss retains the source eager Promise task. The shared JS runtime test checks successful/error/timeout settlement and completion-hook forwarding."
+      "reason": "The runtime-owned Promise keeps local venue/JSON arguments and awaits the existing core worker owner. WorkerReplyGuard owns the exact reply listener and timeout; no second listener, timer or independent latch is installed by this wrapper. Observer loss retains the source eager Promise task. The shared JS runtime test checks successful/error/timeout settlement and completion-hook forwarding. Reviewed direct native error-code property materialization only; the existing worker future, response dispatch and task ownership remain unchanged."
     },
     {
       "owner": "src/js_runtime/builtins.rs::chain_value",
@@ -1649,9 +1649,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "58ca02279bf3aa45c646c86600d5272033c9bfd49031cc063cd04c3ccd32fbd1",
+      "producer_sha256": "3bfc58247c50f7c67d3974ce4846402c330de18748d3bd40798f761e58621c12",
       "classification": "no-owned-latch",
-      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership. Reviewed hosted-string ingress retains synchronous typed data provenance before the same signing/send child await; this adds no registration, task or shared owner."
+      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership. Reviewed hosted-string ingress retains synchronous typed data provenance before the same signing/send child await; this adds no registration, task or shared owner. Reviewed retained signer rejection projection is synchronous after the existing transport await; its owned error value introduces no task, latch, registration or borrow across suspension."
     },
     {
       "owner": "src/js_runtime/client.rs::dispatch",
@@ -2091,7 +2091,7 @@
       ],
       "producer_sha256": "a06b50a1c503f814c8b3f2c3661c0060e01c2e7cd6e2f27bcc81d4ea7bc68cce",
       "classification": "guarded",
-      "reason": "Registers before build/spawn and rejects stale host installation after inline completion, cancellation or discard. Slot.finish removes the exact registration and takes captures/host/cleanup once before callbacks. Driver owns a strong lease only for explicitly detached registries and releases it on completion or after Drop cleanup. Existing guard definitions and witnesses remain retained; new timeout witnesses separately cover detached handle drop and cancellation after sleep registration. Incoming 53ee502232 signing predicate extraction leaves Base.dispose and the entire registry/Driver implementation and named witnesses byte-identical; only the coarse exchange.rs dependency digest changes after review. Incoming aab488a8e2 changes the eager signer-wait entrypoint outside these guarded producers; worker_reply, WorkerReplyGuard, Base disposal and the merged owned-task implementation remain unchanged. The exchange.rs dependency pin follows that reviewed file change. Reviewed socket-lookup changes: synchronous weak resolution does not change this guard or its drop cleanup. Reviewed setter helper adds only a synchronous Cell write; worker reply and owned-task guards and disposal remain unchanged. Reviewed offline recovery routing: set_online_status now synchronously delegates to recover_after_offline instead of reconnect; this guarded creator, its guard and Drop bodies remain unchanged.",
+      "reason": "Registers before build/spawn and rejects stale host installation after inline completion, cancellation or discard. Slot.finish removes the exact registration and takes captures/host/cleanup once before callbacks. Driver owns a strong lease only for explicitly detached registries and releases it on completion or after Drop cleanup. Existing guard definitions and witnesses remain retained; new timeout witnesses separately cover detached handle drop and cancellation after sleep registration. Incoming 53ee502232 signing predicate extraction leaves Base.dispose and the entire registry/Driver implementation and named witnesses byte-identical; only the coarse exchange.rs dependency digest changes after review. Incoming aab488a8e2 changes the eager signer-wait entrypoint outside these guarded producers; worker_reply, WorkerReplyGuard, Base disposal and the merged owned-task implementation remain unchanged. The exchange.rs dependency pin follows that reviewed file change. Reviewed socket-lookup changes: synchronous weak resolution does not change this guard or its drop cleanup. Reviewed setter helper adds only a synchronous Cell write; worker reply and owned-task guards and disposal remain unchanged. Reviewed offline recovery routing: set_online_status now synchronously delegates to recover_after_offline instead of reconnect; this guarded creator, its guard and Drop bodies remain unchanged. Reviewed listener-removal helper: off synchronously removes correlation listeners and drops displaced captures outside the listener borrow; this creator and guard Drop retain their registration and cancellation boundaries. Reviewed Raw(Js) reporter: only the synchronous error-reporting body and imports change this coarse dependency; WorkerReplyGuard, worker_reply, disposal, OwnedTasks producer and Driver Drop are byte-identical to c123551c1d.",
       "witnesses": [
         "src/owned_tasks_tests.rs::cancellation_removes_registration_before_host_and_releases_unpolled_capture",
         "src/owned_tasks_tests.rs::inline_completion_and_inline_close_never_install_stale_handles",
@@ -2110,7 +2110,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "6fd7379a66becfd3670ff075d23b458d42817bb0de17eb710506bd71b0777d6d"
+          "sha256": "ed278c0a9945f0ef324a6b287ab1edd3145b48d83bd21ab1628bf51e2c738ecf"
         }
       ],
       "guards": [
@@ -2505,7 +2505,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "4d14028f0e902aa429824310272ac71376d6e849d6e1a57f26379370db8b3346"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2550,7 +2550,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "4d14028f0e902aa429824310272ac71376d6e849d6e1a57f26379370db8b3346"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2654,7 +2654,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "4d14028f0e902aa429824310272ac71376d6e849d6e1a57f26379370db8b3346"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2698,7 +2698,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "4d14028f0e902aa429824310272ac71376d6e849d6e1a57f26379370db8b3346"
         }
       ],
       "guards": [

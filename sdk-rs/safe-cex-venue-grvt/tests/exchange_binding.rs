@@ -808,10 +808,25 @@ fn real_private_fill_frame_emits_native_fill() {
         json!({"s":"v1.fill","f":{"i":"BTC_USDT_Perp","ib":true,"s":"0.125","p":"50001","ti":"native-fill-42","co":"71","oi":"0xabcdef"}}),
     );
     assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0]["id"], "native-fill-42");
-    assert_eq!(fills.borrow()[0]["orderId"], "71");
-    assert_eq!(fills.borrow()[0]["symbol"], SYMBOL);
-    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(0.125));
+    assert!(fills.borrow()[0].get("id").unwrap().strict_equals(
+        &safe_cex_exchange::js_runtime::value::Js::str("native-fill-42")
+    ));
+    assert!(
+        fills.borrow()[0]
+            .get("orderId")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("71"))
+    );
+    assert!(
+        fills.borrow()[0]
+            .get("symbol")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(SYMBOL))
+    );
+    assert_eq!(
+        fills.borrow()[0].get("amount").unwrap().as_f64(),
+        Some(0.125)
+    );
     h.venue().dispose().unwrap();
 }
 #[test]
@@ -999,4 +1014,140 @@ fn market_refresh_commits_good_rows_around_a_refused_asset_row() {
             .iter()
             .any(|line| line.contains("Refused GRVT market row"))
     );
+}
+
+fn candle_source(file: &str) -> Value {
+    let output = std::process::Command::new("node")
+        .arg(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join(file),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn assert_candle_fields(candle: &Candle, expected: &Value, label: &str) {
+    assert_eq!(expected.as_object().unwrap().len(), 6);
+    for (field, actual) in [
+        ("timestamp", candle.timestamp),
+        ("open", candle.open),
+        ("high", candle.high),
+        ("low", candle.low),
+        ("close", candle.close),
+        ("volume", candle.volume),
+    ] {
+        if expected[field]["nan"] == true {
+            assert!(actual.is_nan(), "{label}: native {field} NaN");
+        } else {
+            assert_eq!(
+                format!("{:016x}", actual.to_bits()),
+                expected[field]["bits"].as_str().unwrap(),
+                "{label}: native {field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rest_candles_keep_source_aliases_time_units_and_distinct_fields() {
+    let source = candle_source("data-reads-source.cjs");
+    let rows = source["candleRows"].as_array().unwrap();
+    assert_eq!(rows.len(), 17);
+    for (name, count) in [
+        ("full", 2),
+        ("lite", 1),
+        ("numeric", 1),
+        ("defaults", 1),
+        ("nan", 1),
+    ] {
+        let case = rows.iter().find(|row| row["name"] == name).unwrap();
+        let h = setup();
+        loaded(&h);
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/lite/v1/kline");
+        h.http.route(
+            "POST",
+            "/lite/v1/kline",
+            200.0,
+            serde_json::from_str(case["raw"].as_str().unwrap()).unwrap(),
+        );
+        let candles = h
+            .drive(
+                h.venue().fetch_ohlcv(
+                    serde_json::from_value(json!({
+                        "symbol":SYMBOL,"interval":"5m","from":11,"to":23,"limit":17
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        assert_eq!(candles.len(), count, "REST candle count {name}");
+        assert_eq!(case["result"].as_array().unwrap().len(), count);
+        for (candle, expected) in candles.iter().zip(case["result"].as_array().unwrap()) {
+            assert_candle_fields(candle, expected, name);
+        }
+        let calls = h.http.calls("/lite/v1/kline");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].data,
+            json!({"i":"BTC_USDT_Perp","i1":"CI_5_M","t":"TRADE","st":"11000000","et":"23000000","l":17.0})
+        );
+    }
+}
+
+#[test]
+fn socket_candles_keep_source_aliases_time_units_and_cleanup() {
+    use std::{cell::RefCell, rc::Rc};
+    let source = candle_source("public-feeds-source.cjs");
+    let rows = source["candleListenerRows"].as_array().unwrap();
+    assert_eq!(rows.len(), 12);
+    for name in ["lite", "full", "numeric-time", "zero-fallback", "invalid"] {
+        let case = rows.iter().find(|row| row["name"] == name).unwrap();
+        let mut opts = options();
+        opts.public_data_only = Some(true);
+        let h = harness(ExchangeName::Grvt, opts, script);
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let cleanup = h
+            .venue()
+            .listen_ohlcv(
+                serde_json::from_value(json!({"symbol":SYMBOL,"interval":"1m"})).unwrap(),
+                Rc::new(move |c| sink.borrow_mut().push(c)),
+            )
+            .unwrap();
+        let mut feed = case["input"].clone();
+        let field = if feed.get("i").is_some() {
+            "i"
+        } else {
+            "instrument"
+        };
+        feed[field] = json!("BTC_USDT_Perp");
+        let frame = json!({"s":"v1.candle","s1":"BTC_USDT_Perp@CI_1_M-TRADE","f":feed}).to_string();
+        let socket = h.runtime.sockets.borrow()[0].1.clone();
+        socket.events.borrow_mut().push_back(message(frame.clone()));
+        h.runtime.pump();
+        assert_eq!(seen.borrow().len(), 1, "socket candle callback {name}");
+        assert_eq!(case["candles"].as_array().unwrap().len(), 1);
+        assert_candle_fields(&seen.borrow()[0], &case["candles"][0], name);
+        cleanup().unwrap();
+        socket.events.borrow_mut().push_back(message(frame));
+        h.runtime.pump();
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "cleanup suppresses next candle {name}"
+        );
+        h.venue().dispose().unwrap();
+    }
 }

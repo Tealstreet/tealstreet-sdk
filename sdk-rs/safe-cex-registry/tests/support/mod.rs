@@ -30,6 +30,9 @@ use tokio::{
 use tokio_tungstenite::tungstenite::Message;
 
 pub type Handler = Rc<dyn Fn(&Seen) -> Option<Value>>;
+pub fn boundary_json(value: safe_cex_registry::native_value::NativeValue) -> Value {
+    safe_cex_exchange::js_runtime::value::to_json(&value.to_js()).unwrap()
+}
 pub const SECRET: &str = "native-host-secret";
 
 #[derive(Debug, Clone)]

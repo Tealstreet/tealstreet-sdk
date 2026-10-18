@@ -1,7 +1,7 @@
 const {ts,fs,path,vm,root,assert,load}=require('./oracle-loader.cjs');
 const file=path.join(root,'packages/safe-cex/src/exchanges/bitunix/bitunix.exchange.ts'),ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true),cls=ast.statements.find(ts.isClassDeclaration);
-const names=['fetchRegularOrders','fetchTpslOrders','formatCreateOrder','formatTPSLOrder','updateStandaloneTpslOrder','updateOrder','placeOrder','placeOrderBatch'];
-const helpers=['isRecord','getFirstValue','parseFiniteNumber','hasFiniteTriggerPrice','getBitunixReduceOnly','getTpslRawOrderId','getTpslLegOrderId','getVirtualTpslLeg','getVirtualTpslParentOrderId','getAttachedVirtualTpslLeg','isStandaloneTpslOrder','isPositionTpslOrder','getBitunixTriggerType','getTpslLegSnapshot'];
+const names=['fetchRegularOrders','fetchTpslOrders','formatCreateOrder','formatTPSLOrder','updateStandaloneTpslOrder','updateOrder','placeOrder','placeOrderBatch','recreateAttachedTpslParentOrder','hydratePositionIdBeforeFormatting'];
+const helpers=['isRecord','getFirstValue','parseFiniteNumber','hasFiniteTriggerPrice','getBitunixReduceOnly','getTpslRawOrderId','getTpslLegOrderId','getVirtualTpslLeg','getVirtualTpslParentOrderId','getAttachedVirtualTpslLeg','isStandaloneTpslOrder','isPositionTpslOrder','getBitunixTriggerType','getTpslLegSnapshot','getInternalTriggerType','isUnsupportedOrderOperation'];
 const codes={};for(const name of [...names,...helpers]){const nodes=cls.members.filter(n=>n.name?.getText(ast)===name);assert.equal(nodes.length,1);codes[name]=ts.transpileModule('(function(){return ('+nodes[0].initializer.getText(ast)+');})',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;}
 const enums=load(path.join(root,'packages/safe-cex/src/types.ts')),constants=load(path.join(root,'packages/safe-cex/src/exchanges/bitunix/bitunix.types.ts'));
 function module(file,requireFn){const mod={exports:{}};vm.runInThisContext('(function(require,module,exports){'+ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText+'\n})',{filename:file})(requireFn,mod,mod.exports);return mod.exports;}
@@ -81,6 +81,31 @@ async function batchRun(f){
  rows.push({name:'placeOrderBatch',fixture:f,events,result});
 }
 (async()=>{const selected=process.argv[2];
+if(selected==='attachedAmendmentRecovery') {
+ const {load:storeLoad}=require('../../safe-cex-types/scripts/accounts-source.cjs');
+ const {DefaultStore}=storeLoad(path.join(root,'packages/safe-cex/src/store/store.base.ts'));
+ const activeMarket=JSON.parse(process.argv[3]);
+ const cases=[];
+ for(const label of ['tp','sl','nonmatching','ordinary','limitTp','limitSl','cancelFailure','replacementFailure']) {
+  const parent={...order};
+  if(label==='limitTp'||label==='limitSl')parent.info={...parent.info,[label==='limitTp'?'tpOrderType':'slOrderType']:'LIMIT',[label==='limitTp'?'tpOrderPrice':'slOrderPrice']:'119.5'};
+  const initial=[parent,{...parent,id:'R__tp',type:'take_profit_market',price:120.5},{...parent,id:'R__sl',type:'stop_market',price:80},{...parent,id:'R4'},{...parent,id:'R4__tp',type:'take_profit_market'}];
+  const input={orders:initial,order:initial[label==='ordinary'?0:label==='sl'?2:1],update:{price:110.25}};
+  // Keep the API's independent msg-without-data diagnostic outside the method catch observation.
+  const modify={code:7,data:{},msg:label==='nonmatching'?'ordinary venue rejection':'ORDER DOES NOT SUPPORT THIS OPERATION'};
+  const cancel=label==='cancelFailure'?{code:9,data:{},msg:'cancel refused'}:{code:0};
+  const placement=label==='replacementFailure'?{code:8,data:{},msg:'replacement refused'}:{code:0,data:{orderId:'NEW'}};
+  const store=new DefaultStore();store.update({markets:[activeMarket],orders:initial,positions:[]});
+  const calls=[],errors=[];
+  const post=lane=>async(endpoint,payload)=>{calls.push({lane,endpoint,payload});return {data:endpoint===constants.ENDPOINTS.MODIFY_ORDER?modify:endpoint===constants.ENDPOINTS.CANCEL_ORDER?cancel:placement};};
+  const owner={store,positionIdCache:new Map(),orderTifCache:new Map(),orderReduceOnlyCache:new Map(),resolveCallerClientOrderId:o=>{assert.equal(o.clientOrderId,undefined);return undefined;},assertSingleNativeClientOrderId:(id,count)=>assert.equal(count,1),emitAndLogError:m=>errors.push(m),xhr:{post:post('limited')},unlimitedXHR:{post:post('unlimited')}};
+  const context={...enums,...constants,...math,...lodash,...load(path.join(root,'packages/safe-cex/src/utils/inverseObj.ts')),...module(path.join(root,'packages/safe-cex/src/utils/omitUndefined.ts'),id=>require(id)),uuid:()=> 'fixturenonce',sleep:async()=>{}};
+  for(const name of [...names,...helpers])owner[name]=vm.runInNewContext(codes[name],context).call(owner);
+  let result;try{result={ids:await owner.updateOrder({order:input.order,update:input.update})};}catch(e){result={error:e.message};}
+  cases.push({label,input,modify,cancel,placement,calls,errors,result,orders:store.orders});
+ }
+ process.stdout.write(JSON.stringify({cases}));return;
+}
 if(selected==='nativePlacementNumbers') {
  const activeMarket=JSON.parse(process.argv[3]);
  for(const bits of ['7ff8000000000000','7ff0000000000000','fff0000000000000']) {

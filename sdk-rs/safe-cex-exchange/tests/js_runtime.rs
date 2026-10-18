@@ -19,12 +19,14 @@ use std::{
 #[derive(Default)]
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
+    next_id: std::cell::Cell<u64>,
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
     exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
+    worker: std::cell::Cell<bool>,
     dial_socket: RefCell<Option<Rc<dyn safe_cex_exchange::websocket::WsSocket>>>,
     dials: RefCell<
         Vec<(
@@ -62,10 +64,12 @@ impl ExchangeRuntime for Runtime {
             .push((severity.into(), message.into()));
     }
     fn unique_id(&self) -> String {
-        "id".into()
+        let id = self.next_id.get();
+        self.next_id.set(id + 1);
+        format!("fixture-{id}")
     }
     fn is_worker(&self) -> bool {
-        false
+        self.worker.get()
     }
     fn random(&self) -> f64 {
         0.5
@@ -146,7 +150,7 @@ fn base_worker_rpc_forwards_arguments_results_errors_and_completion_hook() {
             1,
             "source async prefix emits one worker request"
         );
-        let request = requests.borrow()[0].clone();
+        let request = to_json(&requests.borrow()[0]).unwrap();
         assert_eq!(request["method"], json!("removeOrders"));
         assert_eq!(request["args"], json!([[{"id":"wire-7"}],17.0]));
         let result = if success {
@@ -158,7 +162,9 @@ fn base_worker_rpc_forwards_arguments_results_errors_and_completion_hook() {
             .base
             .emit(
                 "callMethod:done",
-                json!({"requestId":request["requestId"],"success":success,"result":result}),
+                safe_cex_exchange::js_runtime::value::from_json(
+                    &json!({"requestId":request["requestId"],"success":success,"result":result}),
+                ),
             )
             .unwrap();
         let reply = settle(&assembled.runtime, promise);
@@ -3396,7 +3402,7 @@ fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
             row["error"],
             "cleanup throw identity"
         );
-        base.emit("update", json!({})).unwrap();
+        base.emit("update", Js::object(vec![])).unwrap();
         assert_eq!(
             observed.get(),
             1,
@@ -4009,6 +4015,9 @@ fn promise_combinators_keep_pending_values_and_native_identity() {
     }
 }
 
+#[path = "support/emitter_retained.rs"]
+mod emitter_retained;
+
 #[test]
 fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_config() {
     use safe_cex_exchange::js_runtime::value::from_retained_input;
@@ -4101,4 +4110,50 @@ fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_con
             assert_eq!(array.get("1").unwrap().as_f64(), Some(f64::NEG_INFINITY));
         }
     }
+}
+
+#[path = "support/raw_error_reporting.rs"]
+mod raw_error_reporting;
+#[test]
+fn owned_callback_error_clone_preserves_independent_native_metadata() {
+    use safe_cex_exchange::js_runtime::value::owned::{OwnedCallbackError, OwnedJsValue};
+
+    let original = OwnedCallbackError::new(OwnedJsValue::object([
+        ("name", OwnedJsValue::string("TypeError")),
+        ("message", OwnedJsValue::string("signer refused")),
+        (
+            "code",
+            OwnedJsValue::Array(vec![
+                OwnedJsValue::Number(f64::from_bits(0x7ff8000000000042)),
+                OwnedJsValue::Undefined,
+                OwnedJsValue::Number(-0.0),
+                OwnedJsValue::String(vec![0xd800, 120]),
+            ]),
+        ),
+    ]));
+    let copied = original.clone();
+    let OwnedJsValue::Array(original_code) = &original.value()["code"] else {
+        panic!("native code array")
+    };
+    let OwnedJsValue::Array(copied_code) = &copied.value()["code"] else {
+        panic!("cloned native code array")
+    };
+    assert_ne!(original_code.as_ptr(), copied_code.as_ptr());
+    drop(original);
+    assert_eq!(copied.to_string(), "signer refused");
+    assert_eq!(copied.value()["name"], OwnedJsValue::string("TypeError"));
+    let OwnedJsValue::Array(code) = &copied.value()["code"] else {
+        panic!("retained cloned native code array")
+    };
+    assert_eq!(code.len(), 4);
+    let OwnedJsValue::Number(nan) = code[0] else {
+        panic!("native NaN")
+    };
+    assert_eq!(nan.to_bits(), 0x7ff8000000000042);
+    assert!(matches!(code[1], OwnedJsValue::Undefined));
+    let OwnedJsValue::Number(zero) = code[2] else {
+        panic!("native signed zero")
+    };
+    assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }

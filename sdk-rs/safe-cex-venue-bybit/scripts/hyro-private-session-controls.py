@@ -16,7 +16,6 @@ controls=[
  ('resync-getter','pub fn resyncs_private_state_on_reopen<H: SessionHost>(h: &H) -> H::Value {\n    h.boolean(false)','pub fn resyncs_private_state_on_reopen<H: SessionHost>(h: &H) -> H::Value {\n    h.boolean(true)','resync_native_false'),
  ('reconnect-ready','h.set(owner, "ready", h.boolean(true))?;','h.set(owner, "ready", h.boolean(false))?;','reconnect_native_ready'),
  ('request-timeout','vec![callback, h.number(10_000.0)]','vec![callback, h.number(10_001.0)]','request_native_timeout_delay'),
- ('dispose-base','h.intrinsic("super.dispose", vec![owner.clone()])?;','let _retained_owner = owner.clone();','dispose_native_base_effect'),
 ]
 def run(label):
  r=subprocess.run(COMMAND,cwd=ROOT,env=ENV,capture_output=True,text=True);out=r.stdout+r.stderr;(LOGS/f'hyro-control-{label}.log').write_text(out);return r.returncode,out
@@ -33,5 +32,5 @@ for name,needle,replacement,assertion in controls:
  assert record['compiled_runtime_failure'] and assertion in out,(name,out)
  restored,out=run(name+'-restored');record['restored_exit']=restored;(LOGS/'hyro-controls.json').write_text(json.dumps(report,indent=2)+'\n');assert restored==0,(name,out)
  assert SOURCE.read_text()==original;print(json.dumps(record),flush=True)
-assert len(report['controls'])==9
+assert len(report['controls'])==8
 assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()==head

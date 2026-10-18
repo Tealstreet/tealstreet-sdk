@@ -1,3 +1,4 @@
+use safe_cex_num::JsCoercionError;
 use safe_cex_venue_okx::income::{map_okx_bill_to_income_records, okx_bill_category};
 use serde_json::Value;
 
@@ -56,7 +57,7 @@ fn inherited_income_refuses_only_emitted_category_after_source_effects() {
         let calls = std::cell::Cell::new(0);
         let result = map_okx_bill_to_income_records(case["row"].as_object().unwrap(), |_| {
             calls.set(calls.get() + 1);
-            Some("BTCUSDT".into())
+            Ok::<_, JsCoercionError>(Some("BTCUSDT".into()))
         });
         assert_eq!(
             calls.get(),

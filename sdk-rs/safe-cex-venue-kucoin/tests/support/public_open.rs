@@ -8,7 +8,7 @@ pub type Error = Rc<ExchangeError>;
 pub fn error() -> Error {
     let mut error = ExchangeError::new("public callback failure");
     error.name = "TypeError".into();
-    error.code = Some(json!("PUBLIC"));
+    error.code = Some(safe_cex_exchange::js_runtime::value::Js::str("PUBLIC"));
     error.store_subscriber_ids = vec![7, 3];
     Rc::new(error)
 }
