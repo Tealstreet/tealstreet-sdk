@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 workspace = Path(__file__).resolve().parents[2]
@@ -26,10 +27,14 @@ cases = [
      b'if let Some(_capture) = weak.upgrade() {}',
      'production_native_ticker_capture_aliases_retain_cells_and_replace_generations'),
     ('lookup', capture,
-     b'matches!(\n                safe_cex_num::js_table_lookup',
-     b'false && matches!(\n                safe_cex_num::js_table_lookup',
+     b'.then_some(Target::StockInherited)',
+     b'.then_some(Target::StockInherited).filter(|_| false)',
      'public_dispatch_contracts::production_native_dispatch_lookup_and_capture_follow_source_prototypes'),
 ]
+requested = sys.argv[1:]
+assert len(requested) <= 1 and all(name in {case[0] for case in cases} for name in requested)
+if requested:
+    cases = [case for case in cases if case[0] == requested[0]]
 
 
 def run(test):
