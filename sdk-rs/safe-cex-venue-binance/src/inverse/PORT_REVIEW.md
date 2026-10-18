@@ -58,6 +58,12 @@ The following are measured receipts, not completeness claims:
   numeric order policy. COIN-M is registered in each real owner. In particular,
   the compiled numeric witness failed after reaching the missing stock order
   metadata entry; the source-inherited infinity-stop/downsize flags repair it.
+- `inverse_transport_binding` constructs the real parent with a recording
+  private-routing provider and terminal HTTP host. Public market reads keep the
+  dapi URL, omit the API key/signature and skip signing; the account-bracket read
+  uses the provider's private URL and the actual signer. Replacing only the
+  public NoProxy factory call with the existing routed factory compiles and
+  fails the observed public request URL. Exact API bytes are then restored.
 
 The typed Exchange facade retains the existing shared string/model admission
 boundaries. Generated wire records retain the family's bounded numeric capture
