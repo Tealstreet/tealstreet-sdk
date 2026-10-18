@@ -304,3 +304,7 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/structural_aliases.rs"]
+mod structural_alias_tests;

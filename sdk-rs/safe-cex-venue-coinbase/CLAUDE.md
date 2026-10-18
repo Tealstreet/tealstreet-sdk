@@ -296,3 +296,18 @@ nested field, row order/cardinality and f64 bits before reporting. Its `--contro
 mode independently truncates each decoded native vector and requires failure,
 then exact restoration. These finite UTF8 JSON cases do not classify the other
 aliases or remove the generic-registration guard in the full default inventory.
+
+Thirteen generic capability aliases have exact compiler target registrations.
+Boolean outcome/error instantiations, the real retained ReadItem order roots and
+the production Host bound-method instantiations are reviewed separately; unknown
+generic aliases still fail the existing identity path. Host and its associated
+SocketHost are visible only within this crate for authenticated probes, while
+Host.shared keeps its original binding-only visibility.
+
+`generic_alias_native` in the library test target executes the production native
+Promise spawner, retains pointer identity and opaque info/number bits, and captures
+bound arrows from actual Advanced/Spot constructors. It does not claim every
+callback body or every generic argument. `scripts/generic-alias-contracts.mjs`
+authenticates those thirteen fixed types and classifies their non-decoder roles;
+its controls independently remove the signing and bound-method registrations,
+require the unchanged monomorphization refusal, then restore exact policy bytes.
