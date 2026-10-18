@@ -28,7 +28,7 @@ type NormalFormatter<'a, E> =
     Box<dyn Fn(PreparedOrderOpts) -> HostFuture<'a, Vec<OrderPayload>, E> + 'a>;
 type AlgoFormatter<'a, E> = Box<dyn Fn(PreparedOrderOpts) -> HostFuture<'a, OrderPayload, E> + 'a>;
 type TriggerFormatter<'a, E> =
-    Box<dyn Fn(PreparedOrderOpts, Option<UtilityInput>) -> HostFuture<'a, OrderPayload, E> + 'a>;
+    Box<dyn Fn(PreparedOrderOpts, Option<Input>) -> HostFuture<'a, OrderPayload, E> + 'a>;
 type Placement<'a, E> =
     Box<dyn Fn(PreparedOrderOpts) -> HostFuture<'a, Vec<Option<Value>>, E> + 'a>;
 type MarginReader<'a, E> = Box<dyn Fn(Option<String>, bool) -> HostFuture<'a, MarginType, E> + 'a>;
@@ -395,7 +395,7 @@ async fn cancel_request<E: std::fmt::Display>(
     }
 }
 fn gone<E>(row: &Value) -> Result<bool, ServiceError<E>> {
-    is_already_gone_cancel_row(Some(&UtilityInput::from_retained((row.clone()).into())))
+    is_already_gone_cancel_row(Some(&UtilityInput::from_retained(row.clone())))
         .map_err(ServiceError::Coercion)
 }
 async fn cancel_batches<E: std::fmt::Display>(
@@ -874,20 +874,22 @@ pub async fn update_order<E: std::fmt::Display>(
         opts.stop_loss = positive("slTriggerPrice")?;
         opts.take_profit = positive("tpTriggerPrice")?;
         let trigger = |key| {
-            crate::utility::map_blofin_trigger_type(
-                attached
-                    .and_then(|r| r.get(key))
-                    .map(|v| UtilityInput::from_retained((v.clone()).into()))
-                    .as_ref(),
-            )
+            let value = attached.and_then(|r| r.get(key));
+            if value.is_some_and(|v| v.text_equals("last")) {
+                Some(safe_cex_types::OrderStopTriggerType::LastPrice)
+            } else if value.is_some_and(|v| v.text_equals("mark")) {
+                Some(safe_cex_types::OrderStopTriggerType::MarkPrice)
+            } else if value.is_some_and(|v| v.text_equals("index")) {
+                Some(safe_cex_types::OrderStopTriggerType::IndexPrice)
+            } else {
+                None
+            }
         };
         opts.sl_trigger_type = trigger("slTriggerPriceType");
         opts.tp_trigger_type = trigger("tpTriggerPriceType");
         opts.trigger_type = None;
         opts.close = None;
-        let payload =
-            (host.format_trigger_order)(opts, raw.cloned().map(UtilityInput::from_retained))
-                .await?;
+        let payload = (host.format_trigger_order)(opts, raw.cloned()).await?;
         cancel_trigger_orders(std::slice::from_ref(order), store, xhr, host).await?;
         return Ok(vec![Some(Value::String(
             crate::order_services::place_trigger_order(&payload, xhr, host.service).await?,

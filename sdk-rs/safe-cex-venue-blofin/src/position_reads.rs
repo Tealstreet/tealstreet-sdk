@@ -573,7 +573,7 @@ pub async fn fetch_closed_position_rows<E>(
                 continue;
             }
             added += 1;
-            collected.push(UtilityInput::from_retained((row.clone()).into()));
+            collected.push(UtilityInput::from_retained(row.clone()));
         }
         if added == 0 || rows.len() < 100 {
             break;

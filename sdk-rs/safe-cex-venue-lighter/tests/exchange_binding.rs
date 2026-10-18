@@ -1305,3 +1305,75 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     );
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn market_info_keeps_native_numbers_and_opaque_fields_through_store_and_binding() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let h = harness(ExchangeName::Lighter, options(), |_| {});
+    let row = from_json(&perp_row());
+    // Number("bad") is NaN in the actual venue's amountDecimals calculation.
+    row.set("supported_size_decimals", Js::str("bad")).unwrap();
+    row.set(
+        "opaque",
+        Js::object(vec![
+            ("nan", Js::Number(f64::NAN)),
+            ("infinity", Js::Number(f64::INFINITY)),
+            ("minusZero", Js::Number(-0.0)),
+            ("ownUndefined", Js::Undefined),
+            ("surrogate", Js::String(vec![0xd800].into())),
+        ]),
+    )
+    .unwrap();
+    h.http.route_native(
+        "GET",
+        DETAILS,
+        200.0,
+        Js::object(vec![
+            ("code", Js::Number(200.0)),
+            ("order_book_details", Js::array(vec![row])),
+        ]),
+    );
+    let markets = h
+        .drive(h.venue().fetch_markets())
+        .expect("native market mapping");
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].precision.amount, 0.001);
+    Store::update(
+        &*h.store,
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let stored = h.store.markets();
+    let info = stored[0].info.as_ref().unwrap();
+    assert!(
+        info.get("amountDecimals")
+            .and_then(Input::as_f64)
+            .unwrap()
+            .is_nan()
+    );
+    assert_eq!(info.get("priceDecimals").and_then(Input::as_f64), Some(1.0));
+    let opaque = info.get("opaque").unwrap();
+    assert!(opaque.get("nan").and_then(Input::as_f64).unwrap().is_nan());
+    assert_eq!(
+        opaque.get("infinity").and_then(Input::as_f64),
+        Some(f64::INFINITY)
+    );
+    assert_eq!(
+        opaque
+            .get("minusZero")
+            .and_then(Input::as_f64)
+            .unwrap()
+            .to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert!(matches!(opaque.get("ownUndefined"), Some(Input::Undefined)));
+    assert_eq!(
+        opaque.get("surrogate").and_then(Input::as_text),
+        Some([0xd800].as_slice())
+    );
+}

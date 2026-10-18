@@ -1,17 +1,17 @@
 //! Stateless helpers from the maintained BlofinExchange source.
-use safe_cex_num::{
-    js_retained_number as js_number, js_retained_string as js_string,
-    numeric_ingress::JsNumberOutput,
-};
+use safe_cex_num::{js_number, js_truthy, numeric_ingress::JsNumberOutput};
 use safe_cex_types::{
-    OrderStopTriggerType, js_coercion::JsCoercionError, retained_json::RetainedJsonInput as Input,
+    OrderStopTriggerType,
+    js_coercion::{JsCoercionError, js_string},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct UtilityInput {
-    value: Input,
+    #[serde(deserialize_with = "safe_cex_num::numeric_ingress::js_deserialize_passthrough")]
+    value: Value,
 }
 impl JsNumberOutput for UtilityInput {
     fn check_number_output(&self) {
@@ -19,18 +19,18 @@ impl JsNumberOutput for UtilityInput {
     }
 }
 impl UtilityInput {
-    pub fn json(&self) -> &Input {
+    pub fn json(&self) -> &Value {
         &self.value
     }
-    pub(crate) fn from_retained(value: Input) -> Self {
+    pub(crate) fn from_retained(value: Value) -> Self {
         Self { value }
     }
 }
-fn scalar(value: Option<&UtilityInput>) -> Option<&Input> {
+fn scalar(value: Option<&UtilityInput>) -> Option<&Value> {
     value.map(|v| &v.value)
 }
-fn string_or_empty(value: Option<&Input>) -> Result<String, JsCoercionError> {
-    if value.is_some_and(Input::is_truthy) {
+fn string_or_empty(value: Option<&Value>) -> Result<String, JsCoercionError> {
+    if js_truthy(value) {
         js_string(value)
     } else {
         Ok(String::new())
@@ -58,53 +58,38 @@ pub fn parse_positive_price(value: Option<&UtilityInput>) -> Result<Option<f64>,
     Ok((parsed.is_finite() && parsed > 0.0).then_some(parsed))
 }
 pub fn map_blofin_trigger_type(value: Option<&UtilityInput>) -> Option<OrderStopTriggerType> {
-    let value = scalar(value)?;
-    if value.text_equals("last") {
-        Some(OrderStopTriggerType::LastPrice)
-    } else if value.text_equals("mark") {
-        Some(OrderStopTriggerType::MarkPrice)
-    } else if value.text_equals("index") {
-        Some(OrderStopTriggerType::IndexPrice)
-    } else {
-        None
+    match scalar(value).and_then(Value::as_str) {
+        Some("last") => Some(OrderStopTriggerType::LastPrice),
+        Some("mark") => Some(OrderStopTriggerType::MarkPrice),
+        Some("index") => Some(OrderStopTriggerType::IndexPrice),
+        _ => None,
     }
 }
 pub fn to_blofin_trigger_type(value: Option<&UtilityInput>) -> &'static str {
-    if scalar(value).is_some_and(|v| v.text_equals("mark_price")) {
-        "mark"
-    } else if scalar(value).is_some_and(|v| v.text_equals("index_price")) {
-        "index"
-    } else {
-        "last"
+    match scalar(value).and_then(Value::as_str) {
+        Some("mark_price") => "mark",
+        Some("index_price") => "index",
+        _ => "last",
     }
 }
 pub fn is_already_gone_cancel_row(row: Option<&UtilityInput>) -> Result<bool, JsCoercionError> {
     let row = scalar(row);
-    if row
-        .and_then(|r| r.get("code"))
-        .is_some_and(|v| v.text_equals("1000"))
-    {
+    if row.and_then(|r| r.get("code")).and_then(Value::as_str) == Some("1000") {
         return Ok(true);
     }
-    let message = row.and_then(|r| r.get("msg")).filter(|v| !v.is_nullish());
+    let message = row.and_then(|r| r.get("msg")).filter(|v| !v.is_null());
     let message = match message {
-        Some(message) => safe_cex_types::js_coercion::js_retained_string_utf16(message)?,
-        None => Vec::new(),
+        Some(message) => js_string(Some(message))?,
+        None => String::new(),
     };
     // The source uses /i without /u. Only ASCII folds can match its ASCII phrase.
-    let folded: Vec<u16> = message
-        .into_iter()
-        .map(|u| if (65..=90).contains(&u) { u + 32 } else { u })
-        .collect();
-    let needle: Vec<u16> = "filled, triggered, canceled or does not exist"
-        .encode_utf16()
-        .collect();
-    Ok(folded.windows(needle.len()).any(|window| window == needle))
+    Ok(message
+        .to_ascii_lowercase()
+        .contains("filled, triggered, canceled or does not exist"))
 }
 pub fn is_algo_order(order_type: Option<&UtilityInput>) -> bool {
-    scalar(order_type).is_some_and(|v| {
-        ["stop_market", "take_profit_market", "trailing_stop_market"]
-            .iter()
-            .any(|s| v.text_equals(s))
-    })
+    matches!(
+        scalar(order_type).and_then(Value::as_str),
+        Some("stop_market" | "take_profit_market" | "trailing_stop_market")
+    )
 }

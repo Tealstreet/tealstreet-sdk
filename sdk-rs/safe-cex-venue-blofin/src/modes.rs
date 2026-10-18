@@ -1,7 +1,7 @@
 //! BlofinExchange's mode utilities against the shared Store and an explicit host cache.
 use crate::utility::UtilityInput;
+use safe_cex_num::js_truthy;
 use safe_cex_store::{Store, StoreMutationError, StoreUpdate};
-use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     MarginType, OrderSide, OrderType, PositionMode, model_utils::create_position_id,
 };
@@ -133,23 +133,23 @@ pub fn after_method_called_in_worker(
     method: &str,
     first_arg: Option<&UtilityInput>,
 ) -> Result<(), StoreMutationError> {
-    let enabled = first_arg
-        .map(UtilityInput::json)
-        .is_some_and(Input::is_truthy);
+    let enabled = js_truthy(first_arg.map(UtilityInput::json));
     if method == "changePositionMode" {
         let confirmed = result
             .map(UtilityInput::json)
             .filter(|result| result.is_object() || result.is_array())
             .and_then(|result| result.get("positionMode"))
-            .filter(|mode| mode.is_truthy());
+            .filter(|mode| js_truthy(Some(mode)));
         let mode = match confirmed {
-            Some(mode) if mode.text_equals("hedged") => PositionMode::Hedged,
-            Some(mode) if mode.text_equals("oneway") => PositionMode::OneWay,
-            Some(_) => {
-                return Err(StoreMutationError::InvalidOperation(
-                    "Blofin worker result has an unsupported positionMode",
-                ));
-            }
+            Some(mode) => match mode.as_str() {
+                Some("hedged") => PositionMode::Hedged,
+                Some("oneway") => PositionMode::OneWay,
+                _ => {
+                    return Err(StoreMutationError::InvalidOperation(
+                        "Blofin worker result has an unsupported positionMode",
+                    ));
+                }
+            },
             None if enabled => PositionMode::Hedged,
             None => PositionMode::OneWay,
         };

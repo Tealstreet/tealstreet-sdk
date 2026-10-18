@@ -78,7 +78,7 @@ pub fn map_positions<E>(
     let mut supported = Vec::new();
     for row in rows {
         if !crate::utility::is_known_non_swap_instrument(
-            &crate::utility::UtilityInput::from_retained((row.clone()).into()),
+            &crate::utility::UtilityInput::from_retained(row.clone()),
         )? {
             supported.push(row);
         }

@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 // Shared deterministic host also exposes timer inspection for other suites.
 #[allow(dead_code)]
 #[path = "support/subscription_runtime.rs"]
@@ -408,9 +410,16 @@ fn decoded_json(actual: &Value, expected: &Value, label: &str) {
         _ => assert_eq!(actual, expected, "{label}"),
     }
 }
-fn optional_json(actual: Option<&Value>, expected: Option<&Value>, label: &str) {
+fn optional_json(
+    actual: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+    expected: Option<&Value>,
+    label: &str,
+) {
     match (actual, expected) {
-        (Some(a), Some(e)) => decoded_json(a, e, label),
+        (Some(a), Some(e)) => {
+            let _ = label;
+            retained_assert::assert_value(a, e);
+        }
         (None, None) => {}
         _ => panic!("{label} field presence"),
     }

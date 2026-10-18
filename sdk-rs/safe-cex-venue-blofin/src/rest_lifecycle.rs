@@ -154,7 +154,7 @@ pub async fn fetch_markets<E: std::fmt::Display>(
         // Source completes filter() before invoking any mapper.
         let mut filtered = Vec::new();
         for row in rows {
-            if is_blofin_linear_swap_market(&UtilityInput::from_retained((row.clone()).into()))
+            if is_blofin_linear_swap_market(&UtilityInput::from_retained(row.clone()))
                 .map_err(ServiceError::Coercion)?
             {
                 filtered.push(row);

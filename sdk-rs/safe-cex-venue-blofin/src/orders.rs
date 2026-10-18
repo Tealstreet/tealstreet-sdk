@@ -128,7 +128,7 @@ fn map_orders_with_projection(
     let mut result = Vec::new();
     for row in rows {
         // Reuse the previously ported helper with the same retained input contract.
-        let payload = crate::utility::UtilityInput::from_retained((row.clone()).into());
+        let payload = crate::utility::UtilityInput::from_retained(row.clone());
         if crate::utility::is_known_non_swap_instrument(&payload)? {
             continue;
         }

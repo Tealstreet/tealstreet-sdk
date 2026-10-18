@@ -3,7 +3,6 @@ use crate::order_services::ServiceError;
 use crate::{
     modes::{PositionSideOptions, get_position_side},
     types::{BROKER_ID, REVERSE_ORDER_TYPE},
-    utility::UtilityInput,
 };
 use safe_cex_num::{
     adjust, js_number_string, js_retained_number as js_number, js_retained_parse_float,
@@ -129,7 +128,7 @@ fn order_type_key(value: safe_cex_types::ModelField<OrderType>) -> &'static str 
 }
 pub async fn format_trigger_order<E>(
     opts: &PreparedOrderOpts,
-    source: Option<&UtilityInput>,
+    source: Option<&Input>,
     store: &dyn Store,
     host: &FormatHost<'_, E>,
 ) -> Result<OrderPayload, ServiceError<E>> {
@@ -164,7 +163,6 @@ pub async fn format_trigger_order<E>(
             opts.symbol
         )));
     }
-    let source = source.map(UtilityInput::json);
     if source.is_some_and(Input::is_truthy)
         && !source
             .and_then(|s| s.get("instId"))
