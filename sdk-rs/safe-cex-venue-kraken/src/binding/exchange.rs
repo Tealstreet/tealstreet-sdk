@@ -1,4 +1,7 @@
 //! Production Kraken venues: the assembled class graph behind the typed Exchange trait.
+#[cfg(test)]
+#[path = "../../tests/support/accepted_read_receivers.rs"]
+mod accepted_read_receivers;
 use super::{
     globals,
     promise::await_js,

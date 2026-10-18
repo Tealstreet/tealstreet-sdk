@@ -1,4 +1,6 @@
 //! Kraken Futures and Spot source ports, bound to the Exchange trait by `binding`.
+#[cfg(test)]
+extern crate self as safe_cex_venue_kraken;
 pub mod feed_stats;
 pub mod fills;
 pub mod futures_candles;
