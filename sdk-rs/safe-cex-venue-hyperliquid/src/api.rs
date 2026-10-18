@@ -242,12 +242,8 @@ impl ApiClient {
                 safe_cex_types::retained_json::RetainedJsonInput::from_value(body.clone())
                     .map_err(|error| TransportError::Host(error.to_string()))?,
             )),
-            timeout_ms: self
-                .options
-                .extra
-                .as_ref()
-                .and_then(|e| e.recv_window)
-                .map(|n| n as i64),
+            // safeCexAxiosCreate overrides factory recvWindow config before retries.
+            timeout_ms: Some(20_000),
             ..Default::default()
         };
         request.headers.insert(

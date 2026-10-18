@@ -5,7 +5,10 @@ use super::{
     scope::{ScopeShared, scope_of},
     value::{Js, Thrown, arg, error_constructor},
 };
-use std::rc::{Rc, Weak};
+use std::{
+    cell::Cell,
+    rc::{Rc, Weak},
+};
 
 use safe_cex_types::js_coercion::json_quote_utf16 as json_quote;
 
@@ -329,6 +332,88 @@ pub fn install_enums(g: &Js) {
             ("Error", "error"),
         ]),
     );
+}
+
+// CreateResolvingFunctions shares one lock for resolve/reject, including while
+// resolving to a still-pending promise or thenable.
+fn promise_resolvers(promise: promise::Promise) -> (Js, Js, Rc<Cell<bool>>) {
+    let called = Rc::new(Cell::new(false));
+    let resolved = called.clone();
+    let rejected = called.clone();
+    let target = promise.clone();
+    let resolve = Js::function("", move |_, args| {
+        if !resolved.replace(true) {
+            resolve_promise(target.clone(), arg(&args, 0));
+        }
+        Ok(Js::Undefined)
+    });
+    let reject = Js::function("", move |_, args| {
+        if !rejected.replace(true) {
+            promise.settle(Err(Thrown::new(arg(&args, 0))));
+        }
+        Ok(Js::Undefined)
+    });
+    (resolve, reject, called)
+}
+fn resolve_promise(promise: promise::Promise, value: Js) {
+    if let Js::Promise(other) = &value {
+        if promise.ptr_eq(other) {
+            promise.settle(Err(Thrown::type_error(
+                "Chaining cycle detected for promise",
+            )));
+            return;
+        }
+    }
+    if !matches!(
+        &value,
+        Js::Array(_)
+            | Js::Object(_)
+            | Js::Function(_)
+            | Js::Promise(_)
+            | Js::Map(_)
+            | Js::Set(_)
+            | Js::Builtin(_)
+    ) {
+        promise.settle(Ok(value));
+        return;
+    }
+    // Get then synchronously, but invoke it as a promise job after this stack.
+    let then = match value.get("then") {
+        Ok(then) if then.is_callable() => then,
+        Ok(_) => {
+            promise.settle(Ok(value));
+            return;
+        }
+        Err(error) => {
+            promise.settle(Err(error));
+            return;
+        }
+    };
+    let runtime = promise.runtime();
+    super::jobs::for_runtime(&runtime).spawn(Box::pin(async move {
+        let (resolve, reject, called) = promise_resolvers(promise.clone());
+        if let Err(error) = then.call(value, vec![resolve, reject]) {
+            if !called.replace(true) {
+                promise.settle(Err(error));
+            }
+        }
+    }));
+}
+fn construct_promise(
+    runtime: &Rc<dyn crate::runtime::ExchangeRuntime>,
+    executor: Js,
+) -> Result<Js, Thrown> {
+    if !executor.is_callable() {
+        return Err(Thrown::type_error("Promise resolver is not a function"));
+    }
+    let promise = promise::Promise::pending(runtime);
+    let (resolve, reject, called) = promise_resolvers(promise.clone());
+    if let Err(error) = executor.call(Js::Undefined, vec![resolve, reject]) {
+        if !called.replace(true) {
+            promise.settle(Err(error));
+        }
+    }
+    Ok(Js::Promise(promise))
 }
 
 /// The JS builtins venue bodies resolve by name. `rt` is weak: the globals
@@ -671,55 +756,64 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let settled_rt = rt.clone();
     let resolve_rt = rt.clone();
     let reject_rt = rt.clone();
-    def(
-        "Promise",
-        Js::object(vec![
-            (
-                "all",
-                Js::function("all", move |_, a| {
-                    let rt = scope_of(&promise_rt)?;
-                    let runtime = rt.exchange_runtime();
-                    let values = arg(&a, 0).iterable_values();
-                    Ok(Js::Promise(match values {
-                        Ok(values) => promise::all(&runtime, values),
-                        Err(error) => promise::Promise::settled(&runtime, Err(error)),
-                    }))
-                }),
-            ),
-            (
-                "allSettled",
-                Js::function("allSettled", move |_, a| {
-                    let rt = scope_of(&settled_rt)?;
-                    let runtime = rt.exchange_runtime();
-                    let values = arg(&a, 0).iterable_values();
-                    Ok(Js::Promise(match values {
-                        Ok(values) => promise::all_settled(&runtime, values),
-                        Err(error) => promise::Promise::settled(&runtime, Err(error)),
-                    }))
-                }),
-            ),
-            (
-                "resolve",
-                Js::function("resolve", move |_, a| {
-                    let rt = scope_of(&resolve_rt)?;
-                    Ok(match arg(&a, 0) {
-                        p @ Js::Promise(_) => p,
-                        v => Js::Promise(promise::Promise::settled(&rt.exchange_runtime(), Ok(v))),
-                    })
-                }),
-            ),
-            (
-                "reject",
-                Js::function("reject", move |_, a| {
-                    let rt = scope_of(&reject_rt)?;
-                    Ok(Js::Promise(promise::Promise::settled(
-                        &rt.exchange_runtime(),
-                        Err(Thrown::new(arg(&a, 0))),
-                    )))
-                }),
-            ),
-        ]),
-    );
+    let constructor_rt = rt.clone();
+    let constructor = Js::constructor("Promise", move |_, args| {
+        construct_promise(
+            &scope_of(&constructor_rt)?.exchange_runtime(),
+            arg(&args, 0),
+        )
+    });
+    for (name, method) in [
+        (
+            "all",
+            Js::function("all", move |_, a| {
+                let rt = scope_of(&promise_rt)?;
+                let runtime = rt.exchange_runtime();
+                let values = arg(&a, 0).iterable_values();
+                Ok(Js::Promise(match values {
+                    Ok(values) => promise::all(&runtime, values),
+                    Err(error) => promise::Promise::settled(&runtime, Err(error)),
+                }))
+            }),
+        ),
+        (
+            "allSettled",
+            Js::function("allSettled", move |_, a| {
+                let rt = scope_of(&settled_rt)?;
+                let runtime = rt.exchange_runtime();
+                let values = arg(&a, 0).iterable_values();
+                Ok(Js::Promise(match values {
+                    Ok(values) => promise::all_settled(&runtime, values),
+                    Err(error) => promise::Promise::settled(&runtime, Err(error)),
+                }))
+            }),
+        ),
+        (
+            "resolve",
+            Js::function("resolve", move |_, a| {
+                let rt = scope_of(&resolve_rt)?;
+                Ok(match arg(&a, 0) {
+                    p @ Js::Promise(_) => p,
+                    v => Js::Promise(promise::Promise::settled(&rt.exchange_runtime(), Ok(v))),
+                })
+            }),
+        ),
+        (
+            "reject",
+            Js::function("reject", move |_, a| {
+                let rt = scope_of(&reject_rt)?;
+                Ok(Js::Promise(promise::Promise::settled(
+                    &rt.exchange_runtime(),
+                    Err(Thrown::new(arg(&a, 0))),
+                )))
+            }),
+        ),
+    ] {
+        constructor
+            .define(name, method)
+            .expect("Promise static method registration");
+    }
+    def("Promise", constructor);
     let timeout_rt = rt.clone();
     def(
         "setTimeout",

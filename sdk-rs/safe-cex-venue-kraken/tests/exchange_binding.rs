@@ -1550,3 +1550,84 @@ fn constructed_spot_candles_keep_source_date_input_coercion() {
     cleanup().unwrap();
     h.venue().dispose().unwrap();
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+fn ticker_corpus(name: ExchangeName, source_name: &str, count: usize) {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    use std::rc::Rc;
+    let source = ticker_coercion::source(source_name);
+    assert_eq!(source["cases"].as_array().unwrap().len(), count);
+    let h = harness(name, options(), |_| {});
+    let seed = ticker_coercion::seed(source_name);
+    let markets = seed
+        .iter()
+        .map(|t| {
+            serde_json::from_value(json!({
+                "id":t.id,"symbol":t.symbol,"base":"fixture","quote":"USD","active":true,
+                "precision":{"amount":0.01,"price":0.25},
+                "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+            }))
+            .unwrap()
+        })
+        .collect();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            tickers: Some(seed.clone()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let cleanup = h
+        .venue()
+        .listen_order_book(seed[0].symbol.clone(), Rc::new(|_| {}))
+        .unwrap();
+    for _ in 0..8 {
+        h.runtime.pump();
+    }
+    let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+    assert!(
+        socket.is_connected(),
+        "production Kraken ticker socket opens"
+    );
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(seed.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    ticker_corpus(ExchangeName::Kraken, "kraken", 224);
+}
+#[test]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    ticker_corpus(ExchangeName::Krakenspot, "krakenspot", 40);
+}
