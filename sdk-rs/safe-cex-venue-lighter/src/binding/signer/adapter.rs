@@ -274,7 +274,9 @@ mod tests {
             actual.push(json!({"label":label,"expected":match result {
                 Ok(value)=>json!({"ok":value}),Err(error)=>json!({"error":to_thrown(error).message()}),
             }}));
-            value.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+            value
+                .delete(&"cycle".encode_utf16().collect::<Vec<_>>())
+                .unwrap();
         }
         for mode in ["message-throw", "string-hint", "inherited", "symbol"] {
             let trace = Rc::new(RefCell::new(vec![]));

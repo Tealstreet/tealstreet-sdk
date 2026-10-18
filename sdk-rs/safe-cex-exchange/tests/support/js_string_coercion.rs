@@ -200,7 +200,7 @@ fn string_hint_observes_source_order_live_methods_and_native_utf16() {
                                     ),
                                 )?;
                             } else {
-                                this.delete(&utf16("valueOf"));
+                                this.delete(&utf16("valueOf"))?;
                             }
                             Ok(Js::object(vec![]))
                         }),

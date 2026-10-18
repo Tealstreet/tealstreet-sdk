@@ -57,7 +57,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(rt, "placeOrder", place_order)?;
     method(rt, "getStopOrderPositionIdx", |rt, a| {
         let opts = arg(&a, 0).spread_object()?;
-        opts.delete(&"reduceOnly".encode_utf16().collect::<Vec<_>>());
+        opts.delete(&"reduceOnly".encode_utf16().collect::<Vec<_>>())?;
         Ok(rt.clone().spawn(Box::pin(async move {
             let index = await_js(
                 &rt.exchange_runtime(),
@@ -287,10 +287,10 @@ fn place_order(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
             }
         };
         let request = from_json(&formatted);
-        request.delete(&"orderLinkId".encode_utf16().collect::<Vec<_>>());
+        request.delete(&"orderLinkId".encode_utf16().collect::<Vec<_>>())?;
         request.set("category", category)?;
         if !execution.get("bboSideType")?.is_undefined() {
-            request.delete(&"price".encode_utf16().collect::<Vec<_>>());
+            request.delete(&"price".encode_utf16().collect::<Vec<_>>())?;
         }
         for (key, value) in execution.own_entries()? {
             request.set_key(&key, value)?;
@@ -326,7 +326,7 @@ fn place_order(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
                     let payload = original_request.spread_object()?;
                     if arg(&args, 0).to_number()? > 0. {
                         for key in ["stopLoss", "takeProfit", "slTriggerBy", "tpTriggerBy"] {
-                            payload.delete(&key.encode_utf16().collect::<Vec<_>>());
+                            payload.delete(&key.encode_utf16().collect::<Vec<_>>())?;
                         }
                     }
                     payload.set("qty", number(size))?;

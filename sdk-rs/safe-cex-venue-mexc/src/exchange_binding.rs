@@ -1240,7 +1240,7 @@ impl AssemblyHost for Host {
         }
     }
     fn delete_indexed(&self, value: &Js, key: &Js) -> Result<(), Thrown> {
-        value.delete(&key.to_js_string()?);
+        value.delete(&key.to_js_string()?)?;
         Ok(())
     }
     fn destructure_fields(&self, value: &Js, keys: &[&str]) -> Result<Vec<Js>, Thrown> {

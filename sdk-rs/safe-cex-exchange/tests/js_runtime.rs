@@ -1006,7 +1006,7 @@ fn json_stringify_replacer_can_remove_cycles_and_repeat_shared_objects() {
             .to_display(),
         "{}"
     );
-    cycle.delete(&utf16("self"));
+    cycle.delete(&utf16("self")).unwrap();
     assert_eq!(
         json.call_method("stringify", vec![Js::array(vec![cycle.clone(), cycle])])
             .unwrap()
@@ -2846,7 +2846,7 @@ fn source_socket_fields_reach_typed_groups_and_track_replacement_and_removal() {
         &a.base.get_socket(SocketSlot::Private).unwrap(),
         &replacement_core
     ));
-    a.this.delete(&utf16("publicWebsocket"));
+    a.this.delete(&utf16("publicWebsocket")).unwrap();
     assert!(a.base.get_socket(SocketSlot::Public).is_none());
     assert_eq!(a.base.get_all_sockets().len(), 7);
     assert_eq!(a.base.get_public_sockets().len(), 6);
