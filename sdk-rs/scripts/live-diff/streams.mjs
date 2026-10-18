@@ -20,6 +20,7 @@ const exchange = option('--venue', 'binance'),
   adapter = publicStreams[exchange];
 if (!adapter) throw new Error('Add an explicit public stream host adapter for this venue');
 const startupOnly = args.includes('--startup-only');
+if (adapter.startupOnly && !startupOnly) throw new Error('This venue is limited to --startup-only recorded replays');
 if (startupOnly && !args.includes('--replay')) throw new Error('--startup-only requires a recorded replay bundle');
 const captureMs = Number(option('--capture-ms', '60000')),
   timeout = Number(option('--timeout-ms', '60000'));
