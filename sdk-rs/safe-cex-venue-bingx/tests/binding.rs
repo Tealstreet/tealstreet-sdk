@@ -24,7 +24,7 @@ fn fixture() -> Harness {
 fn stale_close_during_held_listen_key_rebuild_does_not_connect_twice() {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
-    use std::{cell::Cell, rc::Rc};
+    use std::rc::Rc;
     const KEYS: &str = "/openApi/user/auth/userDataStream";
     for held_ms in [0.0, 3_100.0] {
         let h = fixture();
@@ -41,7 +41,7 @@ fn stale_close_during_held_listen_key_rebuild_does_not_connect_twice() {
             .unwrap()
             .1
             .clone();
-        let gate = Rc::new(Cell::new(false));
+        let gate = Rc::new(support::Release::default());
         *h.http.held_request.borrow_mut() = Some(("POST".into(), KEYS.into(), gate.clone()));
         h.http
             .routes
