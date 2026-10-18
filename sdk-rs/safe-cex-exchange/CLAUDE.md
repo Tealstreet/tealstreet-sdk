@@ -1699,6 +1699,23 @@ Its normal response interceptor preserves the source absence of recordError.
 The native runtime request-counter regression uses actual HTTP200/404 receipts;
 it fails with an unchanged total on the previous factory.
 
+Ordinary Js objects, including host-resource objects, allocate with the active
+PrototypeRealm's real Object.prototype reference. A None prototype slot is null,
+so there is no implicit stock-prototype String fallback. Legacy __proto__ writes
+and Object.setPrototypeOf reuse one ordinary Object/Function metadata operation:
+primitive legacy values are ignored, own data/accessor shadows retain their
+behavior, original receivers are preserved, and cycle/non-extensibility checks
+run before mutation. Opaque resources remain attached to the same referent and
+are neither inherited nor copied by changing its prototype.
+
+The Object facade exposes the same realm prototype as a nonenumerable immutable
+property. setPrototypeOf validates target/prototype in source order, preserves
+primitive target identity, and bypasses shadowable __proto__ properties. Mutable
+prototype storage for arrays, Map/Set and other nonordinary variants remains a
+separate representation boundary; unsupported changes refuse explicitly.
+`tests/js_object_prototypes.rs` compares actual Node observations with production
+allocation/property algorithms and the installed Object facade.
+
 Native host objects retain one opaque Rc<dyn Any> on their canonical ObjectData.
 Js::host_object creates the ordinary reference, and resource<T> downcasts only its
 own attachment; prototypes and object spread never transfer that native slot.
