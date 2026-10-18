@@ -18,6 +18,7 @@ pub type BuildHttp = Box<
 pub type InstallTransport =
     Rc<dyn Fn(&HttpClient, Rc<RefCell<api::Options>>) -> Result<(), ExchangeError>>;
 pub struct Client {
+    base: Rc<BaseExchange>,
     pub inner: Rc<HttpClient>,
     pub executor: RefCell<std::sync::Arc<dyn safe_cex_transport::RestAdapter>>,
     pub config: api::ClientConfig<ExchangeError>,
@@ -44,7 +45,7 @@ impl Client {
         config: Rc<api::Config>,
     ) -> api::Task<Rc<api::Response>, ExchangeError> {
         let client = self.clone();
-        Box::pin(async move {
+        let request = move |_| async move {
             let mut attempt = 0;
             let (response, config, req) = loop {
                 let limits = client.rate_limits.borrow().clone();
@@ -146,7 +147,8 @@ impl Client {
                     handler(e).await
                 }
             }
-        })
+        };
+        self.base.start_shared_operation(request).wait()
     }
     pub fn request(
         self: &Rc<Self>,
@@ -228,6 +230,7 @@ impl api::Host for Factory {
         let inner = (self.build)(shadow, options)?;
         let inner = Rc::new(inner);
         Ok(Rc::new(Client {
+            base: self.base.clone(),
             inner: inner.clone(),
             executor: RefCell::new(std::sync::Arc::new(HttpExecution { inner })),
             config,
