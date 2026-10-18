@@ -263,10 +263,9 @@ fn string_hint_observes_source_order_live_methods_and_native_utf16() {
             if label == "array-child" {
                 Js::array(vec![Js::str("left"), child, Js::Null])
             } else {
-                Js::object_with_class(
-                    "Error",
-                    vec![("name", child), ("message", Js::str("detail"))],
-                )
+                let error = safe_cex_exchange::js_runtime::value::error_object("Error", "detail");
+                error.define("name", child).unwrap();
+                error
             }
         } else if label == "stock-class" || label == "stock-error" {
             let class = if label == "stock-class" {
