@@ -951,5 +951,78 @@
     },
     "observation": "Clock trace stops after 16s; an instrumented 17s advance remains pending. The 40s CPU sample is active in Bybit invoke<Vec<Market>> -> to_typed -> decode_native/strict_codecs on 8110 markets, rather than the removed notification projection. An earlier 20s parked sample describes an earlier phase.",
     "scopeDecision": "claude-ddi2il explicitly keeps #1111 scoped and assigns the remaining typed fetchMarkets decode cost separately."
+  },
+  "localBinanceRepeatability": {
+    "report": "/tmp/binance-native-delivery-green.json",
+    "reportSha256": "b842c6d5ce8a10fff121f10f03b84d3cd7ad8999e128a12c0b3b316db2e1e3ee",
+    "status": "NONDETERMINISTIC",
+    "nativeDrainVerified": true,
+    "comparisonsProvisional": false,
+    "nativeCombined": {
+      "status": "DIFF",
+      "leftCount": 624,
+      "rightCount": 624,
+      "diffs": [
+        {
+          "path": "$.1.kind",
+          "ts": "store",
+          "rust": "orderbook"
+        },
+        {
+          "path": "$.1.data.latency",
+          "ts": 0,
+          "rust": "<absent>"
+        },
+        {
+          "path": "$.1.data.balance",
+          "ts": "<object>",
+          "rust": "<absent>"
+        },
+        {
+          "path": "$.1.data.tickers",
+          "ts": "<array:783>",
+          "rust": "<absent>"
+        },
+        {
+          "path": "$.1.data.displayedPositions",
+          "ts": "<array:0>",
+          "rust": "<absent>"
+        },
+        {
+          "path": "$.1.data.displayedMargin",
+          "ts": "<object>",
+          "rust": "<absent>"
+        },
+        {
+          "path": "$.1.data.ordersRisk",
+          "ts": "<object>",
+          "rust": "<absent>"
+        },
+        {
+          "path": "$.1.data.activeChasers",
+          "ts": "<array:0>",
+          "rust": "<absent>"
+        }
+      ]
+    },
+    "qualification": "Only combined Store/orderbook delivery indices 1/2 swap. Individual channel payloads and sequences repeat exactly. Independent replay combined streams repeat exactly. The ordered FFI channel fix is assigned separately.",
+    "allIndexDifferences": {
+      "nativeOnlyCombinedOrdering": [
+        {
+          "index": 1,
+          "left": "store",
+          "right": "orderbook"
+        },
+        {
+          "index": 2,
+          "left": "orderbook",
+          "right": "store"
+        }
+      ],
+      "individualChannelsWithDifferences": {
+        "ts": [],
+        "rust": []
+      }
+    }
   }
 }
