@@ -41,9 +41,9 @@ The owned host codec retains its data-tree profile: shared local object identity
 is not a cross-thread capability, and cycles, excess depth and executable values
 retain their visible refusals. Local emitter and browser-post identities are
 measured separately.
-Runtime exception-report callbacks and main-thread worker RPC arguments/success
-results retain their separately scoped JSON ABIs. Raw error-input widening is a
-separate follow-up, and Candle widening remains held.
+Raw runtime exception callbacks and console arguments retain original local Js
+references. Main-thread worker RPC arguments/success results keep their separately
+scoped JSON ABI, and Candle widening remains held.
 
 The selected native/default contract runner is
 `scripts/emitter-accepted-probes.mjs`; `--registry` selects the registry host-error
@@ -80,9 +80,11 @@ reporter and formatter. `core_error_reporting` retains its four typed/source che
 its finite observer mirrors the oracle's explicit Error name/message replacer.
 
 The reporter's optional message remains UTF-8 and extra data remains JSON. Main-thread
-exception hosts retain their explicit terminal JSON ABI; object console diagnostics
-use a non-coercing type label at the existing string-only console capability. Worker
-posts and local emitter listeners receive original native values. Hyperliquid's
+raw exception hosts and console receive original native values, preserving Error
+name, hidden message, and identity. The typed string console convenience delegates
+to the same rich capability. Terminal formatting reads Error data descriptors without
+executing getters or coercion hooks; it is a host presentation, not a value projection.
+Worker posts and local emitter listeners receive original native values. Hyperliquid's
 separate realm still uses its existing owned typed-snapshot bridge; it does not gain
 shared-realm accessor or object-reference identity from this API migration.
 
@@ -100,3 +102,14 @@ This is an actual Wasm plus Node structuredClone proof, not browser startup/DB e
 member enumeration and accessor-cause reading. Each modified production adapter
 compiles to Wasm, reaches its expected throwing getter through the real DATA post,
 and fails the Node harness. Exact source restoration passes the complete harness.
+
+`raw_reporter_console_and_sink_receive_original_native_errors` observes the installed
+BaseExchange member, repeated/distinct Error identities, inherited names, hidden
+messages, two console arguments, zero trace arguments and console suppression.
+`raw_reporter_installed_console_retains_values_without_coercion` uses the installed
+console capability with a poisonous message getter. The maintained source oracle's
+`--console-profile` checks Error/TypeError identities and stable first-line output.
+The unchanged Bybit Hyro hosted-auth witness fails on master with `[object]` instead
+of the signing reason. The unchanged KuCoin `futures_binds_all_sixteen_defaults`
+witness fails on master with `{}` instead of the native message. Both exercise the
+actual exchange binding and host reporting boundary, not a copied formatter.
