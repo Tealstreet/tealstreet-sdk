@@ -20,7 +20,10 @@ const describe = ticker => Object.fromEntries(fields.map(field => [field, bits(t
       const store = new DefaultStore();
       store.update({ tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 99, ask: 101,
         last: 100, mark: 100, index: 100, percentage: 0, volume: 0, quoteVolume: 0,
-        fundingRate: 0, fundingTime: 0, openInterest: 0 }] });
+        fundingRate: 0, fundingTime: 0, openInterest: 0,
+        info: { nan: NaN, text: '\ud800', missing: undefined,
+          array: [Infinity, -0], ['\ud801']: null } }] });
+      assert.equal(Object.hasOwn(store.tickers[0], 'info'), false);
       const exchange = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture' }, store);
       try {
         const captured = store.tickersBySymbol.BTCUSDT;

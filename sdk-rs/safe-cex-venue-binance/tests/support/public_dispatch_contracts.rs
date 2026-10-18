@@ -1,5 +1,5 @@
 use super::*;
-use safe_cex_types::Ticker;
+use safe_cex_types::{Ticker, retained_json::RetainedJsonInput as Input};
 use safe_cex_venue_binance::ticker_capture::Capture;
 
 fn ticker_bits(row: &Ticker) -> Value {
@@ -28,6 +28,27 @@ fn production_native_dispatch_lookup_and_capture_follow_source_prototypes() {
     ] {
         for key in ["constructor", "toString", "__proto__", "not-owned"] {
             let owner = production_native_owner(venue);
+            let mut seeded = owner.base.store.tickers()[0].clone();
+            seeded.info = Some(Input::Object(vec![
+                ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
+                ("text".encode_utf16().collect(), Input::Text(vec![0xd800])),
+                ("missing".encode_utf16().collect(), Input::Undefined),
+                (
+                    "array".encode_utf16().collect(),
+                    Input::Array(vec![Input::Float(f64::INFINITY), Input::Float(-0.0)]),
+                ),
+                (vec![0xd801], Input::Null),
+            ]));
+            safe_cex_store::Store::update(
+                owner.base.store.as_ref(),
+                safe_cex_store::StoreUpdate {
+                    tickers: Some(vec![seeded]),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            assert!(owner.base.store.tickers()[0].info.is_none());
             let capture = Capture::new(owner.base.store.clone());
             let dictionary = capture.dictionary();
             let row = dictionary.borrow().get("BTCUSDT").unwrap().clone();
