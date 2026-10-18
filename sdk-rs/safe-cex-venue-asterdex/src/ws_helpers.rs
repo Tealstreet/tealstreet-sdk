@@ -1,6 +1,6 @@
 //! Pure decisions for the AsterDEX websocket adapters.
 
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, to_typed};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
     runtime::{ExchangeError, LogSeverity},
     websocket::BaseWebSocket,
@@ -142,9 +142,9 @@ pub fn public_event_data_dispatch(
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicKlineCandle {
-    pub timestamp: Option<serde_json::Value>,
+    pub timestamp: Option<Js>,
     pub open: f64,
     pub high: f64,
     pub low: f64,
@@ -152,7 +152,7 @@ pub struct PublicKlineCandle {
     pub volume: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicKlineUpdate {
     pub stream: String,
     pub candle: PublicKlineCandle,
@@ -194,7 +194,7 @@ pub fn public_kline_update(
                 if matches!(value, Js::Undefined) {
                     None
                 } else {
-                    Some(to_typed(&value)?)
+                    Some(value)
                 }
             },
             open: parse("o")?,
@@ -248,12 +248,12 @@ pub fn public_stream_trade_update<'a>(
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicMarkPricePatch {
     pub mark: Option<f64>,
     pub index: Option<f64>,
     pub funding_rate: Option<f64>,
-    pub funding_time: Option<serde_json::Value>,
+    pub funding_time: Option<Js>,
 }
 
 #[derive(Debug, Clone)]
@@ -335,6 +335,8 @@ pub fn public_mark_price_update<'a>(
         }
         Ok(Some(data.get(key)?.parse_float()?))
     };
+    let mark = parse_truthy("p")?;
+    let index = parse_truthy("i")?;
     let rate = data.get("r")?;
     let funding_rate = if rate.is_nullish() || rate.strict_equals(&Js::str("")) {
         None
@@ -343,7 +345,7 @@ pub fn public_mark_price_update<'a>(
     };
     let time = data.get("T")?;
     let funding_time = if time.truthy() {
-        Some(to_typed(&time)?)
+        Some(data.get("T")?)
     } else {
         None
     };
@@ -352,8 +354,8 @@ pub fn public_mark_price_update<'a>(
         symbol,
         ticker,
         patch: PublicMarkPricePatch {
-            mark: parse_truthy("p")?,
-            index: parse_truthy("i")?,
+            mark,
+            index,
             funding_rate,
             funding_time,
         },

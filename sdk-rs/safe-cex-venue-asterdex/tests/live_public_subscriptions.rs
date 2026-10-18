@@ -403,11 +403,30 @@ fn native_assertions(
                 assert_eq!(expected["kind"], "candle");
                 assert_eq!(label, expected["name"].as_str().unwrap());
                 let reference = &expected["candle"];
-                assert_eq!(
-                    candle.timestamp.as_ref(),
-                    reference.get("timestamp"),
-                    "{name} native candle timestamp"
-                );
+                match (candle.timestamp.as_ref(), reference.get("timestamp")) {
+                    (
+                        Some(safe_cex_exchange::js_runtime::value::Js::Number(actual)),
+                        Some(Value::Number(expected)),
+                    ) => {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.as_f64().unwrap().to_bits(),
+                            "{name} native candle timestamp bits"
+                        );
+                    }
+                    (actual, expected) => assert_eq!(
+                        actual.map(|value| {
+                            safe_cex_exchange::js_runtime::value::to_retained_input(value).unwrap()
+                        }),
+                        expected.map(|value| {
+                            safe_cex_exchange::js_runtime::value::to_retained_input(
+                                &safe_cex_exchange::js_runtime::value::from_json(value),
+                            )
+                            .unwrap()
+                        }),
+                        "{name} native candle timestamp retained shape",
+                    ),
+                }
                 for (key, value) in [
                     ("open", candle.open),
                     ("high", candle.high),

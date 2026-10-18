@@ -600,7 +600,11 @@ impl std::fmt::Display for CallbackFailure {
         std::fmt::Display::fmt(self.0.as_ref(), f)
     }
 }
-impl std::error::Error for CallbackFailure {}
+impl std::error::Error for CallbackFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
 
 /// Preserve the original callback failure through the core's owned error ABI.
 /// The cold error path carries the existing Rc in the canonical opaque origin;

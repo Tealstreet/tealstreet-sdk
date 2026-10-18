@@ -407,7 +407,13 @@ impl PublicStream {
             }
         }
         if let Some(value) = update.patch.funding_time {
-            patch.set_json("fundingTime", value);
+            match value {
+                Js::Number(value) => patch.set_number("fundingTime", value),
+                value => patch.set_json(
+                    "fundingTime",
+                    safe_cex_exchange::js_runtime::value::to_typed(&value)?,
+                ),
+            }
         }
         if let Some(ticker) = self.patch_ticker(
             &String::from_utf16_lossy(&data.get("s")?.to_js_string()?),

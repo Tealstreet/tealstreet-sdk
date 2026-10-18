@@ -640,7 +640,7 @@ fn public_mark_price_update_matches_typescript() {
                     update.insert("fundingRate".to_owned(), number(value));
                 }
                 if let Some(value) = plan.patch.funding_time {
-                    update.insert("fundingTime".to_owned(), number(value.as_f64().unwrap()));
+                    update.insert("fundingTime".to_owned(), number(value.to_number().unwrap()));
                 }
                 actual["updates"] = json!([{
                     "targetType":target_type,
@@ -786,11 +786,13 @@ fn public_kline_update_matches_typescript() {
             Ok(Some(update)) => {
                 let timestamp = match update.candle.timestamp {
                     None => json!({"kind":"undefined"}),
-                    Some(Value::Number(value)) => json!({
+                    Some(safe_cex_exchange::js_runtime::value::Js::Number(value)) => json!({
                         "kind":"number",
-                        "bits":format!("{:016x}", value.as_f64().unwrap().to_bits())
+                        "bits":format!("{:016x}", value.to_bits())
                     }),
-                    Some(value) => json!({"kind":"value","value":value}),
+                    Some(value) => {
+                        json!({"kind":"value","value":safe_cex_exchange::js_runtime::value::to_json(&value).unwrap()})
+                    }
                 };
                 json!([{
                     "stream":update.stream,

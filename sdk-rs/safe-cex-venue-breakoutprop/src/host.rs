@@ -276,9 +276,8 @@ impl PollingAncestor for PollingBase {
                 .iter()
                 .cloned()
                 .map(|handler| {
-                    Rc::new(move |value: &serde_json::Value| {
-                        let ticker = safe_cex_num::numeric_ingress::js_from_value_ref(value)
-                            .map_err(|error| ExchangeError::new(error.to_string()))?;
+                    Rc::new(move |value: &Js| {
+                        let ticker = to_typed(value)?;
                         handler(&ticker)
                     }) as safe_cex_exchange::websocket::MessageHandler
                 })

@@ -4439,27 +4439,13 @@
           [
             "value",
             {
-              "resolved_path": {
-                "path": "core::option::Option",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "borrowed_ref": {
-                            "lifetime": null,
-                            "is_mutable": false,
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
                   }
                 }
               }
@@ -4490,7 +4476,7 @@
         "where_predicates": []
       }
     },
-    "call": "serde_json::json!($type($value.get(\"value\")).map(|n| format!(\"{:016x}\", n.to_bits())))",
+    "call": "serde_json::json!($type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)).map(|n| format!(\"{:016x}\", n.to_bits())))",
     "cases": [
       {
         "input": {},
@@ -4630,7 +4616,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -4676,7 +4662,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
                         "args": null
                       }
                     }
@@ -4723,7 +4709,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ let mut calls = 0; let result = $type(&$value[\"data\"], || { calls += 1; $value[\"now\"].as_f64().unwrap() }); match result { Ok(n) => serde_json::json!({\"bits\":format!(\"{:016x}\", n.to_bits()),\"clockCalls\":calls}), Err(e) => serde_json::json!({\"error\":e.name,\"clockCalls\":calls}) } }",
+    "call": "{ let mut calls = 0; let result = $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]), || { calls += 1; $value[\"now\"].as_f64().unwrap() }); match result { Ok(n) => serde_json::json!({\"bits\":format!(\"{:016x}\", n.to_bits()),\"clockCalls\":calls}), Err(e) => serde_json::json!({\"error\":e.to_exchange_error().name,\"clockCalls\":calls}) } }",
     "cases": [
       {
         "input": {
@@ -4908,7 +4894,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -4939,7 +4925,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
                         "args": null
                       }
                     }
@@ -4957,7 +4943,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ let amount = $value[\"amount\"].as_f64().unwrap_or_else(|| $value[\"amount\"].as_str().unwrap().parse::<f64>().unwrap()); match $type(&$value[\"position\"], amount) { Ok(side) => serde_json::json!({\"side\":match side { safe_cex_types::PositionSide::Long => \"long\", safe_cex_types::PositionSide::Short => \"short\" }}), Err(e) => serde_json::json!({\"error\":e.name}) } }",
+    "call": "{ let amount = $value[\"amount\"].as_f64().unwrap_or_else(|| $value[\"amount\"].as_str().unwrap().parse::<f64>().unwrap()); match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"position\"]), amount) { Ok(side) => serde_json::json!({\"side\":match side { safe_cex_types::PositionSide::Long => \"long\", safe_cex_types::PositionSide::Short => \"short\" }}), Err(e) => serde_json::json!({\"error\":e.to_exchange_error().name}) } }",
     "cases": [
       {
         "input": {
@@ -19848,7 +19834,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -19883,7 +19869,7 @@
         "where_predicates": []
       }
     },
-    "call": "match $type(&$value) { Some(book)=>{ let project=|rows:&[safe_cex_types::OrderBookOrders], field:usize| rows.iter().map(|row|format!(\"{:016x}\",match field {0=>row.price,1=>row.amount,_=>row.total}.to_bits())).collect::<Vec<_>>(); serde_json::json!({\"ok\":true,\"bidPrices\":project(&book.bids,0),\"bidAmounts\":project(&book.bids,1),\"bidTotals\":project(&book.bids,2),\"askPrices\":project(&book.asks,0),\"askAmounts\":project(&book.asks,1),\"askTotals\":project(&book.asks,2)}) }, None=>serde_json::json!({\"ok\":false}) }",
+    "call": "match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value)) { Some(book)=>{ let project=|rows:&[safe_cex_types::OrderBookOrders], field:usize| rows.iter().map(|row|format!(\"{:016x}\",match field {0=>row.price,1=>row.amount,_=>row.total}.to_bits())).collect::<Vec<_>>(); serde_json::json!({\"ok\":true,\"bidPrices\":project(&book.bids,0),\"bidAmounts\":project(&book.bids,1),\"bidTotals\":project(&book.bids,2),\"askPrices\":project(&book.asks,0),\"askAmounts\":project(&book.asks,1),\"askTotals\":project(&book.asks,2)}) }, None=>serde_json::json!({\"ok\":false}) }",
     "cases": [
       {
         "input": {
@@ -20135,7 +20121,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "match $type(&$value) { Some(book)=>{ let project=|rows:&[safe_cex_types::OrderBookOrders], field:usize| rows.iter().map(|row|format!(\"{:016x}\",match field {0=>row.price,1=>row.amount,_=>row.total}.to_bits())).collect::<Vec<_>>(); serde_json::json!({\"ok\":true,\"bidPrices\":project(&book.bids,0),\"bidAmounts\":project(&book.bids,1),\"bidTotals\":project(&book.bids,2),\"askPrices\":project(&book.asks,0),\"askAmounts\":project(&book.asks,1),\"askTotals\":project(&book.asks,2)}) }, None=>serde_json::json!({\"ok\":false}) }",
+      "call": "match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value)) { Some(book)=>{ let project=|rows:&[safe_cex_types::OrderBookOrders], field:usize| rows.iter().map(|row|format!(\"{:016x}\",match field {0=>row.price,1=>row.amount,_=>row.total}.to_bits())).collect::<Vec<_>>(); serde_json::json!({\"ok\":true,\"bidPrices\":project(&book.bids,0),\"bidAmounts\":project(&book.bids,1),\"bidTotals\":project(&book.bids,2),\"askPrices\":project(&book.asks,0),\"askAmounts\":project(&book.asks,1),\"askTotals\":project(&book.asks,2)}) }, None=>serde_json::json!({\"ok\":false}) }",
       "nativeFields": [
         "bidPrices",
         "bidAmounts",
@@ -40469,7 +40455,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -40521,7 +40507,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
                         "args": null
                       }
                     }
@@ -40539,7 +40525,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ let keys:Vec<_>=$value[\"handlers\"].as_array().unwrap().iter().map(|v|(v.as_str().unwrap(),())).collect(); match $type(&$value[\"data\"],&keys) { Ok(super::PublicEventDataDispatch::Ignore) => serde_json::json!({\"ok\":true,\"kind\":\"ignore\",\"event\":null}), Ok(super::PublicEventDataDispatch::Handlers{event_type,data}) => serde_json::json!({\"ok\":true,\"kind\":\"handlers\",\"event\":event_type,\"data\":data}), Ok(super::PublicEventDataDispatch::InheritedHandlerFailure{event_type,..}) => serde_json::json!({\"ok\":true,\"kind\":\"inherited\",\"event\":event_type}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+    "call": "{ let keys:Vec<_>=$value[\"handlers\"].as_array().unwrap().iter().map(|v|(v.as_str().unwrap(),())).collect(); match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),&keys) { Ok(super::PublicEventDataDispatch::Ignore) => serde_json::json!({\"ok\":true,\"kind\":\"ignore\",\"event\":null}), Ok(super::PublicEventDataDispatch::Handlers{event_type,data}) => serde_json::json!({\"ok\":true,\"kind\":\"handlers\",\"event\":event_type,\"data\":safe_cex_exchange::js_runtime::value::to_json(&data).unwrap()}), Ok(super::PublicEventDataDispatch::InheritedHandlerFailure{event_type,..}) => serde_json::json!({\"ok\":true,\"kind\":\"inherited\",\"event\":event_type}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.to_exchange_error().name}) } }",
     "cases": [
       {
         "input": {
@@ -40641,7 +40627,7 @@
     ],
     "evidence": "asterdex.ws-public.ts handleEventData reads e, checks truthiness then ordinary object messageHandlers lookup. Actual native discriminant distinguishes own dispatch, absent handler and inherited failure, retains original payload, and refuses null.",
     "nativeObservation": {
-      "call": "{ let keys:Vec<_>=$value[\"handlers\"].as_array().unwrap().iter().map(|v|(v.as_str().unwrap(),())).collect(); match $type(&$value[\"data\"],&keys) { Ok(super::PublicEventDataDispatch::Ignore) => serde_json::json!({\"ok\":true,\"kind\":\"ignore\",\"event\":null}), Ok(super::PublicEventDataDispatch::Handlers{event_type,data}) => serde_json::json!({\"ok\":true,\"kind\":\"handlers\",\"event\":event_type,\"data\":data}), Ok(super::PublicEventDataDispatch::InheritedHandlerFailure{event_type,..}) => serde_json::json!({\"ok\":true,\"kind\":\"inherited\",\"event\":event_type}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+      "call": "{ let keys:Vec<_>=$value[\"handlers\"].as_array().unwrap().iter().map(|v|(v.as_str().unwrap(),())).collect(); match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),&keys) { Ok(super::PublicEventDataDispatch::Ignore) => serde_json::json!({\"ok\":true,\"kind\":\"ignore\",\"event\":null}), Ok(super::PublicEventDataDispatch::Handlers{event_type,data}) => serde_json::json!({\"ok\":true,\"kind\":\"handlers\",\"event\":event_type,\"data\":safe_cex_exchange::js_runtime::value::to_json(&data).unwrap()}), Ok(super::PublicEventDataDispatch::InheritedHandlerFailure{event_type,..}) => serde_json::json!({\"ok\":true,\"kind\":\"inherited\",\"event\":event_type}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.to_exchange_error().name}) } }",
       "nativeFields": [
         "kind",
         "event"
@@ -40762,7 +40748,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -40821,7 +40807,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
                         "args": null
                       }
                     }
@@ -40839,7 +40825,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ let streams:Vec<_>=$value[\"callbacks\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap()).collect(); match $type(&$value[\"data\"],&streams) { Ok(None)=>serde_json::json!({\"ok\":true,\"present\":false,\"stream\":null}), Ok(Some(update))=>{let c=update.candle; serde_json::json!({\"ok\":true,\"present\":true,\"stream\":update.stream,\"timestamp\":c.timestamp,\"hasTimestamp\":c.timestamp.is_some(),\"bits\":([c.open,c.high,c.low,c.close,c.volume].map(|n|format!(\"{:016x}\",n.to_bits())))})}, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+    "call": "{ let streams:Vec<_>=$value[\"callbacks\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap()).collect(); match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),&streams) { Ok(None)=>serde_json::json!({\"ok\":true,\"present\":false,\"stream\":null}), Ok(Some(update))=>{let c=update.candle; serde_json::json!({\"ok\":true,\"present\":true,\"stream\":update.stream,\"timestamp\":c.timestamp.as_ref().map(|v|safe_cex_exchange::js_runtime::value::to_json(v).unwrap()),\"hasTimestamp\":c.timestamp.is_some(),\"bits\":([c.open,c.high,c.low,c.close,c.volume].map(|n|format!(\"{:016x}\",n.to_bits())))})}, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.to_exchange_error().name}) } }",
     "cases": [
       {
         "input": {
@@ -40965,7 +40951,7 @@
     ],
     "evidence": "asterdex.ws-public.ts handleKlineUpdate: lowercase stream/callback admission; missing timestamp remains absent; all five parseFloat fields are observed as native binary64 bits, including NaN, infinities and signed zero. Missing kline/callbacks drop, numeric symbol and null refuse.",
     "nativeObservation": {
-      "call": "{ let streams:Vec<_>=$value[\"callbacks\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap()).collect(); match $type(&$value[\"data\"],&streams) { Ok(None)=>serde_json::json!({\"ok\":true,\"present\":false,\"stream\":null}), Ok(Some(update))=>{let c=update.candle; serde_json::json!({\"ok\":true,\"present\":true,\"stream\":update.stream,\"timestamp\":c.timestamp,\"hasTimestamp\":c.timestamp.is_some(),\"bits\":([c.open,c.high,c.low,c.close,c.volume].map(|n|format!(\"{:016x}\",n.to_bits())))})}, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+      "call": "{ let streams:Vec<_>=$value[\"callbacks\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap()).collect(); match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),&streams) { Ok(None)=>serde_json::json!({\"ok\":true,\"present\":false,\"stream\":null}), Ok(Some(update))=>{let c=update.candle; serde_json::json!({\"ok\":true,\"present\":true,\"stream\":update.stream,\"timestamp\":c.timestamp.as_ref().map(|v|safe_cex_exchange::js_runtime::value::to_json(v).unwrap()),\"hasTimestamp\":c.timestamp.is_some(),\"bits\":([c.open,c.high,c.low,c.close,c.volume].map(|n|format!(\"{:016x}\",n.to_bits())))})}, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.to_exchange_error().name}) } }",
       "nativeFields": [
         "present",
         "stream"
@@ -41396,7 +41382,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -41480,7 +41466,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
                         "args": null
                       }
                     }
@@ -41507,7 +41493,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&$value[\"data\"],&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.symbol,\"bits\":[update.patch.last.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.percentage.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.volume.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.quote_volume.map(|n|format!(\"{:016x}\",n.to_bits()))]}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+    "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":safe_cex_exchange::js_runtime::value::to_json(&update.symbol).unwrap(),\"bits\":[update.patch.last.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.percentage.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.volume.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.quote_volume.map(|n|format!(\"{:016x}\",n.to_bits()))]}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.to_exchange_error().name}) } }",
     "cases": [
       {
         "input": {
@@ -41603,7 +41589,7 @@
     ],
     "evidence": "asterdex.ws-public.ts handleTickerUpdate: native table lookup retains the original Ticker reference (pointer equality), inherited member versus missing distinction, truthy optional patches and exact parsed binary64 bits. Funding numeric zero is present while fundingTime zero is omitted.",
     "nativeObservation": {
-      "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&$value[\"data\"],&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.symbol,\"bits\":[update.patch.last.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.percentage.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.volume.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.quote_volume.map(|n|format!(\"{:016x}\",n.to_bits()))]}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+      "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":safe_cex_exchange::js_runtime::value::to_json(&update.symbol).unwrap(),\"bits\":[update.patch.last.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.percentage.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.volume.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.quote_volume.map(|n|format!(\"{:016x}\",n.to_bits()))]}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.to_exchange_error().name}) } }",
       "nativeFields": [
         "kind",
         "same"
@@ -41720,7 +41706,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -41804,7 +41790,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
                         "args": null
                       }
                     }
@@ -41831,7 +41817,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&$value[\"data\"],&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.symbol,\"bits\":[update.patch.mark.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.index.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.funding_rate.map(|n|format!(\"{:016x}\",n.to_bits()))],\"fundingTime\":update.patch.funding_time}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+    "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":safe_cex_exchange::js_runtime::value::to_json(&update.symbol).unwrap(),\"bits\":[update.patch.mark.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.index.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.funding_rate.map(|n|format!(\"{:016x}\",n.to_bits()))],\"fundingTime\":update.patch.funding_time.as_ref().map(|v|safe_cex_exchange::js_runtime::value::to_json(v).unwrap())}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.to_exchange_error().name}) } }",
     "cases": [
       {
         "input": {
@@ -41927,7 +41913,7 @@
     ],
     "evidence": "asterdex.ws-public.ts handleMarkPriceUpdate: native table lookup retains the original Ticker reference (pointer equality), inherited member versus missing distinction, truthy optional patches and exact parsed binary64 bits. Funding numeric zero is present while fundingTime zero is omitted.",
     "nativeObservation": {
-      "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&$value[\"data\"],&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.symbol,\"bits\":[update.patch.mark.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.index.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.funding_rate.map(|n|format!(\"{:016x}\",n.to_bits()))],\"fundingTime\":update.patch.funding_time}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+      "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":safe_cex_exchange::js_runtime::value::to_json(&update.symbol).unwrap(),\"bits\":[update.patch.mark.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.index.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.funding_rate.map(|n|format!(\"{:016x}\",n.to_bits()))],\"fundingTime\":update.patch.funding_time.as_ref().map(|v|safe_cex_exchange::js_runtime::value::to_json(v).unwrap())}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.to_exchange_error().name}) } }",
       "nativeFields": [
         "kind",
         "same"
@@ -84025,7 +84011,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -84088,7 +84074,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
                         "args": null
                       }
                     }
@@ -84135,7 +84121,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let clock=std::cell::Cell::new(0);let result=$type(&$value[\"data\"],||{clock.set(clock.get()+1);$value[\"now\"].as_f64().unwrap()});serde_json::json!({\"value\":observed::cumulative(result),\"clock\":clock.get()}) }",
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let clock=std::cell::Cell::new(0);let result=$type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),||{clock.set(clock.get()+1);$value[\"now\"].as_f64().unwrap()});serde_json::json!({\"value\":observed::cumulative(result),\"clock\":clock.get()}) }",
     "cases": [
       {
         "input": {
@@ -84371,27 +84357,13 @@
           [
             "balances",
             {
-              "resolved_path": {
-                "path": "core::option::Option",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "borrowed_ref": {
-                            "lifetime": null,
-                            "is_mutable": false,
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
                   }
                 }
               }
@@ -84464,22 +84436,36 @@
         ],
         "output": {
           "resolved_path": {
-            "path": "core::option::Option",
+            "path": "core::result::Result",
             "args": {
               "angle_bracketed": {
                 "args": [
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "alloc::vec::Vec",
+                        "path": "core::option::Option",
                         "args": {
                           "angle_bracketed": {
                             "args": [
                               {
                                 "type": {
                                   "resolved_path": {
-                                    "path": "safe_cex_venue_asterdex::account_helpers::AssetBalanceUpdate",
-                                    "args": null
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_venue_asterdex::account_helpers::AssetBalanceUpdate",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
                                   }
                                 }
                               }
@@ -84487,6 +84473,14 @@
                             "constraints": []
                           }
                         }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
                       }
                     }
                   }
@@ -84503,7 +84497,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let fields=&$value[\"fields\"];match $type($value.get(\"rows\"),fields[\"total\"].as_str(),fields[\"free\"].as_str().unwrap(),fields[\"used\"].as_str()){Some(rows)=>observed::balances(&rows),None=>serde_json::Value::Null} }",
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let fields=&$value[\"fields\"];match $type(&$value.get(\"rows\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined),fields[\"total\"].as_str(),fields[\"free\"].as_str().unwrap(),fields[\"used\"].as_str()).unwrap(){Some(rows)=>observed::balances(&rows),None=>serde_json::Value::Null} }",
     "cases": [
       {
         "input": {
@@ -84888,27 +84882,13 @@
           [
             "positions",
             {
-              "resolved_path": {
-                "path": "core::option::Option",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "borrowed_ref": {
-                            "lifetime": null,
-                            "is_mutable": false,
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
                   }
                 }
               }
@@ -84951,36 +84931,58 @@
         ],
         "output": {
           "resolved_path": {
-            "path": "core::option::Option",
+            "path": "core::result::Result",
             "args": {
               "angle_bracketed": {
                 "args": [
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "alloc::vec::Vec",
+                        "path": "core::option::Option",
                         "args": {
                           "angle_bracketed": {
                             "args": [
                               {
                                 "type": {
-                                  "tuple": [
-                                    {
-                                      "resolved_path": {
-                                        "path": "alloc::string::String",
-                                        "args": null
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "tuple": [
+                                                {
+                                                  "resolved_path": {
+                                                    "path": "alloc::string::String",
+                                                    "args": null
+                                                  }
+                                                },
+                                                {
+                                                  "primitive": "f64"
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
                                       }
-                                    },
-                                    {
-                                      "primitive": "f64"
                                     }
-                                  ]
+                                  }
                                 }
                               }
                             ],
                             "constraints": []
                           }
                         }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
                       }
                     }
                   }
@@ -84997,7 +84999,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let existing=$value[\"existing\"].as_array().unwrap().iter().map(|row|{observed::position(row)}).collect::<Vec<_>>();let currencies=$value[\"currencies\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect::<Vec<_>>();match $type($value.get(\"positions\"),&existing,&currencies){Some(rows)=>serde_json::json!(rows.into_iter().map(|(key,n)|serde_json::json!([key,observed::bits(n)])).collect::<Vec<_>>()),None=>serde_json::Value::Null} }",
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let existing=$value[\"existing\"].as_array().unwrap().iter().map(|row|{observed::position(row)}).collect::<Vec<_>>();let currencies=$value[\"currencies\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect::<Vec<_>>();match $type(&$value.get(\"positions\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined),&existing,&currencies).unwrap(){Some(rows)=>serde_json::json!(rows.into_iter().map(|(key,n)|serde_json::json!([key,observed::bits(n)])).collect::<Vec<_>>()),None=>serde_json::Value::Null} }",
     "cases": [
       {
         "input": {
@@ -90640,7 +90642,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let captured=std::rc::Rc::new(std::cell::Cell::new(0.));let cell=captured.clone();subscriptions.subscribe_to_kline(\"btcusdt@kline_1m\",std::rc::Rc::new(move|c|{assert_eq!(c.timestamp,Some(serde_json::json!(\"opaque timestamp\")));cell.set(c.close);Ok(())})).unwrap();subscriptions.deliver_kline(\"btcusdt@kline_1m\",crate::ws_helpers::PublicKlineCandle{timestamp:Some(serde_json::json!(\"opaque timestamp\")),open:1.,high:2.,low:0.,close:$value.as_f64().unwrap(),volume:3.}).unwrap();serde_json::json!(format!(\"{:016x}\",captured.get().to_bits()))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let captured=std::rc::Rc::new(std::cell::Cell::new(0.));let cell=captured.clone();subscriptions.subscribe_to_kline(\"btcusdt@kline_1m\",std::rc::Rc::new(move|c|{assert!(c.timestamp.as_ref().is_some_and(|v| v.strict_equals(&Js::str(\"opaque timestamp\"))));cell.set(c.close);Ok(())})).unwrap();subscriptions.deliver_kline(\"btcusdt@kline_1m\",crate::ws_helpers::PublicKlineCandle{timestamp:Some(Js::str(\"opaque timestamp\")),open:1.,high:2.,low:0.,close:$value.as_f64().unwrap(),volume:3.}).unwrap();serde_json::json!(format!(\"{:016x}\",captured.get().to_bits()))}",
         "cases": [
           {
             "input": 1.25,
@@ -91669,7 +91671,7 @@
                     "is_mutable": false,
                     "type": {
                       "resolved_path": {
-                        "path": "serde_json::value::Value",
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
                         "args": null
                       }
                     }
@@ -91707,7 +91709,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();stream.handle_order_trade_update($value).unwrap();serde_json::json!(store.orders().iter().map(|o|serde_json::json!({\"id\":o.id,\"symbol\":o.symbol,\"amount\":format!(\"{:016x}\",o.amount.to_bits()),\"remaining\":format!(\"{:016x}\",o.remaining.to_bits())})).collect::<Vec<_>>())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();stream.handle_order_trade_update(&safe_cex_exchange::js_runtime::value::from_json($value)).unwrap();serde_json::json!(store.orders().iter().map(|o|serde_json::json!({\"id\":o.id,\"symbol\":o.symbol,\"amount\":format!(\"{:016x}\",o.amount.to_bits()),\"remaining\":format!(\"{:016x}\",o.remaining.to_bits())})).collect::<Vec<_>>())}",
         "cases": [
           {
             "input": {
@@ -91899,7 +91901,7 @@
                     "is_mutable": false,
                     "type": {
                       "resolved_path": {
-                        "path": "serde_json::value::Value",
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
                         "args": null
                       }
                     }
@@ -91937,7 +91939,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();let events=f::events(venue.base(),\"account\");stream.handle_account_update($value).unwrap();assert_eq!(events.borrow().as_slice(),&[serde_json::json!([$value.clone()])]);f::balance(&store)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();let events=f::events(venue.base(),\"account\");stream.handle_account_update(&safe_cex_exchange::js_runtime::value::from_json($value)).unwrap();assert_eq!(events.borrow().as_slice(),&[serde_json::json!([$value.clone()])]);f::balance(&store)}",
         "cases": [
           {
             "input": {
@@ -91999,7 +92001,7 @@
                     "is_mutable": false,
                     "type": {
                       "resolved_path": {
-                        "path": "serde_json::value::Value",
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
                         "args": null
                       }
                     }
@@ -92037,7 +92039,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();stream.handle_account_position_update($value).unwrap();f::balance(&store)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();stream.handle_account_position_update(&safe_cex_exchange::js_runtime::value::from_json($value)).unwrap();f::balance(&store)}",
         "cases": [
           {
             "input": {

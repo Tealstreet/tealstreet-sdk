@@ -351,7 +351,8 @@ pub(crate) fn native(value: serde_json::Value) -> EventValue {
     EventValue::from_json(value)
 }
 pub(crate) fn parse_data(data: EventValue) -> EventValue {
-    data.to_js_string().ok()
+    data.to_js_string()
+        .ok()
         .and_then(|text| safe_cex_types::retained_json::RetainedJsonInput::parse_json(&text).ok())
         .map(safe_cex_exchange::js_runtime::value::from_retained_input)
         .unwrap_or(EventValue::Null)

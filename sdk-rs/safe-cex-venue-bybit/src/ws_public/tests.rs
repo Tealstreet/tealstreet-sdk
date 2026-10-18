@@ -283,6 +283,22 @@ fn fixture() -> (Rc<BaseWebSocket>, Rc<Parent>, Rc<Runtime>) {
 #[test]
 #[ignore = "requires frozen workspace Node dependencies; mandatory venue-oracle:bybit CI step"]
 fn dispatch_and_subscription_match_live_source() {
+    // Both sides observe ECMAScript Numbers; serde's integer/float storage tag
+    // is not part of the source callback value. Native signed-zero and graph
+    // witnesses below still assert their exact bits and identities before JSON.
+    fn numbers(value: &Value) -> Value {
+        match value {
+            Value::Number(number) => json!(number.as_f64().expect("source finite callback number")),
+            Value::Array(values) => Value::Array(values.iter().map(numbers).collect()),
+            Value::Object(values) => Value::Object(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), numbers(value)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
     let run = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -333,8 +349,8 @@ fn dispatch_and_subscription_match_live_source() {
         }
         on_message(&socket, case["data"].as_str().unwrap()).unwrap();
         assert_eq!(
-            json!(*calls.borrow()),
-            case["calls"],
+            numbers(&json!(*calls.borrow())),
+            numbers(&case["calls"]),
             "callbacks case {i}: {case}"
         );
         let mut keys: Vec<_> = socket
