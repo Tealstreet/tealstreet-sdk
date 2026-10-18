@@ -334,7 +334,7 @@ raw/expanded compiler AST, sysroot Vec artifact and invariant native type.
 Its complete four-route matrix observes native f64 bits and borrowed key pointers
 or offsets, including duplicate keys, escaped text refusal and owned nonempty
 Value refusal. The general borrowed-alias refusal and DeserializeOwned bound
-stay intact; removing the exact native route dispatch must hit that compiled
-refusal. Do not extend this permission to another owner or shape by copying its
+stay intact; a control bypassing the exact native routes must explicitly select
+that unchanged borrowed guard and produce its compiled runtime refusal. Do not extend this permission to another owner or shape by copying its
 contract. Registered native identity/member-order/dispatch controls must fail by
 runtime receipt and pass after exact restoration.

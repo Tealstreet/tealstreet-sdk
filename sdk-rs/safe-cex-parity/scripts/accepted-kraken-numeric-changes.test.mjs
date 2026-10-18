@@ -53,7 +53,7 @@ async function child(mode) {
     if (url === probes && mode === 'route') {
       const line = source.split('\n').filter(row => row.startsWith("  if (contract.aliasProbeKind === 'reviewed-kraken-numeric-changes') return"));
       assert.equal(line.length, 1);
-      source = source.replace(line[0], ''); injected++;
+      source = source.replace(line[0], "  if (contract.aliasProbeKind === 'reviewed-kraken-numeric-changes') return `{ ${equality} use crate::__accepted_set_runtime::DetectAlias as _; let probe = crate::__accepted_set_runtime::AliasProbe::<${targetType}>(std::marker::PhantomData); (&&probe).probe(${literal(type.name)}, ${literal(contract.canonical)}, \"{}\", |_| serde_json::Value::Null, |_, _| None, |_| Vec::new()); }`;"); injected++;
     }
     return { ...result, source };
   } });

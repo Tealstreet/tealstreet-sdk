@@ -34,7 +34,8 @@ Run `numeric-changes-contracts.mjs`, the registered parity policy/native tests,
 `numeric-changes-controls.py` must compile two independent wrong-key publication
 faults, require their named native assertion failures and restore exact source
 bytes before passing again. The parity controls additionally corrupt native
-identity, native member order and route dispatch; each must produce a named
+identity, native member order and bypass the routes through the unchanged
+borrowed guard; each must produce a named
 runtime receipt failure followed by a restored pass.
 
 This closes this alias's finite borrowed decoder coverage, not arbitrary static
