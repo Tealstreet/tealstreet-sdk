@@ -476,6 +476,16 @@ constructed-Scope witnesses and compiled controls are named
 `accepted_trading_error_receivers` and `trading-error-receiver-controls.py`.
 `trading-error-receiver-source.cjs` executes the live TypeScript callers directly.
 
+### Cancellation, account and class receiver coverage
+
+`ADDITIONAL_RECEIVER_REVIEW.md` records eight concrete Scope receivers and the
+Spot cancellation native-error cutover. `accepted_additional_receivers` drives the
+production constructor, signed client, Base reporter and socket prototypes.
+Keep original `Thrown`/message cells until the post-report fresh Error ToString;
+never reintroduce an intermediate typed UTF-8 error. The existing fourteen-case
+Spot cancellation corpus and nine independent compiled controls remain scoped
+to these paths. Module-array and shared Store identity are separately owned.
+
 ### Trading protocol and tick receiver coverage
 
 `RUNTIME_RECEIVER_REVIEW.md` covers TradingHost iterable/send and TickHost's typed

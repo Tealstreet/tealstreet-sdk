@@ -353,65 +353,57 @@ impl SpotCancelHost for Rt {
     type Orders = Js;
     type Order = Js;
     type Id = Js;
-    type Items = std::vec::IntoIter<Result<Rc<Js>, ExchangeError>>;
-    fn length(&self, orders: &Js) -> Result<usize, ExchangeError> {
-        Ok(orders
-            .get("length")
-            .and_then(|l| l.to_number())
-            .map_err(ex)? as usize)
+    type Items = std::vec::IntoIter<Result<Rc<Js>, Thrown>>;
+    fn length(&self, orders: &Js) -> Result<usize, Thrown> {
+        Ok(orders.get("length").and_then(|l| l.to_number())? as usize)
     }
-    fn first(&self, orders: &Js) -> Result<Rc<Js>, ExchangeError> {
-        Ok(Rc::new(orders.get("0").map_err(ex)?))
+    fn first(&self, orders: &Js) -> Result<Rc<Js>, Thrown> {
+        Ok(Rc::new(orders.get("0")?))
     }
-    fn items(&self, orders: Rc<Js>) -> Result<Self::Items, ExchangeError> {
+    fn items(&self, orders: Rc<Js>) -> Result<Self::Items, Thrown> {
         let items = orders
             .array_values()
-            .ok_or_else(|| ExchangeError::new("orders is not iterable"))?;
+            .ok_or_else(|| Thrown::type_error("orders is not iterable"))?;
         Ok(items
             .into_iter()
             .map(|o| Ok(Rc::new(o)))
             .collect::<Vec<_>>()
             .into_iter())
     }
-    fn id(&self, order: &Js) -> Result<Rc<Js>, ExchangeError> {
-        Ok(Rc::new(order.get("id").map_err(ex)?))
+    fn id(&self, order: &Js) -> Result<Rc<Js>, Thrown> {
+        Ok(Rc::new(order.get("id")?))
     }
     fn post_cancel(
         &self,
         endpoint: &'static str,
         field: &'static str,
         id: Rc<Js>,
-    ) -> Result<ExchangeFuture<'static, ()>, ExchangeError> {
-        let xhr = self.this.get("unlimitedXHR").map_err(ex)?;
-        let promise = xhr
-            .call_method(
-                "post",
-                vec![Js::str(endpoint), Js::object(vec![(field, (*id).clone())])],
-            )
-            .map_err(ex)?;
+    ) -> Result<safe_cex_exchange::js_runtime::promise::JsFuture<'static>, Thrown> {
+        let xhr = self.this.get("unlimitedXHR")?;
+        let promise = xhr.call_method(
+            "post",
+            vec![Js::str(endpoint), Js::object(vec![(field, (*id).clone())])],
+        )?;
         Ok(Box::pin({
             let await_runtime = self.exchange_runtime();
-            async move {
-                await_js(&await_runtime, promise).await.map_err(ex)?;
-                Ok(())
-            }
+            async move { await_js(&await_runtime, promise).await }
         }))
     }
-    fn error_message(
-        &self,
-        error: &ExchangeError,
-        fallback: &'static str,
-    ) -> Result<String, ExchangeError> {
-        Ok(if error.message.is_empty() {
-            fallback.to_owned()
+    fn error_message(&self, error: &Thrown, fallback: &'static str) -> Result<Js, Thrown> {
+        let message = if error.value.is_nullish() {
+            Js::Undefined
         } else {
-            error.message.clone()
+            error.value.get("message")?
+        };
+        Ok(if message.truthy() {
+            message
+        } else {
+            Js::str(fallback)
         })
     }
-    fn emit_error(&self, message: &str, context: &'static str) -> Result<(), ExchangeError> {
+    fn emit_error(&self, message: &Js, context: &'static str) -> Result<(), Thrown> {
         self.this
-            .call_method("emitAndLogError", vec![Js::str(message), Js::str(context)])
-            .map_err(ex)?;
+            .call_method("emitAndLogError", vec![message.clone(), Js::str(context)])?;
         Ok(())
     }
 }
