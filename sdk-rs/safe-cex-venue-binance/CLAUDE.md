@@ -799,6 +799,17 @@ the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
 
+The private `Action` and `PinKey` aliases have individual non-decoder capability
+reviews. The actual native private-clone witness retains the captured receiver
+and invokes its reconnect arrow; the held listen-key witness exercises Futures
+and PM through native_dependencies, observes suspension/native value bits and
+rethrows the original rejected HTTP error with its response intact.
+`scripts/private-action-key-controls.py` independently corrupts the production
+captured call and listenKey forwarding, requires named compiled native failures,
+then restores exact source bytes and requires GREEN. The finite compiler runner
+authenticates these two real aliases; it does not execute replacement callbacks
+or classify the returned payload, other futures or the whole package.
+
 Private REST shape checks, field aliases and diagnostics consume the canonical
 native graph directly. Never restore the recursive `json_data` projection.
 Existing borrowed-JSON array validators delegate to the same native guard.
