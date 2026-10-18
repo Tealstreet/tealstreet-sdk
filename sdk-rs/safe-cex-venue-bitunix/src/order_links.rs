@@ -1,8 +1,7 @@
 //! Order linkage utilities over the canonical shared Order and an orders snapshot.
 use crate::order_ids::{get_virtual_tpsl_leg, get_virtual_tpsl_parent_order_id};
-use safe_cex_num::{JsCoercionError, js_string, js_truthy};
+use safe_cex_num::{JsCoercionError, js_retained_string};
 use safe_cex_types::{Order, OrderType};
-use serde_json::Value;
 
 pub fn get_tpsl_raw_order_id(order: &Order) -> Result<String, JsCoercionError> {
     let info = order.info.as_ref();
@@ -11,8 +10,8 @@ pub fn get_tpsl_raw_order_id(order: &Order) -> Result<String, JsCoercionError> {
         .filter(|v| !v.is_null())
         .or_else(|| info.and_then(|v| v.get("orderId")));
     if let Some(value) = raw {
-        if !value.is_null() && !matches!(value,Value::String(s) if s.is_empty()) {
-            return js_string(Some(value));
+        if !value.is_nullish() && !value.text_equals("") {
+            return js_retained_string(Some(value));
         }
     }
     Ok(order.id.clone())
@@ -36,8 +35,8 @@ pub fn is_standalone_tpsl_order(order: &Order, orders: &[Order]) -> bool {
 
 pub fn is_position_tpsl_order(order: &Order) -> Result<bool, JsCoercionError> {
     let raw = order.info.as_ref().and_then(|info| info.get("type"));
-    let kind = if js_truthy(raw) {
-        js_string(raw)?
+    let kind = if raw.is_some_and(|value| value.is_truthy()) {
+        js_retained_string(raw)?
     } else {
         String::new()
     };

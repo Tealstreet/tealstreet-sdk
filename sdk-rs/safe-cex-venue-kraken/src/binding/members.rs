@@ -349,7 +349,10 @@ pub(crate) fn dispatch(
                 store.as_ref(),
                 |endpoint, pair, interval, since| {
                     let params = Js::object(vec![
-                        ("pair", json_value(&pair)),
+                        (
+                            "pair",
+                            safe_cex_exchange::js_runtime::value::from_retained_input(pair),
+                        ),
                         (
                             "interval",
                             match interval {

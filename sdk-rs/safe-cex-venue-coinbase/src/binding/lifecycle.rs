@@ -71,7 +71,7 @@ impl Host {
                 .map(|market| {
                     let market = market.borrow();
                     let mut fields = market.fields.clone();
-                    fields.info = Some(market.info.borrow().clone());
+                    fields.info = Some(market.info.borrow().clone().into());
                     fields
                 })
                 .collect())
@@ -96,7 +96,7 @@ impl Host {
                 .map(|ticker| {
                     let mut fields = ticker.fields.clone();
                     if let Some(info) = &ticker.info {
-                        fields.info = Some(info.borrow().clone());
+                        fields.info = Some(info.borrow().clone().into());
                     }
                     fields
                 })
@@ -117,7 +117,7 @@ impl Host {
                 .map(|position| {
                     let mut fields = position.fields.clone();
                     if let Some(info) = &position.info {
-                        fields.info = (Some(info.borrow().clone())).into();
+                        fields.info = (Some(info.borrow().clone().into())).into();
                     }
                     fields
                 })

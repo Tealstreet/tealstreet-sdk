@@ -4312,3 +4312,6 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
     assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
     assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }
+
+#[path = "support/retained_info.rs"]
+mod retained_info;

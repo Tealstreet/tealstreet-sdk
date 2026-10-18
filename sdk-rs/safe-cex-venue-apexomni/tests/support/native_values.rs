@@ -82,3 +82,28 @@ pub fn native_eq(actual: &J, expected: &J, label: &str) {
         _ => assert_eq!(actual, expected, "{label} native value"),
     }
 }
+
+pub fn retained(value: &safe_cex_types::retained_json::RetainedJsonInput) -> J {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    match value {
+        Input::Undefined => J::Undefined,
+        Input::Null => J::Null,
+        Input::Bool(value) => J::Bool(*value),
+        Input::Float(_) | Input::Lexeme(_) => J::Number(value.as_f64().unwrap()),
+        Input::Text(units) => {
+            J::String(String::from_utf16(units).expect("source native observer UTF8 text"))
+        }
+        Input::Array(values) => J::Array(values.iter().map(retained).collect()),
+        Input::Object(values) => J::Object(
+            values
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        String::from_utf16(key).expect("source native observer UTF8 key"),
+                        retained(value),
+                    )
+                })
+                .collect(),
+        ),
+    }
+}

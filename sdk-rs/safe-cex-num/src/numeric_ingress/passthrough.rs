@@ -48,3 +48,21 @@ mod tests {
         );
     }
 }
+
+impl private::Sealed for safe_cex_types::retained_json::RetainedJsonInput {}
+impl private::Sealed for Option<safe_cex_types::retained_json::RetainedJsonInput> {}
+impl private::Sealed
+    for safe_cex_types::ModelField<safe_cex_types::retained_json::RetainedJsonInput>
+{
+}
+impl JsNumberPassthrough for safe_cex_types::retained_json::RetainedJsonInput {
+    fn check_number_passthrough(&self) {}
+}
+impl JsNumberPassthrough for Option<safe_cex_types::retained_json::RetainedJsonInput> {
+    fn check_number_passthrough(&self) {}
+}
+impl JsNumberPassthrough
+    for safe_cex_types::ModelField<safe_cex_types::retained_json::RetainedJsonInput>
+{
+    fn check_number_passthrough(&self) {}
+}

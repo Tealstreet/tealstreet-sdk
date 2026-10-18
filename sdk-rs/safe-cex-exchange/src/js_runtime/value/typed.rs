@@ -105,10 +105,11 @@ enum NativeMode {
     Normal,
     Preserve,
     ModelRecord,
+    InfoRecord,
 }
 impl NativeMode {
     fn child(self) -> Self {
-        if self == Self::ModelRecord {
+        if matches!(self, Self::ModelRecord | Self::InfoRecord) {
             Self::Normal
         } else {
             self
@@ -152,8 +153,11 @@ impl<'de> Deserializer<'de> for NativeInput {
             Input::Object(values) => de::value::MapDeserializer::new(
                 values
                     .into_iter()
-                    .filter(|(_, value)| {
-                        self.1 != NativeMode::Normal || !matches!(value, Input::Undefined)
+                    .filter(|(key, value)| {
+                        !matches!(value, Input::Undefined)
+                            || matches!(self.1, NativeMode::Preserve | NativeMode::ModelRecord)
+                            || (self.1 == NativeMode::InfoRecord
+                                && key.iter().copied().eq("info".encode_utf16()))
                     })
                     .map(|(key, value)| {
                         Ok((
@@ -179,11 +183,18 @@ impl<'de> Deserializer<'de> for NativeInput {
         name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
+        if name == safe_cex_types::retained_json::RETAINED_NATIVE {
+            return NativeInput(self.0.into_native_payload(), NativeMode::Preserve)
+                .deserialize_seq(visitor);
+        }
         if name == safe_cex_types::model_field::MODEL_FIELD && matches!(self.0, Input::Undefined) {
             return visitor.visit_unit();
         }
         if name == safe_cex_types::model_field::MODEL_RECORD {
             self.1 = NativeMode::ModelRecord;
+        }
+        if name == safe_cex_types::model_field::INFO_RECORD {
+            self.1 = NativeMode::InfoRecord;
         }
         visitor.visit_newtype_struct(self)
     }

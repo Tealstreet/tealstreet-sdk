@@ -8,22 +8,34 @@ fn number(actual: f64, expected: &Value, field: &str) {
     let actual = capture_bits::number_bits(actual);
     assert_eq!(actual, expected, "{field} native field identity");
 }
-fn info_identity(actual: &Value, expected: &Value) {
+fn info_identity(actual: &safe_cex_types::retained_json::RetainedJsonInput, expected: &Value) {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match (actual, expected) {
-        (Value::Number(_), Value::Object(_)) => number(actual.as_f64().unwrap(), expected, "info"),
-        (Value::Object(a), Value::Object(b)) => {
+        (Input::Float(_) | Input::Lexeme(_), Value::Object(_)) => {
+            number(actual.as_f64().unwrap(), expected, "info")
+        }
+        (Input::Object(a), Value::Object(b)) => {
             assert_eq!(a.len(), b.len());
             for (key, value) in a {
-                info_identity(value, &b[key]);
+                info_identity(value, &b[&String::from_utf16(key).unwrap()]);
             }
         }
-        (Value::Array(a), Value::Array(b)) => {
+        (Input::Array(a), Value::Array(b)) => {
             assert_eq!(a.len(), b.len());
             for (a, b) in a.iter().zip(b) {
                 info_identity(a, b);
             }
         }
-        _ => assert_eq!(actual, expected, "info native field identity"),
+        (Input::Null, Value::Null) => {}
+        (Input::Bool(actual), Value::Bool(expected)) => {
+            assert_eq!(actual, expected, "info native boolean")
+        }
+        (Input::Text(actual), Value::String(expected)) => assert_eq!(
+            actual,
+            &expected.encode_utf16().collect::<Vec<_>>(),
+            "info native UTF16 text"
+        ),
+        _ => panic!("info native kind mismatch: {actual:?} vs {expected:?}"),
     }
 }
 macro_rules! numbers {

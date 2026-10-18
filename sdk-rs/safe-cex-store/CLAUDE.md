@@ -184,3 +184,8 @@ Order.reduceOnly follows the same ModelField overlay policy: an absent incoming
 property retains the existing value, while own undefined replaces it. The native
 Store facade regression exercises all four presence states across single/bulk
 upsert and updateOrder, alongside the actual TypeScript Store.
+
+Model info patches carry canonical RetainedJsonInput directly through PatchSource.
+No JSON copy precedes native Store mutation, and emptiness detection checks carried
+StoreUpdate fields without serializing them. Ticker info stripping retains the
+source truthiness rule; Order/Position own-undefined merge semantics are unchanged.

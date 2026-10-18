@@ -128,7 +128,7 @@ pub(crate) fn map_order_row(
         time_in_force: None.into(),
         // Date distinguishes missing, null and booleans before primitive/string parsing.
         last_update,
-        info: (Some(Value::Object(row.clone()))).into(),
+        info: (Some(Value::Object(row.clone()).into())).into(),
         close: (None).into(),
         trigger_type: (None).into(),
         tp_trigger_type: (None).into(),

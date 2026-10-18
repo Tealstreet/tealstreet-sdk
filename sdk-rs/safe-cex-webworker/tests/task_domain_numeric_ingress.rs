@@ -170,9 +170,17 @@ fn complete_task_graphs_match_source_numeric_bits() {
         "/activeMarket/option/expiry" => v.active_market.option.as_ref().unwrap().expiry,
         "/activeMarket/option/strike" => v.active_market.option.as_ref().unwrap().strike,
         "/activeMarket/contractSize" => v.active_market.contract_size.unwrap(),
-        "/activeMarket/info/nested/0" => {
-            js_value_as_f64(&v.active_market.info.as_ref().unwrap()["nested"][0]).unwrap()
-        }
+        "/activeMarket/info/nested/0" => v
+            .active_market
+            .info
+            .as_ref()
+            .unwrap()
+            .get("nested")
+            .unwrap()
+            .as_array()
+            .unwrap()[0]
+            .as_f64()
+            .unwrap(),
         "/activeMarket/takerFee" => v.active_market.taker_fee.unwrap(),
         "/activeMarket/makerFee" => v.active_market.maker_fee.unwrap(),
         "/size" => v.size,
@@ -194,9 +202,17 @@ fn complete_task_graphs_match_source_numeric_bits() {
         "/activeMarket/option/expiry" => v.active_market.option.as_ref().unwrap().expiry,
         "/activeMarket/option/strike" => v.active_market.option.as_ref().unwrap().strike,
         "/activeMarket/contractSize" => v.active_market.contract_size.unwrap(),
-        "/activeMarket/info/nested/0" => {
-            js_value_as_f64(&v.active_market.info.as_ref().unwrap()["nested"][0]).unwrap()
-        }
+        "/activeMarket/info/nested/0" => v
+            .active_market
+            .info
+            .as_ref()
+            .unwrap()
+            .get("nested")
+            .unwrap()
+            .as_array()
+            .unwrap()[0]
+            .as_f64()
+            .unwrap(),
         "/activeMarket/takerFee" => v.active_market.taker_fee.unwrap(),
         "/activeMarket/makerFee" => v.active_market.maker_fee.unwrap(),
         "/size" => v.size,

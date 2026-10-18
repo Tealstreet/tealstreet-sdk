@@ -111,7 +111,10 @@ fn actual_typescript_tpsl_helpers() {
             continue;
         };
         assert_eq!(
-            string_result(get_bitunix_trigger_type(choice, raw.as_ref())),
+            string_result(get_bitunix_trigger_type(
+                choice,
+                raw.map(Into::into).as_ref()
+            )),
             row["result"],
             "TPSL native trigger {row}"
         );

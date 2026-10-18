@@ -1,5 +1,5 @@
 //! WOO IOC pricing and rejection predicates; transport dispatch is separate.
-use safe_cex_num::{JsCoercionError, js_number, js_string, js_truthy};
+use safe_cex_num::{JsCoercionError, js_string, js_truthy};
 use safe_cex_types::{Market, OrderSide, Ticker};
 use serde_json::Value;
 
@@ -73,7 +73,7 @@ pub fn choose_market_ioc_order_price(
 }
 // ts: getWooMarketPriceRangePct
 pub fn get_woo_market_price_range_pct(market: Option<&Market>) -> Result<f64, JsCoercionError> {
-    let range = js_number(
+    let range = safe_cex_num::js_retained_number(
         market
             .and_then(|m| m.info.as_ref())
             .and_then(|v| v.get("price_range")),

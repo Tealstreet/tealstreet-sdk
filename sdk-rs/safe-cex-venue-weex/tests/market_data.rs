@@ -113,7 +113,7 @@ fn market_data_matches_actual_typescript() {
                     }
                     assert_eq!(
                         value.info.as_ref().unwrap(),
-                        raw.as_value(),
+                        &raw.as_value().clone().into(),
                         "{label}::native_info"
                     );
                     assert!(
@@ -198,7 +198,7 @@ fn market_data_matches_actual_typescript() {
                     }
                     assert_eq!(
                         value.info,
-                        Some(Value::Object(info)),
+                        Some(Value::Object(info).into()),
                         "{label}::native_info"
                     );
                     assert!(value.mid_price.is_none(), "{label}::mid_price_absent");

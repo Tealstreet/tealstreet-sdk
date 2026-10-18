@@ -107,7 +107,7 @@ where
                 volume: number(&string(row.get("vol24h"))?),
                 quote_volume: number(&string(row.get("volumeQuote"))?),
                 open_interest: number(&keyed(row, "openInterest")?),
-                info: Some(row.clone()),
+                info: Some(row.clone().into()),
             });
         }
         Ok(tickers)

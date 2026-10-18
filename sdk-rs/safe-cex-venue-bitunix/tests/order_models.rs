@@ -413,7 +413,10 @@ impl OrderModelHost for Host {
     fn trigger(&mut self, trigger: Option<&Value>, raw: Option<&Value>) -> Result<String, Error> {
         let trigger =
             trigger.and_then(|v| serde_json::from_value::<OrderStopTriggerType>(v.clone()).ok());
-        Ok(tpsl_helpers::get_bitunix_trigger_type(trigger, raw)?.into())
+        Ok(
+            tpsl_helpers::get_bitunix_trigger_type(trigger, raw.cloned().map(Into::into).as_ref())?
+                .into(),
+        )
     }
     async fn update_standalone(
         &mut self,

@@ -188,7 +188,10 @@ fn private_position_frame_updates_position_id_then_fetches_authoritative_positio
         initial.contracts, 0.0,
         "position frame itself only patches the ID"
     );
-    assert_eq!(initial.info.unwrap()["positionId"], "frame-position");
+    assert_eq!(
+        initial.info.unwrap().get("positionId").unwrap(),
+        "frame-position"
+    );
     assert_eq!(s.requests(POSITIONS), 0);
     s.advance(999.0);
     assert_eq!(s.requests(POSITIONS), 0, "source one-second debounce");

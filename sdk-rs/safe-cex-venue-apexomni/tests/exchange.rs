@@ -103,7 +103,7 @@ fn position(value: &Position) -> J {
         fields.push(("marginType", s("cross")));
     }
     if let Some(v) = value.info.as_ref() {
-        fields.push(("info", J::from(v.clone())));
+        fields.push(("info", native::retained(v)));
     }
     if let Some(v) = value.last_update.into_value() {
         fields.push(("lastUpdate", source_clock_stamp(v)));
@@ -183,7 +183,7 @@ fn balance(value: &Balance) -> J {
         ("free", n(value.free)),
     ];
     if let Some(v) = &value.info {
-        fields.push(("info", J::from(v.clone())));
+        fields.push(("info", native::retained(v)));
     }
     obj(fields)
 }

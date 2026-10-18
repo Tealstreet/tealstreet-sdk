@@ -11,7 +11,11 @@ fn inverse(market: &Market) -> bool {
     market.is_inverse == Some(true)
 }
 fn quanto(market: &Market) -> bool {
-    crate::js_truthy(market.info.as_ref().and_then(|v| v.get("isQuanto")))
+    market
+        .info
+        .as_ref()
+        .and_then(|value| value.get("isQuanto"))
+        .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
 }
 fn present(value: Option<f64>, message: &str) -> Option<f64> {
     match value.filter(|v| *v != 0.0 && !v.is_nan()) {

@@ -1,3 +1,5 @@
+#[path = "../../parity/evidence/retained_model_values.rs"]
+pub mod retained_model_values;
 use safe_cex_num::{JsCoercionError, JsJsonValue, numeric_ingress::js_deserialize_passthrough};
 use safe_cex_types::{MarginType, Position, PositionMode};
 use safe_cex_venue_bitunix::position_reads::{fetch_orders, fetch_positions};
@@ -46,7 +48,7 @@ fn position(p: Position) -> Value {
         v["positionMode"] = json!(n);
     }
     if let Some(n) = p.info.into_value() {
-        v["info"] = obs(JsJsonValue::from(n));
+        v["info"] = obs(retained_model_values::prepared(&n));
     }
     assert!(
         p.margin_size.is_none() && p.extra.is_none() && p.last_update.is_none(),

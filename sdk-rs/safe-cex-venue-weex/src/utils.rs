@@ -341,7 +341,7 @@ pub fn fake_positions_for_market(
         liquidation_price: 0.0,
         margin_type: (Some(margin_type)).into(),
         position_mode: (Some(position_mode)).into(),
-        info: (Some(serde_json::json!({}))).into(),
+        info: (Some(serde_json::json!({}).into())).into(),
         realized_pnl: (None).into(),
         margin_size: (None).into(),
         extra: (None).into(),
@@ -464,7 +464,7 @@ pub fn normalize_balance(
             safe_cex_num::math_max(total - free, 0.0)
         },
         upnl,
-        info: Some(rows.value.clone()),
+        info: Some(rows.value.clone().into()),
         currencies: None,
         coins: None,
     })

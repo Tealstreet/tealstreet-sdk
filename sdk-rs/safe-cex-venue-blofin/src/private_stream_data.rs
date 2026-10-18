@@ -186,12 +186,17 @@ pub fn handle_order_topic<H: PrivateDataHost>(
                 {
                     size
                 } else {
-                    float(
-                        truth_or([market
+                    safe_cex_num::js_retained_parse_float(
+                        market
                             .as_ref()
                             .and_then(|m| m.info.as_ref())
-                            .and_then(|i| i.get("contractValue"))])
-                        .or(Some(&Value::String("1".into()))),
+                            .and_then(|i| i.get("contractValue"))
+                            .filter(|v| v.is_truthy())
+                            .or(Some(
+                                &safe_cex_types::retained_json::RetainedJsonInput::Text(
+                                    "1".encode_utf16().collect(),
+                                ),
+                            )),
                     )?
                 };
                 let filled = float(
@@ -294,7 +299,7 @@ pub fn handle_account_topic<H: PrivateDataHost>(
     let mut balance = host.store().balance().clone();
     balance.free = subtract(total, host.store().balance().used);
     balance.total = subtract(total, host.store().balance().upnl);
-    balance.info = Some(data.clone());
+    balance.info = Some(data.clone().into());
     host.store()
         .update(
             StoreUpdate {

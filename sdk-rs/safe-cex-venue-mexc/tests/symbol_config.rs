@@ -60,7 +60,7 @@ fn positions(rows: &Value) -> Vec<Position> {
                 .get("marginType")
                 .map(|v| serde_json::from_value(v.clone()).unwrap()))
             .into();
-            p.info = (r.get("info").map(decode_json)).into();
+            p.info = (r.get("info").map(decode_json).map(Into::into)).into();
             p
         })
         .collect()

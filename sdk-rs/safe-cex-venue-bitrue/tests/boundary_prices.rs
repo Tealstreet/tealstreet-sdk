@@ -98,7 +98,10 @@ fn exact_units_and_whole_input_prices() {
     })
     .unwrap();
     assert_eq!(balance.total.to_bits(), 31.0f64.to_bits());
-    assert_eq!(balance.info.as_ref().unwrap()["extra"], replacement);
+    assert_eq!(
+        balance.info.as_ref().unwrap().get("extra").unwrap(),
+        replacement
+    );
     let bracket = r#"{"data":[{"contractName":"�","brackets":[{"initialLeverage":3}]},{"contractName":"\ud800","brackets":[{"initialLeverage":7}]}]}"#;
     assert!(
         js_from_str::<OpaqueValue>(bracket).is_err(),

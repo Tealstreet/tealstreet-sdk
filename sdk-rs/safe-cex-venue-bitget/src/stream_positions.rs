@@ -10,13 +10,14 @@ pub fn get_position_payload_update_time(position: &Position) -> Option<f64> {
             .into_iter()
             .find_map(|key| info.get(key).filter(|v| !v.is_null()))
     });
-    let input = match raw {
-        Some(serde_json::Value::Number(number)) => number
-            .as_f64()
-            .map(FiniteNumberInput::Number)
-            .unwrap_or(FiniteNumberInput::Other),
-        Some(serde_json::Value::String(string)) => FiniteNumberInput::String(string),
-        _ => FiniteNumberInput::Other,
+    let text = raw
+        .and_then(|value| value.as_text())
+        .and_then(|units| String::from_utf16(units).ok());
+    let input = match raw.and_then(|value| value.as_f64()) {
+        Some(value) => FiniteNumberInput::Number(value),
+        None => text
+            .as_deref()
+            .map_or(FiniteNumberInput::Other, FiniteNumberInput::String),
     };
     let parsed = to_finite_number(input, f64::NAN);
     parsed.is_finite().then_some(parsed)

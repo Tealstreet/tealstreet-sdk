@@ -283,7 +283,7 @@ fn sparse_position_risk_rows_use_source_coercion_in_v1_and_v3() {
         assert_eq!(long.liquidation_price, 0.0);
         assert_eq!(
             long.info.as_ref(),
-            Some(&sparse),
+            Some(&sparse.clone().into()),
             "raw fields stay untouched"
         );
         let short = positions
@@ -1474,10 +1474,15 @@ fn algo_capacity_counts_raw_stop_info_when_normalized_type_is_undefined() {
     script(&wire);
     drive(&rt, venue.start()).unwrap();
     let mut markets = store.markets().to_vec();
-    markets[0].info.as_mut().unwrap()["filters"]
+    markets[0]
+        .info
+        .as_mut()
+        .unwrap()
+        .get_mut("filters")
+        .unwrap()
         .as_array_mut()
         .unwrap()
-        .push(json!({"filterType":"MAX_NUM_ALGO_ORDERS","limit":1}));
+        .push(json!({"filterType":"MAX_NUM_ALGO_ORDERS","limit":1}).into());
     Store::update(
         store.as_ref(),
         StoreUpdate {

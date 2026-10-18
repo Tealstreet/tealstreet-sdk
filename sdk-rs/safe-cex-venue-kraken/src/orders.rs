@@ -176,7 +176,7 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
                     || js_truthy(row.get("reduce_only")))
                 .into(),
                 close: (None).into(),
-                info: (Some(row.clone())).into(),
+                info: (Some(row.clone().into())).into(),
                 time_in_force: (Some(time_in_force)).into(),
                 last_update,
                 trigger_type: (None).into(),
