@@ -14,11 +14,10 @@ const run = spawnSync(process.execPath, [
   path.join(workspace, 'safe-cex-parity/scripts/accepted-set.mjs'),
   '--package=safe-cex-venue-binance', '--jobs=1', '--measure',
   ...names.map(name => `--owner=${name}`),
-], { cwd: workspace, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+], { cwd: workspace, stdio: 'inherit',
   env: { ...process.env, CARGO_BUILD_JOBS: '1', CARGO_TARGET_DIR: target },
 });
-assert.equal(run.status, 0, `${run.error ?? ''}\n${run.stdout}\n${run.stderr}`);
-process.stdout.write(run.stdout);
+assert.equal(run.status, 0, run.error?.message ?? 'Canonical driver failed; see its output above.');
 const results = JSON.parse(fs.readFileSync(path.join(target, 'accepted-set-results.json'), 'utf8'));
 assert.deepEqual(results.map(result => result.name).sort(), names);
 if (args.includes('--expect-unclassified')) {
