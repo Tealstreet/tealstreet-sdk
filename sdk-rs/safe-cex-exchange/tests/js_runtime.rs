@@ -26,6 +26,7 @@ struct Runtime {
     exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
+    worker: std::cell::Cell<bool>,
     dial_socket: RefCell<Option<Rc<dyn safe_cex_exchange::websocket::WsSocket>>>,
     dials: RefCell<
         Vec<(
@@ -68,7 +69,7 @@ impl ExchangeRuntime for Runtime {
         format!("fixture-{id}")
     }
     fn is_worker(&self) -> bool {
-        false
+        self.worker.get()
     }
     fn random(&self) -> f64 {
         0.5
@@ -4110,6 +4111,9 @@ fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_con
         }
     }
 }
+
+#[path = "support/raw_error_reporting.rs"]
+mod raw_error_reporting;
 #[test]
 fn owned_callback_error_clone_preserves_independent_native_metadata() {
     use safe_cex_exchange::js_runtime::value::owned::{OwnedCallbackError, OwnedJsValue};

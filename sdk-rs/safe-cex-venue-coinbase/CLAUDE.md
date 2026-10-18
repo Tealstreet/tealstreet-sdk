@@ -269,3 +269,11 @@ has a separate host contract. Constructed UUID regressions exercise both variant
 exact POST client IDs, optimistic parent IDs, mint entropy consumption and signed
 JWT headers; Node-derived Ed25519 public keys verify the actual wire token.
 
+
+The native ticker census in `tests/exchange_binding.rs` verifies the maintained
+source has no active ticker_batch handler: its mapper and registration are
+commented out in TS. For both constructed Coinbase variants, 56 malformed
+three-row batches preserve all ticker numeric bits and produce one visible
+unsupported-channel report per frame. The shared control runner changes the
+actual dispatcher diagnostic and requires a compiled native assertion failure
+followed by exact-restored success. This does not invent ticker WS support.

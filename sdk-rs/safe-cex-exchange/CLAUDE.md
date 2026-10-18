@@ -1311,12 +1311,44 @@ signed native HTTP request, verifying its HMAC and expiry after a 90-second
 server correction. The core virtual-clock regression checks both getters and
 the independent raw Date clock.
 
+Shared JS promises run on a runtime-owned FIFO job queue. Their async bodies
+start synchronously through the first suspension; settled awaits and reactions
+resume in queued jobs. Returned promises receive a separate resolution job.
+Nonempty all/allSettled register each input reaction synchronously, retaining
+input order while observing the first rejection in settlement order.
+
+NativeRuntime drains that queue before and after each host future poll. All
+callbacks within a poll remain one batch; the checkpoint does not split socket
+frames that the host delivers together. Scope timers use the same queue and
+drain reactions before the next timer. Other runtime embedders still control
+their host callback boundaries; the scoped native witnesses cover this native
+checkpoint, timer cancellation and host task discard.
+
+The shared JS Promise sink reports unhandled rejections through the runtime
+exception boundary at a quiescent microtask checkpoint. Registering an await or
+reaction handles its source immediately; an unhandled propagated rejection
+belongs to the derived promise. Reading result() alone does not handle it.
+Checks retain discarded rejection values until their reporting turn, and host
+driver discard releases those pending captures without reporting them.
+
+Bitrue's constructed public socket regression drives malformed raw depth frames
+through the real socket dispatcher. Its discarded async listener promise reports
+the source TypeError exactly once; the next valid snapshot still reaches its
+callback. Native host controls cover catches before rejection, during the same
+microtask checkpoint, and after the first report, plus host-discard cleanup.
+
 String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
 units and honor their position argument after search-string coercion. Positions
 truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
 endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
+
+The shared JS facade's async snapshot/order/position methods return rejected
+Promises for preparation errors, including errors before their first await.
+Snapshot privacy/disposal guards precede retry-count coercion. The native
+`js_async_facade` target compares return/catch behavior with the maintained TS
+async field bodies executed by Node, preserving original conversion exceptions.
 
 Emitter callbacks and `BaseExchange::emit`/`emit_args` carry shared `Js` directly.
 Scalar listeners read a missing first argument as Undefined; variadic listeners
@@ -1509,6 +1541,13 @@ BigNumber.isFinite reads the private decimal/Infinity/NaN variant directly; it
 never converts through f64. The Node oracle includes finite values at +/-1e1000
 and +/-1e-1000, which overflow or underflow a Number conversion, as well as
 NaN, both infinities, signed zero, clones and arithmetic results.
+
+
+Raw error reporter inputs use `ExchangeErrorInput::Raw(Js)`. Pass the original
+shared-runtime value; already-JSON readers use explicit `from_json` at that boundary.
+The reporter retains lazy reads, native formatted messages and worker error identity.
+Optional message/extra-data and main-thread exception-host ABIs retain their stated
+UTF-8/JSON profiles; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
 
 Worker/native delivery services live in exchange-core so constructor hosts never
 depend upward on safe-cex-webworker. `delivery_timers` owns the existing timer

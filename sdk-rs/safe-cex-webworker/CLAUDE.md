@@ -27,6 +27,9 @@ and own undefined before postMessage. No default or JSON adapter is supplied.
 Native Error DATA retains its intrinsic prototype and hidden message/stack/cause
 properties before post, including UTF-16 message units. The real Wasm witness
 compares TypeError descriptors and structured clone with the host JS engine.
+Error DATA materialization ignores custom enumerable fields without invoking
+their getters; cause is retained only as an own data property. Standard
+name/message/stack reads stay observable, matching native Error structured clone.
 
 The CLI executor is injected and owns its emitted handled results; the handler
 never manufactures success from a resolved void future. Missing/rejected executors
@@ -680,3 +683,8 @@ their separate `post_payload` capability. Do not serialize native emitter values
 before invoking the required DATA post.
 
 OHLCV fetch and subscription requests decode the shared AnyTimeframe interval. The exact 27 source literals are checked against the live type AST; both real handlers forward every interval, and native listeners must deliver each candle. Monthly, extended and seconds intervals must never disappear at worker decoding.
+
+Constructed AsterDEX private-frame/worker emitter witnesses live in
+`../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
+The venue retains private facade tests without importing the worker crate. Both paths preserve
+variadic event arguments; the real fill bridge retains Infinity and object identity.

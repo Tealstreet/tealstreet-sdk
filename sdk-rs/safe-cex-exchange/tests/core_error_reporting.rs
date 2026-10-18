@@ -152,6 +152,37 @@ fn error_input(input: &serde_json::Value) -> ExchangeErrorInput {
     error.original_error = input.get("originalError").cloned();
     ExchangeErrorInput::Error(Box::new(error))
 }
+fn observe_event(value: &safe_cex_exchange::js_runtime::value::Js) -> serde_json::Value {
+    use safe_cex_exchange::js_runtime::value::{Js, to_json};
+    match value {
+        Js::Object(object) if object.class == "Error" => json!({
+            "name": to_json(&value.get("name").unwrap()).unwrap(),
+            "message": to_json(&value.get("message").unwrap()).unwrap(),
+        }),
+        Js::Object(_) => serde_json::Value::Object(
+            value
+                .own_entries()
+                .unwrap()
+                .into_iter()
+                .filter(|(_, value)| !value.is_undefined())
+                .map(|(key, value)| (String::from_utf16_lossy(&key), observe_event(&value)))
+                .collect(),
+        ),
+        Js::Array(items) => serde_json::Value::Array(
+            items
+                .borrow()
+                .iter()
+                .map(|value| {
+                    value
+                        .as_ref()
+                        .map(observe_event)
+                        .unwrap_or(serde_json::Value::Null)
+                })
+                .collect(),
+        ),
+        _ => to_json(value).unwrap(),
+    }
+}
 fn normalize_numbers(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Number(number) => {
@@ -244,9 +275,7 @@ fn base_error_events_match_live_typescript_oracle() {
             Rc::new(move |event, data| {
                 {
                     let mut row = vec![json!(event)];
-                    row.extend(data.iter().map(|value| {
-                        safe_cex_exchange::js_runtime::value::to_json(value).unwrap()
-                    }));
+                    row.extend(data.iter().map(observe_event));
                     captured.borrow_mut().push(serde_json::Value::Array(row));
                 };
                 Ok(())

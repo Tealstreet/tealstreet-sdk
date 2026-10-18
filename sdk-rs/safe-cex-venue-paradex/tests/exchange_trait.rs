@@ -1654,3 +1654,110 @@ fn order_identity_source_keeps_raw_fields_and_date_error() {
     );
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "13");
 }
+
+fn side_order(id: &str, side: Option<serde_json::Value>) -> serde_json::Value {
+    let mut row = json!({"id":id,"market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","price":"101.5","size":"0.006","remaining_size":"0.003","created_at":1784505600000i64,"reduce_only":false});
+    if let Some(side) = side {
+        row["side"] = side;
+    }
+    row
+}
+#[test]
+fn undefined_order_sides_survive_constructed_start_reads_and_store() {
+    let mut rows = Vec::new();
+    for (index, side) in [
+        None,
+        Some(json!("unknown")),
+        Some(json!("")),
+        Some(serde_json::Value::Null),
+        Some(json!(17)),
+        Some(json!(false)),
+        Some(json!({})),
+        Some(json!([])),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        rows.push(side_order(&format!("undefined-{index}"), side));
+    }
+    rows.push(side_order("buy", Some(json!("BUY"))));
+    rows.push(side_order("sell", Some(json!("SELL"))));
+    rows.push(side_order("array-buy", Some(json!(["BUY"]))));
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), |wire| {
+        private_script(wire);
+        wire.responses
+            .borrow_mut()
+            .insert("/orders".into(), json!({"results":rows}));
+    });
+    drive(&runtime, venue.start())
+        .expect("source undefined sides must not reject startup order loading");
+    let orders = drive(&runtime, venue.fetch_orders(None))
+        .expect("read must retain rows with undefined side");
+    assert_eq!(orders.len(), 11);
+    assert_eq!(store.orders().len(), 11);
+    for order in orders.iter().chain(store.orders().iter()) {
+        if order.id.starts_with("undefined-") {
+            assert!(
+                order.side.is_undefined(),
+                "{} must retain own undefined side",
+                order.id
+            );
+        } else {
+            let side = if order.id == "sell" {
+                safe_cex_types::OrderSide::Sell
+            } else {
+                safe_cex_types::OrderSide::Buy
+            };
+            assert_eq!(order.side.value(), Some(&side));
+        }
+        assert_eq!(order.amount.to_bits(), 0.006_f64.to_bits());
+        assert_eq!(order.last_update.to_bits(), 1784505600000_f64.to_bits());
+    }
+    assert!(store.loaded().orders);
+    assert!(
+        wire.requests
+            .borrow()
+            .iter()
+            .filter(|r| r.url == "/orders")
+            .count()
+            >= 2
+    );
+    venue.dispose().unwrap();
+}
+#[test]
+fn undefined_order_side_preserves_later_date_failure() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut bad = side_order("bad", Some(json!("unknown")));
+    bad["created_at"] = json!({"toString":null});
+    wire.responses
+        .borrow_mut()
+        .insert("/orders".into(), json!({"results":[bad]}));
+    let error = drive(&runtime, venue.fetch_orders(None))
+        .expect_err("source Date conversion failure still rejects");
+    assert!(
+        error
+            .message
+            .contains("Cannot convert object to primitive value"),
+        "{}",
+        error.message
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn undefined_order_side_matches_maintained_source_presence_and_errors() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-side-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "12");
+}

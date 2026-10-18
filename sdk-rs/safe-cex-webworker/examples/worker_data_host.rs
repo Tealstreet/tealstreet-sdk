@@ -98,3 +98,73 @@ pub fn post_worker_error_data(post: js_sys::Function) -> Result<(), JsValue> {
     })
     .map_err(|error| js_sys::Error::new(&error.message).into())
 }
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn post_worker_error_getter_data(post: js_sys::Function) -> Result<u32, JsValue> {
+    use safe_cex_exchange::{
+        js_runtime::value::{Js, Thrown},
+        runtime::ExchangeError,
+    };
+    use safe_cex_webworker::{
+        data_post::{WorkerDataPayload, WorkerDataPost},
+        payload::StoreWorkerOp,
+    };
+    use std::{cell::Cell, rc::Rc};
+    let reads = Rc::new(Cell::new(0));
+    let host = WorkerDataPost::for_browser(Rc::new(move |payload| {
+        post.call1(&JsValue::UNDEFINED, payload)
+            .map(|_| ())
+            .map_err(|error| ExchangeError::new(format!("native post failed: {error:?}")))
+    }));
+    let errors = ["Error", "TypeError", "SyntaxError", "RangeError"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let error = Thrown::error(name, "getter must stay unread").value;
+            let count = reads.clone();
+            error.define_accessor(
+                "code",
+                Some(Rc::new(move |_| {
+                    count.set(count.get() + 1);
+                    Err(Thrown::type_error("custom Error getter was read"))
+                })),
+                None,
+            );
+            if index == 1 {
+                let count = reads.clone();
+                error.define_accessor(
+                    "cause",
+                    Some(Rc::new(move |_| {
+                        count.set(count.get() + 1);
+                        Err(Thrown::type_error("accessor Error cause was read"))
+                    })),
+                    None,
+                );
+            } else if index == 2 {
+                error
+                    .define(
+                        "cause",
+                        Js::object(vec![
+                            ("reason", Js::str("linked")),
+                            ("value", Js::Number(f64::INFINITY)),
+                        ]),
+                    )
+                    .unwrap();
+            }
+            error
+                .define(
+                    "custom",
+                    Js::function("uncloneable custom", |_, _| Ok(Js::Undefined)),
+                )
+                .unwrap();
+            error
+        })
+        .collect();
+    host.send(WorkerDataPayload {
+        op: StoreWorkerOp::Error,
+        data: Js::array(errors),
+    })
+    .map_err(|error| js_sys::Error::new(&error.message))?;
+    Ok(reads.get())
+}
