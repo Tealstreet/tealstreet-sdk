@@ -159,7 +159,9 @@ struct Response {
 impl Response {
     fn finish(&self, result: Result<Value, ExchangeError>) {
         *self.value.borrow_mut() = Some(result);
-        if let Some(waker) = self.waker.borrow_mut().take() { waker.wake(); }
+        if let Some(waker) = self.waker.borrow_mut().take() {
+            waker.wake();
+        }
     }
 }
 #[derive(Default)]
@@ -436,7 +438,11 @@ fn clock_realm_shares_one_clock_and_isolates_other_realms() {
     let other = AsterDEXClockRealm::new(base.clone(), http.clone());
     assert!(!Rc::ptr_eq(&first, &aster_dex_virtual_clock(&other)));
     drop(first.force_sync_and_get_offset(false, None));
-    http.pending.borrow_mut().pop_front().unwrap().finish(Ok(json!({"serverTime":1100})));
+    http.pending
+        .borrow_mut()
+        .pop_front()
+        .unwrap()
+        .finish(Ok(json!({"serverTime":1100})));
     runtime.pump();
     assert_eq!(again.get_time_offset(), 100.0);
     assert_eq!(aster_dex_virtual_clock(&other).get_time_offset(), 0.0);
@@ -449,7 +455,11 @@ fn clock_stop_releases_timer_slot_before_reentrant_host_cancellation() {
     let (runtime, http, base, realm) = fixture();
     let clock = aster_dex_virtual_clock(&realm);
     drop(clock.start(false, AsterDEXAPIVersion::V1));
-    http.pending.borrow_mut().pop_front().unwrap().finish(Ok(json!({"serverTime":1100})));
+    http.pending
+        .borrow_mut()
+        .pop_front()
+        .unwrap()
+        .finish(Ok(json!({"serverTime":1100})));
     runtime.pump();
     assert_eq!(runtime.timers(), 1);
     let weak = Rc::downgrade(&clock);
@@ -469,7 +479,11 @@ fn clock_owner_disposal_still_settles_existing_completion() {
     assert!(clock.is_syncing());
     clock.stop();
     base.dispose().unwrap();
-    http.pending.borrow_mut().pop_front().unwrap().finish(Ok(json!({"serverTime":1100})));
+    http.pending
+        .borrow_mut()
+        .pop_front()
+        .unwrap()
+        .finish(Ok(json!({"serverTime":1100})));
     runtime.pump();
     assert!(
         matches!(poll(Pin::new(&mut operation)), Poll::Ready(Ok(0.0))),
