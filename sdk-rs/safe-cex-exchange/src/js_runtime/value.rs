@@ -1152,6 +1152,16 @@ impl Js {
                     String::from_utf16_lossy(key)
                 )));
             }
+            if let Js::String(units) = self
+                && (key == utf16("length").as_ref()
+                    || array_index(key).is_some_and(|index| index < units.len()))
+            {
+                return Err(Thrown::type_error(&format!(
+                    "Cannot assign to read only property '{}' of string '{}'",
+                    String::from_utf16_lossy(key),
+                    self.to_display()
+                )));
+            }
             // Strict-mode [[Set]] on a primitive throws; Map/Set/Promise expandos are unsupported.
             return Err(Thrown::type_error(&format!(
                 "Cannot create property '{}' on {} '{}'",
