@@ -26,8 +26,26 @@ The own-undefined assertions compile RED against the prior production addon
 The canonical health carrier and source partial merge preserve them through the
 production notification and worker delivery path.
 
-The health candidate compiles GREEN from `d05c4cf090` (native addon SHA-256
-`829a899fd6ec16f104c09d48127eb39003625713c46e706e777a0e998d3a5b87`):
+The health candidate compiles GREEN from `4573a92bae` (native addon SHA-256
+`aa09ab469195c89b674d19f166818c77b7ab5f0a2c5ffb511cb95ff2779e998f`):
 all seven reported tests pass, including the three individual presence checks and
 whole-record values/key order. The existing 5/6-request production Store callback
 regression also passes both cases on that same immutable addon.
+
+That source normally inherits the strict raw-task receipt API from #1154. The
+compiled replay API regression passes on the same addon, preserving parser
+histories, raw task classification and the source clock controls.
+
+The independent live-diff lane also replays the original 570-frame bundle. Its
+strict pre-fix replay (`health-strict570-red.json`, source f262, addon ad989)
+drains all 570 physical frames and 238+331 parser messages, with no pending jobs,
+unknown/finite/ready/blocking raw tasks, or parser errors. Both native repeats
+produce identical 624 outputs: 238 ticker snapshots, 237 books and 149 candles.
+The only cross-language discrepancy is 714 missing health properties across
+238 Store snapshots. This separates the property loss from processing backlog.
+
+On the health candidate above, `health-strict-prefix-green.json` independently
+checks the receipt API and the same 12-frame/6-HTTP prefix. Both native repeats
+drain strictly and produce identical ten outputs; complete TS/native outputs
+and all four Store health records match, including own undefined values and key
+order. This short prefix is a smoke check, not a 60-second coverage claim.
