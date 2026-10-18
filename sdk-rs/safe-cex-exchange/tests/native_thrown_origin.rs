@@ -128,3 +128,56 @@ fn a_throwing_code_getter_recovers_its_cause_without_reading_cause_code() {
     assert_eq!(error.message, "getter cause");
     assert!(Thrown::from(error).value.same_reference(&cause));
 }
+
+#[test]
+fn edited_diagnostics_keep_other_original_utf16_fields_through_the_origin_chain() {
+    let original = Js::object(vec![
+        ("name", Js::utf16(&[0xd800])),
+        ("message", Js::utf16(&[0xdc00])),
+    ]);
+    let mut error = Thrown::new(original.clone()).to_exchange_error();
+    error.message = "explicit edit".into();
+    let restored = Thrown::from(error);
+    assert!(!restored.value.same_reference(&original));
+    assert_eq!(
+        restored
+            .value
+            .get("name")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .as_ref(),
+        &[0xd800]
+    );
+    assert!(
+        restored
+            .value
+            .get("message")
+            .unwrap()
+            .strict_equals(&Js::str("explicit edit"))
+    );
+    assert_eq!(
+        original.get("message").unwrap().as_str().unwrap().as_ref(),
+        &[0xdc00]
+    );
+}
+
+#[test]
+fn explicitly_attached_responses_keep_the_nearest_typed_authority() {
+    use safe_cex_types::retained_json::RetainedJsonInput;
+    let original = Js::object(vec![("message", Js::str("original"))]);
+    let response =
+        RetainedJsonInput::from_value(serde_json::json!({"data":{"version":2}})).unwrap();
+    let error = Thrown::new(original.clone())
+        .to_exchange_error()
+        .with_retained_response(
+            RetainedJsonInput::from_value(serde_json::json!({"data":{"version":1}})).unwrap(),
+        )
+        .with_retained_response(response.clone());
+    let restored = Thrown::from(error);
+    assert!(!restored.value.same_reference(&original));
+    assert_eq!(
+        restored.native.unwrap().retained_response_input(),
+        Some(response)
+    );
+}
