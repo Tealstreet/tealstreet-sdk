@@ -3,7 +3,7 @@ use safe_cex_num::{JsCoercionError, JsRootCollator, numeric_ingress::js_value_as
 use safe_cex_types::{OrderStopTriggerType, retained_json::RetainedJsonInput};
 use safe_cex_venue_kraken::helpers;
 use serde_json::{Value, json};
-use std::{cell::Cell, cell::RefCell, cmp::Ordering};
+use std::{cell::Cell, cell::RefCell, cmp::Ordering, process::Command};
 
 #[test]
 fn trigger_parser_observes_native_variants_absence_and_coercion_error() {
@@ -57,6 +57,33 @@ fn error_constructor_preserves_literal_message_distinct_snapshots_and_presence()
     assert_eq!(error.name, "Error");
     assert_eq!(error.message, "literal {broken json}");
     assert_eq!(error.to_string(), "literal {broken json}");
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/error-retained-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let retained_response = error.retained_response_input().unwrap();
+    let retained_bits = retained_response
+        .get("fraction")
+        .unwrap()
+        .as_f64()
+        .unwrap()
+        .to_bits();
+    assert_eq!(
+        retained_bits,
+        (-0.0_f64).to_bits(),
+        "native response retains negative zero"
+    );
+    assert_eq!(format!("{retained_bits:016x}"), source["sourceNativeBits"]);
+    assert_eq!(source["sourceIdentity"], true);
     let native_response = error.response_json_view().unwrap();
     let native_cause = error.metadata.original_error.as_ref().unwrap();
     assert_eq!(js_value_as_f64(&native_response["status"]).unwrap(), 403.0);
@@ -64,8 +91,10 @@ fn error_constructor_preserves_literal_message_distinct_snapshots_and_presence()
         js_value_as_f64(&native_response["fraction"])
             .unwrap()
             .to_bits(),
-        (-0.0_f64).to_bits()
+        0.0_f64.to_bits(),
+        "the JSON view projects negative zero, independently of retained input"
     );
+    assert_eq!(source["projectedBits"], "0000000000000000");
     assert_eq!(native_response["nested"]["response"], true);
     let object = native_response.as_object().unwrap();
     assert!(object.contains_key("explicitNull"));

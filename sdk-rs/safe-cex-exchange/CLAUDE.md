@@ -119,6 +119,15 @@ Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
 See the [socket host contract](WS_CONTRACT.md) for host scheduling and relay options.
+Opt-in replay hosts register the canonical per-dial parser counters when a
+BaseWebSocket is constructed. The host retains only those counters, never the
+socket/parent owner. Diagnostic enumeration therefore includes nested sockets and
+disposed dial histories independently of exchange health/watchdog groups. Do not
+register nested business sockets as top-level slots to expose replay receipts.
+The recorded Binance addon regression checks both TLS/parser paths while keeping
+source-correct public grouping; the per-dial unit test checks counter identity
+and owner release with retained history. Ordinary hosts do not register histories.
+
 Synchronous venue `WsProtocol::connect_and_subscribe` implementations call
 `socket.start_websocket(url, protocols, options)`. The core owns the dial task,
 its cancellation and error diagnostics; the venue never retains its handle and

@@ -57,9 +57,11 @@ Sentry worker errors read only nonempty string message/name/stack properties;
 plain structured-clone objects work, primitive rejections use the supplied
 fallbacks, and whitespace strings remain valid. Missing stacks stay omitted.
 
-Sentry serialization currently accepts JSON properties only: inherited and
-non-enumerable browser Error/DOMException fields need host materialization.
-The live TypeScript witness pins this outstanding boundary, recorded as divergent.
+Sentry serialization accepts canonical Js values and reads inherited and hidden
+message/name/stack through Get in source order. Getter failures preserve their
+original thrown value and stop later reads; functions use fallbacks without Get.
+The existing String DTO replaces isolated UTF16 units with U+FFFD under the
+approved UTF-8 addendum; retained input units and valid pairs remain unchanged.
 Payload enums reject JSON object-form enum tags; worker ops are string literals.
 Private serde remote helpers expose the derived spelling inventory to unit tests,
 while public Deserialize requires strings. Fixture mode and version are closed

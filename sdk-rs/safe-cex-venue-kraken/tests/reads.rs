@@ -350,9 +350,10 @@ fn read_chosen_boundaries() {
         calls.set(calls.get() + 1);
         ready(Ok(Some(response)))
     }));
-    assert!(
-        result.is_err(),
-        "token Value output still refuses lone units"
+    assert_eq!(
+        result.unwrap(),
+        json!("\u{fffd}"),
+        "typed token uses the shared String projection"
     );
     assert_eq!(calls.get(), 1, "response narrowing happens after POST");
     assert_eq!(
@@ -619,10 +620,18 @@ fn leverage_chosen_boundary() {
     );
     let response: JsNumberInput = serde_json::from_str(raw).unwrap();
     let reports = Cell::new(0);
+    let clears = Cell::new(0);
+    let entries = RefCell::new(Vec::new());
     complete(reads::fetch_leverage_settings(
         |_| Ok(ready(Ok(Some(response)))),
-        || panic!("wire refusal must precede cache clear"),
-        |_, _| panic!("wire refusal must precede cache set"),
+        || {
+            clears.set(clears.get() + 1);
+            Ok(())
+        },
+        |symbol, leverage| {
+            entries.borrow_mut().push((symbol, leverage));
+            Ok(())
+        },
         |prefix, message| {
             assert_eq!(prefix, "[Kraken] Failed to fetch leverage settings:");
             assert!(!message.is_empty(), "visible wire refusal");
@@ -631,7 +640,16 @@ fn leverage_chosen_boundary() {
         },
     ))
     .unwrap();
-    assert_eq!(reports.get(), 1, "caught wire refusal is reported once");
+    assert_eq!(
+        reports.get(),
+        0,
+        "admitted typed text must not report a refusal"
+    );
+    assert_eq!(clears.get(), 1, "successful response clears the cache once");
+    let entries = entries.into_inner();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].0, json!("\u{fffd}"));
+    assert_eq!(entries[0].1.as_f64().unwrap().to_bits(), 17.25f64.to_bits());
 }
 
 #[path = "support/history.rs"]

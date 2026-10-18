@@ -7734,6 +7734,14 @@ rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::frame_receipts_enabled"
 reason = "Explicit Rust replay-host instrumentation switch, default false. Ordinary hosts retain no per-dial parser history; only the diagnostic host enables consumed/processed receipts. No TS exchange tuning or source behavior is added. The frame_receipts and compiled replay regressions exercise the enabled path."
 
 [[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::register_frame_receipts"
+reason = "Replay-host diagnostic counter registration, called only when frame_receipts_enabled. Retains the existing parser counters without a socket/parent owner, independently of source business socket groups. The compiled recorded Binance nested-socket regression and per-dial unit witness exercise shared histories and owner release. No TypeScript business API is added."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/native.rs::native_parser_receipts"
+reason = "Native replay diagnostic projection of registered per-dial parser counters, including nested and disposed sockets. Replaces exchange-level group enumeration without changing health/watchdog membership. The compiled recorded Binance nested-socket regression checks both physical socket receipts with source-correct grouping."
+
+[[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::with_retained_response"
 reason = "C3: native API-error construction glue attaches one existing RetainedJsonInput response to an origin wrapper while chaining the previous opaque cause. It neither parses nor duplicates a transport response authority. No standalone TypeScript declaration; actual Binance signed cancel and nearest-origin native tests exercise this boundary."
 

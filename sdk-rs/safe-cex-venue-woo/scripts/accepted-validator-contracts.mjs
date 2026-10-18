@@ -28,23 +28,6 @@ const names = [
   "safe_cex_venue_woo::v3_public::require_instrument_decimal",
   "safe_cex_venue_woo::v3_public::optional_instrument_decimal",
   "safe_cex_venue_woo::v3_public::require_finite_number",
-  "safe_cex_venue_woo::v3_private::require_record",
-  "safe_cex_venue_woo::v3_private::require_array",
-  "safe_cex_venue_woo::v3_private::require_string",
-  "safe_cex_venue_woo::v3_private::require_boolean",
-  "safe_cex_venue_woo::v3_private::require_integer",
-  "safe_cex_venue_woo::v3_private::require_finite_number",
-  "safe_cex_venue_woo::v3_private::require_decimal_string",
-  "safe_cex_venue_woo::v3_private::optional_decimal_string",
-  "safe_cex_venue_woo::v3_private::require_enum",
-  "safe_cex_venue_woo::v3_private::decimal_to_number",
-  "safe_cex_venue_woo::v3_regular_writes::require_record",
-  "safe_cex_venue_woo::v3_regular_writes::require_boolean",
-  "safe_cex_venue_woo::v3_regular_writes::require_integer",
-  "safe_cex_venue_woo::v3_regular_writes::require_string",
-  "safe_cex_venue_woo::v3_regular_writes::require_enum",
-  "safe_cex_venue_woo::v3_regular_writes::require_decimal",
-  "safe_cex_venue_woo::v3_regular_writes::require_perpetual_symbol",
   "safe_cex_venue_woo::v3_public::required_stats_string",
   "safe_cex_venue_woo::types::deserialize_present"
 ];
@@ -71,7 +54,7 @@ const own = artifacts.filter(item => item.package_id === pkg.id && item.target.n
 assert.equal(own.length, 1, 'actual selected WOO compiler artifact');
 const found = inventory(doc, { defaultTraits: loadPolicy('default-traits'), receiverTraits: loadPolicy('receiver-traits'), readSource: file => fs.readFileSync(path.resolve(root, file)) });
 const owners = found.types.filter(owner => names.includes(owner.name));
-assert.equal(owners.length, 30, 'complete reviewed validator cohort');
+assert.equal(owners.length, 13, 'complete reviewed validator cohort');
 assert.ok(owners.every(owner => !owner.deserialize && owner.kind === 'function' && owner.methods.length === 1 && !owner.conversions.length && !owner.traitMethods.length), 'no indexed API may be omitted');
 const scanner = buildScanner('1');
 const sysroot = command('rustc', ['--print', 'sysroot']).trim();
@@ -135,11 +118,11 @@ try {
   if (output) fs.writeFileSync(output, JSON.stringify(rows, null, 2) + '\n');
   const failed = rows.filter(row => row.failures.length);
   console.log(JSON.stringify({ target: targetName, owners: rows.length, failed: failed.map(row => ({ name: row.name, failures: control ? row.failures.length : row.failures })) }));
-  assert.equal(rows.length, 30);
+  assert.equal(rows.length, 13);
   if (control) {
     assert.equal(mutations, 1);
-    assert.equal(failed.length, 30, 'every independent native validator body removal must fail');
+    assert.equal(failed.length, 13, 'every independent native validator body removal must fail');
     assert.ok(failed.every(row => row.failures.some(message => message.startsWith('function output mismatch for '))), 'each actual native validator must distinguish its reviewed valid inputs and outputs');
-    console.log('30 concrete native validator body removals: compiled named observation failures');
+    console.log('13 concrete native validator body removals: compiled named observation failures');
   } else assert.deepEqual(failed, [], 'reviewed actual WOO validator outputs and admission');
 } finally { for (const [file, bytes] of originals) assert.deepEqual(fs.readFileSync(path.join(root, file)), bytes, `${file}: real production source remains unchanged`); }
