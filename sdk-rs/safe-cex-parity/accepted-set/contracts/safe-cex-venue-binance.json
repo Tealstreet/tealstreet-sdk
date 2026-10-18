@@ -29505,5 +29505,1743 @@
         "output": {"ok":true,"bits":"0000000000000000"}
       }
     ]
+  },
+  "safe_cex_venue_binance::public_classes::PublicSocket": {
+    "shape": "observed",
+    "requiredFeatures": [
+      "native"
+    ],
+    "evidence": "Production native_dependencies and ExchangeOwner supply canonical PublicState/PublicSocket, timers, default Store and actual reqwest snapshot decoding over loopback HTTP. Native bits, borrowed callbacks and actual core state are inspected before JSON. Finite stock payloads; no arbitrary prototype/accessor or full feature-matrix claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "kind",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_classes::PublicKind",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "id",
+                {
+                  "primitive": "u64"
+                }
+              ],
+              [
+                "d",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_classes::PublicDependencies",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Constructs or borrows the typed canonical host/socket owner; no raw representation is admitted. Native observations below construct the actual production ExchangeOwner."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "core::ops::deref::Deref",
+          "name": "deref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Target",
+                    "args": null,
+                    "self_type": {
+                      "generic": "Self"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Constructs or borrows the typed canonical host/socket owner; no raw representation is admitted. Native observations below construct the actual production ExchangeOwner."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "handlers",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_venue_binance::public_listeners::Parser",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::handlers($value.as_str().unwrap().into(), |socket,key| <$type as crate::public_listeners::ListenerHost>::handlers(socket,key)) }",
+        "cases": [
+          {
+            "input": "receipt",
+            "output": {
+              "count": 1
+            }
+          },
+          {
+            "input": "missing",
+            "output": {
+              "count": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "replace_handlers",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "parsers",
+                {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::public_listeners::Parser",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::replace($value.as_u64().unwrap() as usize, |socket,key,parsers| <$type as crate::public_listeners::ListenerHost>::replace_handlers(socket,key,parsers)) }",
+        "cases": [
+          {
+            "input": 0,
+            "output": {
+              "nativeCount": 0,
+              "coreCount": 0
+            }
+          },
+          {
+            "input": 2,
+            "output": {
+              "nativeCount": 2,
+              "coreCount": 2
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "delete_handlers",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::delete($value.as_str().unwrap().into(), |socket,key| <$type as crate::public_listeners::ListenerHost>::delete_handlers(socket,key)) }",
+        "cases": [
+          {
+            "input": "receipt",
+            "output": {
+              "receiptPresent": false
+            }
+          },
+          {
+            "input": "missing",
+            "output": {
+              "receiptPresent": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "cleanup",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "handler",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::cleanup($value.as_str().unwrap().into(), |socket,key| <$type as crate::public_listeners::ListenerHost>::cleanup(socket,key)) }",
+        "cases": [
+          {
+            "input": "receipt",
+            "output": {
+              "receiptPresent": false
+            }
+          },
+          {
+            "input": "missing",
+            "output": {
+              "receiptPresent": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "get_snapshot",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "venue",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_listeners::Venue",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "limit",
+                {
+                  "primitive": "f64"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::public_listeners::Snapshot",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::snapshot($value[\"symbol\"].as_str().unwrap().into(), 2.0, $value[\"response\"].as_str().unwrap().into(), |socket,venue,symbol,limit| <$type as crate::public_listeners::ListenerHost>::get_snapshot(socket,venue,symbol,limit)) }",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "response": "{\"lastUpdateId\":17,\"bids\":[[\"9.25\",\"-0\"]],\"asks\":[[\"10.5\",\"2.5\"]]}"
+            },
+            "output": {
+              "idBits": "4031000000000000",
+              "bidPrice": "9.25",
+              "amountBits": "8000000000000000"
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSDT",
+              "response": "{\"lastUpdateId\":18,\"bids\":[[\"9.25\",\"-0\"]],\"asks\":[[\"10.5\",\"2.5\"]]}"
+            },
+            "output": {
+              "idBits": "4032000000000000",
+              "bidPrice": "9.25",
+              "amountBits": "8000000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "apply",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "book",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_listeners::Book",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "sync",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_listeners::SyncState",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "previous",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::protocol_types::BinanceOrderBookApplyResult",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::apply($value.clone(), |socket,book,data,sync| <$type as crate::public_listeners::ListenerHost>::apply(socket,book,data,sync,false)) }",
+        "cases": [
+          {
+            "input": {
+              "U": 18,
+              "u": 18,
+              "b": [
+                [
+                  "9",
+                  "2"
+                ]
+              ],
+              "a": []
+            },
+            "output": {
+              "result": "applied",
+              "bids": [
+                [
+                  "4022000000000000",
+                  "4000000000000000"
+                ]
+              ],
+              "asks": [],
+              "lastIdBits": "4032000000000000"
+            }
+          },
+          {
+            "input": {
+              "U": 19,
+              "u": 19,
+              "b": [
+                [
+                  "9",
+                  "2"
+                ]
+              ],
+              "a": []
+            },
+            "output": {
+              "result": "gap",
+              "bids": [],
+              "asks": [],
+              "lastIdBits": null
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_classes::PublicState": {
+    "shape": "observed",
+    "requiredFeatures": [
+      "native"
+    ],
+    "evidence": "Production native_dependencies and ExchangeOwner supply canonical PublicState/PublicSocket, timers, default Store and actual reqwest snapshot decoding over loopback HTTP. Native bits, borrowed callbacks and actual core state are inspected before JSON. Finite stock payloads; no arbitrary prototype/accessor or full feature-matrix claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "on_message",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::message($value.as_str().unwrap().into(), |socket,wire| <$type>::on_message(socket,wire)) }",
+        "cases": [
+          {
+            "input": "{\"e\":\"bookTicker\",\"s\":\"BTCUSDT\",\"b\":\"2.5\",\"a\":\"12.3\"}",
+            "output": {
+              "bidBits": "4004000000000000",
+              "askBits": "402899999999999a"
+            }
+          },
+          {
+            "input": "{\"e\":\"bookTicker\",\"s\":\"BTCUSDT\",\"b\":\"-0\",\"a\":\"Infinity\"}",
+            "output": {
+              "bidBits": "8000000000000000",
+              "askBits": "7ff0000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "handle_stream",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "topic",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "events",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::stream($value.clone(), |socket,topic,events| <$type>::handle_stream(socket,topic,events)) }",
+        "cases": [
+          {
+            "input": [
+              {
+                "e": "bookTicker",
+                "s": "BTCUSDT",
+                "b": "2.5",
+                "a": "12.3"
+              }
+            ],
+            "output": {
+              "bidBits": "4004000000000000",
+              "askBits": "402899999999999a"
+            }
+          },
+          {
+            "input": [
+              {
+                "e": "bookTicker",
+                "s": "BTCUSDT",
+                "b": "-0",
+                "a": "Infinity"
+              }
+            ],
+            "output": {
+              "bidBits": "8000000000000000",
+              "askBits": "7ff0000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "listen_order_book",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "Self"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [
+                                            {
+                                              "resolved_path": {
+                                                "path": "safe_cex_venue_binance::public_listeners::Book",
+                                                "args": null
+                                              }
+                                            }
+                                          ],
+                                          "output": {
+                                            "resolved_path": {
+                                              "path": "core::result::Result",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "tuple": []
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::public_listeners::Unsubscribe",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::listen($value.as_str().unwrap().into(), |state,symbol,callback| <$type>::listen_order_book(state,symbol,callback)) }",
+        "cases": [
+          {
+            "input": "BTCUSDT",
+            "output": {
+              "unsubscribed": true,
+              "callbacks": 0,
+              "handlerKeys": [
+                "bookTicker",
+                "depthUpdate.BTCUSDT"
+              ]
+            }
+          },
+          {
+            "input": "ETHUSDT",
+            "output": {
+              "unsubscribed": true,
+              "callbacks": 0,
+              "handlerKeys": [
+                "bookTicker",
+                "depthUpdate.ETHUSDT"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "handlers",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_venue_binance::public_listeners::Parser",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::handlers($value.as_str().unwrap().into(), |socket,key| <$type as crate::public_listeners::ListenerHost>::handlers(socket,key)) }",
+        "cases": [
+          {
+            "input": "receipt",
+            "output": {
+              "count": 1
+            }
+          },
+          {
+            "input": "missing",
+            "output": {
+              "count": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "replace_handlers",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "parsers",
+                {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::public_listeners::Parser",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::replace($value.as_u64().unwrap() as usize, |socket,key,parsers| <$type as crate::public_listeners::ListenerHost>::replace_handlers(socket,key,parsers)) }",
+        "cases": [
+          {
+            "input": 0,
+            "output": {
+              "nativeCount": 0,
+              "coreCount": 0
+            }
+          },
+          {
+            "input": 2,
+            "output": {
+              "nativeCount": 2,
+              "coreCount": 2
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "delete_handlers",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::delete($value.as_str().unwrap().into(), |socket,key| <$type as crate::public_listeners::ListenerHost>::delete_handlers(socket,key)) }",
+        "cases": [
+          {
+            "input": "receipt",
+            "output": {
+              "receiptPresent": false
+            }
+          },
+          {
+            "input": "missing",
+            "output": {
+              "receiptPresent": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "cleanup",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "handler",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::cleanup($value.as_str().unwrap().into(), |socket,key| <$type as crate::public_listeners::ListenerHost>::cleanup(socket,key)) }",
+        "cases": [
+          {
+            "input": "receipt",
+            "output": {
+              "receiptPresent": false
+            }
+          },
+          {
+            "input": "missing",
+            "output": {
+              "receiptPresent": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "get_snapshot",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "venue",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_listeners::Venue",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "limit",
+                {
+                  "primitive": "f64"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::public_listeners::Snapshot",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::snapshot($value[\"symbol\"].as_str().unwrap().into(), 2.0, $value[\"response\"].as_str().unwrap().into(), |socket,venue,symbol,limit| <$type as crate::public_listeners::ListenerHost>::get_snapshot(socket,venue,symbol,limit)) }",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "response": "{\"lastUpdateId\":17,\"bids\":[[\"9.25\",\"-0\"]],\"asks\":[[\"10.5\",\"2.5\"]]}"
+            },
+            "output": {
+              "idBits": "4031000000000000",
+              "bidPrice": "9.25",
+              "amountBits": "8000000000000000"
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSDT",
+              "response": "{\"lastUpdateId\":18,\"bids\":[[\"9.25\",\"-0\"]],\"asks\":[[\"10.5\",\"2.5\"]]}"
+            },
+            "output": {
+              "idBits": "4032000000000000",
+              "bidPrice": "9.25",
+              "amountBits": "8000000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::public_listeners::ListenerHost",
+          "name": "apply",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "book",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_listeners::Book",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "sync",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_listeners::SyncState",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "previous",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::protocol_types::BinanceOrderBookApplyResult",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual canonical native ExchangeOwner, production host operations and Store; inspect native fields or identity before reporting.",
+        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-owner-native-observers.rs\")); } witness::apply($value.clone(), |socket,book,data,sync| <$type as crate::public_listeners::ListenerHost>::apply(socket,book,data,sync,false)) }",
+        "cases": [
+          {
+            "input": {
+              "U": 18,
+              "u": 18,
+              "b": [
+                [
+                  "9",
+                  "2"
+                ]
+              ],
+              "a": []
+            },
+            "output": {
+              "result": "applied",
+              "bids": [
+                [
+                  "4022000000000000",
+                  "4000000000000000"
+                ]
+              ],
+              "asks": [],
+              "lastIdBits": "4032000000000000"
+            }
+          },
+          {
+            "input": {
+              "U": 19,
+              "u": 19,
+              "b": [
+                [
+                  "9",
+                  "2"
+                ]
+              ],
+              "a": []
+            },
+            "output": {
+              "result": "gap",
+              "bids": [],
+              "asks": [],
+              "lastIdBits": null
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_classes::core_json": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "core_json",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Serializes an existing native event for the outbound legacy callback bridge; it is an encoder, not payload admission.",
+    "evidence": "Direct source-role review in src/public_classes.rs; no native decoder execution claim for this classification."
+  },
+  "safe_cex_venue_binance::public_classes::failure": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "failure",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_binance::request_weight::Failure",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs a diagnostic error from existing typed message text.",
+    "evidence": "Direct source-role review in src/public_classes.rs; no native decoder execution claim for this classification."
   }
 }
