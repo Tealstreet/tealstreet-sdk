@@ -899,3 +899,10 @@ observations are compared with the maintained TS constructors. The ordinary
 private_classes source-case guard keeps all 164 cases live in CI. Preserve the
 208 constructed native Store cases and seven independent compiled body controls
 when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
+
+`Auth` and `PrivateState` retain executed raw API contracts gated by the real
+native Cargo feature. The default receipt is explicitly unobserved; the canonical
+driver executes fresh native observations over production native_dependencies and
+ExchangeOwner. See [PRIVATE_NATIVE_OWNER_REVIEW.md](PRIVATE_NATIVE_OWNER_REVIEW.md)
+for the six actual APIs, finite native effects and independent compiled controls.
+Do not replace these raw observations with typed labels or default mock parents.
