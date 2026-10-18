@@ -168,6 +168,7 @@ pub trait BlofinExchangeHost: 'static {
     /// Start each Promise.all child eagerly and retain it independently of its waiter.
     fn start_order_read(
         &self,
+        base: &Self::Base,
         body: rest_lifecycle::LifecycleFuture<'static, Vec<Order>, Self::Error>,
     ) -> rest_lifecycle::LifecycleFuture<'static, Vec<Order>, Self::Error>;
     fn init_external_public_data(
@@ -652,13 +653,18 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         let algo = self.clone();
         let trigger = self.clone();
         [
-            self.host
-                .start_order_read(Box::pin(async move { normal.fetch_normal_orders().await })),
-            self.host
-                .start_order_read(Box::pin(async move { algo.fetch_algo_orders().await })),
-            self.host.start_order_read(Box::pin(
-                async move { trigger.fetch_trigger_orders().await },
-            )),
+            self.host.start_order_read(
+                &self.base,
+                Box::pin(async move { normal.fetch_normal_orders().await }),
+            ),
+            self.host.start_order_read(
+                &self.base,
+                Box::pin(async move { algo.fetch_algo_orders().await }),
+            ),
+            self.host.start_order_read(
+                &self.base,
+                Box::pin(async move { trigger.fetch_trigger_orders().await }),
+            ),
         ]
     }
     pub async fn fetch_orders_with_retry(

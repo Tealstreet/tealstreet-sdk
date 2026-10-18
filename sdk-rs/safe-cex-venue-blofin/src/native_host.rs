@@ -395,11 +395,15 @@ impl BlofinExchangeHost for NativeHost {
     }
     fn start_order_read(
         &self,
+        base: &NativeBase,
         body: crate::rest_lifecycle::LifecycleFuture<'static, Vec<Order>, ExchangeError>,
     ) -> crate::rest_lifecycle::LifecycleFuture<'static, Vec<Order>, ExchangeError> {
-        let runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = self.runtime.clone();
         // Keep the complete native Result as T: no error projection or cloning.
-        let waiter = safe_cex_exchange::eager::start_eager(&runtime, async move { Ok(body.await) });
+        let waiter =
+            safe_cex_exchange::eager::start_eager(
+                &base.get().runtime,
+                async move { Ok(body.await) },
+            );
         Box::pin(async move { waiter.await.map_err(ServiceError::Host)? })
     }
     fn init_external_public_data(

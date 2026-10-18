@@ -569,6 +569,7 @@ impl BlofinExchangeHost for ExchangeHost {
     }
     fn start_order_read(
         &self,
+        _: &Self::Base,
         body: rl::LifecycleFuture<'static, Vec<Order>, String>,
     ) -> rl::LifecycleFuture<'static, Vec<Order>, String> {
         // This bounded assembly fixture drives all children through ready(); the
