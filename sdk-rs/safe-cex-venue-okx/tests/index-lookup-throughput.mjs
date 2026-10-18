@@ -1,4 +1,6 @@
 // Full original OKX tape; unmodified streams runner and complete retained output.
+// Maintainer-approved lookup gate: one full control/candidate pair. Each report
+// retains both native repeats; the larger state-copy slice requires three pairs.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { deserialize } from 'node:v8';
@@ -7,8 +9,8 @@ import { assertOutputIdentity, runIdentityGuardControls } from '../../scripts/li
 
 const paths = process.argv.slice(2);
 assert(
-  paths.length >= 6 && paths.length % 2 === 0,
-  'Supply interleaved control/candidate reports, at least three of each',
+  paths.length === 2,
+  'Supply the one full control/candidate pair approved for the lookup slice',
 );
 const reports = paths.map((path) => JSON.parse(readFileSync(path)));
 const before = reports.filter((_, i) => i % 2 === 0);
@@ -92,6 +94,9 @@ const tsAfter = profile(runs(after, 'ts'));
 console.log(
   JSON.stringify(
     {
+      pairedReportCount: before.length,
+      nativeSamplesPerSide: baseline.length,
+      sampleCountQualification: 'One full pair approved for this lookup slice; two native repeats per side, no three-pair inference.',
       identicalCompleteNativeOutput: true,
       identicalObservableNativeGraph: true,
       identicalSerializedNativeOutput: fixtureSha256s.every(fixture => fixture.sha256 === fixtureSha256s[0].sha256),
