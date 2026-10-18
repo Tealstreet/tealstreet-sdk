@@ -5602,3 +5602,7 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
         owner.dispose().unwrap();
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "support/live_flag_binding.rs"]
+mod live_flag_binding;

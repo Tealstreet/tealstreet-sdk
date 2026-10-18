@@ -715,3 +715,7 @@ flat query, then checks one retained book through live updates and cleanup.
 the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
+
+LiveFlag constructor receipts classify typed callback/Cell state. Native retry
+proofs live in tests/support/live_flag_binding.rs; live-flag-controls.py requires
+independent compiled reader/conversion failures and exact source restorations.
