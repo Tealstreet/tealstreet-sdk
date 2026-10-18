@@ -259,7 +259,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "getStopOrderPositionIdx", |rt, a| {
         let opts = arg(&a, 0).spread_object()?;
-        opts.delete(&"reduceOnly".encode_utf16().collect::<Vec<_>>());
+        opts.delete(&"reduceOnly".encode_utf16().collect::<Vec<_>>())?;
         let pending = rt.this.call_method("getOrderPositionIdx", vec![opts])?;
         Ok(rt.spawn(Box::pin({
             let await_runtime = rt.exchange_runtime();

@@ -338,7 +338,7 @@ impl Listener {
             .collect();
         let len = values.len();
         if delete_empty && len == 0 {
-            handlers.delete(&self.handler.encode_utf16().collect::<Vec<_>>());
+            handlers.delete(&self.handler.encode_utf16().collect::<Vec<_>>())?;
         } else {
             handlers.set(&self.handler, Js::array(values))?;
         }
@@ -411,7 +411,7 @@ fn candles(rt: &Rt, options: Js, callback: Js) -> Result<Js, Thrown> {
         if next > 0. {
             topics.set_key(&listener.topic.to_js_string()?, Js::Number(next))?;
         } else {
-            topics.delete(&listener.topic.to_js_string()?);
+            topics.delete(&listener.topic.to_js_string()?)?;
         }
         if flag(&rt, "isConnected")? && left == 0 {
             rt.call_path(
@@ -646,7 +646,7 @@ fn book(rt: &Rt, symbol: Js, callback: Js) -> Result<Js, Thrown> {
         let count = topics.get_property(&listener.topic)?;
         if !count.is_undefined() {
             if count.to_number()? <= 1. {
-                topics.delete(&listener.topic.to_js_string()?);
+                topics.delete(&listener.topic.to_js_string()?)?;
             } else {
                 topics.set_key(
                     &listener.topic.to_js_string()?,

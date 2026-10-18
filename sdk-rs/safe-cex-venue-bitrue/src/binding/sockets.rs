@@ -270,7 +270,7 @@ impl StreamHost for Rt {
         v.set_key(&k.to_js_string()?, n)
     }
     fn delete(&self, v: Js, k: Js) -> Result<(), Thrown> {
-        v.delete(&k.to_js_string()?);
+        v.delete(&k.to_js_string()?)?;
         Ok(())
     }
     fn spread(&self, v: Js) -> Result<Vec<Js>, Thrown> {
