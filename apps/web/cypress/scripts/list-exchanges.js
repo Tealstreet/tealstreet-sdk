@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Print the exchange lists derived from cypress/config/exchanges.js as JSON.
-// Used by .github/workflows/e2e.yaml to build its matrix so CI's notion of
+// Used by the e2e workflow (mirrors/tealstreet-sdk/.github/workflows/e2e.yml) to build its matrix so CI's notion of
 // "all" always matches the local runners'.
 //
 //   node cypress/scripts/list-exchanges.js            -> all configured exchanges

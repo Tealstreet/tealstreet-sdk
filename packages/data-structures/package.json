@@ -55,7 +55,7 @@
     "vitest": "^5.0.2",
     "@types/create-hash": "^1.2.2",
     "@types/create-hmac": "^1.1.0",
-    "@types/lodash": "^4.17.24",
+    "@types/lodash": "^4.17.26",
     "@types/qs": "^6.15.1",
     "eslint": "^9.28.0",
     "ts-node": "^10.9.1"

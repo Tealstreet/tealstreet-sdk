@@ -398,7 +398,7 @@ checked — the guard then logs each foreign position and lets the flatten
 proceed:
 
 ```bash
-gh workflow run e2e.yaml --ref <branch> \
+gh workflow run e2e.yml -R Tealstreet/tealstreet-sdk \
   -f target=preview -f exchanges=okx -f tests=load-balance \
   -f allow_foreign_flatten=true
 ```
@@ -497,7 +497,7 @@ Tests authenticate via real Auth0 login using `testUsername` and `testPassword` 
 
 ### GitHub Actions
 
-The E2E workflow (`.github/workflows/e2e.yaml`) runs on a self-hosted runner and can be triggered manually via the "Run workflow" button on GitHub, or automatically on a daily schedule.
+The E2E workflow runs on the public `Tealstreet/tealstreet-sdk` mirror (`mirrors/tealstreet-sdk/.github/workflows/e2e.yml` here, exported by Copybara), on a daily schedule or from that repo's "Run workflow" button.
 
 The workflow dropdown provides:
 
@@ -526,20 +526,9 @@ To add a new exchange to the E2E test suite:
    },
    ```
 
-2. **Add API keys** in `cypress.env.json` (local) with a named account matching the exchange, AND update the `CYPRESS_ENV_JSON` GitHub secret
+2. **Add API keys** in `cypress.env.json` (local) with a named account matching the exchange, AND update the `CYPRESS_ENV_JSON` secret on `Tealstreet/tealstreet-sdk`
 
-3. **Add to GitHub Actions dropdown** in `.github/workflows/e2e.yaml` under `inputs.exchanges.options`:
-
-   ```yaml
-   options:
-     - all
-     - woo
-     - myexchange # <-- add here
-   ```
-
-   The "all" option automatically picks up the exchange from `exchanges.js`, but adding it to the dropdown allows running it individually from the UI.
-
-4. **Handle exchange-specific quirks** — if the exchange has API limitations:
+3. **Handle exchange-specific quirks** — if the exchange has API limitations:
    - Set `skipTests` in `exchanges.js` for tests that can't work
    - Override `positionModes` / `hidePositionModeSelector` in `exchangeMetadata.ts` if position mode support differs from defaults
    - Add conditional logic in `spec.cy.ts` for assertion differences (e.g., `if (getAccMetadata().exchangeName !== 'myexchange')`)
