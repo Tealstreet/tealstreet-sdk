@@ -4315,7 +4315,6 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
 
 #[test]
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
-<<<<<<< HEAD
 fn native_http_factory_diagnostics_keep_shallow_bodies_headers_and_capture_guards() {
     use safe_cex_exchange::{js_runtime::client::factory, native::native_runtime};
     use safe_cex_store::venue_rest_diagnostics::{
@@ -4428,7 +4427,10 @@ fn native_http_factory_diagnostics_keep_shallow_bodies_headers_and_capture_guard
             );
             body.delete(&utf16("self"));
         }));
-=======
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 fn native_http_factory_preserves_axios_status_error_codes() {
     use safe_cex_exchange::{js_runtime::client::factory, native::native_runtime};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -4462,5 +4464,4 @@ fn native_http_factory_preserves_axios_status_error_codes() {
             }
         })
     );
->>>>>>> test/native-http-error-codes
 }
