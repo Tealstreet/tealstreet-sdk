@@ -23,7 +23,9 @@ the three ID logs show native TypeError versus a successful source call.
   by object conversion, instead of forcing them through ToString. Null-prototype
   dictionaries remain ordinary native property tables (no quadratic Map replacement).
 * `setSetting`: source line1044 assigns arbitrary runtime keys and only notifies
-  when the value changes. The old refusal assertion was stale.
+  when the value changes. The old refusal assertion was stale. #1110 supplies
+  that fixture correction; this branch adopts its exact js_runtime.rs version
+  instead of carrying a second edit.
 * Raw `updatePosition`: source line1054's for-in assignment retains own undefined,
   callable values, null and unknown keys. Typed reads still refuse unrepresentable
   fields, while a later valid raw patch restores typed readability. The numeric
@@ -41,9 +43,10 @@ all other #1110 storage bodies remain unchanged.
 
 ## Compiled controls
 
-All three independent production faults compile, fail the named native regression,
+All four independent production faults compile, fail the named native regression,
 and pass after exact byte restoration: force Symbol through ToString; remove the
-installed splice member; reread length after coercion/deleted-slot getters. Logs
+installed splice member; reread length after coercion/deleted-slot getters; move
+upsert key coercion ahead of the source RHS length read. Logs
 are `/tmp/store-correctness-controls.log` and its per-case directory. The source
 methods and test expectations stay unchanged during these controls.
 
