@@ -1762,6 +1762,17 @@ and checks reentry, exact references/bits, capture release and refusal behavior.
 Missing-publication and premature-publication production mutations must compile,
 fail the named source-visible assertions, restore exact bytes and pass.
 
+## Shared for-in record
+
+ForInRecord enumerates original native descriptor names along canonical
+prototype links. Hidden own names suppress inherited enumerables, deleted
+unvisited names are skipped, and enumeration never reads property values.
+Native functions store name/length as ordinary nonenumerable configurable,
+readonly descriptors; redefining/deleting them uses the common property code.
+Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
+this does not widen the public intrinsic descriptor-reflection surface.
+Array descriptor/prototype migration remains the separate single-storage step.
+
 ## ccxt compatibility imports
 
 The shared library installs ccxt-compat numberToString, parsePrecision,
