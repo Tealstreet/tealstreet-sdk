@@ -39,7 +39,17 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
             .and_then(|v| safe_cex_exchange::js_runtime::value::to_json(&v).ok())
     };
     native.is_axios_error = e.value.get("isAxiosError").is_ok_and(|v| v.truthy());
-    native.response = field("response");
+    let response = match e.value.get("response") {
+        Ok(value) => value,
+        Err(cause) => return cause.into(),
+    };
+    if !response.is_nullish() {
+        let response = match safe_cex_exchange::js_runtime::value::to_retained_input(&response) {
+            Ok(value) => value,
+            Err(cause) => return cause.into(),
+        };
+        native = native.with_retained_response(response);
+    }
     native.config = field("config");
     native.request = field("request");
     native

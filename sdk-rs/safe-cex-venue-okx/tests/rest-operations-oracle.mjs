@@ -110,13 +110,21 @@ for(const op of ['batch','algo']){
 assert.equal(cases.length,118);
 const missing=cases.find(c=>c.input.op==='lookup'&&c.input.responses[0]?.reject&&c.input.responses[0].body.code==='51603');assert.deepEqual(missing.result,{found:false,definitive:true});
 const placement=cases.find(c=>c.input.op==='batch'&&c.input.responses[0]?.body.data?.[0]?.sMsg==='PER ORDER');assert.equal(placement.error.message,'PER ORDER (code 51008)');
-let inheritedStatusExecutions=0;
+let inheritedStatusExecutions=0, placementIdConversions=0;
 for(const c of cases){
- if(c.input.malformedId||c.input.malformedData){
+ if(c.input.malformedId){
+  // Keep the actual source result separately; decision 4 converts live IDs
+  // at the native string result boundary, rather than losing the placed order.
+  c.sourceMalformed=JSON.parse(JSON.stringify(c));
+  c.result=c.result.map(String);
+  placementIdConversions++;
+ }
+ if(c.input.malformedData){
   c.sourceMalformed=JSON.parse(JSON.stringify(c));delete c.result;
-  const message=c.input.malformedId?"OKX order id must be a string":"OKX order response data must be an array";c.error={name:"Error",message};c.emissions=[message];
+  const message="OKX order response data must be an array";c.error={name:"Error",message};c.emissions=[message];
  }
  if(c.sourcePrototype)inheritedStatusExecutions++;
 }
 assert.equal(inheritedStatusExecutions,5,'REST-BRANCH inherited status executions');
+assert.equal(placementIdConversions,8,'REST-BRANCH live placement ID conversions');
 process.stdout.write(JSON.stringify(cases));

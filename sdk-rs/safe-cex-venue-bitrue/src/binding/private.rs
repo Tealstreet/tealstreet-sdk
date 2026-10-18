@@ -6,13 +6,15 @@ use super::{
 use crate::{collection_reads::Callback, private_auth::PrivateHost};
 use safe_cex_exchange::js_runtime::{
     client, ops,
-    value::{Js, Thrown, arg, to_json},
+    value::{Js, Thrown, arg},
 };
 use std::cell::RefCell;
 
 fn predicate(data: &Js) -> Result<bool, Thrown> {
-    crate::private_auth::is_bitrue_signature_rejection(&to_json(data)?)
-        .map_err(|e| Thrown::error(e.name, e.message))
+    crate::private_auth::is_bitrue_signature_rejection(
+        &safe_cex_exchange::js_runtime::value::to_retained_input(data)?,
+    )
+    .map_err(|e| Thrown::error(e.name, e.message))
 }
 fn signature_condition(error: &Js) -> Result<bool, Thrown> {
     let response = error.get("response")?;

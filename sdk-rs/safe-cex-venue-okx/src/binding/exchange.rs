@@ -422,3 +422,8 @@ mod callback_binding;
 #[cfg(test)]
 #[path = "../../tests/support/amendment_binding.rs"]
 mod amendment_binding;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/divergence_binding.rs"]
+mod divergence_binding;

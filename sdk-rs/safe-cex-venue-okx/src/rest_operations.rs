@@ -75,7 +75,6 @@ async fn place_native(
     emit: &dyn Fn(&str) -> Result<(), ExchangeError>,
 ) -> Result<Vec<String>, ExchangeError> {
     let mut ids = Vec::new();
-    let mut refused_id = false;
     for batch in payloads.chunks(if algo { 1 } else { 20 }) {
         let payload = if algo {
             batch[0].clone()
@@ -118,15 +117,9 @@ async fn place_native(
                         }
                         let id = row.get(if algo { "algoId" } else { "ordId" });
                         if js_truthy(id) {
-                            // ts-bug: placeOrderBatch/placeAlgoOrderBatch can leak non-string IDs from any.
-                            // The chosen string-valued core contract rejects them with a diagnostic.
-                            if let Some(id) = id.and_then(Value::as_str) {
-                                batch_ids.push(id.to_owned());
-                            } else {
-                                // Retain the refusal until every source row and request finishes.
-                                // A later source error must win over this typed-output choice.
-                                refused_id = true;
-                            }
+                            // The order is already live: preserve its ID at the typed
+                            // result boundary using shared JS String (decision 4).
+                            batch_ids.push(js_string(id).map_err(coercion)?);
                         } else {
                             return Err(ExchangeError::new(error_message(row.get("sMsg"))?));
                         }
@@ -142,11 +135,6 @@ async fn place_native(
                 return Err(ExchangeError::new(error.message));
             }
         }
-    }
-    if refused_id {
-        let message = "OKX order id must be a string";
-        emit(message)?;
-        return Err(ExchangeError::new(message));
     }
     Ok(ids)
 }

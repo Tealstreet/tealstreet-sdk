@@ -131,7 +131,7 @@ fn reviewed_signature_retry_clones_share_one_stamp_across_both_paths() {
             let observed = count.clone();
             let predicate: IsSignatureRejection = Rc::new(move |value| {
                 observed.set(observed.get() + 1);
-                Ok(value["code"] == json!(-1022))
+                Ok(safe_cex_num::js_retained_number(value.get("code"))? == -1022.0)
             });
             let original = SignatureRetry::default();
             let sibling = original.clone();
@@ -142,7 +142,7 @@ fn reviewed_signature_retry_clones_share_one_stamp_across_both_paths() {
                 if via_error {
                     signature_rejected_response(&error, first, &predicate).unwrap()
                 } else {
-                    resend_on_rejected_data(&data, first, &predicate).unwrap()
+                    resend_on_rejected_data(&data.clone().into(), first, &predicate).unwrap()
                 },
                 "SIGNATURE CLONE first approval"
             );
@@ -150,7 +150,7 @@ fn reviewed_signature_retry_clones_share_one_stamp_across_both_paths() {
             for copy in [&original, &sibling, &late] {
                 assert!(copy.has_retried(), "SIGNATURE CLONE shared stamp");
                 assert!(
-                    !resend_on_rejected_data(&data, copy, &predicate).unwrap(),
+                    !resend_on_rejected_data(&data.clone().into(), copy, &predicate).unwrap(),
                     "SIGNATURE CLONE resolved retry stays spent"
                 );
                 assert!(
