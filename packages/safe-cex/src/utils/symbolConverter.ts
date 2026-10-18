@@ -33,6 +33,7 @@ export function toBinance(symbol: string, from: ExchangeName): string {
   switch (from) {
     // -- Passthrough: already Binance format --------------------------------
     case 'binance':
+    case 'binanceinverse':
     case 'binancepm':
     case 'binancespot':
     case 'bitget':
@@ -230,6 +231,7 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
   switch (to) {
     // -- Passthrough: Binance format is the native format -------------------
     case 'binance':
+    case 'binanceinverse':
     case 'binancepm':
     case 'binancespot':
     case 'bitget':

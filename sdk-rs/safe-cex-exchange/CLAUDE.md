@@ -960,8 +960,19 @@ strict receiver and remaining arguments. It preserves native values, returned
 references/promises and arbitrary thrown values without awaiting or JSON.
 Non-callable receivers reject before reading conversion hooks. Own function
 `call` properties/getters retain precedence. The native/Node witness
-is `tests/js_function_call.rs`; function construction and prototype metadata
-remain separate capabilities in the Hyperliquid shared-runtime consolidation.
+is `tests/js_function_call.rs`.
+
+Functions retain their allocation realm's native Function prototype on the same
+referent. Parent reads/writes preserve inherited accessor receivers, readonly
+refusals, own shadows and cycle rejection. Bound functions retain the target's
+parent. Call/bind now resolve to the existing canonical intrinsic identities;
+their old per-read wrappers are removed. `tests/js_function_prototypes.rs`
+compares these operations with Node, including cross-realm identities. Intrinsic
+parent metadata is independent of the shadowable `__proto__` string property.
+Unknown surrogate keys miss inherited UTF8 intrinsic fields without replacement;
+intrinsic writes retain their existing explicit native-primitive boundary.
+Construction/new.target, accessor flags and function own-key reflection remain
+separate consolidation capabilities.
 
 The shared JS runtime supplies `Function.prototype.bind` for venue callbacks,
 retaining the target receiver and prepending bound arguments even when the result
@@ -1632,3 +1643,11 @@ All three regressions compile and fail against the original production bodies.
 Shared nuke closes use the canonical nativePositionSize port and cancel orders
 before closing; cancel failure logs and continues. NUKE_NATIVE_CLOSES.md records
 the real registry/OKX HTTP regression and pending-close guard witness.
+
+The typed `ExchangeRuntime::console` default forwards one unchanged string argument
+to `console_values`; production NativeRuntime inherits it. The real BaseExchange
+log witness in `tests/native_console_default.rs` checks exact native stderr and
+listener arguments, including Unicode, NUL, empty strings and formatting tokens.
+`scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
+missing classifications or changed default bodies; the receiver classification
+applies only to this typed forwarding method.

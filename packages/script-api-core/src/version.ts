@@ -30,5 +30,7 @@
  *         `triggerPrice` is rounded to the venue tick like `price`.
  * 1.3.1 — `api.constants.ExchangeName` gains `txflow`, matching the
  *         safe-cex ExchangeName union for the dev-only TxFlow scaffold.
+ * 1.3.2 — `api.constants.ExchangeName` gains `binanceinverse`, matching the
+ *         safe-cex ExchangeName union for Binance COIN-M inverse support.
  */
-export const CORE_API_VERSION = '1.3.1';
+export const CORE_API_VERSION = '1.3.2';
