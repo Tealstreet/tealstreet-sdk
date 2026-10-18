@@ -5501,6 +5501,10 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
 }
 
 #[cfg(feature = "native")]
+#[path = "support/private_action_key_binding.rs"]
+mod private_action_key_binding;
+
+#[cfg(feature = "native")]
 #[path = "support/snapshot_future_binding.rs"]
 mod snapshot_future_binding;
 

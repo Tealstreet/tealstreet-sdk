@@ -66,6 +66,20 @@ change inside the item, including whitespace, invalidates its pin. Dependencies
 called by the item retain their separate inventory and behavioral obligations.
 This does not retire role review or native evidence when a reviewed body changes.
 
+Decoder owner contracts may declare `requiredFeatures: ["native"]` when their
+observations need the production native host. Names must be real Cargo features
+of that owner's package. Classification-only and typed-only records cannot use
+this field. The default owner API is still checked, and its receipt is explicitly
+`native-gated` with `observed: false`; it is not an executed decoder result.
+
+The canonical driver automatically measures those owners on the native target
+with the required features, using fresh compiler/source/alias/helper discovery.
+Each owner must produce an actual runtime receipt there; missing or
+classification-only receipts fail. Native failures remain gate failures. The
+original compiler inventory is restored after these additional measurements.
+`parity:accepted` already invokes this driver, so its CI job executes the native
+probes too. A native-feature receipt does not claim execution on wasm.
+
 The receiver item cutover rehashed all 76 existing rows in seven crate shards;
 owner keys, categories, source files and reasons were preserved. The compiler
 regression builds an original impl, an unrelated prefix/suffix edit and an impl
