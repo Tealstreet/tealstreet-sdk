@@ -67,7 +67,7 @@ This finite native/default review does not exempt values passed through the
 capabilities, other public aliases, arbitrary callbacks or the feature matrix.
 Generated receipts and compiler snapshots remain under `target/`.
 
-Measured receipts on the reviewed source: thirteen authenticated native capability
+Initial measured receipts: thirteen authenticated native capability
 classifications pass, separately from seven native binding tests. All thirteen
 production faults compile and fail their named assertion, and every exact
 restoration passes. The 32 live detach cases and all three connection groups pass;
@@ -75,3 +75,8 @@ strict native Clippy passes for the three touched integration targets. Required
 all-features cancellation passes six tests, with only its explicit discovery
 exporter ignored. Invention/status parity passes 7,563 rows and 16,696 public items.
 These figures describe this finite checkpoint, not global behavioral equivalence.
+
+Normal master merge `c45de1e1c9` retains both native test modules and every master
+contract. The seven native binding tests and required cancellation six pass again;
+invention/status parity passes 7,563 rows and 16,700 public Rust items. The six
+owned declaration modules and thirteen controlled capability bodies are unchanged.
