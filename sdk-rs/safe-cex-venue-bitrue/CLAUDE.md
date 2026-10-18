@@ -194,12 +194,14 @@ shared JS values internally. HTTP creation uses the shared source factory and ru
 tealstreetTunnel branch installs its BigInt adapter through the shared factory;
 proxy authorization follows venue signing. No venue-local adapter refusal remains.
 Public jsonParse performs ordinary Number parsing, while the private big-int
-parser retains its source non-string passthrough. Browser compressed Blob input
+parser retains its source non-string passthrough. Compressed Blob input on native and browser sockets
 uses the existing Store read_blob helper with its byte-to-character projection.
 
 `tests/exchange_binding.rs` covers all sixteen methods, caller-ID fail-closed
 behavior before any single/batch write, private listen-key failure without a
-private dial/subscription, and the native Buffer/plain-JSON public frame path.
+private dial/subscription, and the native gzip Blob/ordinary jsonParse public frame path. The compiled FFI regression
+`native-bitrue-gzip.test.mjs` replays the exact first recorded gzip frame
+through real TLS sockets, comparing all 779 market/ticker rows with maintained TS.
 `scripts/binding-controls.py` sequentially breaks each trait dispatch and requires
 its named assertion, then a restored pass. Do not compile concurrently with it.
 The registry's native_host_bitrue test verifies the HMAC at a local HTTP server.

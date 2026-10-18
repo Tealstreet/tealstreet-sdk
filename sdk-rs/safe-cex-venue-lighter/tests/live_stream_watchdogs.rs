@@ -993,7 +993,7 @@ fn stream_watchdogs_native_records_callbacks_recovery_and_disposal() {
         "independent method floors"
     );
     assert_eq!(
-        oracle["contentHash"], "8a8854e77d090827f6ac5d95bff5b8e10df9e7fc7abf2af57824f07e11c1ca7f",
+        oracle["contentHash"], "56f1f65a11b8db02af4e25d08516357a041fccacc4eb92ff8d5b0a1eb235245b",
         "full source-only corpus pin after all native assertions"
     );
 }

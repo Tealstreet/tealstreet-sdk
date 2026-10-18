@@ -140,6 +140,9 @@ impl NativeStoreDelivery {
         }
         Ok(())
     }
+    pub(super) fn reset_replay_throttle(&self) {
+        self.throttle.cancel();
+    }
     pub fn cancel(&self) {
         self.active.set(false);
         self.throttle.cancel();

@@ -1047,12 +1047,13 @@ The js_runtime typed-value bridge uses the shared native serialization capture a
 
 JS socket properties are the source of truth for typed lifecycle grouping. BaseExchange installs weak, lazy lookups for the eight source fields; these create socket cores after venue assembly and observe property replacement/removal on each lookup. The JS runtime regression checks source order, public/private grouping and disposal.
 
-The js_runtime socket terminal preserves Binary as the host binary object: native
-Buffer and wasm Blob, with exact bytes behind ArrayBuffer. Buffer.toString and
-Blob.text perform UTF-8 replacement only when the venue explicitly asks for text;
+The js_runtime socket terminal preserves Binary as Blob on native and wasm,
+matching both the source WebSocket default and the reconnecting wrapper’s explicit
+`binaryType = "blob"`, including its Node ws transport. Exact bytes remain behind
+ArrayBuffer; Blob.text performs UTF-8 replacement only when requested;
 compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
-checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
+checks non-UTF-8 bytes, size, explicit conversion and unchanged text frames.
 
 Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
 JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
