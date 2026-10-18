@@ -25733,6 +25733,730 @@
     "evidence": "Production signing::text in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
     "reason": "Applies the existing query/header stringification profile to a typed JSON value, including array joining and object spelling. It produces outbound text rather than decoding a domain owner."
   },
+  "safe_cex_venue_binance::private_classes::PrivateSocket": {
+    "shape": "typed",
+    "evidence": "PrivateSocket has no Deserialize and exposes only a typed Venue/PrivateDependencies constructor plus an Rc-owned state borrow through Deref. The native private_owner_binding tests separately construct actual native_dependencies/ExchangeOwner for Futures, PM and Spot, observe original parent Rc, defaults, Store order effects and terminal Spot HMAC send. scripts/private-owner-controls.py independently faults production family selection and HMAC payload forwarding, requires named compiled failures and exact-restoration passes. This compiler classification does not execute those effects or classify Auth/PrivateState raw APIs.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "venue",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::private_session::Venue",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "d",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::private_classes::PrivateDependencies",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "Self"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Constructs core websocket, captured receiver and callbacks from already typed Venue and PrivateDependencies; no external representation is decoded."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "core::ops::deref::Deref",
+          "name": "deref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Target",
+                    "args": null,
+                    "self_type": {
+                      "generic": "Self"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Borrows the original typed PrivateState behind the existing Rc without decoding or copying a representation."
+      }
+    ]
+  },
+  "safe_cex_venue_binance::private_classes::Auth": {
+    "shape": "observed",
+    "requiredFeatures": [
+      "native"
+    ],
+    "evidence": "Real native_dependencies/ExchangeOwner supplies the receiver, shared Base, runtime and Store. Only terminal clock/socket/HTTP are scripted; the terminal HTTP adapter refuses every unexpected request. Observations invoke the actual owner methods and inspect native return values, Base event arguments, terminal socket URLs and actual Store field bits before projection. These finite profiles do not claim arbitrary-JS or Wasm execution. Independent compiled production faults must fail the corresponding named native observation and exact restorations must pass.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::api_factory::SpotAuthBindings",
+          "name": "hmac_sha256_hex",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "secret",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "payload",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute native secret/payload HMAC; source UTF8 bytes have independently specified SHA256 digests."
+      }
+    ],
+    "call": "{ #[allow(unused_imports)] use crate::private_event_value::EventOps as _; #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-native-owner-observers.rs\")); } let h=witness::actual(); let mut auth=$type(h.state()); let result=crate::api_factory::SpotAuthBindings::hmac_sha256_hex(&mut auth,safe_cex_exchange::js_runtime::value::from_json(&$value[\"secret\"]),$value[\"payload\"].as_str().unwrap().to_owned()).unwrap(); let output=serde_json::json!({\"digest\":result.text().unwrap(),\"units\":result.to_js_string().unwrap().len()}); h.owner.dispose().unwrap(); output }",
+    "cases": [
+      {
+        "input": {
+          "secret": "native-secret-A",
+          "payload": "apiKey=first&recvWindow=5000&timestamp=1700000000000"
+        },
+        "output": {
+          "digest": "6f50ccde848c0ab498a32d49cf5a5a343940a6a0f3e00437077f9e1d8d68b068",
+          "units": 64
+        }
+      },
+      {
+        "input": {
+          "secret": "native-secret-B",
+          "payload": "apiKey=second&recvWindow=5000&timestamp=1700000000001"
+        },
+        "output": {
+          "digest": "4d06f1f691fd0656115197878af32c6c2c39d5a65dfb86ebfe0c3f524a93db7b",
+          "units": 64
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::private_classes::PrivateState": {
+    "shape": "observed",
+    "requiredFeatures": [
+      "native"
+    ],
+    "evidence": "Real native_dependencies/ExchangeOwner supplies the receiver, shared Base, runtime and Store. Only terminal clock/socket/HTTP are scripted; the terminal HTTP adapter refuses every unexpected request. Observations invoke the actual owner methods and inspect native return values, Base event arguments, terminal socket URLs and actual Store field bits before projection. These finite profiles do not claim arbitrary-JS or Wasm execution. Independent compiled production faults must fail the corresponding named native observation and exact restorations must pass.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "handle_events",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "Self"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "kind",
+                {
+                  "primitive": "u8"
+                }
+              ],
+              [
+                "events",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Native order event arguments traverse the actual receiver, event mapper and shared Store; inspect native amount/price bits and id.",
+        "call": "{ #[allow(unused_imports)] use crate::private_event_value::EventOps as _; #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-native-owner-observers.rs\")); } let h=witness::actual(); let state: std::rc::Rc<$type>=h.state(); state.handle_events(1,safe_cex_exchange::js_runtime::value::Js::array(vec![witness::event($value)])).unwrap(); let out=witness::rows(&h); h.owner.dispose().unwrap(); out }",
+        "cases": [
+          {
+            "input": {
+              "id": 42,
+              "amount": "3"
+            },
+            "output": [
+              {
+                "id": "42",
+                "amountBits": "4008000000000000",
+                "priceBits": "4056cccccccccccd"
+              }
+            ]
+          },
+          {
+            "input": {
+              "id": 73,
+              "amount": "4"
+            },
+            "output": [
+              {
+                "id": "73",
+                "amountBits": "4010000000000000",
+                "priceBits": "4056cccccccccccd"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::private_session::ConnectBindings",
+          "name": "emit",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "msg",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "A raw message reaches the original Base error listener with source formatting and argument cardinality.",
+        "call": "{ #[allow(unused_imports)] use crate::private_event_value::EventOps as _; #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-native-owner-observers.rs\")); } let h=witness::actual(); let state: std::rc::Rc<$type>=h.state(); crate::private_session::ConnectBindings::emit(state.as_ref(),$value[\"message\"].as_str().unwrap().to_owned()).unwrap(); let args=h.errors.borrow(); let out=serde_json::json!({\"message\":args.last().unwrap()[0].text().unwrap(),\"argc\":args.last().unwrap().len()}); drop(args); h.owner.dispose().unwrap(); out }",
+        "cases": [
+          {
+            "input": {
+              "message": "first native message"
+            },
+            "output": {
+              "message": "Exchange Error: first native message",
+              "argc": 2
+            }
+          },
+          {
+            "input": {
+              "message": "second native message"
+            },
+            "output": {
+              "message": "Exchange Error: second native message",
+              "argc": 2
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::private_session::ConnectBindings",
+          "name": "log",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "msg",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "severity",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::runtime::LogSeverity",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Raw message and severity reach the original Base log listener.",
+        "call": "{ #[allow(unused_imports)] use crate::private_event_value::EventOps as _; #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-native-owner-observers.rs\")); } let h=witness::actual(); let state: std::rc::Rc<$type>=h.state(); let severity=if $value[\"severity\"]==\"warning\" { safe_cex_exchange::runtime::LogSeverity::Warning } else { safe_cex_exchange::runtime::LogSeverity::Error }; crate::private_session::ConnectBindings::log(state.as_ref(),$value[\"message\"].as_str().unwrap().to_owned(),severity).unwrap(); let args=h.logs.borrow(); let out=serde_json::json!({\"message\":args.last().unwrap()[0].text().unwrap(),\"argc\":args.last().unwrap().len(),\"severity\":args.last().unwrap()[1].text().unwrap()}); drop(args); h.owner.dispose().unwrap(); out }",
+        "cases": [
+          {
+            "input": {
+              "message": "first native message",
+              "severity": "warning"
+            },
+            "output": {
+              "message": "[binance] first native message",
+              "argc": 2,
+              "severity": "warning"
+            }
+          },
+          {
+            "input": {
+              "message": "second native message",
+              "severity": "error"
+            },
+            "output": {
+              "message": "[binance] second native message",
+              "argc": 2,
+              "severity": "error"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::private_session::ConnectBindings",
+          "name": "create",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "A raw URL creates the real core socket and terminal dial; inspect its original native URL and returned Js record.",
+        "call": "{ #[allow(unused_imports)] use crate::private_event_value::EventOps as _; #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-native-owner-observers.rs\")); } let h=witness::actual(); let state: std::rc::Rc<$type>=h.state(); let result=crate::private_session::ConnectBindings::create(state.as_ref(),$value.as_str().unwrap().to_owned()).unwrap(); h.runtime.pump(); let out=serde_json::json!({\"url\":h.runtime.sockets.borrow()[0].0,\"keys\":result.own_keys().into_iter().map(|key|key.to_vec()).collect::<Vec<_>>(),\"sameState\":std::rc::Rc::ptr_eq(&state,&h.state())}); h.owner.dispose().unwrap(); out }",
+        "cases": [
+          {
+            "input": "wss://first.native-owner.example/ws",
+            "output": {
+              "url": "wss://first.native-owner.example/ws",
+              "keys": [],
+              "sameState": true
+            }
+          },
+          {
+            "input": "wss://second.native-owner.example/ws",
+            "output": {
+              "url": "wss://second.native-owner.example/ws",
+              "keys": [],
+              "sameState": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_binance::private_session::ConnectBindings",
+          "name": "add_listener",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_ws",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "event",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Register the real current-socket message callback, deliver a terminal frame, and observe actual Store publication.",
+        "call": "{ #[allow(unused_imports)] use crate::private_event_value::EventOps as _; #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-native-owner-observers.rs\")); } let h=witness::actual(); let state: std::rc::Rc<$type>=h.state(); use crate::private_session::ConnectBindings; let ws=state.create(\"wss://native-owner.example/ws\".to_owned()).unwrap(); state.add_listener(ws,\"message\").unwrap(); h.runtime.pump(); let frame=witness::event($value); let text=safe_cex_exchange::js_runtime::value::to_json(&frame).unwrap().to_string(); h.runtime.sockets.borrow()[0].1.events.borrow_mut().push_back(safe_cex_exchange::websocket::WsEvent::Message(safe_cex_transport::socket::SocketFrame::Text(text))); h.runtime.pump(); let out=witness::rows(&h); h.owner.dispose().unwrap(); out }",
+        "cases": [
+          {
+            "input": {
+              "id": 42,
+              "amount": "3"
+            },
+            "output": [
+              {
+                "id": "42",
+                "amountBits": "4008000000000000",
+                "priceBits": "4056cccccccccccd"
+              }
+            ]
+          },
+          {
+            "input": {
+              "id": 73,
+              "amount": "4"
+            },
+            "output": [
+              {
+                "id": "73",
+                "amountBits": "4010000000000000",
+                "priceBits": "4056cccccccccccd"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
   "safe_cex_venue_binance::private_classes::Action": {
     "category": "non-decoder",
     "target": {

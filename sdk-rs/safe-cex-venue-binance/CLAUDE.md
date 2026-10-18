@@ -887,6 +887,20 @@ then restores exact production bytes and requires passes. These execution proofs
 do not classify the remaining Auth/PrivateState raw APIs or erase the documented
 UTF-8 frame boundary.
 
+`PrivateSocket` has a specific typed constructor/Deref accepted-set record.
+`scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
+including full dependency discovery and actual compiler features, then checks the
+one resulting classification receipt. It does not claim decoder execution;
+`private_owner_binding` and its independently compiled controls establish the
+separate real constructor/Store/authentication effects described above.
+
+`Auth` and `PrivateState` retain executed raw API contracts gated by the real
+native Cargo feature. The default receipt is explicitly unobserved; the canonical
+driver executes fresh native observations over production native_dependencies and
+ExchangeOwner. See [PRIVATE_NATIVE_OWNER_REVIEW.md](PRIVATE_NATIVE_OWNER_REVIEW.md)
+for the six actual APIs, finite native effects and independent compiled controls.
+Do not replace these raw observations with typed labels or default mock parents.
+
 The standalone `delegated_methods` extraction layer has no production caller and
 is retired with its options alias and mock-only oracle. Keep the six TypeScript
 rows on the live ExchangeState listener/dispatch members. The native candle,
