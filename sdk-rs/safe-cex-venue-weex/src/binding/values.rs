@@ -154,10 +154,10 @@ pub(super) fn filter(
     Ok(Js::array(out))
 }
 pub(super) fn new_map(h: &Host, value: Js) -> Result<Js, Thrown> {
-    h.global("Map")?.call(Js::Undefined, std::vec![value])
+    h.global("Map")?.construct(std::vec![value], None)
 }
 pub(super) fn set(h: &Host, value: Js) -> Result<Js, Thrown> {
-    h.global("Set")?.call(Js::Undefined, std::vec![value])
+    h.global("Set")?.construct(std::vec![value], None)
 }
 pub(super) fn default_config(
     value: crate::symbol_settings::WeexDefaultSymbolConfig,

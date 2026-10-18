@@ -821,12 +821,9 @@ fn api_class(name: &str, methods: Vec<(&str, Js)>) -> Result<Js, Thrown> {
     for (key, method) in methods {
         prototype.define(key, method)?;
     }
-    let instance_proto = prototype.clone();
-    let class = Js::constructor(name, None, move |_, a| {
-        let instance = Js::object(vec![("client", arg(&a, 0))]);
-        if let Js::Object(o) = &instance {
-            *o.proto.borrow_mut() = Some(instance_proto.clone());
-        }
+    let class = Js::constructor(name, None, move |target, a| {
+        let instance = target.allocate_instance()?;
+        instance.define("client", arg(&a, 0))?;
         Ok(instance)
     });
     class.define("prototype", prototype)?;

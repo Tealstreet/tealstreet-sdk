@@ -153,8 +153,7 @@ pub(crate) fn spot_body(weak: &W, receiver: &Js) -> Rc<SpotBodyOps<Js, Thrown>> 
     })
 }
 
-/// A class value: callable constructor whose `prototype` chains to the base's.
-/// The constructor receives the prototype as both active function and newTarget.
+/// A class constructor with its active function and original newTarget.
 pub(crate) fn derive_class(
     name: &str,
     base: Js,
@@ -199,7 +198,7 @@ pub(crate) fn super_construct(base: Js, target: Js, args: Vec<Js>) -> Result<Js,
 pub(crate) fn construction() -> Rc<ConstructionOps<Js, Thrown>> {
     Rc::new(ConstructionOps {
         derive: Rc::new(|name, base, _, ctor| derive_class(name, base, ctor)),
-        superclass: Rc::new(|active| active.get("__proto__")),
+        superclass: Rc::new(|active| active.super_constructor()),
         super_construct: Rc::new(super_construct),
         construct: Rc::new(|ctor, args| ctor.construct(args, None)),
     })
@@ -244,7 +243,7 @@ pub(crate) fn private_class(weak: &W) -> Rc<PrivateClassOps<Js, Thrown>> {
                 name,
                 base,
                 Rc::new(move |active, target, args| {
-                    let receiver = super_construct(active.get("__super")?, target, args)?;
+                    let receiver = super_construct(active.super_constructor()?, target, args)?;
                     init(receiver.clone())?;
                     Ok(receiver)
                 }),

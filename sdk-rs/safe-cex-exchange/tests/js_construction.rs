@@ -2,7 +2,7 @@ use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use safe_cex_num::{ProtoMember, PrototypeRealm};
 use serde_json::{Value, json};
 use std::{
-    cell::{Cell, OnceCell},
+    cell::{Cell, OnceCell, RefCell},
     process::Command,
     rc::Rc,
 };
@@ -32,6 +32,66 @@ fn class_call_refuses_before_running_constructor() {
 }
 
 #[test]
+fn callable_error_constructor_keeps_message_units_and_construct_order() {
+    let globals = Js::object(vec![]);
+    safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&globals, std::rc::Weak::new());
+    let error = globals.get("Error").unwrap();
+    assert!(error.is_callable() && error.is_constructor());
+    assert!(
+        error.own_keys().is_empty(),
+        "JS_CONSTRUCT Error prototype remains nonenumerable"
+    );
+    for result in [
+        error.call(Js::Undefined, vec![Js::utf16(&[0xd800])]),
+        error.construct(vec![Js::utf16(&[0xd800])], None),
+    ] {
+        let value = result.unwrap();
+        assert_eq!(
+            value.get("message").unwrap().as_str().unwrap().as_ref(),
+            &[0xd800]
+        );
+        assert_eq!(value.get("name").unwrap().to_display(), "Error");
+        assert!(value.own_keys().is_empty());
+    }
+    let trace = Rc::new(RefCell::new(Vec::new()));
+    let target = Js::constructor("Target", None, |target, _| target.allocate_instance());
+    let events = trace.clone();
+    let prototype = error.get("prototype").unwrap();
+    target.define_accessor(
+        "prototype",
+        Some(Rc::new(move |_| {
+            events.borrow_mut().push("prototype");
+            Ok(prototype.clone())
+        })),
+        None,
+    );
+    let events = trace.clone();
+    let message = Js::object(vec![(
+        "toString",
+        Js::function("toString", move |_, _| {
+            events.borrow_mut().push("message");
+            Ok(Js::str("text"))
+        }),
+    )]);
+    assert_eq!(
+        error
+            .construct(vec![message], Some(&target))
+            .unwrap()
+            .get("message")
+            .unwrap()
+            .to_display(),
+        "text"
+    );
+    let output = Command::new("node").arg("-e").arg("const trace=[]; const target=new Proxy(function Target(){},{get(t,k,r){if(k==='prototype') {trace.push('prototype'); return Error.prototype;} return Reflect.get(t,k,r);}});Reflect.construct(Error,[{toString(){trace.push('message');return 'text';}}],target);console.log(JSON.stringify(trace));").output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        json!(*trace.borrow()),
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        "JS_CONSTRUCT Error reads prototype before message coercion"
+    );
+}
+
+#[test]
 fn construction_keeps_new_target_dynamic_super_bound_arguments_and_realm() {
     let output = Command::new("node")
         .arg(concat!(
@@ -57,7 +117,7 @@ fn construction_keeps_new_target_dynamic_super_bound_arguments_and_realm() {
     let slot: Rc<OnceCell<Js>> = Rc::default();
     let active = slot.clone();
     let derived = Js::constructor("Derived", None, move |target, args| {
-        let superclass = active.get().unwrap().get("__proto__")?;
+        let superclass = active.get().unwrap().super_constructor()?;
         superclass.construct(args, Some(&target))
     });
     slot.set(derived.clone()).unwrap();
@@ -68,6 +128,10 @@ fn construction_keeps_new_target_dynamic_super_bound_arguments_and_realm() {
     let explicit = class
         .construct(vec![token.clone()], Some(&derived))
         .unwrap();
+    assert!(
+        explicit.get("target").unwrap().same_reference(&derived),
+        "JS_CONSTRUCT original explicit new.target"
+    );
     let prototype_of = |instance: &Js| {
         let Js::Object(data) = instance else {
             panic!("native constructed instance")
@@ -101,6 +165,7 @@ fn construction_keeps_new_target_dynamic_super_bound_arguments_and_realm() {
         Ok(instance)
     });
     derived.set("__proto__", other).unwrap();
+    derived.define("__proto__", token.clone()).unwrap();
     let dynamic = derived.construct(vec![token.clone()], None).unwrap();
     let realm = Rc::new(PrototypeRealm::default());
     let foreign = {

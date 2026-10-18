@@ -311,6 +311,7 @@ impl ExchangeClassRealm for Realm {
                 .map_err(to_thrown)
         });
         class.define("prototype", prototype).map_err(to_signing)?;
+        class.set("__proto__", base).map_err(to_signing)?;
         let _ = slot.set(class.clone());
         Ok(to_account(&class))
     }
@@ -368,10 +369,9 @@ impl ExchangeClassRealm for Realm {
         new_target: AccountValue,
         args: &[AccountValue],
     ) -> SigningResult<AccountValue> {
-        let _ = class;
-        let base = self.global("BaseExchange").map_err(to_signing)?;
+        let base = to_js(&class).super_constructor().map_err(to_signing)?;
         let instance = base
-            .construct(args.iter().map(to_js).collect(), None)
+            .construct(args.iter().map(to_js).collect(), Some(&to_js(&new_target)))
             .map_err(to_signing)?;
         let prototype = to_js(&new_target).get("prototype").map_err(to_signing)?;
         if let Js::Object(o) = &instance {

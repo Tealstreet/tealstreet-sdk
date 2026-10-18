@@ -278,8 +278,8 @@ pub(super) fn error_constructor(name: &'static str) -> Js {
     });
     let call = body.clone();
     let constructor = Js::constructor(name, Some(call), move |target, args| {
-        let error = body(Js::Undefined, args)?;
         let prototype = target.get("prototype")?;
+        let error = body(Js::Undefined, args)?;
         if prototype.is_object()
             && let Js::Object(data) = &error
         {
@@ -287,9 +287,18 @@ pub(super) fn error_constructor(name: &'static str) -> Js {
         }
         Ok(error)
     });
-    constructor
-        .define("prototype", error_prototype(name).0)
-        .expect("error prototype");
+    let Js::Function(function) = &constructor else {
+        unreachable!()
+    };
+    function.props.borrow_mut().insert(
+        utf16("prototype"),
+        Prop::DataDescriptor {
+            value: error_prototype(name).0,
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        },
+    );
     constructor
 }
 
@@ -439,6 +448,14 @@ impl Js {
 
     pub fn is_constructor(&self) -> bool {
         matches!(self, Js::Function(function) if function.construct.is_some())
+    }
+
+    /// GetSuperConstructor reads metadata, without the shadowable `__proto__` property.
+    pub fn super_constructor(&self) -> Result<Js, Thrown> {
+        if !self.is_callable() {
+            return Err(Thrown::type_error("Active class must be a function"));
+        }
+        Ok(self.prototype().unwrap_or(Js::Null))
     }
 
     /// The native construct body receives original new.target, then arguments.

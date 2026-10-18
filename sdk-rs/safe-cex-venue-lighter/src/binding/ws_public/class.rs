@@ -32,8 +32,6 @@ type AccountOps = IngressOps<AccountValue, TransactionSigningError>;
 pub(crate) struct SocketRealm {
     realm: Realm,
     ingress: Rc<AccountOps>,
-    /// The BaseWebSocket class `create_derived_class` extended.
-    base: RefCell<Js>,
     /// BaseWebSocket.prototype at class creation: the `super` lookup object.
     home_parent: RefCell<Js>,
     this: Weak<SocketRealm>,
@@ -49,7 +47,6 @@ impl SocketRealm {
         Rc::new_cyclic(|this| Self {
             realm,
             ingress,
-            base: RefCell::new(Js::Undefined),
             home_parent: RefCell::new(Js::Undefined),
             this: this.clone(),
         })
@@ -123,7 +120,6 @@ impl PublicSocketRealm for SocketRealm {
         if let Js::Object(o) = &prototype {
             *o.proto.borrow_mut() = (!parent.is_nullish()).then(|| parent.clone());
         }
-        *self.base.borrow_mut() = base;
         *self.home_parent.borrow_mut() = parent;
         let me = js(self.me())?;
         let slot: Rc<OnceCell<Js>> = Rc::default();
@@ -136,6 +132,7 @@ impl PublicSocketRealm for SocketRealm {
                 .map_err(to_thrown)
         });
         js(class.define("prototype", prototype))?;
+        js(class.set("__proto__", base))?;
         let _ = slot.set(class.clone());
         Ok(to_account(&class))
     }
@@ -187,15 +184,15 @@ impl PublicSocketRealm for SocketRealm {
         new_target: AccountValue,
         args: &[AccountValue],
     ) -> SigningResult<AccountValue> {
-        let _ = class;
-        let base = self.base.borrow().clone();
+        let base = js(to_js(&class).super_constructor())?;
         if !base.is_callable() {
             return Err(to_signing(Thrown::type_error(&format!(
                 "Class extends value {} is not a constructor",
                 base.to_display()
             ))));
         }
-        let instance = js(base.call(Js::Undefined, args.iter().map(to_js).collect()))?;
+        let instance =
+            js(base.construct(args.iter().map(to_js).collect(), Some(&to_js(&new_target))))?;
         let prototype = js(to_js(&new_target).get("prototype"))?;
         if let Js::Object(o) = &instance {
             *o.proto.borrow_mut() = Some(prototype);

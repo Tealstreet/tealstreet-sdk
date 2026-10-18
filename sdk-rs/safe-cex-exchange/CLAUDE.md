@@ -971,8 +971,17 @@ compares these operations with Node, including cross-realm identities. Intrinsic
 parent metadata is independent of the shadowable `__proto__` string property.
 Unknown surrogate keys miss inherited UTF8 intrinsic fields without replacement;
 intrinsic writes retain their existing explicit native-primitive boundary.
-Construction/new.target, accessor flags and function own-key reflection remain
-separate consolidation capabilities.
+Function construction is a separate operation on the same referent. The factory
+requires an explicit optional call body and a construct callback receiving the
+original new.target and native argument vector. Native class bodies allocate
+through allocate_instance and return their actual constructed object; callable
+builtins provide their source call behavior explicitly. Bound construction keeps
+prefix arguments and substitutes its target only for the default bound new.target.
+GetSuperConstructor reads the active function parent from metadata, independently
+of own __proto__ data. Constructor validation occurs at invocation after argument
+evaluation. tests/js_construction.rs compares native operations with Node,
+including cross-realm allocation fallback and Error prototype/message order.
+Accessor flags and complete function own-key reflection remain separate steps.
 
 The shared JS runtime supplies `Function.prototype.bind` for venue callbacks,
 retaining the target receiver and prepending bound arguments even when the result

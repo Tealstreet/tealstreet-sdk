@@ -186,22 +186,26 @@ impl crate::exchange::ExchangeHost for Rt {
         Ok(Rc::new(self.with_this(r)))
     }
     fn derive(&self, base: Js, m: Vec<(&'static str, Js)>) -> Result<Js, Thrown> {
-        Ok(Js::constructor("PolymarketExchange", None, move |_, a| {
-            let r = base.call(Js::Undefined, a)?;
-            for (k, v) in &m {
-                if *k == "name" {
-                    let f = v.clone();
-                    r.define_accessor(
-                        k,
-                        Some(Rc::new(move |recv| f.call(recv.clone(), vec![]))),
-                        None,
-                    );
-                } else {
-                    r.define(k, v.clone())?;
+        Ok(Js::constructor(
+            "PolymarketExchange",
+            None,
+            move |target, a| {
+                let r = base.construct(a, Some(&target))?;
+                for (k, v) in &m {
+                    if *k == "name" {
+                        let f = v.clone();
+                        r.define_accessor(
+                            k,
+                            Some(Rc::new(move |recv| f.call(recv.clone(), vec![]))),
+                            None,
+                        );
+                    } else {
+                        r.define(k, v.clone())?;
+                    }
                 }
-            }
-            Ok(r)
-        }))
+                Ok(r)
+            },
+        ))
     }
     fn prototype_method(&self, n: &'static str) -> Result<Js, Thrown> {
         super::members::exchange(self, n, None)
@@ -420,9 +424,9 @@ impl crate::classes::ClassHost for Rt {
         b: Option<Js>,
         p: Vec<(&'static str, Js)>,
     ) -> Result<Js, Thrown> {
-        Ok(Js::constructor(n, None, move |_, a| {
+        Ok(Js::constructor(n, None, move |target, a| {
             let r = match &b {
-                Some(b) => b.call(Js::Undefined, a)?,
+                Some(b) => b.construct(a, Some(&target))?,
                 None => Js::object_with_class(n, vec![]),
             };
             for (k, v) in &p {

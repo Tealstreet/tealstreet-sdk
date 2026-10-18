@@ -14,6 +14,7 @@ const boundNormal = new bound();
 const boundExplicit = Reflect.construct(bound, [], Derived);
 class Other { constructor(value) { this.value = value; this.target = new.target; this.other = true; } }
 Object.setPrototypeOf(Derived, Other);
+Object.defineProperty(Derived, '__proto__', {value:token,configurable:true});
 const dynamic = new Derived(token);
 const foreignRealm = vm.runInNewContext('({Foreign:function Foreign(){},objectPrototype:Object.prototype})');
 const foreign = foreignRealm.Foreign;
