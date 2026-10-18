@@ -577,6 +577,14 @@ Binance and BingX signature predicates use these conversions instead of rebuildi
 an Error from text. The native order/account witnesses cover resolved envelopes
 and HTTP rejection, and assert that coercion failures never trigger a resend.
 
+The JS REST adapter keeps string error-code UTF-16 units in the existing owned
+callback origin; `RestFailure.code` remains its explicit UTF-8 diagnostic view.
+The shared ExchangeError conversion applies response and context views to both
+retained callback causes and ordinary failures, preserving the complete original
+RestFailure for downcasts. The constructed Aster rejection regression compares
+normal and lone-surrogate codes to the maintained source; the core origin test
+also checks response phase, own undefined, signed zero, keys and request metadata.
+
 `RestFailure.context` is boxed to keep the response-bearing error small; the
 metadata is unchanged. `RestFailure.code` preserves general host/status error codes as well as the code
 copied from opaque NetworkFailure. The library network-or-idempotent helper is

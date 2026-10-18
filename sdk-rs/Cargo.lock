@@ -3903,6 +3903,7 @@ dependencies = [
  "napi-derive",
  "safe-cex",
  "safe-cex-registry",
+ "safe-cex-webworker",
  "serde_json",
  "tokio",
  "wasm-bindgen",
