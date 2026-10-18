@@ -1,0 +1,18 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/binance/binanceinverse.api.ts"
+
+[[symbol]]
+ts = "createPublicAPI"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "createAPI"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
