@@ -40,3 +40,10 @@ The companion exchange-native-controls.py requires four independently compiled
 semantic faults to fail only their named owner, exact source restoration and
 native GREEN4 after each. Controls and final feature-delegation/gates must pass
 before READY; the initial positive measurement alone is not a READY receipt.
+
+Final executed validation: default-driver delegation produced four actual native
+receipts (15 cases) and four explicitly unexecuted native-gated receipts. All four
+independent production-body faults compiled, failed only their named native owner
+and passed all four owners after exact byte restoration. Native library strict
+Clippy, rustfmt and all-features cancellation6 passed on the normally merged head.
+No permanent production source changes accompany these contracts.
