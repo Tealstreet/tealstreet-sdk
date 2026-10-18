@@ -81198,6 +81198,1215 @@
       ]
     }
   },
+  "safe_cex_venue_asterdex::api_runtime::option": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let key=\"apiKey\";\nlet o=match scenario {\n \"null-receiver\"=>Js::Null,\"undefined-receiver\"=>Js::Undefined,\"false-receiver\"=>Js::Bool(false),_=>Js::object(vec![])};\nmatch scenario {\n \"undefined\"=>{o.define(key,Js::Undefined).unwrap();},\"null\"=>{o.define(key,Js::Null).unwrap();},\n \"negative-zero\"=>{o.define(key,Js::Number(-0.0)).unwrap();},\"identity\"=>{o.define(key,sentinel.clone()).unwrap();},\n \"inherited\"=>{if let Js::Object(v)=&o{*v.proto.borrow_mut()=Some(Js::object(vec![(key,Js::Bool(true))]));}},\n \"getter-error\"=>{let e=thrown.clone();o.define_accessor(key,Some(Rc::new(move|_|Err(Thrown::new(e.clone())))),None);},_=>{}\n}\nlet r=$type(&h,&o,key);match r {Ok(v)=>{if scenario==\"identity\"{assert!(v.strict_equals(&sentinel),\"original object identity\");}describe(&v)},Err(e)=>{if scenario==\"getter-error\"{assert!(e.strict_equals(&thrown),\"original getter throw\");serde_json::json!({\"error\":\"original\"})}else{serde_json::json!({\"error\":e.get(\"name\").unwrap().to_display()})}}}\n }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "kind": "object"
+        }
+      },
+      {
+        "input": {
+          "case": "inherited"
+        },
+        "output": {
+          "kind": "boolean",
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "case": "getter-error"
+        },
+        "output": {
+          "error": "original"
+        }
+      },
+      {
+        "input": {
+          "case": "null-receiver"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined-receiver"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "case": "false-receiver"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ],
+    "evidence": "Own/missing/own-undefined, null, inherited properties, signed zero and raw object/error identities. Nullish optional access bypasses getters; ordinary option access keeps TypeError. Maintained-source apiKey and optional options expressions are independently executed. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "option",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::runtime_host::opt": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let key=\"options\";\nlet o=match scenario {\n \"null-receiver\"=>Js::Null,\"undefined-receiver\"=>Js::Undefined,\"false-receiver\"=>Js::Bool(false),_=>Js::object(vec![])};\nmatch scenario {\n \"undefined\"=>{o.define(key,Js::Undefined).unwrap();},\"null\"=>{o.define(key,Js::Null).unwrap();},\n \"negative-zero\"=>{o.define(key,Js::Number(-0.0)).unwrap();},\"identity\"=>{o.define(key,sentinel.clone()).unwrap();},\n \"inherited\"=>{if let Js::Object(v)=&o{*v.proto.borrow_mut()=Some(Js::object(vec![(key,Js::Bool(true))]));}},\n \"getter-error\"=>{let e=thrown.clone();o.define_accessor(key,Some(Rc::new(move|_|Err(Thrown::new(e.clone())))),None);},_=>{}\n}\nlet r=$type(&h,o,key);match r {Ok(v)=>{if scenario==\"identity\"{assert!(v.strict_equals(&sentinel),\"original object identity\");}describe(&v)},Err(e)=>{if scenario==\"getter-error\"{assert!(e.strict_equals(&thrown),\"original getter throw\");serde_json::json!({\"error\":\"original\"})}else{serde_json::json!({\"error\":e.get(\"name\").unwrap().to_display()})}}}\n }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "kind": "object"
+        }
+      },
+      {
+        "input": {
+          "case": "inherited"
+        },
+        "output": {
+          "kind": "boolean",
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "case": "getter-error"
+        },
+        "output": {
+          "error": "original"
+        }
+      },
+      {
+        "input": {
+          "case": "null-receiver"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined-receiver"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "false-receiver"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ],
+    "evidence": "Own/missing/own-undefined, null, inherited properties, signed zero and raw object/error identities. Nullish optional access bypasses getters; ordinary option access keeps TypeError. Maintained-source apiKey and optional options expressions are independently executed. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "opt",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::api_runtime::clock": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet clock=Js::object(vec![]);let receiver=clock.clone();let expected=sentinel.clone();let error=thrown.clone();let calls=Rc::new(Cell::new(0));let count=calls.clone();\nlet key=if scenario==\"sync\"{\"syncClientServerTime\"}else if scenario==\"needs\"{\"needsSync\"}else{\"getCurrentTimeMs\"};\nlet fail=scenario==\"throws\";let needs=scenario==\"needs\";let sync=scenario==\"sync\";\nif scenario!=\"missing\"{clock.define(key,Js::function(\"clock port\",move|this,args|{\n assert!(this.strict_equals(&receiver),\"clock method receiver\");count.set(count.get()+1);\n if sync{assert_eq!(args.len(),2);assert!(args[0].strict_equals(&expected));assert!(matches!(args[1],Js::Number(n)if n.to_bits()==(-0.0f64).to_bits()));}else{assert!(args.is_empty());}\n if fail{Err(Thrown::new(error.clone()))}else if needs{Ok(Js::Bool(true))}else if sync{Ok(expected.clone())}else{Ok(Js::Number(-0.0))}\n})).unwrap();}\nlet h=Host::new(clock);let args=if sync{vec![sentinel.clone(),Js::Number(-0.0)]}else{vec![]};\nlet r=$type(&h,key,args);let value=match r{Ok(v)=>{if sync{assert!(v.strict_equals(&sentinel));}describe(&v)},Err(e)=>{if fail{assert!(e.strict_equals(&thrown));serde_json::json!({\"error\":\"original\"})}else{serde_json::json!({\"error\":e.get(\"name\").unwrap().to_display()})}}};\nserde_json::json!({\"result\":value,\"calls\":calls.get()}) }",
+    "cases": [
+      {
+        "input": {
+          "case": "time"
+        },
+        "output": {
+          "result": {
+            "kind": "number",
+            "bits": "8000000000000000"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "needs"
+        },
+        "output": {
+          "result": {
+            "kind": "boolean",
+            "value": true
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "sync"
+        },
+        "output": {
+          "result": {
+            "kind": "object"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "result": {
+            "error": "TypeError"
+          },
+          "calls": 0
+        }
+      }
+    ],
+    "evidence": "Actual virtual-clock method dispatch preserves this, empty/sync arguments, return identity/-0 and unmodified thrown values; missing methods refuse. Clock callback is only the dependency port, not a replacement clock helper. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "clock",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "H"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::api_runtime::detail": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let data=Js::object(vec![]);let trace=Rc::new(RefCell::new(Vec::new()));let reads=trace.clone();let error=thrown.clone();let fail=scenario==\"message-error\";\ndata.define_accessor(\"msg\",Some(Rc::new(move|_|{reads.borrow_mut().push(\"msg\");if fail{Err(Thrown::new(error.clone()))}else{Ok(Js::str(\"detail\"))}})),None);\nlet reads=trace.clone();let error=thrown.clone();let fail=scenario==\"code-error\";let special=scenario==\"builder\";\ndata.define_accessor(\"code\",Some(Rc::new(move|_|{reads.borrow_mut().push(\"code\");if fail{Err(Thrown::new(error.clone()))}else{Ok(Js::Number(if special{-5025.0}else{0.0}))}})),None);\nif scenario==\"false\"{data.define(\"msg\",Js::Bool(false)).unwrap();}if scenario==\"missing\"{data.delete(&\"msg\".encode_utf16().collect::<Vec<_>>());}\nlet r=$type(&h,&data,\"msg\");let result=match r{Ok(v)=>describe(&v),Err(e)=>{assert!(e.strict_equals(&thrown),\"original detail getter error\");serde_json::json!({\"error\":\"original\"})}};\nserde_json::json!({\"result\":result,\"reads\":trace.borrow().clone(),\"imports\":h.imports.borrow().clone()}) }",
+    "cases": [
+      {
+        "input": {
+          "case": "normal"
+        },
+        "output": {
+          "result": {
+            "kind": "string",
+            "value": "detail"
+          },
+          "reads": [
+            "msg",
+            "code"
+          ],
+          "imports": [
+            "getAsterDEXErrorDetail"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "builder"
+        },
+        "output": {
+          "result": {
+            "kind": "string",
+            "value": "Aster builder attribution is not synced for this API key. Open your Aster API key settings, sync or enable the Tealstreet builder authorization, then reconnect the account and try again."
+          },
+          "reads": [
+            "msg",
+            "code"
+          ],
+          "imports": [
+            "getAsterDEXErrorDetail"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "false"
+        },
+        "output": {
+          "result": {
+            "kind": "string",
+            "value": "Unknown error"
+          },
+          "reads": [
+            "code"
+          ],
+          "imports": [
+            "getAsterDEXErrorDetail"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "result": {
+            "kind": "string",
+            "value": "Unknown error"
+          },
+          "reads": [
+            "code"
+          ],
+          "imports": [
+            "getAsterDEXErrorDetail"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "message-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "reads": [
+            "msg"
+          ],
+          "imports": []
+        }
+      },
+      {
+        "input": {
+          "case": "code-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "reads": [
+            "msg",
+            "code"
+          ],
+          "imports": []
+        }
+      }
+    ],
+    "evidence": "Error detail wrapper forwards message then optional code once and invokes the actual api_helpers detail dependency. Both property failure positions preserve the original thrown object and prevent the dependency call; real maintained-source detail expression and function check finite output. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "detail",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::exchange_runtime::due": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let owner=Js::object(vec![]);let reads=Rc::new(Cell::new(0));let count=reads.clone();let error=thrown.clone();let name=scenario.to_owned();\nowner.define_accessor(\"lastBalanceReconciliationAt\",Some(Rc::new(move|_|{count.set(count.get()+1);if name==\"first-error\"||name==\"second-error\"&&count.get()==2{return Err(Thrown::new(error.clone()));}Ok(match name.as_str(){\"zero\"=>Js::Number(0.0),\"negative-zero\"=>Js::Number(-0.0),\"string\"=>Js::str(\"1000\"),\"nan\"=>Js::Number(f64::NAN),\"null\"=>Js::Null,_=>Js::Number(1000.0)})})),None);\nlet now=Js::Number(match scenario{\"before\"=>25999.0,\"after\"=>26001.0,\"null\"=>25000.0,_=>26000.0});\nlet result=match $type(&h,&owner,now,\"lastBalanceReconciliationAt\",25000.0){Ok(v)=>serde_json::json!(v),Err(e)=>{assert!(e.strict_equals(&thrown));serde_json::json!({\"error\":\"original\"})}};\nserde_json::json!({\"result\":result,\"reads\":reads.get()}) }",
+    "cases": [
+      {
+        "input": {
+          "case": "zero"
+        },
+        "output": {
+          "result": true,
+          "reads": 1
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "result": true,
+          "reads": 1
+        }
+      },
+      {
+        "input": {
+          "case": "before"
+        },
+        "output": {
+          "result": false,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "equal"
+        },
+        "output": {
+          "result": true,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "after"
+        },
+        "output": {
+          "result": true,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "string"
+        },
+        "output": {
+          "result": true,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "nan"
+        },
+        "output": {
+          "result": false,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "result": true,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "first-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "reads": 1
+        }
+      },
+      {
+        "input": {
+          "case": "second-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "reads": 2
+        }
+      }
+    ],
+    "evidence": "Tick reconciliation predicate uses strict zero then a second property read and JS subtraction/greater-equal. Witnesses cover signed zero, exact interval edges, numeric strings, null, NaN, and first/second getter throws against the actual source initializer. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "due",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "now",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "interval",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::exchange_runtime::update": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let rows=sentinel.clone();let loaded=Js::object(vec![(\"balance\",Js::Bool(false)),(\"opaque\",Js::Undefined)]);if let Js::Object(v)=&loaded{*v.proto.borrow_mut()=Some(Js::object(vec![(\"inherited\",Js::Bool(true))]));}\nlet store=Js::object(vec![]);let owner=Js::object(vec![(\"store\",store.clone())]);let trace=Rc::new(RefCell::new(Vec::new()));let reads=trace.clone();let old=loaded.clone();let error=thrown.clone();let fail=scenario==\"loaded-error\";\nstore.define_accessor(\"loaded\",Some(Rc::new(move|_|{reads.borrow_mut().push(\"loaded\");if fail{Err(Thrown::new(error.clone()))}else{Ok(old.clone())}})),None);\nlet receiver=store.clone();let expected=rows.clone();let old=loaded.clone();let reads=trace.clone();let error=thrown.clone();let fail=scenario==\"update-error\";\nlet update=Js::function(\"update\",move|this,args|{reads.borrow_mut().push(\"call\");assert!(this.strict_equals(&receiver));assert_eq!(args.len(),1);let patch=&args[0];assert!(patch.get(\"orders\")?.strict_equals(&expected),\"rows identity\");let flags=patch.get(\"loaded\")?;assert!(!flags.strict_equals(&old),\"loaded copied\");assert!(flags.get(\"orders\")?.strict_equals(&Js::Bool(true)));assert!(flags.get(\"balance\")?.strict_equals(&Js::Bool(false)));assert!(flags.get(\"opaque\")?.is_undefined());assert!(flags.own_entries()?.iter().any(|(k,_)|String::from_utf16(k).unwrap()==\"opaque\"),\"own undefined preserved\");assert!(flags.get(\"inherited\")?.is_undefined());if fail{Err(Thrown::new(error.clone()))}else{Ok(Js::Number(7.0))}});\nlet reads=trace.clone();let error=thrown.clone();let fail=scenario==\"method-error\";\nstore.define_accessor(\"update\",Some(Rc::new(move|_|{reads.borrow_mut().push(\"update\");if fail{Err(Thrown::new(error.clone()))}else{Ok(update.clone())}})),None);\nlet r=$type(&h,&owner,\"orders\",rows);let result=match r{Ok(())=>serde_json::json!(\"ok\"),Err(e)=>{assert!(e.strict_equals(&thrown));serde_json::json!({\"error\":\"original\"})}};\nassert!(loaded.get(\"orders\").unwrap().is_undefined(),\"original loaded untouched\");\nserde_json::json!({\"result\":result,\"trace\":trace.borrow().clone()}) }",
+    "cases": [
+      {
+        "input": {
+          "case": "normal"
+        },
+        "output": {
+          "result": "ok",
+          "trace": [
+            "update",
+            "loaded",
+            "call"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "update-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "trace": [
+            "update",
+            "loaded",
+            "call"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "loaded-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "trace": [
+            "update",
+            "loaded"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "method-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "trace": [
+            "update"
+          ]
+        }
+      }
+    ],
+    "evidence": "Real Store update call retains the Store receiver and rows identity; copied loaded flags keep own undefined/false values but omit inherited flags and leave old flags untouched. Method/loaded/call exceptions stop exactly at the source effect, preserving original thrown identity and evaluation order. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "update",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "kind",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "rows",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
   "safe_cex_venue_asterdex::virtual_clock::ClockOperation": {
     "shape": "typed",
     "evidence": "safe-cex-venue-asterdex/src/virtual_clock.rs; exact current compiler-selected APIs reviewed. Future::poll consumes the existing typed Pin/Context and forwards the shared typed completion. It accepts no serialized input and does not parse or construct a decoded model. The clock lifecycle witnesses exercise pending, completion, shared waiters and cancellation. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",
