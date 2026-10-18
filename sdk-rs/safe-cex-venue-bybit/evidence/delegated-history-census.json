@@ -1,0 +1,22 @@
+{
+  "base": "aa3208a9298350b75b01dfa3e7c8a66b6bf25f60",
+  "manifest_files": 26,
+  "rows": 560,
+  "counts": {
+    "ported": 342,
+    "divergent": 186,
+    "pending": 32
+  },
+  "changed": [
+    [
+      "bybit.exchange.ts.toml",
+      "BybitExchange#mapOrderHistoryRowsToExecutions"
+    ],
+    [
+      "bybitinverse.exchange.ts.toml",
+      "BybitInverseExchange#mapOrderHistoryRowsToExecutions"
+    ]
+  ],
+  "status_changes": 0,
+  "identity_guard_changes": 0
+}

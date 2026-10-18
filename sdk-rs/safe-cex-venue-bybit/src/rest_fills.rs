@@ -300,7 +300,7 @@ pub(crate) fn fetch_historical_fills(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
 
 // Shared decision 3: a malformed strict output refuses one row, never its neighbors.
 fn admit_execution_rows(rt: &Rt, rows: Js) -> Result<Js, Thrown> {
-    let Some(values) = rows.array_values() else {
+    let Some(values) = rows.array_values()? else {
         return Ok(rows);
     };
     let mut accepted = Vec::new();
