@@ -6034,5 +6034,702 @@
         }
       }
     }
+  },
+  "safe_cex_venue_kraken::ohlcv_polling::PollFuture": {
+    "category": "non-decoder",
+    "reason": "Owning pinned native poll continuation completing with unit or the original Thrown at the actual Scope host. It awaits chart HTTP and publishes through the callback rather than decoding input itself. Only the reviewed binding::rt::Rt instantiation is covered.",
+    "evidence": "Fresh maintained acceptedAliasContext authenticates compiler artifacts, external roots and declaration claims. scripts/polling-alias-contracts.mjs executes actual finite native alias identity, Serde and conversion probes against independently authored expected Rust types. tests/support/accepted_polling_aliases.rs invokes the production polling body over a constructed KrakenExchange Scope, real charts client, held HTTP completion and runtime timers: native candle fields, five-second continuation, changed-row suppression, callback/cache cell identity and cleanup cancellation. scripts/polling-alias-controls.py requires four named compiled semantic faults in the actual continuation consumers, exact-source restoration and native passes. POLLING_ALIAS_REVIEW.md scopes the proof; other hosts and remaining aliases remain independent.",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "H"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "tuple": []
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "tuple": []
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "qualified_path": {
+                                                                  "name": "Error",
+                                                                  "args": null,
+                                                                  "self_type": {
+                                                                    "generic": "H"
+                                                                  },
+                                                                  "trait": {
+                                                                    "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::ohlcv_polling::PollCallback": {
+    "category": "non-decoder",
+    "reason": "Owning repeat-poll callable taking no raw input and producing a native PollFuture; the real timeout invokes it at the source five-second interval. Only the reviewed binding::rt::Rt instantiation is covered.",
+    "evidence": "Fresh maintained acceptedAliasContext authenticates compiler artifacts, external roots and declaration claims. scripts/polling-alias-contracts.mjs executes actual finite native alias identity, Serde and conversion probes against independently authored expected Rust types. tests/support/accepted_polling_aliases.rs invokes the production polling body over a constructed KrakenExchange Scope, real charts client, held HTTP completion and runtime timers: native candle fields, five-second continuation, changed-row suppression, callback/cache cell identity and cleanup cancellation. scripts/polling-alias-controls.py requires four named compiled semantic faults in the actual continuation consumers, exact-source restoration and native passes. POLLING_ALIAS_REVIEW.md scopes the proof; other hosts and remaining aliases remain independent.",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::ohlcv_polling::PollFuture",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::pin::Pin",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::boxed::Box",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "dyn_trait": {
+                                                          "traits": [
+                                                            {
+                                                              "trait": {
+                                                                "path": "core::future::future::Future",
+                                                                "args": {
+                                                                  "angle_bracketed": {
+                                                                    "args": [],
+                                                                    "constraints": [
+                                                                      {
+                                                                        "name": "Output",
+                                                                        "args": null,
+                                                                        "binding": {
+                                                                          "equality": {
+                                                                            "type": {
+                                                                              "resolved_path": {
+                                                                                "path": "core::result::Result",
+                                                                                "args": {
+                                                                                  "angle_bracketed": {
+                                                                                    "args": [
+                                                                                      {
+                                                                                        "type": {
+                                                                                          "tuple": []
+                                                                                        }
+                                                                                      },
+                                                                                      {
+                                                                                        "type": {
+                                                                                          "qualified_path": {
+                                                                                            "name": "Error",
+                                                                                            "args": null,
+                                                                                            "self_type": {
+                                                                                              "generic": "H"
+                                                                                            },
+                                                                                            "trait": {
+                                                                                              "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                                                              "args": null
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    ],
+                                                                                    "constraints": []
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                }
+                                                              },
+                                                              "generic_params": []
+                                                            }
+                                                          ],
+                                                          "lifetime": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::ohlcv_polling::CandleCallback": {
+    "category": "non-decoder",
+    "reason": "Consumer-owned delivery callback over the original native candle cell, returning unit or Thrown; it observes and may mutate an already-read candle, not decode it. Only the reviewed binding::rt::Rt instantiation is covered.",
+    "evidence": "Fresh maintained acceptedAliasContext authenticates compiler artifacts, external roots and declaration claims. scripts/polling-alias-contracts.mjs executes actual finite native alias identity, Serde and conversion probes against independently authored expected Rust types. tests/support/accepted_polling_aliases.rs invokes the production polling body over a constructed KrakenExchange Scope, real charts client, held HTTP completion and runtime timers: native candle fields, five-second continuation, changed-row suppression, callback/cache cell identity and cleanup cancellation. scripts/polling-alias-controls.py requires four named compiled semantic faults in the actual continuation consumers, exact-source restoration and native passes. POLLING_ALIAS_REVIEW.md scopes the proof; other hosts and remaining aliases remain independent.",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "H"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::rc::Rc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "qualified_path": {
+                                                "name": "Value",
+                                                "args": null,
+                                                "self_type": {
+                                                  "generic": "H"
+                                                },
+                                                "trait": {
+                                                  "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "qualified_path": {
+                                              "name": "Error",
+                                              "args": null,
+                                              "self_type": {
+                                                "generic": "H"
+                                              },
+                                              "trait": {
+                                                "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::ohlcv_polling::Cleanup": {
+    "category": "non-decoder",
+    "reason": "Owning zero-argument cancellation capability returning unit or Thrown; it disables the poll and removes timer/cache entries, not a wire decoder. Only the reviewed binding::rt::Rt instantiation is covered.",
+    "evidence": "Fresh maintained acceptedAliasContext authenticates compiler artifacts, external roots and declaration claims. scripts/polling-alias-contracts.mjs executes actual finite native alias identity, Serde and conversion probes against independently authored expected Rust types. tests/support/accepted_polling_aliases.rs invokes the production polling body over a constructed KrakenExchange Scope, real charts client, held HTTP completion and runtime timers: native candle fields, five-second continuation, changed-row suppression, callback/cache cell identity and cleanup cancellation. scripts/polling-alias-controls.py requires four named compiled semantic faults in the actual continuation consumers, exact-source restoration and native passes. POLLING_ALIAS_REVIEW.md scopes the proof; other hosts and remaining aliases remain independent.",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "qualified_path": {
+                                              "name": "Error",
+                                              "args": null,
+                                              "self_type": {
+                                                "generic": "H"
+                                              },
+                                              "trait": {
+                                                "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }

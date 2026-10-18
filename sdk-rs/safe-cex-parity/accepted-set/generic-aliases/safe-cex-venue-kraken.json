@@ -1380,5 +1380,710 @@
       }
     },
     "unsized": false
+  },
+  "safe_cex_venue_kraken::ohlcv_polling::PollFuture": {
+    "canonical": "core::pin::Pin",
+    "expectedType": "::core::pin::Pin<::std::boxed::Box<dyn ::core::future::Future<Output=::core::result::Result<(),::safe_cex_exchange::js_runtime::value::Thrown>> + 'static>>",
+    "suffix": "<crate::binding::rt::Rt>",
+    "file": "safe-cex-venue-kraken/src/ohlcv_polling.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "H"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "tuple": []
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "tuple": []
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "qualified_path": {
+                                                                  "name": "Error",
+                                                                  "args": null,
+                                                                  "self_type": {
+                                                                    "generic": "H"
+                                                                  },
+                                                                  "trait": {
+                                                                    "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_kraken::ohlcv_polling::PollCallback": {
+    "canonical": "alloc::rc::Rc",
+    "expectedType": "::std::rc::Rc<dyn ::core::ops::Fn() -> ::core::pin::Pin<::std::boxed::Box<dyn ::core::future::Future<Output=::core::result::Result<(),::safe_cex_exchange::js_runtime::value::Thrown>> + 'static>> + 'static>",
+    "suffix": "<crate::binding::rt::Rt>",
+    "file": "safe-cex-venue-kraken/src/ohlcv_polling.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::ohlcv_polling::PollFuture",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::pin::Pin",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::boxed::Box",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "dyn_trait": {
+                                                          "traits": [
+                                                            {
+                                                              "trait": {
+                                                                "path": "core::future::future::Future",
+                                                                "args": {
+                                                                  "angle_bracketed": {
+                                                                    "args": [],
+                                                                    "constraints": [
+                                                                      {
+                                                                        "name": "Output",
+                                                                        "args": null,
+                                                                        "binding": {
+                                                                          "equality": {
+                                                                            "type": {
+                                                                              "resolved_path": {
+                                                                                "path": "core::result::Result",
+                                                                                "args": {
+                                                                                  "angle_bracketed": {
+                                                                                    "args": [
+                                                                                      {
+                                                                                        "type": {
+                                                                                          "tuple": []
+                                                                                        }
+                                                                                      },
+                                                                                      {
+                                                                                        "type": {
+                                                                                          "qualified_path": {
+                                                                                            "name": "Error",
+                                                                                            "args": null,
+                                                                                            "self_type": {
+                                                                                              "generic": "H"
+                                                                                            },
+                                                                                            "trait": {
+                                                                                              "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                                                              "args": null
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    ],
+                                                                                    "constraints": []
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                }
+                                                              },
+                                                              "generic_params": []
+                                                            }
+                                                          ],
+                                                          "lifetime": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_kraken::ohlcv_polling::CandleCallback": {
+    "canonical": "alloc::rc::Rc",
+    "expectedType": "::std::rc::Rc<dyn ::core::ops::Fn(::std::rc::Rc<::safe_cex_exchange::js_runtime::value::Js>) -> ::core::result::Result<(),::safe_cex_exchange::js_runtime::value::Thrown> + 'static>",
+    "suffix": "<crate::binding::rt::Rt>",
+    "file": "safe-cex-venue-kraken/src/ohlcv_polling.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "H"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::rc::Rc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "qualified_path": {
+                                                "name": "Value",
+                                                "args": null,
+                                                "self_type": {
+                                                  "generic": "H"
+                                                },
+                                                "trait": {
+                                                  "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "qualified_path": {
+                                              "name": "Error",
+                                              "args": null,
+                                              "self_type": {
+                                                "generic": "H"
+                                              },
+                                              "trait": {
+                                                "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_kraken::ohlcv_polling::Cleanup": {
+    "canonical": "alloc::rc::Rc",
+    "expectedType": "::std::rc::Rc<dyn ::core::ops::Fn() -> ::core::result::Result<(),::safe_cex_exchange::js_runtime::value::Thrown> + 'static>",
+    "suffix": "<crate::binding::rt::Rt>",
+    "file": "safe-cex-venue-kraken/src/ohlcv_polling.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "qualified_path": {
+                                              "name": "Error",
+                                              "args": null,
+                                              "self_type": {
+                                                "generic": "H"
+                                              },
+                                              "trait": {
+                                                "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "unsized": false
   }
 }

@@ -530,3 +530,9 @@ actual compiler identities and decoder traits; `accepted_construction_aliases`
 observes signed client bases, native thrown values and source throttle timing.
 The two compiled constructor faults in `construction-alias-controls.py` must fail
 named witnesses and restore exact bytes before readiness.
+
+`POLLING_ALIAS_REVIEW.md` covers the four finite OHLCV continuation capabilities.
+The `polling-alias-contracts.mjs` native probes authenticate actual compiler
+identities; `accepted_polling_aliases` uses the constructed Scope, real chart
+client and timers. `polling-alias-controls.py` requires four independently named
+compiled runtime failures and exact-source restored passes.
