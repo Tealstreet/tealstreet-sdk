@@ -28,20 +28,34 @@ const names = [
 ];
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const args = process.argv.slice(2);
-assert.ok(args.length <= 1 && args.every(arg => arg === '--expect-unclassified'));
+assert.ok(args.length <= 1 && args.every(arg =>
+  ['--expect-unclassified', '--controls'].includes(arg)));
 const { metadata, pkg, target, found, aliases, macroOrigins } = acceptedAliasContext({
   workspace: root, packageName: 'safe-cex-venue-backpack', aliasNames: names, jobs: 1,
 });
-const results = runProbes(root, metadata, [{
+const packages = [{
   package: pkg.name, packageId: pkg.id, features: [], target, types: [],
   publicAliases: aliases, defaultWitnesses: [], locals: [], delegatedLocals: [],
   macroOrigins, externalTypeAliases: found.externalTypeAliases,
-}], loadContracts(), { target: 'native', features: [], jobs: 1 });
-assert.deepEqual(results.map(row => row.name).sort(), names);
-if (args.includes('--expect-unclassified')) {
+}];
+const contracts = loadContracts();
+const run = selected => runProbes(root, metadata, packages, selected,
+  { target: 'native', features: [], jobs: 1 });
+const requireUnclassified = results => {
+  assert.deepEqual(results.map(row => row.name).sort(), names);
   for (const result of results) assert.ok(result.failures.some(failure =>
     failure.includes('public alias needs an accepted-set contract')), result.name);
   console.log('All 20 Backpack callable/nominal aliases fail missing classification by name.');
+};
+if (args.includes('--controls')) {
+  const missing = { ...contracts };
+  for (const name of names) delete missing[name];
+  requireUnclassified(run(missing));
+}
+const results = run(contracts);
+assert.deepEqual(results.map(row => row.name).sort(), names);
+if (args.includes('--expect-unclassified')) {
+  requireUnclassified(results);
 } else {
   for (const result of results) assert.deepEqual(result.failures, [], result.name);
   console.log('Backpack20 actual compiler/callable alias receipts PASS');
