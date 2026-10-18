@@ -2,6 +2,10 @@
 mod runtime;
 use safe_cex_exchange::{
     income_paging::*,
+    js_runtime::{
+        globals::stringify_json,
+        value::{Js, Thrown, error_object},
+    },
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_types::{IncomeCategory, IncomeRecord};
@@ -374,8 +378,17 @@ fn income_pager_delay_failure_and_runtime_ownership() {
             .push(format!("fetch:{}", params.start_time));
         Box::pin(async { Ok(vec![]) })
     };
-    let cause = ExchangeError::new("delay original");
-    let metadata = std::ptr::from_ref(cause.metadata.as_ref());
+    let source = timing_source_profiles();
+    assert_eq!(source["delay"]["same"], true);
+    let code = Js::object(vec![
+        ("zero", Js::Number(-0.0)),
+        ("nan", Js::Number(f64::from_bits(0x7ff8_0000_0000_0042))),
+        ("text", Js::utf16(&[0xd800])),
+    ]);
+    let original = error_object("RangeError", "delay original");
+    original.set("code", code.clone()).unwrap();
+    let cause = Thrown::new(original.clone()).to_exchange_error();
+    let expected = cause.clone();
     let mut cause = Some(cause);
     let delay_events = events.clone();
     let delay = move |ms: f64| -> ExchangeFuture<'_, ()> {
@@ -398,9 +411,30 @@ fn income_pager_delay_failure_and_runtime_ownership() {
         vec!["fetch:-0", "delay"],
         "PAGER delay failure precedes next request"
     );
+    assert_eq!(error, expected, "PAGER complete delay metadata");
+    assert_eq!(error.name, source["delay"]["name"]);
+    assert_eq!(error.message, source["delay"]["message"]);
+    let recovered = Thrown::from(error);
     assert!(
-        metadata == std::ptr::from_ref(error.metadata.as_ref()),
-        "PAGER original delay failure identity"
+        recovered.value.strict_equals(&original),
+        "PAGER original delay cause identity"
+    );
+    assert!(recovered.value.get("code").unwrap().strict_equals(&code));
+    assert_eq!(
+        code.get("zero").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert_eq!(
+        code.get("nan").unwrap().as_f64().unwrap().to_bits(),
+        0x7ff8_0000_0000_0042
+    );
+    assert_eq!(
+        code.get("text").unwrap().as_str().unwrap().as_ref(),
+        &[0xd800]
+    );
+    assert_eq!(
+        String::from_utf16(&stringify_json(&recovered.value).unwrap().unwrap()).unwrap(),
+        source["delay"]["json"]
     );
     struct Pending(Rc<Cell<bool>>);
     impl Drop for Pending {
@@ -492,9 +526,7 @@ fn pager_starts_first_fetch_before_first_poll() {
     }
 }
 
-#[test]
-#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
-fn pager_continues_after_discarding_an_unpolled_waiter() {
+fn timing_source_profiles() -> Value {
     let output = Command::new("node")
         .arg("-e")
         .arg(r#"
@@ -503,7 +535,9 @@ const vm = require('node:vm');
 const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
 const source = fs.readFileSync(process.argv[1], 'utf8');
 const exports = {};
-vm.runInNewContext(ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText, {exports});
+const delayCause = new RangeError('delay original');
+delayCause.code = {zero:-0,nan:NaN,text:'\ud800'};
+vm.runInNewContext(ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText, {exports,setTimeout(){throw delayCause;}});
 (async () => {
   const trace = [];
   let release;
@@ -519,7 +553,11 @@ vm.runInNewContext(ts.transpileModule(source, {compilerOptions:{module:ts.Module
   const before = trace.slice();
   release();
   for (let i=0;i<16;i++) await Promise.resolve();
-  process.stdout.write(JSON.stringify({before,after:trace}));
+  let rejected;
+  try { await exports.paginateIncomeRange(async () => [], {startTime:0,endTime:2,chunkMs:1,pageLimit:1,chunkDelayMs:1}); }
+  catch (error) { rejected = error; }
+  if (rejected !== delayCause) throw new Error('source replaced delay cause');
+  process.stdout.write(JSON.stringify({before,after:trace,delay:{same:rejected===delayCause,name:rejected.name,message:rejected.message,json:JSON.stringify(rejected)}}));
 })().catch(error => { console.error(error); process.exitCode=1; });
 "#)
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/safe-cex/src/exchanges/income-paging.ts"))
@@ -529,7 +567,13 @@ vm.runInNewContext(ts.transpileModule(source, {compilerOptions:{module:ts.Module
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn pager_continues_after_discarding_an_unpolled_waiter() {
+    let source = timing_source_profiles();
     assert_eq!(source["before"], serde_json::json!(["fetch:1"]));
     assert_eq!(
         source["after"],
