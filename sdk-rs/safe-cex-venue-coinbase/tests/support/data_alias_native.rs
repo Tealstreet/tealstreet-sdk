@@ -326,7 +326,7 @@ fn lifecycle_timer_alias_is_created_and_cancelled_by_the_real_runtime() {
                 .unwrap();
             let captured = timer.clone();
             assert!(Rc::ptr_eq(&timer, &captured));
-            assert!(captured.borrow().as_f64().is_some());
+            assert!(captured.borrow().is_object(), "native Timeout projects to its JSON object view");
             exchange.host.clear_timeout(captured).unwrap();
             tokio::time::sleep(Duration::from_millis(15)).await;
             assert_eq!(fired.get(), 0);

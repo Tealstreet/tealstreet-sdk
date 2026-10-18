@@ -33161,5 +33161,2166 @@
     },
     "reason": "Shared ordered array of native function callbacks; the production TickHost adapter captures actual public class callbacks and invokes them with native frames.",
     "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
+  },
+  "safe_cex_venue_coinbase::market_position_reads::ReadItem": {
+    "category": "decoder",
+    "shape": "json",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "observation": {
+      "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ retained(&decoded.borrow()) },Err(_)=>serde_json::json!({\"error\":true})} }",
+      "cases": [
+        {
+          "input": "null",
+          "output": null
+        },
+        {
+          "input": "false",
+          "output": false
+        },
+        {
+          "input": "-0.0",
+          "output": {
+            "bits": "8000000000000000"
+          }
+        },
+        {
+          "input": "\"🚀\"",
+          "output": {
+            "units": [
+              55357,
+              56960
+            ]
+          }
+        },
+        {
+          "input": "[]",
+          "output": []
+        },
+        {
+          "input": "{\"z\":[-0.0,true,null,\"🚀\"],\"a\":{\"x\":2}}",
+          "output": [
+            [
+              [
+                122
+              ],
+              [
+                {
+                  "bits": "8000000000000000"
+                },
+                true,
+                null,
+                {
+                  "units": [
+                    55357,
+                    56960
+                  ]
+                }
+              ]
+            ],
+            [
+              [
+                97
+              ],
+              [
+                [
+                  [
+                    120
+                  ],
+                  {
+                    "bits": "4000000000000000"
+                  }
+                ]
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::market_position_reads::ReadItems": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "observation": {
+      "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let rows=decoded.borrow();let values:Vec<_>=rows.iter().map(|row|retained(&row.borrow())).collect();serde_json::json!({\"length\":rows.len(),\"values\":values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
+      "cases": [
+        {
+          "input": "[]",
+          "output": {
+            "length": 0,
+            "values": []
+          }
+        },
+        {
+          "input": "[null,false,-0.0,\"🚀\",[],{\"z\":[-0.0,true,null,\"🚀\"],\"a\":{\"x\":2}}]",
+          "output": {
+            "length": 6,
+            "values": [
+              null,
+              false,
+              {
+                "bits": "8000000000000000"
+              },
+              {
+                "units": [
+                  55357,
+                  56960
+                ]
+              },
+              [],
+              [
+                [
+                  [
+                    122
+                  ],
+                  [
+                    {
+                      "bits": "8000000000000000"
+                    },
+                    true,
+                    null,
+                    {
+                      "units": [
+                        55357,
+                        56960
+                      ]
+                    }
+                  ]
+                ],
+                [
+                  [
+                    97
+                  ],
+                  [
+                    [
+                      [
+                        120
+                      ],
+                      {
+                        "bits": "4000000000000000"
+                      }
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "7",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "\"array\"",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    },
+    "positive": [
+      [],
+      [
+        null,
+        false,
+        -0.0,
+        "🚀",
+        [],
+        {
+          "z": [
+            -0.0,
+            true,
+            null,
+            "🚀"
+          ],
+          "a": {
+            "x": 2
+          }
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      7,
+      "array"
+    ]
+  },
+  "safe_cex_venue_coinbase::market_position_reads::ReadMarket": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Market",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "observation": {
+      "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}}fn market(d:&safe_cex_types::Market)->serde_json::Value{let mut out=serde_json::Map::new();out.insert(\"id\".into(),serde_json::json!(d.id));out.insert(\"symbol\".into(),serde_json::json!(d.symbol));out.insert(\"prettySymbol\".into(),serde_json::json!(d.pretty_symbol));out.insert(\"base\".into(),serde_json::json!(d.base));out.insert(\"quote\".into(),serde_json::json!(d.quote));out.insert(\"active\".into(),serde_json::json!(d.active));out.insert(\"precision\".into(),serde_json::json!({\"amount\":bits(d.precision.amount),\"price\":bits(d.precision.price)}));out.insert(\"limits\".into(),serde_json::json!({\"amount\":{\"min\":bits(d.limits.amount.min),\"max\":bits(d.limits.amount.max)},\"leverage\":{\"min\":bits(d.limits.leverage.min),\"max\":bits(d.limits.leverage.max)},\"price\":d.limits.price.as_ref().map(|p|serde_json::json!({\"min\":bits(p.min)}))}));out.insert(\"option\".into(),d.option.as_ref().map(|p|serde_json::json!({\"underlying\":p.underlying,\"expiry\":bits(p.expiry),\"strike\":bits(p.strike),\"right\":p.right,\"style\":p.style,\"settlement\":p.settlement,\"premiumAsset\":p.premium_asset,\"settleAsset\":p.settle_asset})).unwrap_or(serde_json::Value::Null));out.insert(\"contractSize\".into(),d.contract_size.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"isExpiring\".into(),serde_json::json!(d.is_expiring));out.insert(\"isInverse\".into(),serde_json::json!(d.is_inverse));out.insert(\"isSpot\".into(),serde_json::json!(d.is_spot));out.insert(\"isPerpetual\".into(),serde_json::json!(d.is_perpetual));out.insert(\"isReadOnly\".into(),serde_json::json!(d.is_read_only));out.insert(\"info\".into(),d.info.as_ref().map(retained).unwrap_or(serde_json::Value::Null));out.insert(\"takerFee\".into(),d.taker_fee.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"makerFee\".into(),d.maker_fee.map(bits).unwrap_or(serde_json::Value::Null));serde_json::Value::Object(out)} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ market(&decoded.borrow()) },Err(_)=>serde_json::json!({\"error\":true})} }",
+      "cases": [
+        {
+          "input": "{\"id\":\"first\",\"symbol\":\"BTCUSD\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":0.01,\"price\":0.1},\"limits\":{\"amount\":{\"min\":0.01,\"max\":100},\"leverage\":{\"min\":1,\"max\":10}},\"isSpot\":false}",
+          "output": {
+            "id": "first",
+            "symbol": "BTCUSD",
+            "prettySymbol": null,
+            "base": "BTC",
+            "quote": "USD",
+            "active": true,
+            "precision": {
+              "amount": "3f847ae147ae147b",
+              "price": "3fb999999999999a"
+            },
+            "limits": {
+              "amount": {
+                "min": "3f847ae147ae147b",
+                "max": "4059000000000000"
+              },
+              "leverage": {
+                "min": "3ff0000000000000",
+                "max": "4024000000000000"
+              },
+              "price": null
+            },
+            "option": null,
+            "contractSize": null,
+            "isExpiring": null,
+            "isInverse": null,
+            "isSpot": false,
+            "isPerpetual": null,
+            "isReadOnly": null,
+            "info": null,
+            "takerFee": null,
+            "makerFee": null
+          }
+        },
+        {
+          "input": "{\"id\":\"second\",\"symbol\":\"BTC-OPTION\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":false,\"precision\":{\"amount\":-0.0,\"price\":2.5},\"limits\":{\"amount\":{\"min\":-0.0,\"max\":17},\"leverage\":{\"min\":2,\"max\":3},\"price\":{\"min\":-0.0}},\"isSpot\":false,\"prettySymbol\":\"BTC option\",\"option\":{\"underlying\":\"BTC\",\"expiry\":-0.0,\"strike\":100.5,\"right\":\"call\",\"style\":\"european\",\"settlement\":\"cash\",\"premiumAsset\":\"USD\",\"settleAsset\":\"USDC\"},\"contractSize\":-0.0,\"isExpiring\":true,\"isInverse\":false,\"isPerpetual\":false,\"isReadOnly\":true,\"info\":{\"z\":[-0.0,true,null,\"🚀\"],\"a\":{\"x\":2}},\"takerFee\":-0.0,\"makerFee\":0.025}",
+          "output": {
+            "id": "second",
+            "symbol": "BTC-OPTION",
+            "prettySymbol": "BTC option",
+            "base": "BTC",
+            "quote": "USD",
+            "active": false,
+            "precision": {
+              "amount": "8000000000000000",
+              "price": "4004000000000000"
+            },
+            "limits": {
+              "amount": {
+                "min": "8000000000000000",
+                "max": "4031000000000000"
+              },
+              "leverage": {
+                "min": "4000000000000000",
+                "max": "4008000000000000"
+              },
+              "price": {
+                "min": "8000000000000000"
+              }
+            },
+            "option": {
+              "underlying": "BTC",
+              "expiry": "8000000000000000",
+              "strike": "4059200000000000",
+              "right": "call",
+              "style": "european",
+              "settlement": "cash",
+              "premiumAsset": "USD",
+              "settleAsset": "USDC"
+            },
+            "contractSize": "8000000000000000",
+            "isExpiring": true,
+            "isInverse": false,
+            "isSpot": false,
+            "isPerpetual": false,
+            "isReadOnly": true,
+            "info": [
+              [
+                [
+                  122
+                ],
+                [
+                  {
+                    "bits": "8000000000000000"
+                  },
+                  true,
+                  null,
+                  {
+                    "units": [
+                      55357,
+                      56960
+                    ]
+                  }
+                ]
+              ],
+              [
+                [
+                  97
+                ],
+                [
+                  [
+                    [
+                      120
+                    ],
+                    {
+                      "bits": "4000000000000000"
+                    }
+                  ]
+                ]
+              ]
+            ],
+            "takerFee": "8000000000000000",
+            "makerFee": "3f9999999999999a"
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{\"id\":null}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{\"id\":\"first\",\"symbol\":\"BTCUSD\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":\"bad\",\"price\":1},\"limits\":{\"amount\":{\"min\":0.01,\"max\":100},\"leverage\":{\"min\":1,\"max\":10}},\"isSpot\":false}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{\"id\":\"first\",\"symbol\":\"BTCUSD\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":0.01,\"price\":0.1},\"limits\":{\"amount\":{},\"leverage\":{\"min\":1,\"max\":2}},\"isSpot\":false}",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    },
+    "positive": [
+      {
+        "id": "first",
+        "symbol": "BTCUSD",
+        "base": "BTC",
+        "quote": "USD",
+        "active": true,
+        "precision": {
+          "amount": 0.01,
+          "price": 0.1
+        },
+        "limits": {
+          "amount": {
+            "min": 0.01,
+            "max": 100
+          },
+          "leverage": {
+            "min": 1,
+            "max": 10
+          }
+        },
+        "isSpot": false
+      },
+      {
+        "id": "second",
+        "symbol": "BTC-OPTION",
+        "base": "BTC",
+        "quote": "USD",
+        "active": false,
+        "precision": {
+          "amount": -0.0,
+          "price": 2.5
+        },
+        "limits": {
+          "amount": {
+            "min": -0.0,
+            "max": 17
+          },
+          "leverage": {
+            "min": 2,
+            "max": 3
+          },
+          "price": {
+            "min": -0.0
+          }
+        },
+        "isSpot": false,
+        "prettySymbol": "BTC option",
+        "option": {
+          "underlying": "BTC",
+          "expiry": -0.0,
+          "strike": 100.5,
+          "right": "call",
+          "style": "european",
+          "settlement": "cash",
+          "premiumAsset": "USD",
+          "settleAsset": "USDC"
+        },
+        "contractSize": -0.0,
+        "isExpiring": true,
+        "isInverse": false,
+        "isPerpetual": false,
+        "isReadOnly": true,
+        "info": {
+          "z": [
+            -0.0,
+            true,
+            null,
+            "🚀"
+          ],
+          "a": {
+            "x": 2
+          }
+        },
+        "takerFee": -0.0,
+        "makerFee": 0.025
+      }
+    ],
+    "negative": [
+      null,
+      [],
+      {},
+      true,
+      {
+        "id": null
+      },
+      {
+        "id": "first",
+        "symbol": "BTCUSD",
+        "base": "BTC",
+        "quote": "USD",
+        "active": true,
+        "precision": {
+          "amount": "bad",
+          "price": 1
+        },
+        "limits": {
+          "amount": {
+            "min": 0.01,
+            "max": 100
+          },
+          "leverage": {
+            "min": 1,
+            "max": 10
+          }
+        },
+        "isSpot": false
+      },
+      {
+        "id": "first",
+        "symbol": "BTCUSD",
+        "base": "BTC",
+        "quote": "USD",
+        "active": true,
+        "precision": {
+          "amount": 0.01,
+          "price": 0.1
+        },
+        "limits": {
+          "amount": {},
+          "leverage": {
+            "min": 1,
+            "max": 2
+          }
+        },
+        "isSpot": false
+      }
+    ]
+  },
+  "safe_cex_venue_coinbase::market_position_reads::ReadMarkets": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_types::Market",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "observation": {
+      "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}}fn market(d:&safe_cex_types::Market)->serde_json::Value{let mut out=serde_json::Map::new();out.insert(\"id\".into(),serde_json::json!(d.id));out.insert(\"symbol\".into(),serde_json::json!(d.symbol));out.insert(\"prettySymbol\".into(),serde_json::json!(d.pretty_symbol));out.insert(\"base\".into(),serde_json::json!(d.base));out.insert(\"quote\".into(),serde_json::json!(d.quote));out.insert(\"active\".into(),serde_json::json!(d.active));out.insert(\"precision\".into(),serde_json::json!({\"amount\":bits(d.precision.amount),\"price\":bits(d.precision.price)}));out.insert(\"limits\".into(),serde_json::json!({\"amount\":{\"min\":bits(d.limits.amount.min),\"max\":bits(d.limits.amount.max)},\"leverage\":{\"min\":bits(d.limits.leverage.min),\"max\":bits(d.limits.leverage.max)},\"price\":d.limits.price.as_ref().map(|p|serde_json::json!({\"min\":bits(p.min)}))}));out.insert(\"option\".into(),d.option.as_ref().map(|p|serde_json::json!({\"underlying\":p.underlying,\"expiry\":bits(p.expiry),\"strike\":bits(p.strike),\"right\":p.right,\"style\":p.style,\"settlement\":p.settlement,\"premiumAsset\":p.premium_asset,\"settleAsset\":p.settle_asset})).unwrap_or(serde_json::Value::Null));out.insert(\"contractSize\".into(),d.contract_size.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"isExpiring\".into(),serde_json::json!(d.is_expiring));out.insert(\"isInverse\".into(),serde_json::json!(d.is_inverse));out.insert(\"isSpot\".into(),serde_json::json!(d.is_spot));out.insert(\"isPerpetual\".into(),serde_json::json!(d.is_perpetual));out.insert(\"isReadOnly\".into(),serde_json::json!(d.is_read_only));out.insert(\"info\".into(),d.info.as_ref().map(retained).unwrap_or(serde_json::Value::Null));out.insert(\"takerFee\".into(),d.taker_fee.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"makerFee\".into(),d.maker_fee.map(bits).unwrap_or(serde_json::Value::Null));serde_json::Value::Object(out)} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let rows=decoded.borrow();let values:Vec<_>=rows.iter().map(|row|market(&row.borrow())).collect();serde_json::json!({\"length\":rows.len(),\"values\":values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
+      "cases": [
+        {
+          "input": "[]",
+          "output": {
+            "length": 0,
+            "values": []
+          }
+        },
+        {
+          "input": "[{\"id\":\"first\",\"symbol\":\"BTCUSD\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":0.01,\"price\":0.1},\"limits\":{\"amount\":{\"min\":0.01,\"max\":100},\"leverage\":{\"min\":1,\"max\":10}},\"isSpot\":false}]",
+          "output": {
+            "length": 1,
+            "values": [
+              {
+                "id": "first",
+                "symbol": "BTCUSD",
+                "prettySymbol": null,
+                "base": "BTC",
+                "quote": "USD",
+                "active": true,
+                "precision": {
+                  "amount": "3f847ae147ae147b",
+                  "price": "3fb999999999999a"
+                },
+                "limits": {
+                  "amount": {
+                    "min": "3f847ae147ae147b",
+                    "max": "4059000000000000"
+                  },
+                  "leverage": {
+                    "min": "3ff0000000000000",
+                    "max": "4024000000000000"
+                  },
+                  "price": null
+                },
+                "option": null,
+                "contractSize": null,
+                "isExpiring": null,
+                "isInverse": null,
+                "isSpot": false,
+                "isPerpetual": null,
+                "isReadOnly": null,
+                "info": null,
+                "takerFee": null,
+                "makerFee": null
+              }
+            ]
+          }
+        },
+        {
+          "input": "[{\"id\":\"second\",\"symbol\":\"BTC-OPTION\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":false,\"precision\":{\"amount\":-0.0,\"price\":2.5},\"limits\":{\"amount\":{\"min\":-0.0,\"max\":17},\"leverage\":{\"min\":2,\"max\":3},\"price\":{\"min\":-0.0}},\"isSpot\":false,\"prettySymbol\":\"BTC option\",\"option\":{\"underlying\":\"BTC\",\"expiry\":-0.0,\"strike\":100.5,\"right\":\"call\",\"style\":\"european\",\"settlement\":\"cash\",\"premiumAsset\":\"USD\",\"settleAsset\":\"USDC\"},\"contractSize\":-0.0,\"isExpiring\":true,\"isInverse\":false,\"isPerpetual\":false,\"isReadOnly\":true,\"info\":{\"z\":[-0.0,true,null,\"🚀\"],\"a\":{\"x\":2}},\"takerFee\":-0.0,\"makerFee\":0.025},{\"id\":\"first\",\"symbol\":\"BTCUSD\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":0.01,\"price\":0.1},\"limits\":{\"amount\":{\"min\":0.01,\"max\":100},\"leverage\":{\"min\":1,\"max\":10}},\"isSpot\":false}]",
+          "output": {
+            "length": 2,
+            "values": [
+              {
+                "id": "second",
+                "symbol": "BTC-OPTION",
+                "prettySymbol": "BTC option",
+                "base": "BTC",
+                "quote": "USD",
+                "active": false,
+                "precision": {
+                  "amount": "8000000000000000",
+                  "price": "4004000000000000"
+                },
+                "limits": {
+                  "amount": {
+                    "min": "8000000000000000",
+                    "max": "4031000000000000"
+                  },
+                  "leverage": {
+                    "min": "4000000000000000",
+                    "max": "4008000000000000"
+                  },
+                  "price": {
+                    "min": "8000000000000000"
+                  }
+                },
+                "option": {
+                  "underlying": "BTC",
+                  "expiry": "8000000000000000",
+                  "strike": "4059200000000000",
+                  "right": "call",
+                  "style": "european",
+                  "settlement": "cash",
+                  "premiumAsset": "USD",
+                  "settleAsset": "USDC"
+                },
+                "contractSize": "8000000000000000",
+                "isExpiring": true,
+                "isInverse": false,
+                "isSpot": false,
+                "isPerpetual": false,
+                "isReadOnly": true,
+                "info": [
+                  [
+                    [
+                      122
+                    ],
+                    [
+                      {
+                        "bits": "8000000000000000"
+                      },
+                      true,
+                      null,
+                      {
+                        "units": [
+                          55357,
+                          56960
+                        ]
+                      }
+                    ]
+                  ],
+                  [
+                    [
+                      97
+                    ],
+                    [
+                      [
+                        [
+                          120
+                        ],
+                        {
+                          "bits": "4000000000000000"
+                        }
+                      ]
+                    ]
+                  ]
+                ],
+                "takerFee": "8000000000000000",
+                "makerFee": "3f9999999999999a"
+              },
+              {
+                "id": "first",
+                "symbol": "BTCUSD",
+                "prettySymbol": null,
+                "base": "BTC",
+                "quote": "USD",
+                "active": true,
+                "precision": {
+                  "amount": "3f847ae147ae147b",
+                  "price": "3fb999999999999a"
+                },
+                "limits": {
+                  "amount": {
+                    "min": "3f847ae147ae147b",
+                    "max": "4059000000000000"
+                  },
+                  "leverage": {
+                    "min": "3ff0000000000000",
+                    "max": "4024000000000000"
+                  },
+                  "price": null
+                },
+                "option": null,
+                "contractSize": null,
+                "isExpiring": null,
+                "isInverse": null,
+                "isSpot": false,
+                "isPerpetual": null,
+                "isReadOnly": null,
+                "info": null,
+                "takerFee": null,
+                "makerFee": null
+              }
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[null]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[{}]",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    },
+    "positive": [
+      [],
+      [
+        {
+          "id": "first",
+          "symbol": "BTCUSD",
+          "base": "BTC",
+          "quote": "USD",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 0.01,
+              "max": 100
+            },
+            "leverage": {
+              "min": 1,
+              "max": 10
+            }
+          },
+          "isSpot": false
+        }
+      ],
+      [
+        {
+          "id": "second",
+          "symbol": "BTC-OPTION",
+          "base": "BTC",
+          "quote": "USD",
+          "active": false,
+          "precision": {
+            "amount": -0.0,
+            "price": 2.5
+          },
+          "limits": {
+            "amount": {
+              "min": -0.0,
+              "max": 17
+            },
+            "leverage": {
+              "min": 2,
+              "max": 3
+            },
+            "price": {
+              "min": -0.0
+            }
+          },
+          "isSpot": false,
+          "prettySymbol": "BTC option",
+          "option": {
+            "underlying": "BTC",
+            "expiry": -0.0,
+            "strike": 100.5,
+            "right": "call",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "USD",
+            "settleAsset": "USDC"
+          },
+          "contractSize": -0.0,
+          "isExpiring": true,
+          "isInverse": false,
+          "isPerpetual": false,
+          "isReadOnly": true,
+          "info": {
+            "z": [
+              -0.0,
+              true,
+              null,
+              "🚀"
+            ],
+            "a": {
+              "x": 2
+            }
+          },
+          "takerFee": -0.0,
+          "makerFee": 0.025
+        },
+        {
+          "id": "first",
+          "symbol": "BTCUSD",
+          "base": "BTC",
+          "quote": "USD",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 0.01,
+              "max": 100
+            },
+            "leverage": {
+              "min": 1,
+              "max": 10
+            }
+          },
+          "isSpot": false
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      [
+        null
+      ],
+      [
+        {}
+      ]
+    ]
+  },
+  "safe_cex_venue_coinbase::public_market_reads::CatalogSupportedTypes": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "observation": {
+      "call": "{  match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let values=decoded.borrow();serde_json::json!({\"length\":values.len(),\"values\":*values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
+      "cases": [
+        {
+          "input": "[]",
+          "output": {
+            "length": 0,
+            "values": []
+          }
+        },
+        {
+          "input": "[\"SPOT\"]",
+          "output": {
+            "length": 1,
+            "values": [
+              "SPOT"
+            ]
+          }
+        },
+        {
+          "input": "[\"INTX\",\"\",\"CFM\"]",
+          "output": {
+            "length": 3,
+            "values": [
+              "INTX",
+              "",
+              "CFM"
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "\"SPOT\"",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[null]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[1]",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    },
+    "positive": [
+      [],
+      [
+        "SPOT"
+      ],
+      [
+        "INTX",
+        "",
+        "CFM"
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      "SPOT",
+      [
+        null
+      ],
+      [
+        1
+      ]
+    ]
+  },
+  "safe_cex_venue_coinbase::public_market_reads::PublicCandles": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_types::Candle",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "observation": {
+      "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let rows=decoded.borrow();let values:Vec<_>=rows.iter().map(|row|{let row=row.borrow();serde_json::json!({\"timestamp\":bits(row.timestamp),\"open\":bits(row.open),\"high\":bits(row.high),\"low\":bits(row.low),\"close\":bits(row.close),\"volume\":bits(row.volume),\"lastSide\":row.last_side})}).collect();serde_json::json!({\"length\":rows.len(),\"values\":values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
+      "cases": [
+        {
+          "input": "[]",
+          "output": {
+            "length": 0,
+            "values": []
+          }
+        },
+        {
+          "input": "[{\"timestamp\":-0.0,\"open\":2,\"high\":3,\"low\":1,\"close\":2.5,\"volume\":-0.0}]",
+          "output": {
+            "length": 1,
+            "values": [
+              {
+                "timestamp": "8000000000000000",
+                "open": "4000000000000000",
+                "high": "4008000000000000",
+                "low": "3ff0000000000000",
+                "close": "4004000000000000",
+                "volume": "8000000000000000",
+                "lastSide": null
+              }
+            ]
+          }
+        },
+        {
+          "input": "[{\"timestamp\":17,\"open\":-0.0,\"high\":9,\"low\":0,\"close\":8,\"volume\":5,\"lastSide\":\"sell\"},{\"timestamp\":-0.0,\"open\":2,\"high\":3,\"low\":1,\"close\":2.5,\"volume\":-0.0}]",
+          "output": {
+            "length": 2,
+            "values": [
+              {
+                "timestamp": "4031000000000000",
+                "open": "8000000000000000",
+                "high": "4022000000000000",
+                "low": "0000000000000000",
+                "close": "4020000000000000",
+                "volume": "4014000000000000",
+                "lastSide": "sell"
+              },
+              {
+                "timestamp": "8000000000000000",
+                "open": "4000000000000000",
+                "high": "4008000000000000",
+                "low": "3ff0000000000000",
+                "close": "4004000000000000",
+                "volume": "8000000000000000",
+                "lastSide": null
+              }
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[{}]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[{\"timestamp\":-0.0,\"open\":\"bad\",\"high\":3,\"low\":1,\"close\":2.5,\"volume\":-0.0}]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[{\"timestamp\":-0.0,\"open\":2,\"high\":3,\"low\":1,\"close\":2.5,\"volume\":-0.0,\"lastSide\":\"bad\"}]",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    },
+    "positive": [
+      [],
+      [
+        {
+          "timestamp": -0.0,
+          "open": 2,
+          "high": 3,
+          "low": 1,
+          "close": 2.5,
+          "volume": -0.0
+        }
+      ],
+      [
+        {
+          "timestamp": 17,
+          "open": -0.0,
+          "high": 9,
+          "low": 0,
+          "close": 8,
+          "volume": 5,
+          "lastSide": "sell"
+        },
+        {
+          "timestamp": -0.0,
+          "open": 2,
+          "high": 3,
+          "low": 1,
+          "close": 2.5,
+          "volume": -0.0
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      [
+        {}
+      ],
+      [
+        {
+          "timestamp": -0.0,
+          "open": "bad",
+          "high": 3,
+          "low": 1,
+          "close": 2.5,
+          "volume": -0.0
+        }
+      ],
+      [
+        {
+          "timestamp": -0.0,
+          "open": 2,
+          "high": 3,
+          "low": 1,
+          "close": 2.5,
+          "volume": -0.0,
+          "lastSide": "bad"
+        }
+      ]
+    ]
+  },
+  "safe_cex_venue_coinbase::order_sync::PrivateOrderMarkets": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "indexmap::map::IndexMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_types::Market",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "observation": {
+      "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}}fn market(d:&safe_cex_types::Market)->serde_json::Value{let mut out=serde_json::Map::new();out.insert(\"id\".into(),serde_json::json!(d.id));out.insert(\"symbol\".into(),serde_json::json!(d.symbol));out.insert(\"prettySymbol\".into(),serde_json::json!(d.pretty_symbol));out.insert(\"base\".into(),serde_json::json!(d.base));out.insert(\"quote\".into(),serde_json::json!(d.quote));out.insert(\"active\".into(),serde_json::json!(d.active));out.insert(\"precision\".into(),serde_json::json!({\"amount\":bits(d.precision.amount),\"price\":bits(d.precision.price)}));out.insert(\"limits\".into(),serde_json::json!({\"amount\":{\"min\":bits(d.limits.amount.min),\"max\":bits(d.limits.amount.max)},\"leverage\":{\"min\":bits(d.limits.leverage.min),\"max\":bits(d.limits.leverage.max)},\"price\":d.limits.price.as_ref().map(|p|serde_json::json!({\"min\":bits(p.min)}))}));out.insert(\"option\".into(),d.option.as_ref().map(|p|serde_json::json!({\"underlying\":p.underlying,\"expiry\":bits(p.expiry),\"strike\":bits(p.strike),\"right\":p.right,\"style\":p.style,\"settlement\":p.settlement,\"premiumAsset\":p.premium_asset,\"settleAsset\":p.settle_asset})).unwrap_or(serde_json::Value::Null));out.insert(\"contractSize\".into(),d.contract_size.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"isExpiring\".into(),serde_json::json!(d.is_expiring));out.insert(\"isInverse\".into(),serde_json::json!(d.is_inverse));out.insert(\"isSpot\".into(),serde_json::json!(d.is_spot));out.insert(\"isPerpetual\".into(),serde_json::json!(d.is_perpetual));out.insert(\"isReadOnly\".into(),serde_json::json!(d.is_read_only));out.insert(\"info\".into(),d.info.as_ref().map(retained).unwrap_or(serde_json::Value::Null));out.insert(\"takerFee\".into(),d.taker_fee.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"makerFee\".into(),d.maker_fee.map(bits).unwrap_or(serde_json::Value::Null));serde_json::Value::Object(out)} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let rows=decoded.borrow();let values:Vec<_>=rows.iter().map(|(key,row)|serde_json::json!([key,market(&row.borrow())])).collect();serde_json::json!({\"length\":rows.len(),\"values\":values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
+      "cases": [
+        {
+          "input": "{}",
+          "output": {
+            "length": 0,
+            "values": []
+          }
+        },
+        {
+          "input": "{\"first\":{\"id\":\"first\",\"symbol\":\"BTCUSD\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":0.01,\"price\":0.1},\"limits\":{\"amount\":{\"min\":0.01,\"max\":100},\"leverage\":{\"min\":1,\"max\":10}},\"isSpot\":false}}",
+          "output": {
+            "length": 1,
+            "values": [
+              [
+                "first",
+                {
+                  "id": "first",
+                  "symbol": "BTCUSD",
+                  "prettySymbol": null,
+                  "base": "BTC",
+                  "quote": "USD",
+                  "active": true,
+                  "precision": {
+                    "amount": "3f847ae147ae147b",
+                    "price": "3fb999999999999a"
+                  },
+                  "limits": {
+                    "amount": {
+                      "min": "3f847ae147ae147b",
+                      "max": "4059000000000000"
+                    },
+                    "leverage": {
+                      "min": "3ff0000000000000",
+                      "max": "4024000000000000"
+                    },
+                    "price": null
+                  },
+                  "option": null,
+                  "contractSize": null,
+                  "isExpiring": null,
+                  "isInverse": null,
+                  "isSpot": false,
+                  "isPerpetual": null,
+                  "isReadOnly": null,
+                  "info": null,
+                  "takerFee": null,
+                  "makerFee": null
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "input": "{\"second\":{\"id\":\"second\",\"symbol\":\"BTC-OPTION\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":false,\"precision\":{\"amount\":-0.0,\"price\":2.5},\"limits\":{\"amount\":{\"min\":-0.0,\"max\":17},\"leverage\":{\"min\":2,\"max\":3},\"price\":{\"min\":-0.0}},\"isSpot\":false,\"prettySymbol\":\"BTC option\",\"option\":{\"underlying\":\"BTC\",\"expiry\":-0.0,\"strike\":100.5,\"right\":\"call\",\"style\":\"european\",\"settlement\":\"cash\",\"premiumAsset\":\"USD\",\"settleAsset\":\"USDC\"},\"contractSize\":-0.0,\"isExpiring\":true,\"isInverse\":false,\"isPerpetual\":false,\"isReadOnly\":true,\"info\":{\"z\":[-0.0,true,null,\"🚀\"],\"a\":{\"x\":2}},\"takerFee\":-0.0,\"makerFee\":0.025},\"first\":{\"id\":\"first\",\"symbol\":\"BTCUSD\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":0.01,\"price\":0.1},\"limits\":{\"amount\":{\"min\":0.01,\"max\":100},\"leverage\":{\"min\":1,\"max\":10}},\"isSpot\":false}}",
+          "output": {
+            "length": 2,
+            "values": [
+              [
+                "second",
+                {
+                  "id": "second",
+                  "symbol": "BTC-OPTION",
+                  "prettySymbol": "BTC option",
+                  "base": "BTC",
+                  "quote": "USD",
+                  "active": false,
+                  "precision": {
+                    "amount": "8000000000000000",
+                    "price": "4004000000000000"
+                  },
+                  "limits": {
+                    "amount": {
+                      "min": "8000000000000000",
+                      "max": "4031000000000000"
+                    },
+                    "leverage": {
+                      "min": "4000000000000000",
+                      "max": "4008000000000000"
+                    },
+                    "price": {
+                      "min": "8000000000000000"
+                    }
+                  },
+                  "option": {
+                    "underlying": "BTC",
+                    "expiry": "8000000000000000",
+                    "strike": "4059200000000000",
+                    "right": "call",
+                    "style": "european",
+                    "settlement": "cash",
+                    "premiumAsset": "USD",
+                    "settleAsset": "USDC"
+                  },
+                  "contractSize": "8000000000000000",
+                  "isExpiring": true,
+                  "isInverse": false,
+                  "isSpot": false,
+                  "isPerpetual": false,
+                  "isReadOnly": true,
+                  "info": [
+                    [
+                      [
+                        122
+                      ],
+                      [
+                        {
+                          "bits": "8000000000000000"
+                        },
+                        true,
+                        null,
+                        {
+                          "units": [
+                            55357,
+                            56960
+                          ]
+                        }
+                      ]
+                    ],
+                    [
+                      [
+                        97
+                      ],
+                      [
+                        [
+                          [
+                            120
+                          ],
+                          {
+                            "bits": "4000000000000000"
+                          }
+                        ]
+                      ]
+                    ]
+                  ],
+                  "takerFee": "8000000000000000",
+                  "makerFee": "3f9999999999999a"
+                }
+              ],
+              [
+                "first",
+                {
+                  "id": "first",
+                  "symbol": "BTCUSD",
+                  "prettySymbol": null,
+                  "base": "BTC",
+                  "quote": "USD",
+                  "active": true,
+                  "precision": {
+                    "amount": "3f847ae147ae147b",
+                    "price": "3fb999999999999a"
+                  },
+                  "limits": {
+                    "amount": {
+                      "min": "3f847ae147ae147b",
+                      "max": "4059000000000000"
+                    },
+                    "leverage": {
+                      "min": "3ff0000000000000",
+                      "max": "4024000000000000"
+                    },
+                    "price": null
+                  },
+                  "option": null,
+                  "contractSize": null,
+                  "isExpiring": null,
+                  "isInverse": null,
+                  "isSpot": false,
+                  "isPerpetual": null,
+                  "isReadOnly": null,
+                  "info": null,
+                  "takerFee": null,
+                  "makerFee": null
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "{\"bad\":{}}",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    },
+    "positive": [
+      {},
+      {
+        "first": {
+          "id": "first",
+          "symbol": "BTCUSD",
+          "base": "BTC",
+          "quote": "USD",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 0.01,
+              "max": 100
+            },
+            "leverage": {
+              "min": 1,
+              "max": 10
+            }
+          },
+          "isSpot": false
+        }
+      },
+      {
+        "second": {
+          "id": "second",
+          "symbol": "BTC-OPTION",
+          "base": "BTC",
+          "quote": "USD",
+          "active": false,
+          "precision": {
+            "amount": -0.0,
+            "price": 2.5
+          },
+          "limits": {
+            "amount": {
+              "min": -0.0,
+              "max": 17
+            },
+            "leverage": {
+              "min": 2,
+              "max": 3
+            },
+            "price": {
+              "min": -0.0
+            }
+          },
+          "isSpot": false,
+          "prettySymbol": "BTC option",
+          "option": {
+            "underlying": "BTC",
+            "expiry": -0.0,
+            "strike": 100.5,
+            "right": "call",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "USD",
+            "settleAsset": "USDC"
+          },
+          "contractSize": -0.0,
+          "isExpiring": true,
+          "isInverse": false,
+          "isPerpetual": false,
+          "isReadOnly": true,
+          "info": {
+            "z": [
+              -0.0,
+              true,
+              null,
+              "🚀"
+            ],
+            "a": {
+              "x": 2
+            }
+          },
+          "takerFee": -0.0,
+          "makerFee": 0.025
+        },
+        "first": {
+          "id": "first",
+          "symbol": "BTCUSD",
+          "base": "BTC",
+          "quote": "USD",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 0.01,
+              "max": 100
+            },
+            "leverage": {
+              "min": 1,
+              "max": 10
+            }
+          },
+          "isSpot": false
+        }
+      }
+    ],
+    "negative": [
+      null,
+      [],
+      true,
+      {
+        "bad": {}
+      }
+    ]
+  },
+  "safe_cex_venue_coinbase::exchange_lifecycle::LifecycleTimer": {
+    "category": "decoder",
+    "shape": "json",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "observation": {
+      "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))}fn value(v:&serde_json::Value)->serde_json::Value{match v{serde_json::Value::Null=>serde_json::Value::Null,serde_json::Value::Bool(v)=>serde_json::json!(v),serde_json::Value::String(v)=>serde_json::json!({\"units\":v.encode_utf16().collect::<Vec<_>>()}),serde_json::Value::Number(v)=>serde_json::json!({\"bits\":bits(v.as_f64().expect(\"finite native JSON number\"))}),serde_json::Value::Array(v)=>serde_json::Value::Array(v.iter().map(value).collect()),serde_json::Value::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k.encode_utf16().collect::<Vec<_>>(),value(v)])).collect())}} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ value(&decoded.borrow()) },Err(_)=>serde_json::json!({\"error\":true})} }",
+      "cases": [
+        {
+          "input": "null",
+          "output": null
+        },
+        {
+          "input": "false",
+          "output": false
+        },
+        {
+          "input": "-0.0",
+          "output": {
+            "bits": "8000000000000000"
+          }
+        },
+        {
+          "input": "\"🚀\"",
+          "output": {
+            "units": [
+              55357,
+              56960
+            ]
+          }
+        },
+        {
+          "input": "[]",
+          "output": []
+        },
+        {
+          "input": "{\"z\":[-0.0,true,null,\"🚀\"],\"a\":{\"x\":2}}",
+          "output": [
+            [
+              [
+                122
+              ],
+              [
+                {
+                  "bits": "8000000000000000"
+                },
+                true,
+                null,
+                {
+                  "units": [
+                    55357,
+                    56960
+                  ]
+                }
+              ]
+            ],
+            [
+              [
+                97
+              ],
+              [
+                [
+                  [
+                    120
+                  ],
+                  {
+                    "bits": "4000000000000000"
+                  }
+                ]
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::market_position_reads::ReadTickers": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::market_position_reads::ReadTicker",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared mutable vector of native typed ticker rows with separately retained info roots; not a raw wire decoder. Native fields and the production frame adapter retain number bits.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
+  },
+  "safe_cex_venue_coinbase::market_position_reads::ReadPositions": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::market_position_reads::ReadPosition",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared mutable vector of typed position rows and independent original-info handles; not a raw wire decoder. Native numeric fields and shared info mutation are directly observed.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
+  },
+  "safe_cex_venue_coinbase::public_market_reads::CatalogMarkets": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_venue_coinbase::public_market_reads::CatalogMarket",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared mutable catalog row/vector roots carrying typed Market fields and a separate original-item handle. CatalogMarket has no Deserialize implementation; native trait detection enforces that classification.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
   }
 }
