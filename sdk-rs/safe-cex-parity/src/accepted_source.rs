@@ -2124,6 +2124,49 @@ mod tests {
     }
 
     #[test]
+    fn actual_bitrue_local_enum_recipe_has_visible_bounded_effects() {
+        let source = include_str!("../../safe-cex-venue-bitrue/src/binding/classes.rs");
+        assert_eq!(source.matches("enums!(").count(), 3);
+        let mut visitor = verified_test_visitor();
+        visitor.visit_file(&syn::parse_file(source).unwrap());
+        let opaque: Vec<_> = visitor
+            .names
+            .iter()
+            .filter(|row| row.0.starts_with("UNSUPPORTED_LOCAL_MACRO_EFFECTS:"))
+            .collect();
+        assert!(opaque.is_empty(), "actual Bitrue enum recipe: {opaque:?}");
+    }
+
+    #[test]
+    fn literal_expression_local_macro_effects_are_checked_after_substitution() {
+        for source in [
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("impl is inert text", crate::TABLE); }"#,
+            r#"fn owner() { macro_rules! renamed { ($key:literal, $value:expr) => { let _ = $value; let _ = $key; }; } renamed!("side", (1 + 2)); }"#,
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(visitor.names.is_empty(), "bounded effects: {source}: {:?}", visitor.names);
+        }
+        for source in [
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", { impl FromStr for Side {} 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $unused:expr) => { let _ = $label; }; } entries!("x", { impl FromStr for Side {} 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $unused:expr) => { let _ = $label; }; } entries!("x", include!("hidden.rs")); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", { #[vendor::decorate] struct Hidden; 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { impl FromStr for Side {} let _ = ($label, $rows); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows, $other); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:expr, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!(label, 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($same:literal, $same:expr) => { let _ = $same; }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; () => { 1 }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($($item:expr),*) => { 1 }; } entries!("x", 1); }"#,
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(visitor.names.iter().any(|row| row.0.starts_with("UNSUPPORTED_")), "opaque effect must stay refused: {source}: {:?}", visitor.names);
+        }
+    }
+
+    #[test]
     fn invoked_local_macro_effects_preserve_helpers_and_refuse_global_or_opaque_items() {
         for source in [
             "fn owner() { macro_rules! helper { () => { #[derive(serde::Deserialize)] struct Hidden { value: bool } }; } helper!(); }",
