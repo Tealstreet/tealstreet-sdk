@@ -1,15 +1,15 @@
 # Binance Exchange Integration
 
-This directory contains three Binance exchange variants for Tealstreet: **USD-M Futures**, **Spot**, and **Portfolio Margin**. All variants share the same directory rather than having separate subdirectories.
+This directory contains four Binance exchange variants for Tealstreet: **USD-M Futures**, **COIN-M Inverse Futures**, **Spot**, and **Portfolio Margin**. All variants share the same directory rather than having separate subdirectories.
 
 ## Exchange Information
 
-| Property           | Futures (`binance`) | Portfolio Margin (`binancepm`) | Spot (`binancespot`)      |
-| ------------------ | ------------------- | ------------------------------ | ------------------------- |
-| Exchange class     | `BinanceExchange`   | `BinancePMExchange`            | `BinanceSpotExchange`     |
-| Pretty name        | Binance             | Binance Portfolio Margin       | Binance Spot              |
-| Production enabled | Yes                 | Yes                            | No (`enabledInDev: true`) |
-| Testnet support    | Yes                 | Yes                            | Yes                       |
+| Property           | Futures (`binance`) | Inverse (`binanceinverse`)          | Portfolio Margin (`binancepm`) | Spot (`binancespot`)      |
+| ------------------ | ------------------- | ----------------------------------- | ------------------------------ | ------------------------- |
+| Exchange class     | `BinanceExchange`   | `BinanceInverseExchange`            | `BinancePMExchange`            | `BinanceSpotExchange`     |
+| Pretty name        | Binance             | Binance Inverse                     | Binance Portfolio Margin       | Binance Spot              |
+| Production enabled | Yes                 | No (`enabledInDev: true`, preview off) | Yes                            | No (`enabledInDev: true`) |
+| Testnet support    | Yes                 | Yes                                 | Yes                            | Yes                       |
 
 ## API Documentation
 
@@ -31,6 +31,16 @@ This directory contains three Binance exchange variants for Tealstreet: **USD-M 
 | `binance.types.ts`      | Type definitions, endpoint constants, type mappings, income history types                |
 | `binance.ws-private.ts` | Private WebSocket: account updates, order fills, algo order events, listenKey management |
 | `binance.ws-public.ts`  | Public WebSocket: tickers, book tickers, mark price, kline, orderbook depth              |
+
+### COIN-M Inverse Futures (`exchangeName: 'binanceinverse'`)
+
+| File                           | Description                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------- |
+| `binanceinverse.api.ts`        | COIN-M REST API client using `dapi.binance.com` / `demo-dapi.binance.com`                  |
+| `binanceinverse.exchange.ts`   | COIN-M exchange class (`BinanceInverseExchange`) with inverse market, balance, and order mapping |
+| `binanceinverse.types.ts`      | COIN-M endpoint constants, WebSocket hosts, and shared mappings                             |
+| `binanceinverse.ws-private.ts` | COIN-M private WebSocket: listen-key stream, account/order updates                          |
+| `binanceinverse.ws-public.ts`  | COIN-M public WebSocket: dstream tickers, book tickers, mark price, kline, orderbook depth  |
 
 ### Spot (`exchangeName: 'binancespot'`)
 
@@ -186,6 +196,35 @@ errors to users.
 | `/fapi/v1/income`            | GET         | Income history (realized PnL, funding fees, commissions)                             |
 | `/fapi/v1/listenKey`         | POST/PUT    | Create or keepalive a user data stream listen key                                    |
 
+### COIN-M Inverse Futures (`dapi.binance.com`)
+
+`binanceinverse` uses Binance's COIN-M `/dapi` family, not the USD-M `/fapi`
+family. Keep it as a separate variant because symbols, collateral, native order
+quantity, and position sizing are inverse-contract specific.
+
+| Endpoint                     | Method      | Description                                                        |
+| ---------------------------- | ----------- | ------------------------------------------------------------------ |
+| `/dapi/v1/exchangeInfo`      | GET         | Fetch COIN-M markets and contract metadata, including contract size |
+| `/dapi/v1/account`           | GET         | Fetch COIN-M account assets and balances                           |
+| `/dapi/v2/leverageBracket`   | GET         | Fetch leverage brackets per symbol                                 |
+| `/dapi/v1/ticker/24hr`       | GET         | 24h ticker statistics                                              |
+| `/dapi/v1/ticker/bookTicker` | GET         | Best bid/ask prices                                                |
+| `/dapi/v1/premiumIndex`      | GET         | Mark price, index price, funding rate                              |
+| `/dapi/v1/openOrders`        | GET         | Fetch all open orders                                              |
+| `/dapi/v1/order`             | POST/DELETE | Place or cancel a single order, including stop/TP market orders    |
+| `/dapi/v1/batchOrders`       | POST/DELETE | Place or cancel batch orders                                       |
+| `/dapi/v1/allOpenOrders`     | DELETE      | Cancel all open orders for a symbol                                |
+| `/dapi/v1/positionSide/dual` | GET/POST    | Get or set hedge mode                                              |
+| `/dapi/v1/leverage`          | POST        | Set leverage for a symbol                                          |
+| `/dapi/v1/marginType`        | POST        | Set margin type                                                    |
+| `/dapi/v1/positionRisk`      | GET         | Fetch detailed position risk info                                  |
+| `/dapi/v1/klines`            | GET         | OHLCV candle data                                                  |
+| `/dapi/v1/depth`             | GET         | Orderbook snapshot                                                 |
+| `/dapi/v1/trades`            | GET         | Recent public trades                                               |
+| `/dapi/v1/userTrades`        | GET         | User trade history                                                 |
+| `/dapi/v1/income`            | GET         | Income history                                                     |
+| `/dapi/v1/listenKey`         | POST/PUT    | Create or keepalive a user data stream listen key                  |
+
 ### Spot (`api.binance.com`)
 
 | Endpoint               | Method      | Description                              |
@@ -232,6 +271,8 @@ As of **2026-04-23**, Binance retired the legacy `wss://fstream.binance.com/ws` 
 | ------------------- | ------------------------------------------ | ------------------------------------------ | ------------------------------------------------------- |
 | **Futures** livenet | `wss://fstream.binance.com/public/ws`      | `wss://fstream.binance.com/market/ws`      | `wss://fstream.binance.com/private/ws?listenKey=…`      |
 | **Futures** testnet | `wss://demo-fstream.binance.com/public/ws` | `wss://demo-fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/private/ws?listenKey=…` |
+| **Inverse** livenet | `wss://dstream.binance.com/ws`             | same socket via live subscriptions         | `wss://dstream.binance.com/ws/{listenKey}`              |
+| **Inverse** testnet | `wss://dstream.binancefuture.com/ws`       | same socket via live subscriptions         | `wss://dstream.binancefuture.com/ws/{listenKey}`        |
 | **PM** livenet      | `wss://fstream.binance.com/public/ws`      | `wss://fstream.binance.com/market/ws`      | `wss://fstream.binance.com/pm/ws/{listenKey}`           |
 | **PM** testnet      | `wss://demo-fstream.binance.com/public/ws` | `wss://demo-fstream.binance.com/market/ws` | `wss://demo-fstream.binance.com/pm/ws/{listenKey}`      |
 | **Spot** livenet    | `wss://stream.binance.com:9443/ws`         | (same as public — unaffected by split)     | `wss://ws-api.binance.com:443/ws-api/v3`                |
@@ -563,6 +604,8 @@ All variants use cancel-and-recreate pattern (no native edit endpoint used). The
 
 - **Futures/PM**: `BTCUSDT`, `ETHUSDC` (base + quote concatenated)
 - **Market ID format**: `{base}/{quote}:{margin}` (e.g., `BTC/USDT:USDT`)
+- **Inverse**: `BTCUSD_PERP`, `ETHUSD_PERP` (COIN-M native symbol, quote is USD, margin is base coin)
+- **Market ID format (inverse)**: `{base}/USD:{base}` (e.g., `BTC/USD:BTC`)
 - **Spot**: `BTCUSDT` (base + quote concatenated)
 - **Market ID format (spot)**: `{base}/{quote}` (e.g., `BTC/USDT`)
 - For futures/PM, `fetchMarkets` accepts `contractType` of either `PERPETUAL` (crypto perps) or `TRADIFI_PERPETUAL` (TradFi perps — gold, silver, single-name equities, ETFs), with USDT or USDC margin. **The wire value is literally `TRADIFI_PERPETUAL` with the typo'd extra "I" — Binance ships it that way; do not "correct" it to `TRADFI_PERPETUAL`.** TradFi symbols (`XAUUSDT`, `TSLAUSDT`, `SPYUSDT`, …) flow through the same `/fapi/v1/*` endpoints, the same WS streams, and the same algo/closePosition/leverageBracket code paths as crypto perps. The user must have signed the one-time TradFi-Perps agreement on Binance (`POST /fapi/v1/stock/contract`) — we don't call this endpoint, the user has to opt in via Binance's own UI before our orders will work.
@@ -577,6 +620,11 @@ All variants use cancel-and-recreate pattern (no native edit endpoint used). The
   - `LOT_SIZE.stepSize` -> `market.precision.amount` (e.g., `0.001`)
   - Minimum amount is `max(LOT_SIZE.minQty, MARKET_LOT_SIZE.minQty)`
   - Maximum amount is `min(LOT_SIZE.maxQty, MARKET_LOT_SIZE.maxQty)`
+- **Inverse**: Amount precision is native contract count from `LOT_SIZE.stepSize`
+  (typically integer contracts), and `market.contractSize` is the fixed USD value
+  per contract. Orders send native contracts; positions expose base-size
+  `contracts` by converting native contracts through mark/last price and keep the
+  native count in `position.info.contractsNative`.
 - **Spot**: Uses `LOT_SIZE.stepSize` and `PRICE_FILTER.tickSize` from
   exchangeInfo. If a filter is absent, the compatibility fallback is
   `10 ** -baseAssetPrecision` / `10 ** -quoteAssetPrecision`. Amount limits
@@ -601,6 +649,7 @@ All OHLCV data from Binance arrives in milliseconds. Converted to seconds via `t
 ### Notional Calculation
 
 - **Futures**: `Math.abs(contracts * entryPrice + upnl)` -- includes unrealized PnL in notional to correct for shorts (`binance.exchange.ts:596`).
+- **Inverse**: `abs(nativeContracts * market.contractSize)` for USD notional; base-size exposure is `nativeContracts * contractSize / mark`.
 - **PM**: `Math.abs(parseFloat(p.notional))` -- uses the exchange-provided notional directly (`binancepm.exchange.ts:331`).
 - **Spot**: `Math.abs(contracts) * entryPrice + upnl` (`binancespot.exchange.ts:297`).
 
@@ -735,6 +784,30 @@ doesNotSupportOpenInterest: true
 alwaysCalculateUnrealizedPnlFromLastPrice: true
 tickInterval: 500
 latencyDomain: fapi.binance.com
+orderbookTickDelay: 60
+```
+
+### Binance Inverse (`binanceinverse`)
+
+```
+enabled: false
+enabledInDev: true
+enableInPreview: false
+supportsTestnet: true
+supportsPublicOnly: true
+supportsTrailingStopLoss: true
+supportsChaser: true
+supportsTPSLCloseAttribute: true
+supportsTunnel: true
+supportedOnMobile: false
+defaultQuote: USD
+supportedTPSLTriggerTypes: [LastPrice, MarkPrice]
+defaultTPTriggerType: LastPrice
+defaultSLTriggerType: MarkPrice
+doesNotSupportOpenInterest: true
+alwaysCalculateUnrealizedPnlFromLastPrice: true
+tickInterval: 500
+latencyDomain: dapi.binance.com
 orderbookTickDelay: 60
 ```
 
