@@ -34,12 +34,37 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
                     format!("{asset}USDT"),
                 ),
                 "kucoinspot" => (format!("{asset}-USDT"), format!("{asset}-USDT")),
+                "hyperliquid" => (asset.to_string(), format!("{asset}/USDC")),
+                "hyperliquidspot" => (
+                    format!(
+                        "@{}",
+                        ["BTC", "ETH", "ADA"]
+                            .iter()
+                            .position(|v| *v == asset)
+                            .unwrap()
+                    ),
+                    format!("{asset}/USDC"),
+                ),
+                "lighter" => (
+                    (["BTC", "ETH", "ADA"]
+                        .iter()
+                        .position(|v| *v == asset)
+                        .unwrap()
+                        + 1)
+                    .to_string(),
+                    asset.to_string(),
+                ),
                 _ => panic!("unsupported ticker seed {venue}"),
             };
-            serde_json::from_value(json!({"id":id,"symbol":symbol,"bid":101,"ask":102,
+            let mut ticker: Ticker =
+                serde_json::from_value(json!({"id":id,"symbol":symbol,"bid":101,"ask":102,
             "last":103,"mark":104,"index":105,"percentage":106,"volume":107,
             "quoteVolume":108,"fundingRate":109,"fundingTime":110,"openInterest":111}))
-            .unwrap()
+                .unwrap();
+            if venue.starts_with("hyperliquid") {
+                ticker.mid_price = Some(112.0);
+            }
+            ticker
         })
         .collect()
 }
@@ -53,6 +78,19 @@ pub fn assert_native(tickers: &[Ticker], case: &Value) {
             .find(|t| t.id == row["id"].as_str().unwrap())
             .unwrap();
         assert_eq!(ticker.symbol, row["symbol"].as_str().unwrap());
+        if row["fields"].get("midPrice").is_some() {
+            let number = ticker.mid_price.expect("native ticker midPrice present");
+            let bits = if number.is_nan() {
+                0x7ff8_0000_0000_0000
+            } else {
+                number.to_bits()
+            };
+            assert_eq!(
+                bits,
+                u64::from_str_radix(row["fields"]["midPrice"].as_str().unwrap(), 16).unwrap(),
+                "native ticker midPrice {case}"
+            );
+        }
         for (field, number) in [
             ("bid", ticker.bid),
             ("ask", ticker.ask),
