@@ -408,3 +408,10 @@ reading aliases. Unread UTF-16 units, nonfinite numbers, negative zero and own
 undefined survive in the owned info snapshot; the constructed mapper witness
 covers Classic, USDC and inverse. The live order corpus observes those native
 values and property presence before its legacy JSON comparison.
+
+The secondary public socket now starts the shared core-owned dial eagerly, using
+canonical start_eager through the existing registry. Real Bitget and Backpack
+call-prefix witnesses and independent production controls are documented in
+EAGER_DIAL_AUDIT.md. Pending I/O is dropped on disposal before runtime polling.
+The separate missing CONNECTING handle during a held handshake remains an open
+FIX-audit finding; do not mark the assigned secondary connect row complete yet.

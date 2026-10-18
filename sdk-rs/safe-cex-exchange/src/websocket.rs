@@ -1236,7 +1236,8 @@ impl BaseWebSocket {
     }
     /// Own preparation (for example a REST bullet-token fetch) and the dial as
     /// one cancellable task. None means the venue has handled a no-dial outcome.
-    /// The closure is invoked only inside the core-owned task, never by the venue.
+    /// Preparation starts eagerly through the shared Promise boundary; the
+    /// socket registry still cancels the actual preparation/dial body.
     pub fn start_prepared_websocket<F, P>(self: &Rc<Self>, prepare: P)
     where
         F: Future<Output = Result<Option<PreparedWebSocket>, ExchangeError>> + 'static,
@@ -1247,37 +1248,42 @@ impl BaseWebSocket {
         }
         let generation = self.reserve_socket_generation();
         let weak = Rc::downgrade(self);
-        self.spawn_owned(Box::pin(async move {
-            let Some(socket) = weak.upgrade() else {
-                return;
-            };
-            if socket.is_disposed() || socket.state.borrow().generation != generation {
-                return;
-            }
-            let result = async {
-                let Some(prepared) = prepare().await? else {
-                    return Ok(());
+        self.spawn_owned_kind(
+            Box::pin(async move {
+                let Some(socket) = weak.upgrade() else {
+                    return;
                 };
                 if socket.is_disposed() || socket.state.borrow().generation != generation {
-                    return Ok(());
+                    return;
                 }
-                socket
-                    .create_websocket_for_generation(
-                        prepared.url,
-                        prepared.protocols,
-                        prepared.options,
-                        Some(generation),
-                    )
-                    .await
-            }
-            .await;
-            if let Err(error) = result
-                && !socket.is_disposed()
-                && socket.state.borrow().generation == generation
-            {
-                socket.report_callback_result(socket.handle_web_socket_error(&error.to_string()));
-            }
-        }));
+                let result = async {
+                    let Some(prepared) = prepare().await? else {
+                        return Ok(());
+                    };
+                    if socket.is_disposed() || socket.state.borrow().generation != generation {
+                        return Ok(());
+                    }
+                    socket
+                        .create_websocket_for_generation(
+                            prepared.url,
+                            prepared.protocols,
+                            prepared.options,
+                            Some(generation),
+                        )
+                        .await
+                }
+                .await;
+                if let Err(error) = result
+                    && !socket.is_disposed()
+                    && socket.state.borrow().generation == generation
+                {
+                    socket
+                        .report_callback_result(socket.handle_web_socket_error(&error.to_string()));
+                }
+            }),
+            false,
+            true,
+        );
     }
     pub async fn create_websocket(
         self: &Rc<Self>,
@@ -1638,6 +1644,7 @@ impl BaseWebSocket {
                 }
             }),
             true,
+            false,
         );
         Ok(())
     }
@@ -2463,12 +2470,13 @@ impl BaseWebSocket {
     // Task handles are socket-owned: closing host I/O need not wake a pending
     // receive or auth future. Never call cancellation/drop while holding state.
     fn spawn_owned(self: &Rc<Self>, future: Pin<Box<dyn Future<Output = ()>>>) -> OwnedOperation {
-        self.spawn_owned_kind(future, false)
+        self.spawn_owned_kind(future, false, false)
     }
     fn spawn_owned_kind(
         self: &Rc<Self>,
         future: Pin<Box<dyn Future<Output = ()>>>,
         relay: bool,
+        eager: bool,
     ) -> OwnedOperation {
         let (key, generation) = {
             let mut state = self.state.borrow_mut();
@@ -2484,16 +2492,18 @@ impl BaseWebSocket {
             key: SocketTaskKey::Owned(key),
             completed: completed.clone(),
         };
-        let task = self.owned_tasks.start(
-            self.runtime.as_ref(),
-            |_| {
-                Box::pin(async move {
-                    future.await;
-                    guard.complete();
-                })
-            },
-            |_| {},
-        );
+        let build = move |_| {
+            Box::pin(async move {
+                future.await;
+                guard.complete();
+            }) as Pin<Box<dyn Future<Output = ()>>>
+        };
+        let task = if eager {
+            let runtime: Rc<dyn ExchangeRuntime> = self.runtime.clone();
+            self.owned_tasks.start_eager(&runtime, build, |_| {})
+        } else {
+            self.owned_tasks.start(self.runtime.as_ref(), build, |_| {})
+        };
         let operation = task.clone();
         // A host may poll inline, including invoking dispose before returning
         // its handle. In either case it must not install a stale handle.
@@ -3720,7 +3730,10 @@ mod tests {
                 1,
                 "REST preparation must be core-owned: {mode}"
             );
-            assert_eq!(polls.get() > 0, mode != "unpolled");
+            assert!(
+                polls.get() > 0,
+                "preparation prefix runs before caller polling: {mode}"
+            );
             let weak = Rc::downgrade(&socket);
             socket.dispose();
             drop(socket);
@@ -3844,13 +3857,10 @@ mod tests {
             );
             let weak = Rc::downgrade(&socket);
             socket.dispose();
-            assert!(
-                runtime
-                    .jobs
-                    .borrow()
-                    .iter()
-                    .all(|(_, cancelled)| cancelled.get()),
-                "dispose must cancel the dial task"
+            assert_eq!(
+                runtime.dial_drops.get(),
+                1,
+                "dispose must drop the actual eager dial before the scheduler runs"
             );
             drop(socket);
             runtime.pump(); // The host drops cancelled TASKS, without polling the dial again.
@@ -3859,7 +3869,7 @@ mod tests {
                 weak.upgrade().is_none(),
                 "pending dial retained disposed socket"
             );
-            assert_eq!(runtime.dial_drops.get(), usize::from(mode != "unpolled"));
+            assert_eq!(runtime.dial_drops.get(), 1);
         }
     }
     #[test]

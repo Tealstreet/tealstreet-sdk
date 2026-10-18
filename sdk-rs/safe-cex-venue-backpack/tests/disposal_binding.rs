@@ -280,3 +280,34 @@ fn public_override_only_cancels_depth_and_closes() {
 fn private_override_only_cancels_orders_and_closes() {
     exercise("private")
 }
+
+#[test]
+fn public_connect_installs_ready_socket_before_polling() {
+    let (owner, runtime, _, _) = support::fixture();
+    let socket = owner.public_websocket.get().unwrap();
+    runtime.dial_sockets.borrow_mut().push(Rc::new(Socket {
+        name: "eager-public",
+        close: Rc::new(|_| {}),
+        terminate: Rc::new(Cell::new(0)),
+    }));
+    socket.connect_and_subscribe().unwrap();
+    assert!(
+        socket.base.has_websocket(),
+        "BACKPACK eager ready dial installs before runtime polling"
+    );
+    socket.base.dispose();
+    runtime.pump();
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/connect-prefix-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "BACKPACK maintained prefix witness: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    assert_eq!(source.stdout, b"synchronous-wrapper-installed\n");
+}

@@ -81,6 +81,7 @@ pub struct Runtime {
     pub sleeps: RefCell<Vec<u64>>,
     pub dials: RefCell<Vec<String>>,
     pub pending_dial: Rc<Cell<bool>>,
+    pub dial_waker: Rc<RefCell<Option<Waker>>>,
     pub inline: Cell<bool>,
     pub monotonic_time: Cell<Option<f64>>,
 }
@@ -193,8 +194,10 @@ impl WsRuntime for Runtime {
         self.dials.borrow_mut().push(url);
         let socket = self.io.clone();
         let pending = self.pending_dial.clone();
-        Box::pin(std::future::poll_fn(move |_| {
+        let waker = self.dial_waker.clone();
+        Box::pin(std::future::poll_fn(move |cx| {
             if pending.get() {
+                *waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             } else {
                 Poll::Ready(Ok(socket.clone() as Rc<dyn WsSocket>))

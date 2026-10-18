@@ -1898,6 +1898,13 @@ UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
 
+`js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
+and the Vec<Market> info boundary. Its optional recorded-payload probe measures
+parse and typed decode separately; `tests/large_payload_source.mjs` captures
+maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Native observation files encode UTF-16, own undefined and f64 bits explicitly so
+before/after byte comparisons do not hide lossy JSON projections.
+
 ## Retained error responses
 
 Local `Thrown` conversions retain the original JS value in the existing opaque
@@ -1959,12 +1966,14 @@ materialization follows that source chain and the canonical retained response.
 Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
 signed requests before JSON. Original JS object identity remains an owned-tree residual.
 
-`js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
-and the Vec<Market> info boundary. Its optional recorded-payload probe measures
-parse and typed decode separately; `tests/large_payload_source.mjs` captures
-maintained source market outputs from recorded Bybit/OKX/Paradex responses.
-Native observation files encode UTF-16, own undefined and f64 bits explicitly so
-before/after byte comparisons do not hide lossy JSON projections.
+
+
+The mapped closed-position resolver requires a runtime and retained static fetch
+callbacks. It starts its selected fetch during invocation with `start_eager`;
+the runtime owns continuation after the waiter/source drop. Fetch and resolver
+Promise boundaries share the canonical driver. `closed_position_timing` checks
+six maintained-source profiles with NativeRuntime; the separate typed result
+surrogate/alias boundary remains in CLOSED_POSITIONS_AUDIT.md.
 
 The mapped loop utility requires its owning runtime on LoopHost and starts via
 start_eager. Its sleep Promise preserves the source await fence even for ready
