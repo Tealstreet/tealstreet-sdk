@@ -59,7 +59,7 @@ async function production(mode, selected) {
     const url = new URL('./accepted-probes.mjs', import.meta.url).href;
     registerHooks({ load(urlToLoad, context, next) {
       const loaded = next(urlToLoad, context); if (urlToLoad !== url) return loaded;
-      const source = String(loaded.source), anchor = '    const command = wasm ?';
+      const source = String(loaded.source), anchor = '    const command = node ?';
       assert.equal(source.split(anchor).length, 2, 'one post-validation copied-production mutation');
       const injected = `    const mutationFile = path.join(sandbox, workspaceRelative, 'safe-cex-venue-hyperliquid/src/realm/value.rs');
     remember(mutationFile); const before = fs.readFileSync(mutationFile, 'utf8');
