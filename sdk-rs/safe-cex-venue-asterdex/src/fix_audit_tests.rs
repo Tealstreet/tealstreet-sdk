@@ -586,7 +586,7 @@ fn rest_book_sort_matches_source(side: &str) {
         let f = Fixture::new();
         for case in cases {
             *f.http.depth.borrow_mut() = Some(case["depth"].clone());
-            let book: safe_cex_types::OrderBook = f.venue.invoke("fetchOrderBook", vec![Js::str("BTCUSDT"), Js::Number(1000.0)]).await.unwrap();
+            let book: safe_cex_types::OrderBook = tokio::time::timeout(std::time::Duration::from_secs(2), f.venue.invoke("fetchOrderBook", vec![Js::str("BTCUSDT"), Js::Number(1000.0)])).await.expect("ASTER-REST-SORT must settle without a comparator panic").unwrap();
             let levels = if side == "bids" { &book.bids } else { &book.asks };
             let actual = levels.iter().map(|level| json!({
                 "price":sort_number_bits(level.price),

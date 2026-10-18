@@ -31,7 +31,7 @@ function bits(value) {
       i % 7 === 0 || i % 11 === 0 ? 'NaN' : String((i * 197 + 558) % 997),
       String(i + 1),
     ]);
-    const depth = { lastUpdateId: 123, bids: levels, asks: levels };
+    const depth = { lastUpdateId: 123, E: 123000, T: 123001, bids: levels, asks: levels };
     const source = new result.Source();
     source.apiVersion = 'v1';
     let calls = 0;
