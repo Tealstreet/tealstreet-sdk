@@ -589,6 +589,25 @@ updates independently, requires the named native assertion to fail, restores exa
 source bytes and requires a pass after each fault. The selected alias inventory
 runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
 
+### Position snapshot callback alias receipts
+
+`position_snapshots::{Emit,Log}` are executable capabilities captured from the
+actual ExchangeState. `node scripts/snapshot-alias-contracts.mjs` (cwd this
+crate) uses fresh authenticated compiler discovery and runs the two native alias
+trait/type probes. These are classification receipts, not callback execution.
+The concrete execution witnesses are in `tests/support/snapshot_aliases.rs`,
+included by the native `private_classes` target. They construct the production
+native dependencies/ExchangeOwner, drive signed Futures/PM positions failures
+and Futures account balance aggregation through native HTTP, and observe Base
+error/log callbacks, one-time logging, native balance bits and listener errors.
+Run them with `cargo test --locked --jobs 1 -p safe-cex-venue-binance --features
+native --test private_classes snapshot_aliases` from `sdk-rs`.
+`python3 safe-cex-venue-binance/scripts/snapshot-alias-controls.py` independently
+faults Emit forwarding and Log severity in the production capture bodies,
+requires the corresponding compiled native assertion to fail, then restores the
+exact file and requires GREEN. This cohort makes no claim for other aliases or
+Wasm callback execution.
+
 `public_rest::RestFuture` is the pinned request continuation returned by the live
 `RestContext::get`, with a reviewed `'static` compiler instantiation. Its specific
 non-decoder classification does not classify the resolved JSON or other lifetimes.
@@ -603,6 +622,27 @@ source claims before running ordinary alias probes. Separate
 paths independently; both must compile and fail the named native test, then pass
 after exact source restoration. Other owners and generic instantiations remain
 outside this finite evidence.
+
+### Retired duplicate order throttle
+
+The former `orders_throttle` generic module had no production caller; its only
+Rust caller was its standalone oracle target. The assembled private constructor
+already installs `PrivateState::start_fetch_throttled`, and its live
+`throttled_orders` method selects and schedules that callback. The two TypeScript
+private-socket source methods remain mapped to those canonical class bodies.
+Do not restore `FetchOrdersCallback`/`LoadedProperties` or their duplicate helper
+module to satisfy an alias inventory.
+
+`tests/support/order_throttle_binding.rs` exercises the production native
+Futures/PM constructor, 10000ms timer, both signed order requests and one loaded
+Store publication with the ticker-loaded sibling retained. Run the native
+`private_classes` target with filter `order_throttle_binding` from `sdk-rs`.
+`scripts/live-order-throttle-controls.py` separately corrupts the real class delay
+and loaded flag, requires compiled named native failures, and restores the exact
+production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
+receipts describe the retired oracle-only helper; they are not current class
+execution evidence. No package script directly names the deleted target/oracle;
+the existing all-targets Binance oracle command continues to discover live tests.
 
 The seven `public_listeners` aliases have a finite compiler-authenticated review
 in `scripts/public-listener-alias-contracts.mjs`. `Book` is an actual map decoder,

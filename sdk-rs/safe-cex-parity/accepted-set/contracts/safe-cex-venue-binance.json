@@ -10084,6 +10084,202 @@
       }
     }
   },
+  "safe_cex_venue_binance::class_jobs::NativeFuture": {
+    "category": "non-decoder",
+    "evidence": "The production ExchangeOwner invokes real native class methods through class_jobs::start; PrivateState also starts and detaches its position-fetch continuation through this alias. The held-response native binding witness starts the actual two REST requests without an awaiting caller, then releases them and observes the final Store snapshot and cleared in-flight state. Ordinary native alias detectors independently inspect the fixed Value instantiation.",
+    "reason": "This pinned owned asynchronous computation produces a typed result; it does not decode external input. TS async class methods return eagerly started Promises whose suspended continuations outlive an abandoned await. The reviewed native instantiation fixes T to Value solely for trait detection and grants no claim for every T.",
+    "generics": {
+      "params": [
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_venue_binance::request_weight::Failure",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "resolved_path": {
+                                                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                                              "args": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
   "safe_cex_venue_binance::ticker_capture::TickerReference": {
     "category": "decoder",
     "shape": "map",
@@ -10644,8 +10840,78 @@
       }
     }
   },
-  "safe_cex_venue_binance::public_listeners::Parser": {
+  "safe_cex_venue_binance::position_snapshots::Emit": {
     "category": "non-decoder",
+    "evidence": "Maintained BinanceExchange.fetchPositions and BinancePMExchange.fetchPositions catches call emitAndLogError and return current Store positions. tests/private_classes.rs::snapshot_aliases::emit_alias_reports_native_position_failure_and_propagates_listener_error constructs actual native_dependencies/ExchangeOwner for Futures and PM, runs signed native HTTP through both positions paths, observes Base error events plus typed reporter, then invokes the captured alias and checks listener-error propagation. scripts/snapshot-alias-controls.py independently suppresses the production captured callback, requires the named runtime test to fail after successful compilation, restores exact source and passes. scripts/snapshot-alias-contracts.mjs authenticates fresh compiler declarations/artifacts and separately checks the native alias classification; that receipt alone does not execute the callback.",
+    "reason": "Captured executable position-failure reporting capability. It accepts an existing native Js value and returns callback success/failure; it does not decode raw input into an owner.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_binance::request_weight::Failure",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -10723,7 +10989,12 @@
           }
         }
       }
-    },
+    }
+  },
+  "safe_cex_venue_binance::position_snapshots::Log": {
+    "category": "non-decoder",
+    "evidence": "Maintained BinanceExchange.fetchPositionsAndBalance logs its first nonempty balance aggregation with LogSeverity.Info. tests/private_classes.rs::snapshot_aliases::log_alias_delivers_balance_severity_once_and_propagates_listener_error constructs actual native_dependencies/ExchangeOwner, runs two signed native account requests, observes the native balance bits and exactly one Base log event, then invokes the captured alias with Warning and verifies listener-error propagation. scripts/snapshot-alias-controls.py independently corrupts production severity forwarding, requires the named runtime test to fail after successful compilation, restores exact source and passes. scripts/snapshot-alias-contracts.mjs authenticates fresh compiler declarations/artifacts and separately checks native alias classification; no Wasm or unrelated alias equivalence is claimed.",
+    "reason": "Captured executable balance logging capability. It accepts an already-produced String and typed LogSeverity, forwards them to the owning BaseExchange, and propagates listener failure; it is not a decoder.",
     "generics": {
       "params": [],
       "where_predicates": []
@@ -10746,7 +11017,13 @@
                               "inputs": [
                                 {
                                   "resolved_path": {
-                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::runtime::LogSeverity",
                                     "args": null
                                   }
                                 }
@@ -10792,8 +11069,494 @@
         }
       }
     },
-    "reason": "An Rc event callback installed into the real BaseWebSocket listener registry consumes an already retained EventValue. It is an executable receiver-bound capability, not a Serde admission boundary.",
-    "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; actual text frames reach the installed native Parser, start one HTTP snapshot and buffer a second update. The separate compiled semantic control for Parser must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::runtime::LogSeverity",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_binance::public_listeners::Job": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "tuple": []
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "resolved_path": {
+                                                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                                              "args": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "tuple": []
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_venue_binance::request_weight::Failure",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "A pinned Future yielding Result<(),Rc<ExchangeError>> is the scheduled snapshot/apply continuation, not a raw-input decoder. The actual host owns and polls this computation.",
+    "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the native scheduled Job stays pending on held HTTP and applies both buffered frames after release before emitting a book. The separate compiled semantic control for Job must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
+  },
+  "safe_cex_venue_binance::public_listeners::Book": {
+    "category": "decoder",
+    "shape": "map",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::OrderBook",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "sample": {
+      "bids": [
+        {
+          "price": -0.0,
+          "amount": 1.25,
+          "total": -2.5
+        },
+        {
+          "price": 99.5,
+          "amount": 3.75,
+          "total": 4.125
+        }
+      ],
+      "asks": [
+        {
+          "price": 101.25,
+          "amount": -0.0,
+          "total": 6.5
+        }
+      ]
+    },
+    "entrypoints": [],
+    "evidence": "This actual Rc/RefCell alias implements Deserialize through the strict map-only OrderBook/OrderBookOrders schema. Native observations read every level field as binary64 bits and require cloned Rc identity before JSON reporting. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the live depth listener retains the same Book Rc through snapshot, buffered and live deltas, and empties it during cleanup. No blanket state-handle exemption. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "observation": {
+      "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-listener-alias-observers.rs\")); } let decoded: Result<$type,_> = serde_json::from_str($value[\"wire\"].as_str().unwrap()); match decoded { Ok(decoded) => witness::book(&decoded), Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": {
+            "wire": "{\"bids\": [{\"price\": -0.0, \"amount\": 1.25, \"total\": -2.5}, {\"price\": 99.5, \"amount\": 3.75, \"total\": 4.125}], \"asks\": [{\"price\": 101.25, \"amount\": -0.0, \"total\": 6.5}]}"
+          },
+          "output": {
+            "sameCell": true,
+            "bids": [
+              {
+                "price": "8000000000000000",
+                "amount": "3ff4000000000000",
+                "total": "c004000000000000"
+              },
+              {
+                "price": "4058e00000000000",
+                "amount": "400e000000000000",
+                "total": "4010800000000000"
+              }
+            ],
+            "asks": [
+              {
+                "price": "4059500000000000",
+                "amount": "8000000000000000",
+                "total": "401a000000000000"
+              }
+            ]
+          }
+        },
+        {
+          "input": {
+            "wire": "{\"bids\":[],\"asks\":[]}"
+          },
+          "output": {
+            "sameCell": true,
+            "bids": [],
+            "asks": []
+          }
+        },
+        {
+          "input": {
+            "wire": "null"
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "wire": "[]"
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "wire": "{}"
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "wire": "{\"bids\":[],\"asks\":[[1,2,3]]}"
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "wire": "{\"bids\":[{\"price\":1,\"amount\":2}],\"asks\":[]}"
+          },
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::public_listeners::Unsubscribe": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "safe_cex_venue_binance::public_listeners::Action",
+        "args": null
+      }
+    },
+    "reason": "This exact alias resolves to the fallible Action callback returned by the production listener. Its work removes the registered parser, resets the retained book and sends through the actual socket; it does not parse raw input.",
+    "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the returned cleanup sends UNSUBSCRIBE, clears the same retained Book, and prevents later frame delivery. The separate compiled semantic control for Unsubscribe must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
   },
   "safe_cex_venue_binance::public_listeners::Action": {
     "category": "non-decoder",
@@ -10931,225 +11694,6 @@
     },
     "reason": "The native timer owns an Rc callback that retries subscription after connection, with fallible execution. A runtime callable capability cannot decode raw input.",
     "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the initial disconnected subscription remains silent, and advancing the shared virtual sleep clock invokes the real connected subscription Action. The separate compiled semantic control for Action must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
-  },
-  "safe_cex_venue_binance::public_listeners::Unsubscribe": {
-    "category": "non-decoder",
-    "target": {
-      "resolved_path": {
-        "path": "alloc::rc::Rc",
-        "args": {
-          "angle_bracketed": {
-            "args": [
-              {
-                "type": {
-                  "dyn_trait": {
-                    "traits": [
-                      {
-                        "trait": {
-                          "path": "core::ops::function::Fn",
-                          "args": {
-                            "parenthesized": {
-                              "inputs": [],
-                              "output": {
-                                "resolved_path": {
-                                  "path": "core::result::Result",
-                                  "args": {
-                                    "angle_bracketed": {
-                                      "args": [
-                                        {
-                                          "type": {
-                                            "tuple": []
-                                          }
-                                        },
-                                        {
-                                          "type": {
-                                            "resolved_path": {
-                                              "path": "alloc::rc::Rc",
-                                              "args": {
-                                                "angle_bracketed": {
-                                                  "args": [
-                                                    {
-                                                      "type": {
-                                                        "resolved_path": {
-                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
-                                                          "args": null
-                                                        }
-                                                      }
-                                                    }
-                                                  ],
-                                                  "constraints": []
-                                                }
-                                              }
-                                            }
-                                          }
-                                        }
-                                      ],
-                                      "constraints": []
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "generic_params": []
-                      }
-                    ],
-                    "lifetime": null
-                  }
-                }
-              }
-            ],
-            "constraints": []
-          }
-        }
-      }
-    },
-    "generics": {
-      "params": [],
-      "where_predicates": []
-    },
-    "rawTarget": {
-      "resolved_path": {
-        "path": "safe_cex_venue_binance::public_listeners::Action",
-        "args": null
-      }
-    },
-    "reason": "This exact alias resolves to the fallible Action callback returned by the production listener. Its work removes the registered parser, resets the retained book and sends through the actual socket; it does not parse raw input.",
-    "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the returned cleanup sends UNSUBSCRIBE, clears the same retained Book, and prevents later frame delivery. The separate compiled semantic control for Unsubscribe must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
-  },
-  "safe_cex_venue_binance::public_listeners::Book": {
-    "category": "decoder",
-    "shape": "map",
-    "target": {
-      "resolved_path": {
-        "path": "alloc::rc::Rc",
-        "args": {
-          "angle_bracketed": {
-            "args": [
-              {
-                "type": {
-                  "resolved_path": {
-                    "path": "core::cell::RefCell",
-                    "args": {
-                      "angle_bracketed": {
-                        "args": [
-                          {
-                            "type": {
-                              "resolved_path": {
-                                "path": "safe_cex_types::OrderBook",
-                                "args": null
-                              }
-                            }
-                          }
-                        ],
-                        "constraints": []
-                      }
-                    }
-                  }
-                }
-              }
-            ],
-            "constraints": []
-          }
-        }
-      }
-    },
-    "sample": {
-      "bids": [
-        {
-          "price": -0.0,
-          "amount": 1.25,
-          "total": -2.5
-        },
-        {
-          "price": 99.5,
-          "amount": 3.75,
-          "total": 4.125
-        }
-      ],
-      "asks": [
-        {
-          "price": 101.25,
-          "amount": -0.0,
-          "total": 6.5
-        }
-      ]
-    },
-    "entrypoints": [],
-    "evidence": "This actual Rc/RefCell alias implements Deserialize through the strict map-only OrderBook/OrderBookOrders schema. Native observations read every level field as binary64 bits and require cloned Rc identity before JSON reporting. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the live depth listener retains the same Book Rc through snapshot, buffered and live deltas, and empties it during cleanup. No blanket state-handle exemption. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
-    "observation": {
-      "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-listener-alias-observers.rs\")); } let decoded: Result<$type,_> = serde_json::from_str($value[\"wire\"].as_str().unwrap()); match decoded { Ok(decoded) => witness::book(&decoded), Err(_) => serde_json::Value::Null } }",
-      "cases": [
-        {
-          "input": {
-            "wire": "{\"bids\": [{\"price\": -0.0, \"amount\": 1.25, \"total\": -2.5}, {\"price\": 99.5, \"amount\": 3.75, \"total\": 4.125}], \"asks\": [{\"price\": 101.25, \"amount\": -0.0, \"total\": 6.5}]}"
-          },
-          "output": {
-            "sameCell": true,
-            "bids": [
-              {
-                "price": "8000000000000000",
-                "amount": "3ff4000000000000",
-                "total": "c004000000000000"
-              },
-              {
-                "price": "4058e00000000000",
-                "amount": "400e000000000000",
-                "total": "4010800000000000"
-              }
-            ],
-            "asks": [
-              {
-                "price": "4059500000000000",
-                "amount": "8000000000000000",
-                "total": "401a000000000000"
-              }
-            ]
-          }
-        },
-        {
-          "input": {
-            "wire": "{\"bids\":[],\"asks\":[]}"
-          },
-          "output": {
-            "sameCell": true,
-            "bids": [],
-            "asks": []
-          }
-        },
-        {
-          "input": {
-            "wire": "null"
-          },
-          "output": null
-        },
-        {
-          "input": {
-            "wire": "[]"
-          },
-          "output": null
-        },
-        {
-          "input": {
-            "wire": "{}"
-          },
-          "output": null
-        },
-        {
-          "input": {
-            "wire": "{\"bids\":[],\"asks\":[[1,2,3]]}"
-          },
-          "output": null
-        },
-        {
-          "input": {
-            "wire": "{\"bids\":[{\"price\":1,\"amount\":2}],\"asks\":[]}"
-          },
-          "output": null
-        }
-      ]
-    }
   },
   "safe_cex_venue_binance::public_listeners::SyncState": {
     "category": "non-decoder",
@@ -11419,94 +11963,77 @@
     "reason": "A pinned Future yielding retained EventValue or Rc<ExchangeError> is the in-flight native HTTP capability. It has no raw-input Deserialize frontdoor; its resolved retained data has separate consumers.",
     "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the real public HTTP response remains held across multiple polls, buffers frames, then resolves into the snapshot loader. The separate compiled semantic control for Snapshot must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
   },
-  "safe_cex_venue_binance::public_listeners::Job": {
+  "safe_cex_venue_binance::public_listeners::Parser": {
     "category": "non-decoder",
     "target": {
       "resolved_path": {
-        "path": "core::pin::Pin",
+        "path": "alloc::rc::Rc",
         "args": {
           "angle_bracketed": {
             "args": [
               {
                 "type": {
-                  "resolved_path": {
-                    "path": "alloc::boxed::Box",
-                    "args": {
-                      "angle_bracketed": {
-                        "args": [
-                          {
-                            "type": {
-                              "dyn_trait": {
-                                "traits": [
-                                  {
-                                    "trait": {
-                                      "path": "core::future::future::Future",
-                                      "args": {
-                                        "angle_bracketed": {
-                                          "args": [],
-                                          "constraints": [
-                                            {
-                                              "name": "Output",
-                                              "args": null,
-                                              "binding": {
-                                                "equality": {
-                                                  "type": {
-                                                    "resolved_path": {
-                                                      "path": "core::result::Result",
-                                                      "args": {
-                                                        "angle_bracketed": {
-                                                          "args": [
-                                                            {
-                                                              "type": {
-                                                                "tuple": []
-                                                              }
-                                                            },
-                                                            {
-                                                              "type": {
-                                                                "resolved_path": {
-                                                                  "path": "alloc::rc::Rc",
-                                                                  "args": {
-                                                                    "angle_bracketed": {
-                                                                      "args": [
-                                                                        {
-                                                                          "type": {
-                                                                            "resolved_path": {
-                                                                              "path": "safe_cex_exchange::runtime::ExchangeError",
-                                                                              "args": null
-                                                                            }
-                                                                          }
-                                                                        }
-                                                                      ],
-                                                                      "constraints": []
-                                                                    }
-                                                                  }
-                                                                }
-                                                              }
-                                                            }
-                                                          ],
-                                                          "constraints": []
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
                                                         }
                                                       }
                                                     }
-                                                  }
+                                                  ],
+                                                  "constraints": []
                                                 }
                                               }
                                             }
-                                          ]
+                                          }
                                         }
-                                      }
-                                    },
-                                    "generic_params": []
+                                      ],
+                                      "constraints": []
+                                    }
                                   }
-                                ],
-                                "lifetime": null
+                                }
                               }
                             }
                           }
-                        ],
-                        "constraints": []
+                        },
+                        "generic_params": []
                       }
-                    }
+                    ],
+                    "lifetime": null
                   }
                 }
               }
@@ -11522,76 +12049,59 @@
     },
     "rawTarget": {
       "resolved_path": {
-        "path": "core::pin::Pin",
+        "path": "alloc::rc::Rc",
         "args": {
           "angle_bracketed": {
             "args": [
               {
                 "type": {
-                  "resolved_path": {
-                    "path": "alloc::boxed::Box",
-                    "args": {
-                      "angle_bracketed": {
-                        "args": [
-                          {
-                            "type": {
-                              "dyn_trait": {
-                                "traits": [
-                                  {
-                                    "trait": {
-                                      "path": "core::future::future::Future",
-                                      "args": {
-                                        "angle_bracketed": {
-                                          "args": [],
-                                          "constraints": [
-                                            {
-                                              "name": "Output",
-                                              "args": null,
-                                              "binding": {
-                                                "equality": {
-                                                  "type": {
-                                                    "resolved_path": {
-                                                      "path": "core::result::Result",
-                                                      "args": {
-                                                        "angle_bracketed": {
-                                                          "args": [
-                                                            {
-                                                              "type": {
-                                                                "tuple": []
-                                                              }
-                                                            },
-                                                            {
-                                                              "type": {
-                                                                "resolved_path": {
-                                                                  "path": "safe_cex_venue_binance::request_weight::Failure",
-                                                                  "args": null
-                                                                }
-                                                              }
-                                                            }
-                                                          ],
-                                                          "constraints": []
-                                                        }
-                                                      }
-                                                    }
-                                                  }
-                                                }
-                                              }
-                                            }
-                                          ]
-                                        }
-                                      }
-                                    },
-                                    "generic_params": []
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
                                   }
-                                ],
-                                "lifetime": null
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_binance::request_weight::Failure",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
                               }
                             }
                           }
-                        ],
-                        "constraints": []
+                        },
+                        "generic_params": []
                       }
-                    }
+                    ],
+                    "lifetime": null
                   }
                 }
               }
@@ -11601,7 +12111,7 @@
         }
       }
     },
-    "reason": "A pinned Future yielding Result<(),Rc<ExchangeError>> is the scheduled snapshot/apply continuation, not a raw-input decoder. The actual host owns and polls this computation.",
-    "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the native scheduled Job stays pending on held HTTP and applies both buffered frames after release before emitting a book. The separate compiled semantic control for Job must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
+    "reason": "An Rc event callback installed into the real BaseWebSocket listener registry consumes an already retained EventValue. It is an executable receiver-bound capability, not a Serde admission boundary.",
+    "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; actual text frames reach the installed native Parser, start one HTTP snapshot and buffer a second update. The separate compiled semantic control for Parser must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
   }
 }
