@@ -3819,6 +3819,7 @@ dependencies = [
  "safe-cex-transport",
  "safe-cex-types",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

@@ -40,7 +40,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex/src/factory.rs::ExchangeFactory::preload_exchanges"
 status = "divergent"
-note = "CHOSEN: concurrent polling of all loaders preserves success caching, but a first error drops remaining Rust futures; TS Promise.all rejects while its other promises continue. Host-installed loaders replace dynamic imports. Explicit rename: `safe-cex/src/factory.rs::ExchangeFactory::preload_exchanges` mirrors preloadExchanges."
+note = "Host-installed loaders replace dynamic imports. FIX-audit: safe-cex/tests/factory_preload.rs executes the public factory with NativeRuntime and maintained TS declarations: all loaders start before return, ready results cache after their await boundary, the first rejection does not cancel sibling caching, and discarded waiters retain loading. Canonical start_eager owns typed loads and shared Promise.all owns the aggregate; the required factory runtime replaces caller-owned cancellation. Explicit rename: `safe-cex/src/factory.rs::ExchangeFactory::preload_exchanges` mirrors preloadExchanges."
 
 [[symbol]]
 ts = "isExchangeLoaded"

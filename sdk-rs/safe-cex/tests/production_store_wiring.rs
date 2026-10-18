@@ -139,6 +139,7 @@ fn factory_constructs_real_exchange_while_clock_source_is_pending() {
         [("binance".into(), loader)].into_iter().collect(),
         clock,
         TransportRegistry::default(),
+        Rc::new(QuietRuntime),
     );
     let store = Rc::new(DefaultStore::new());
     let mut context = Context::from_waker(Waker::noop());
