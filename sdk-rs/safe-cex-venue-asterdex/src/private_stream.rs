@@ -467,8 +467,7 @@ impl PrivateStream {
                 parent_id: (None).into(),
                 status: safe_cex_types::ModelField::Value(OrderStatus::Open),
                 symbol: utf8(d.get("s")?)
-                    .ok_or_else(|| ExchangeError::new("Missing private order symbol"))?
-                    .into(),
+                    .ok_or_else(|| ExchangeError::new("Missing private order symbol"))?,
                 r#type: kind,
                 side: if d.get("S")?.strict_equals(&Js::str("BUY")) {
                     safe_cex_types::ModelField::Value(OrderSide::Buy)
