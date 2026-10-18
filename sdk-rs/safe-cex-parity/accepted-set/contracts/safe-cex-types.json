@@ -61085,7 +61085,7 @@
     55296,
     65535
   ],
-  "evidence": "Private UTF-16 storage decoder accepts the existing validated numeric unit sequence or the canonical internal packed native-endian byte event. Direct native bytes observe empty/even/odd input and lone units; retained_utf16 exercises every unit through the actual payload adapter. No JSON wire format change.",
+  "evidence": "Private UTF-16 storage decoder accepts the existing validated numeric unit sequence or the canonical internal packed native-endian byte event. Direct native bytes observe decoded length and complete units across empty/even/odd input and lone units; retained_utf16 exercises every unit through the actual payload adapter. No JSON wire format change.",
   "entrypoints": [],
   "positive": [
     [],
@@ -61127,16 +61127,15 @@
     ]
   ],
   "nativeObservation": {
-    "call": "{let bytes:Vec<u8>=if let Some(units)=$value.get(\"units\"){let units:Vec<u16>=serde_json::from_value(units.clone()).unwrap();units.into_iter().flat_map(u16::to_ne_bytes).collect()}else{serde_json::from_value($value.clone()).unwrap()}; match <$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes)){Ok(value)=>serde_json::json!({\"ok\":true,\"units\":value.0}),Err(_)=>serde_json::json!({\"ok\":false})}}",
-    "nativeFields": [
-      "units"
-    ],
+    "call": "{let bytes:Vec<u8>=if let Some(units)=$value.get(\"units\"){let units:Vec<u16>=serde_json::from_value(units.clone()).unwrap();units.into_iter().flat_map(u16::to_ne_bytes).collect()}else{serde_json::from_value($value.clone()).unwrap()}; match <$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes)){Ok(value)=>serde_json::json!({\"ok\":true,\"length\":value.0.len(),\"units\":value.0}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "nativeFields": ["length", "units"],
     "cases": [
   {
     "input": [],
     "output": {
       "ok": true,
-      "units": []
+      "units": [],
+      "length": 0
     }
   },
   {
@@ -61151,7 +61150,8 @@
       "units": [
         0,
         65535
-      ]
+      ],
+      "length": 2
     }
   },
   {
@@ -61166,7 +61166,8 @@
       "units": [
         55296,
         57343
-      ]
+      ],
+      "length": 2
     }
   },
   {

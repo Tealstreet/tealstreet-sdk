@@ -9,6 +9,6 @@
     "category": "decoder-helper",
     "runtimeOwner": "safe_cex_types::retained_json::codec::deserialize_native_payload",
     "reason": "The nested visitor implements the canonical closed native payload decoder. Execute its actual enclosing function and inspect tag variants, UTF16 units and native Number bits, including malformed cardinality and out-of-range units. Reviewed streaming-unit cutover: tag/cardinality checks and actual fields are unchanged; validated unit sequences remain unchanged while the private packed byte channel copies native UTF-16 in bulk; retained_utf16 compares every key and value unit. retained_utf16 executes all65536 units and malformed numeric/type/extra-element controls.",
-    "sourceSha256": "344e99c899050954060c9431e135e889b8081d561c2e4c61251107fa29874177"
+    "sourceSha256": "f6562050268dde90eaf7fd3e7f36d88a9ff42fd37a21dd94edff01af28a4fcc5"
   }
 }
