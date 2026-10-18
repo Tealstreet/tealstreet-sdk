@@ -883,3 +883,10 @@ whole maintained classes and real Axios/Store for six profiles. Run
 both named native failures, then restore exact bytes and require all three
 tests to pass. This preserves the existing JSON input boundary; it does not
 claim arbitrary input graph identity across that boundary.
+
+The seven `public_ticker_events` function contracts execute the real raw-data
+readers; they are not typed/non-decoder exemptions. Native bit and ordered-effect
+observations are compared with the maintained TS constructors. The ordinary
+private_classes source-case guard keeps all 164 cases live in CI. Preserve the
+208 constructed native Store cases and seven independent compiled body controls
+when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
