@@ -578,20 +578,22 @@ impl ErrorHost for Rt {
         value.is_string()
     }
     fn lower_method(&self, value: &Js, expression: &str) -> ReadResult<Self, Handle<Self>> {
-        if !value.is_string() {
+        let method = value.get("toLowerCase")?;
+        if !method.is_callable() {
             return Err(Thrown::type_error(&format!(
                 "{expression}.toLowerCase is not a function"
             )));
         }
-        Ok(h(value.call_method("toLowerCase", vec![])?))
+        Ok(h(method.call(value.clone(), vec![])?))
     }
     fn upper_method(&self, value: &Js, expression: &str) -> ReadResult<Self, Handle<Self>> {
-        if !value.is_string() {
+        let method = value.get("toUpperCase")?;
+        if !method.is_callable() {
             return Err(Thrown::type_error(&format!(
                 "{expression}.toUpperCase is not a function"
             )));
         }
-        Ok(h(value.call_method("toUpperCase", vec![])?))
+        Ok(h(method.call(value.clone(), vec![])?))
     }
     fn error_value(&self, error: &Thrown) -> ReadResult<Self, Handle<Self>> {
         Ok(h(error.value.clone()))
@@ -661,16 +663,27 @@ impl TradingHost for Rt {
         Ok(h(Js::str(&id)))
     }
     fn iterable(&self, value: &Js, expression: &str) -> ReadResult<Self, Vec<Handle<Self>>> {
-        match value {
-            Js::Array(_) | Js::String(_) => {
-                Ok(value.iterable_values()?.into_iter().map(h).collect())
-            }
-            _ => Err(Thrown::type_error(&if expression == "txids" {
-                "txids is not iterable".to_owned()
+        // Resolve the protocol method once, retaining the caller's spread diagnostic.
+        let method = if value.is_nullish() {
+            Js::Undefined
+        } else {
+            value.get_property(&Js::SymbolIterator)?
+        };
+        if !method.is_callable() {
+            return Err(Thrown::type_error(if expression == "txids" {
+                "txids is not iterable"
             } else {
-                "Spread syntax requires ...iterable[Symbol.iterator] to be a function".to_owned()
-            })),
+                "Spread syntax requires ...iterable[Symbol.iterator] to be a function"
+            }));
         }
+        let iterator = safe_cex_exchange::js_runtime::iterator::IteratorRecord::from_iterator(
+            method.call(value.clone(), vec![])?,
+        )?;
+        let mut values = Vec::new();
+        while let Some(value) = iterator.step_value()? {
+            values.push(h(value));
+        }
+        Ok(values)
     }
     fn send(
         &self,
@@ -801,42 +814,62 @@ impl ApiHost for Rt {
     // ts: utils/retryReadsOnly networkErrorOnRead(isRead): reads (and the listed
     // posted reads) retried on axios-retry's isNetworkError only.
     fn retry_condition(&self, posted: Option<Vec<&'static str>>) -> ReadResult<Self, Handle<Self>> {
-        let posted: Vec<String> = posted
-            .unwrap_or_default()
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
         Ok(h(Js::function("retryCondition", move |_, a| {
             let error = arg(&a, 0);
-            if !error.is_object() {
+            // onlyReads performs the undefined guard and then a second config read.
+            if error.get("config")?.is_undefined() {
                 return Ok(Js::Bool(false));
             }
             let config = error.get("config")?;
-            if config.is_undefined() {
-                return Ok(Js::Bool(false));
-            }
             let method = config.get("method")?;
             let method = if method.is_nullish() {
-                String::new()
+                Js::Undefined
             } else {
-                lossy(&method.to_js_string()?).to_lowercase()
+                let lower = method.get("toLowerCase")?;
+                if !lower.is_callable() {
+                    return Err(Thrown::type_error(
+                        "config.method?.toLowerCase is not a function",
+                    ));
+                }
+                lower.call(method, vec![])?
             };
-            let url = config.get("url")?;
-            let path = if url.is_nullish() {
-                String::new()
-            } else {
-                lossy(&url.to_js_string()?)
-                    .split('?')
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned()
-            };
-            let read = method == "get" || method == "head" || posted.contains(&path);
+            let mut read =
+                method.strict_equals(&Js::str("get")) || method.strict_equals(&Js::str("head"));
+            if !read && let Some(posted) = &posted {
+                let url = config.get("url")?;
+                let path = if url.is_nullish() {
+                    Js::Undefined
+                } else {
+                    let split = url.get("split")?;
+                    if !split.is_callable() {
+                        return Err(Thrown::type_error("config.url?.split is not a function"));
+                    }
+                    split.call(url, vec![Js::str("?")])?.get("0")?
+                };
+                let path = if path.is_nullish() { Js::str("") } else { path };
+                read = posted
+                    .iter()
+                    .any(|entry| path.strict_equals(&Js::str(entry)));
+            }
+            // onlyReads short-circuits all network-error property reads for writes.
+            if !read || error.get("response")?.truthy() || !error.get("code")?.truthy() {
+                return Ok(Js::Bool(false));
+            }
             let code = error.get("code")?;
-            let network = error.get("response")?.is_nullish()
-                && code.truthy()
-                && code.to_display() != "ECONNABORTED";
-            Ok(Js::Bool(read && network))
+            if ["ERR_CANCELED", "ECONNABORTED"]
+                .iter()
+                .any(|entry| code.strict_equals(&Js::str(entry)))
+            {
+                return Ok(Js::Bool(false));
+            }
+            // is-retry-allowed performs its own live read; compare native cells,
+            // without coercing arbitrary codes or losing unpaired UTF16 units.
+            let code = error.get("code")?;
+            Ok(Js::Bool(
+                !safe_cex_transport::provider::NETWORK_DENIED_CODES
+                    .iter()
+                    .any(|entry| code.strict_equals(&Js::str(entry))),
+            ))
         })))
     }
     fn retry(&self, client: Handle<Self>, config: Handle<Self>) -> ReadResult<Self, ()> {
@@ -853,12 +886,16 @@ impl ApiHost for Rt {
                 return Ok(Js::Bool(true));
             }
             let config = error.get("config")?;
-            let response = error.get("response")?;
             if !config.truthy()
-                || !response.truthy()
+                || !error.get("response")?.truthy()
                 || config.get(SIGNATURE_RETRY_CONFIG_KEY)?.truthy()
-                || !api::is_kraken_spot_signature_rejection(&host, &response.get("data")?)?
             {
+                return Ok(Js::Bool(false));
+            }
+            if !api::is_kraken_spot_signature_rejection(
+                &host,
+                &error.get("response")?.get("data")?,
+            )? {
                 return Ok(Js::Bool(false));
             }
             config.set(SIGNATURE_RETRY_CONFIG_KEY, Js::Bool(true))?;

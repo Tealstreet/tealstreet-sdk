@@ -466,3 +466,43 @@ terminal rendering belongs to the host. The actual constructed-Scope witnesses
 live in `tests/support/accepted_diagnostic_receivers.rs`; their two original-body
 regression controls are in `scripts/diagnostic-receiver-controls.py`. Refresh
 reviewed impl/file pins whenever those enclosing bodies change.
+
+### Trading error receiver members
+
+`TRADING_ERROR_RECEIVER_REVIEW.md` covers the three concrete ErrorHost methods.
+Resolve the native case member once and invoke it with its original receiver;
+do not restore the String-only guard or stringify the returned cell. The native
+constructed-Scope witnesses and compiled controls are named
+`accepted_trading_error_receivers` and `trading-error-receiver-controls.py`.
+`trading-error-receiver-source.cjs` executes the live TypeScript callers directly.
+
+### Cancellation, account and class receiver coverage
+
+`ADDITIONAL_RECEIVER_REVIEW.md` records eight concrete Scope receivers and the
+Spot cancellation native-error cutover. `accepted_additional_receivers` drives the
+production constructor, signed client, Base reporter and socket prototypes.
+Keep original `Thrown`/message cells until the post-report fresh Error ToString;
+never reintroduce an intermediate typed UTF-8 error. The existing fourteen-case
+Spot cancellation corpus and nine independent compiled controls remain scoped
+to these paths. Module-array and shared Store identity are separately owned.
+
+### Trading protocol and tick receiver coverage
+
+`RUNTIME_RECEIVER_REVIEW.md` covers TradingHost iterable/send and TickHost's typed
+error emission. Spread must use the native iterator protocol, retaining one
+method lookup and the original values/errors through shared IteratorRecord.
+`tests/support/accepted_runtime_receivers.rs` reaches the constructed Scope;
+`runtime-receiver-source.cjs` executes the live spread/tick source and
+`runtime-receiver-controls.py` compiles one semantic fault per receiver, requiring
+named failures and exact restored passes. Keep limited/unlimited client selection
+observable through the real signed HTTP pipeline.
+
+### API retry receiver coverage
+
+`API_RETRY_RECEIVER_REVIEW.md` records the native read/signature retry predicates.
+Preserve source short-circuit/property access order and strict native code checks;
+reuse the shared transport deny-list data without a second String conversion.
+`accepted_api_receivers` reaches actual constructed Scope callbacks; the source
+script executes the live utility and exact Spot retry arrow. The three serial
+`api-receiver-controls.py` faults must fail named compiled witnesses and restore
+exactly. Array.join UTF16 behavior is shared-owned and repaired separately in #1037.
