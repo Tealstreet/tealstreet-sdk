@@ -663,16 +663,27 @@ impl TradingHost for Rt {
         Ok(h(Js::str(&id)))
     }
     fn iterable(&self, value: &Js, expression: &str) -> ReadResult<Self, Vec<Handle<Self>>> {
-        match value {
-            Js::Array(_) | Js::String(_) => {
-                Ok(value.iterable_values()?.into_iter().map(h).collect())
-            }
-            _ => Err(Thrown::type_error(&if expression == "txids" {
-                "txids is not iterable".to_owned()
+        // Resolve the protocol method once, retaining the caller's spread diagnostic.
+        let method = if value.is_nullish() {
+            Js::Undefined
+        } else {
+            value.get_property(&Js::SymbolIterator)?
+        };
+        if !method.is_callable() {
+            return Err(Thrown::type_error(if expression == "txids" {
+                "txids is not iterable"
             } else {
-                "Spread syntax requires ...iterable[Symbol.iterator] to be a function".to_owned()
-            })),
+                "Spread syntax requires ...iterable[Symbol.iterator] to be a function"
+            }));
         }
+        let iterator = safe_cex_exchange::js_runtime::iterator::IteratorRecord::from_iterator(
+            method.call(value.clone(), vec![])?,
+        )?;
+        let mut values = Vec::new();
+        while let Some(value) = iterator.step_value()? {
+            values.push(h(value));
+        }
+        Ok(values)
     }
     fn send(
         &self,

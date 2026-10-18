@@ -1,4 +1,10 @@
-use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
+use safe_cex_exchange::{
+    js_runtime::{
+        promise::JsFuture,
+        value::{Js, Thrown},
+    },
+    runtime::ExchangeError,
+};
 use safe_cex_venue_kraken::spot_cancel::{self, SpotCancelHost};
 use serde_json::Value;
 use std::{
@@ -50,7 +56,7 @@ struct Items {
     cursor: usize,
 }
 impl Iterator for Items {
-    type Item = Result<Rc<Order>, ExchangeError>;
+    type Item = Result<Rc<Order>, Thrown>;
     fn next(&mut self) -> Option<Self::Item> {
         let order = self.orders.0.borrow().get(self.cursor)?.clone();
         self.cursor += 1;
@@ -69,7 +75,7 @@ struct Host {
     posts: Cell<usize>,
     released: Cell<usize>,
     events: RefCell<Vec<Event>>,
-    error: RefCell<Option<ExchangeError>>,
+    error: Thrown,
     pointer: usize,
 }
 impl Host {
@@ -102,7 +108,7 @@ impl Host {
             posts: Cell::new(0),
             released: Cell::new(0),
             events: RefCell::new(vec![]),
-            error: RefCell::new(Some(error)),
+            error: error.into(),
             pointer,
         })
     }
@@ -112,9 +118,9 @@ impl Host {
             index,
         })
     }
-    fn fail(&self, point: &str) -> Result<(), ExchangeError> {
+    fn fail(&self, point: &str) -> Result<(), Thrown> {
         if self.config["fail"] == point {
-            Err(self.error.borrow_mut().take().unwrap())
+            Err(self.error.clone())
         } else {
             Ok(())
         }
@@ -125,16 +131,16 @@ impl SpotCancelHost for Host {
     type Order = Order;
     type Id = Vec<u16>;
     type Items = Items;
-    fn length(&self, orders: &Orders) -> Result<usize, ExchangeError> {
+    fn length(&self, orders: &Orders) -> Result<usize, Thrown> {
         Ok(orders.0.borrow().len())
     }
-    fn first(&self, orders: &Orders) -> Result<Rc<Order>, ExchangeError> {
+    fn first(&self, orders: &Orders) -> Result<Rc<Order>, Thrown> {
         Ok(orders.0.borrow()[0].clone())
     }
-    fn items(&self, orders: Rc<Orders>) -> Result<Items, ExchangeError> {
+    fn items(&self, orders: Rc<Orders>) -> Result<Items, Thrown> {
         Ok(Items { orders, cursor: 0 })
     }
-    fn id(&self, order: &Order) -> Result<Rc<Vec<u16>>, ExchangeError> {
+    fn id(&self, order: &Order) -> Result<Rc<Vec<u16>>, Thrown> {
         self.events.borrow_mut().push(Event::Id(order.index));
         self.fail(&format!("id-{}", order.index))?;
         Ok(order.id.borrow().clone())
@@ -144,7 +150,7 @@ impl SpotCancelHost for Host {
         endpoint: &'static str,
         field: &'static str,
         id: Rc<Vec<u16>>,
-    ) -> Result<ExchangeFuture<'static, ()>, ExchangeError> {
+    ) -> Result<JsFuture<'static>, Thrown> {
         let post = self.posts.get() + 1;
         self.posts.set(post);
         let identity = self
@@ -162,30 +168,27 @@ impl SpotCancelHost for Host {
             if host.released.get() < post {
                 Poll::Pending
             } else {
-                Poll::Ready(host.fail(&format!("async-{post}")))
+                Poll::Ready(host.fail(&format!("async-{post}")).map(|()| Js::Undefined))
             }
         })))
     }
-    fn error_message(
-        &self,
-        error: &ExchangeError,
-        fallback: &'static str,
-    ) -> Result<String, ExchangeError> {
+    fn error_message(&self, error: &Thrown, fallback: &'static str) -> Result<Js, Thrown> {
         assert_eq!(
-            (&*error.metadata as *const _) as usize,
+            (&*error.native.as_ref().unwrap().metadata as *const _) as usize,
             self.pointer,
             "CANCEL native caught original error identity"
         );
-        Ok(if error.message.is_empty() {
-            fallback.into()
+        let message = error.value.get("message")?;
+        Ok(if message.truthy() {
+            message
         } else {
-            error.message.clone()
+            Js::str(fallback)
         })
     }
-    fn emit_error(&self, message: &str, context: &'static str) -> Result<(), ExchangeError> {
+    fn emit_error(&self, message: &Js, context: &'static str) -> Result<(), Thrown> {
         self.events
             .borrow_mut()
-            .push(Event::Error(message.into(), context));
+            .push(Event::Error(message.to_display(), context));
         Ok(())
     }
 }
@@ -244,6 +247,7 @@ fn cancel_orders_live_source() {
         match result.expect("cancel settled") {
             Ok(()) => assert!(case["failure"].is_null()),
             Err(error) => {
+                let error = error.to_exchange_error();
                 failures += 1;
                 assert_eq!(error.name, case["failure"]["name"]);
                 assert_eq!(error.message, case["failure"]["message"]);

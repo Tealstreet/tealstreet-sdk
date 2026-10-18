@@ -346,3 +346,22 @@ are observed directly; full amendment and remote-signer flows are not claimed.
 `config-alias-controls.py` independently changes actual key-cache identity policy
 and event-array projection, requires named compiled failures, restores exact
 source bytes and reruns the same witnesses.
+
+Lifecycle timer roots retain the original shared-runtime Js Timeout handle.
+The native host passes that exact value from setTimeout to clearTimeout; JSON
+views cannot preserve its cancellation identity. Both Advanced and Spot native
+class witnesses cancel a real timer and retain an independent uncancelled timer.
+`lifecycle-timer-controls.py` restores the JSON-roundtrip defect, requires both
+named native failures, restores exact source bytes and reruns both witnesses.
+The fixed timer alias has a specific non-decoder capability receipt.
+
+The last ten structural data aliases have seven native decoder records and three
+non-decoder collection roles. `data-alias-contracts.mjs` authenticates fresh
+compiler targets and reads decoded contents before reporting; its controls lose
+actual decoded rows and market metadata, require named output mismatches and
+restore the exact observations. `data_alias_native` separately exercises native
+Js decoding, shared item/market/catalog/model roots, rich retained info, candle
+numbers and the production typed-field frame adapter. The projection control
+changes that actual venue adapter, requires its compiled bit assertion to fail
+and restores exact bytes. This finite cohort does not replace underlying model
+contracts or claim every read method or arbitrary input-object identity.
