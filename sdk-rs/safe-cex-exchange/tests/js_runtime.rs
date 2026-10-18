@@ -3545,7 +3545,9 @@ fn source_identity_fields_are_read_before_the_typed_base_is_published() {
         (Js::Null, Js::object(vec![]), false, true),
     ] {
         let assembled = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
-            receiver.define_accessor("isSpot", Some(Rc::new(move |_| Ok(spot.clone()))), None);
+            receiver
+                .define_accessor("isSpot", Some(Rc::new(move |_| Ok(spot.clone()))), None)
+                .expect("test accessor target permits definition");
             receiver.define("isDemo", demo)
         })
         .unwrap();
@@ -3571,7 +3573,9 @@ fn source_identity_fields_are_read_before_the_typed_base_is_published() {
     let cause = Thrown::error("RangeError", "source flag getter");
     let expected = cause.value.clone();
     let result = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
-        receiver.define_accessor("isDemo", Some(Rc::new(move |_| Err(cause.clone()))), None);
+        receiver
+            .define_accessor("isDemo", Some(Rc::new(move |_| Err(cause.clone()))), None)
+            .expect("test accessor target permits definition");
         Ok(())
     });
     assert!(result.err().unwrap().value.strict_equals(&expected));

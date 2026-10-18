@@ -63,11 +63,14 @@ fn native_state(function: bool, integrity: &str, replace: bool) -> Value {
     };
     target.set("prior", Js::str("original")).unwrap();
     object.call_method(integrity, vec![target.clone()]).unwrap();
-    target.define_accessor(
-        if replace { "prior" } else { "added" },
-        Some(Rc::new(|_| Ok(Js::str("replacement")))),
-        None,
-    );
+    let error = target
+        .define_accessor(
+            if replace { "prior" } else { "added" },
+            Some(Rc::new(|_| Ok(Js::str("replacement")))),
+            None,
+        )
+        .expect_err("integrity must refuse native accessor installation");
+    assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
     json!({"prior":target.get("prior").unwrap().to_display(),"added":target.has_own("added"),
         "keys":target.own_keys().iter().map(|k|String::from_utf16(k).unwrap()).collect::<Vec<_>>()})
 }

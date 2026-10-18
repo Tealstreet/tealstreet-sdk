@@ -103,21 +103,23 @@ fn thenable(
             let inner = if mode == "nested" {
                 let nested = Js::object(vec![]);
                 let seen = trace.clone();
-                nested.define_accessor(
-                    "then",
-                    Some(Rc::new(move |owner| {
-                        seen.borrow_mut().push("get:inner".into());
-                        let owner = owner.clone();
-                        let seen = seen.clone();
-                        Ok(Js::function("innerThen", move |this, args| {
-                            seen.borrow_mut()
-                                .push(format!("call:inner:{}", this.same_reference(&owner)));
-                            arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
-                            Ok(Js::Undefined)
-                        }))
-                    })),
-                    None,
-                );
+                nested
+                    .define_accessor(
+                        "then",
+                        Some(Rc::new(move |owner| {
+                            seen.borrow_mut().push("get:inner".into());
+                            let owner = owner.clone();
+                            let seen = seen.clone();
+                            Ok(Js::function("innerThen", move |this, args| {
+                                seen.borrow_mut()
+                                    .push(format!("call:inner:{}", this.same_reference(&owner)));
+                                arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
+                                Ok(Js::Undefined)
+                            }))
+                        })),
+                        None,
+                    )
+                    .expect("test accessor target permits definition");
                 nested
             } else {
                 Js::Undefined
@@ -161,7 +163,7 @@ fn thenable(
                         }
                     }
                 }
-                Ok(Js::Undefined)
+                Ok(Js::Undefined.expect("test accessor target permits definition"))
             }))
         })),
         None,
@@ -332,23 +334,25 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
                             let value = Js::object(vec![]);
                             let calls = seen.clone();
                             let thrown = error.clone();
-                            value.define_accessor(
-                                "then",
-                                Some(Rc::new(move |_| {
-                                    calls.borrow_mut().push(format!("get:{i}"));
-                                    if i == 0 && abrupt == "then" {
-                                        return Err(Thrown::new(thrown.clone()));
-                                    }
-                                    let calls = calls.clone();
-                                    Ok(Js::function("then", move |_, args| {
-                                        calls.borrow_mut().push(format!("call:{i}"));
-                                        arg(&args, 0)
-                                            .call(Js::Undefined, vec![Js::Number(i as f64)])?;
-                                        Ok(Js::Undefined)
-                                    }))
-                                })),
-                                None,
-                            );
+                            value
+                                .define_accessor(
+                                    "then",
+                                    Some(Rc::new(move |_| {
+                                        calls.borrow_mut().push(format!("get:{i}"));
+                                        if i == 0 && abrupt == "then" {
+                                            return Err(Thrown::new(thrown.clone()));
+                                        }
+                                        let calls = calls.clone();
+                                        Ok(Js::function("then", move |_, args| {
+                                            calls.borrow_mut().push(format!("call:{i}"));
+                                            arg(&args, 0)
+                                                .call(Js::Undefined, vec![Js::Number(i as f64)])?;
+                                            Ok(Js::Undefined)
+                                        }))
+                                    })),
+                                    None,
+                                )
+                                .expect("test accessor target permits definition");
                             let row = Js::object(vec![("done", Js::Bool(false)), ("value", value)]);
                             if i == 1 && matches!(abrupt, "done" | "value") {
                                 let seen = seen.clone();
@@ -360,7 +364,8 @@ fn installed_combinators_interleave_iterator_steps_and_then_lookup() {
                                         Err(Thrown::new(error.clone()))
                                     })),
                                     None,
-                                );
+                                )
+                                .expect("test accessor target permits definition");
                             }
                             Ok(row)
                         }),
@@ -465,19 +470,21 @@ fn await_and_async_return_preserve_engine_job_turns() {
                     _ => {
                         let value = Js::object(vec![]);
                         let seen = trace.clone();
-                        value.define_accessor(
-                            "then",
-                            Some(Rc::new(move |_| {
-                                seen.borrow_mut().push("get".into());
-                                let seen = seen.clone();
-                                Ok(Js::function("then", move |_, args| {
-                                    seen.borrow_mut().push("call".into());
-                                    arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
-                                    Ok(Js::Undefined)
-                                }))
-                            })),
-                            None,
-                        );
+                        value
+                            .define_accessor(
+                                "then",
+                                Some(Rc::new(move |_| {
+                                    seen.borrow_mut().push("get".into());
+                                    let seen = seen.clone();
+                                    Ok(Js::function("then", move |_, args| {
+                                        seen.borrow_mut().push("call".into());
+                                        arg(&args, 0).call(Js::Undefined, vec![Js::Number(-0.)])?;
+                                        Ok(Js::Undefined)
+                                    }))
+                                })),
+                                None,
+                            )
+                            .expect("test accessor target permits definition");
                         value
                     }
                 };

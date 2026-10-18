@@ -146,14 +146,16 @@ fn function_call_retains_receiver_arguments_results_and_throws() {
         Err(Thrown::type_error("conversion must not run"))
     });
     let reads = refusal_reads.clone();
-    invalid.define_accessor(
-        "toString",
-        Some(Rc::new(move |_| {
-            reads.set(reads.get() + 1);
-            Ok(conversion.clone())
-        })),
-        None,
-    );
+    invalid
+        .define_accessor(
+            "toString",
+            Some(Rc::new(move |_| {
+                reads.set(reads.get() + 1);
+                Ok(conversion.clone())
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     let error = call.call(invalid, vec![]).unwrap_err();
     assert_eq!(
         refusal_reads.get(),
@@ -188,14 +190,16 @@ fn function_call_retains_receiver_arguments_results_and_throws() {
         Ok(result.clone())
     });
     let count = reads.clone();
-    target.define_accessor(
-        "call",
-        Some(Rc::new(move |_| {
-            count.set(count.get() + 1);
-            Ok(override_call.clone())
-        })),
-        None,
-    );
+    target
+        .define_accessor(
+            "call",
+            Some(Rc::new(move |_| {
+                count.set(count.get() + 1);
+                Ok(override_call.clone())
+            })),
+            None,
+        )
+        .expect("test accessor target permits definition");
     assert!(
         target
             .call_method("call", vec![receiver.clone()])
