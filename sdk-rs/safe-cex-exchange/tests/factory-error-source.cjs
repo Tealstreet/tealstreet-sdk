@@ -12,7 +12,7 @@ const {DefaultStore} = load('store/store.base.ts');
     ['asterdex', AsterDEXExchange, 'primaryAPI', venue => venue.syncPositionMode()],
     ['woo', WOOXExchange, 'xhr', venue => venue.xhr.get('/v3/accountinfo')],
   ]) {
-    for (const original of ['bare rejection', 42, false]) {
+    for (const original of ['bare rejection', 42, false, '\ud800']) {
       const venue = new Type(name, {key:'fixture', secret:'fixture', applicationId:'fixture-app', tuning:{consoleLogging:false}}, new DefaultStore());
       try {
         venue[client].defaults.adapter = async () => { throw original; };
@@ -24,10 +24,12 @@ const {DefaultStore} = load('store/store.base.ts');
           assert.equal(error.isAxiosError, true);
           assert.equal(error.originalError, original);
           assert.equal(new Date(error.context.timestamp).toISOString(), error.context.timestamp);
+          error.enhancedMessage = 'changed enhancement';
+          assert.equal(error.message, 'changed enhancement');
           return true;
         });
       } finally { venue.dispose(); }
     }
   }
-  process.stdout.write(JSON.stringify({asterdex:3,woo:3}));
+  process.stdout.write(JSON.stringify({asterdex:4,woo:4}));
 })().catch(error => {console.error(error);process.exitCode=1});

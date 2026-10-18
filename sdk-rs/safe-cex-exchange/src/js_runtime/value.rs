@@ -222,12 +222,45 @@ impl From<ExchangeError> for Thrown {
                             .expect("fresh error metadata property");
                     }
                 }
-                for field in ["stack", "cause", "isAxiosError"] {
+                for field in [
+                    "stack",
+                    "cause",
+                    "isAxiosError",
+                    "enhancedMessage",
+                    "context",
+                    "originalError",
+                ] {
                     if let Some(cell) = cause.value().get(field) {
                         value
                             .define(field, cell.to_js())
                             .expect("fresh retained error property");
                     }
+                }
+                if matches!(
+                    cause.value().get("originalErrorIsSelf"),
+                    Some(OwnedJsValue::Bool(true))
+                ) {
+                    value
+                        .define("originalError", value.clone())
+                        .expect("fresh self error property");
+                }
+                if cause.value().get("enhancedMessage").is_some()
+                    && matches!(cause.value().get("message"), Some(OwnedJsValue::String(units)) if String::from_utf16_lossy(units) == error.message)
+                {
+                    value
+                        .define_accessor(
+                            "message",
+                            Some(Rc::new(|this| {
+                                let message = this.get("enhancedMessage")?;
+                                if message.truthy() {
+                                    Ok(message)
+                                } else {
+                                    this.get("originalError")?.get("message")
+                                }
+                            })),
+                            None,
+                        )
+                        .expect("fresh enhanced error accessor");
                 }
                 break;
             }

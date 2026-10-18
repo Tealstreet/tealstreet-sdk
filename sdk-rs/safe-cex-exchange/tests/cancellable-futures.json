@@ -1647,9 +1647,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "1c6dd113f273627dd963a5f7053763976272e78aee5b5c3e715739a53cea6815",
+      "producer_sha256": "9ed3b58ab1a210e241b38b8bda55c51e3296438f825c4eaaf3f639540c93268f",
       "classification": "no-owned-latch",
-      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing. Reviewed retained string-code origin: after the same child await, synchronous owned metadata capture preserves UTF-16 units before publishing the settled rejection. No task, waiter, reservation or registration is added; the original rejection slot is still written only after settlement. Reviewed complete retained REST diagnostics: name, stack, cause and Axios flags are captured synchronously after the same child await through the existing owned origin; no new async boundary, task or cancellation resource. Null-safe metadata reads and the existing primitive diagnostic projection remain synchronous within that same settled branch."
+      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing. Reviewed retained string-code origin: after the same child await, synchronous owned metadata capture preserves UTF-16 units before publishing the settled rejection. No task, waiter, reservation or registration is added; the original rejection slot is still written only after settlement. Reviewed complete retained REST diagnostics: name, stack, cause and Axios flags are captured synchronously after the same child await through the existing owned origin; no new async boundary, task or cancellation resource. Null-safe metadata reads and the existing primitive diagnostic projection remain synchronous within that same settled branch. Reviewed factory enhancement: enhancedMessage/context/originalError and its self-relation marker are captured synchronously through the same owned callback origin after settlement; the same await and settled rejection slot remain, with no new task, timer, registration or latch."
     },
     {
       "owner": "src/js_runtime/client.rs::JsRestAdapter::send",

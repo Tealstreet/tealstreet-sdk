@@ -19,6 +19,10 @@ const axios=require('axios');
    client.defaults.adapter=async config=>{original.config=config;throw original;};
    try {
     let caught;try{await(name==='asterdex'?venue.syncPositionMode():client.get('/v3/accountinfo'));}catch(error){caught=error;}
+    if(name==='woo'){
+      assert.equal(caught.message,'[woo] GET /v3/accountinfo failed with 418 undefined: denied');
+      assert.equal(caught.context.method,'GET');assert.equal(caught.context.url,'/v3/accountinfo');assert.equal(caught.context.statusCode,418);
+    }
     assert.equal(caught,original);assert(caught instanceof Error);assert(caught instanceof (name==='asterdex'?axios.AxiosError:TypeError));assert.equal(caught.name,original.name);
     for(const key of ['name','message','code','stack','cause','response','isAxiosError'])assert.equal(caught[key],original[key]);
    }finally{venue.dispose();}

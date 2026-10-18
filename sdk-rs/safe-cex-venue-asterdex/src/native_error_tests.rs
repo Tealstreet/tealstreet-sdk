@@ -83,6 +83,14 @@ fn sync_position_mode_retains_native_axios_error_observations() {
                 "ASTER-NATIVE-ERROR must preserve {field}"
             );
         }
+        assert!(
+            error
+                .value
+                .get("originalError")
+                .unwrap()
+                .strict_equals(&error.value),
+            "enhanced Error originalError retains its self relation"
+        );
         let native = error.native.as_ref().unwrap();
         assert!(native.is_axios_error);
         assert_eq!(

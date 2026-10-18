@@ -10,6 +10,7 @@ use safe_cex_transport::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+mod error_enhancer;
 pub mod factory;
 
 /// What a client needs from its host: the runtime owning launched requests and
@@ -715,8 +716,25 @@ impl RestAdapter for JsRestAdapter {
                     let message = thrown.message();
                     let capture = (|| -> Result<_, crate::runtime::ExchangeError> {
                         let mut fields = Vec::new();
-                        for field in ["name", "message", "code", "stack", "cause", "isAxiosError"] {
+                        for field in [
+                            "name",
+                            "message",
+                            "code",
+                            "stack",
+                            "cause",
+                            "isAxiosError",
+                            "enhancedMessage",
+                            "context",
+                            "originalError",
+                        ] {
                             let value = optional(&thrown.value, field)?;
+                            if field == "originalError" && value.same_reference(&thrown.value) {
+                                fields.push((
+                                    "originalErrorIsSelf",
+                                    super::value::owned::OwnedJsValue::Bool(true),
+                                ));
+                                continue;
+                            }
                             if !value.is_undefined() || thrown.value.has_own(field) {
                                 fields.push((
                                     field,

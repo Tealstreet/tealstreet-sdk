@@ -202,15 +202,24 @@ fn install_outcome_interceptor(
     });
     let on_rejected = Js::function("recordErrorOutcome", move |_, args| {
         let error = arg(&args, 0);
-        if let Some(owner) = owner.upgrade() {
+        let enhanced = if let Some(owner) = owner.upgrade() {
+            let name = serde_json::to_value(owner.name()).expect("exchange name");
+            let enhanced = super::error_enhancer::enhance_axios_error(
+                &error,
+                name.as_str().expect("exchange string"),
+                owner.runtime.now_ms(),
+            )?;
             let response = optional(&error, "response")?;
             let response = response.truthy().then_some(response);
             record_outcome(&owner, &error, response.as_ref());
             if proxied && let Some(response) = &response {
                 report_proxy_failure(&owner, response)?;
             }
-        }
-        Err(Thrown::new(error))
+            enhanced
+        } else {
+            error
+        };
+        Err(Thrown::new(enhanced))
     });
     client
         .get("interceptors")?

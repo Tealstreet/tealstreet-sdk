@@ -1,4 +1,6 @@
-use super::*;
+use super::{AsterDEXDependencies, AsterDEXExchange};
+use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_exchange::{
     js_runtime::{client::JsHttpHost, promise::JsFuture, value::from_json},
     native::{NativeRuntime, native_replay_runtime},
@@ -6,11 +8,13 @@ use safe_cex_exchange::{
     replay_clock,
 };
 use safe_cex_store::{Store, StoreUpdate};
+use safe_cex_types::ExchangeName;
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
     future::Future,
+    rc::Rc,
     task::{Context, Poll, Waker},
 };
 
@@ -358,7 +362,12 @@ fn lifecycle_probes_execute_the_maintained_whole_typescript_classes() {
 #[test]
 fn factory_enhances_primitive_rejections_before_sync_position_mode_observes_them() {
     run(async {
-        for original in [Js::str("bare rejection"), Js::Number(42.0), Js::Bool(false)] {
+        for original in [
+            Js::str("bare rejection"),
+            Js::Number(42.0),
+            Js::Bool(false),
+            Js::utf16(&[0xd800]),
+        ] {
             let f = Fixture::new();
             *f.http.rejection.borrow_mut() = Some(original.clone());
             let pending = f
@@ -402,6 +411,15 @@ fn factory_enhances_primitive_rejections_before_sync_position_mode_observes_them
                 .get("timestamp")
                 .unwrap();
             assert_eq!(timestamp.to_display(), "2027-01-15T08:00:00.000Z");
+            error
+                .value
+                .set("enhancedMessage", Js::str("changed enhancement"))
+                .unwrap();
+            assert_eq!(
+                error.value.get("message").unwrap().to_display(),
+                "changed enhancement",
+                "source enhanced message remains a live getter"
+            );
         }
     });
 }
@@ -427,5 +445,110 @@ fn factory_enhancement_matches_the_two_actual_source_venues() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     let result: serde_json::Value = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
-    assert_eq!(result, json!({"asterdex":3,"woo":3}));
+    assert_eq!(result, json!({"asterdex":4,"woo":4}));
+}
+
+#[test]
+fn live_poll_and_reconcile_deadlines_match_source_before_disposal() {
+    run(async {
+        let f = Fixture::new();
+        f.tickers();
+        f.venue
+            .rt
+            .this
+            .call_method("startOpenInterestPolling", vec![])
+            .unwrap();
+        turns().await;
+        assert_eq!(f.store.tickers().unwrap()[0].open_interest, 7.0);
+        let stream = f.venue.rt.shared.extra.private.get().unwrap();
+        stream.repairs.schedule_balance_reconcile(0.0).unwrap();
+        stream.repairs.schedule_order_reconcile().unwrap();
+        f.advance(999.0).await;
+        assert!(
+            !f.http
+                .requests
+                .borrow()
+                .iter()
+                .any(|url| url.contains("/account"))
+        );
+        f.advance(1000.0).await;
+        assert_eq!(
+            f.http
+                .requests
+                .borrow()
+                .iter()
+                .filter(|url| url.contains("/account"))
+                .count(),
+            1
+        );
+        f.advance(5000.0).await;
+        stream.repairs.schedule_order_reconcile().unwrap();
+        f.advance(10_000.0).await;
+        assert!(
+            !f.http
+                .requests
+                .borrow()
+                .iter()
+                .any(|url| url.contains("/openOrders"))
+        );
+        f.advance(14_999.0).await;
+        assert_eq!(
+            f.http
+                .requests
+                .borrow()
+                .iter()
+                .filter(|url| url.contains("/openInterest"))
+                .count(),
+            1
+        );
+        f.advance(15_000.0).await;
+        assert_eq!(
+            f.http
+                .requests
+                .borrow()
+                .iter()
+                .filter(|url| url.contains("/openInterest"))
+                .count(),
+            2,
+            "source poll repeats after 15s"
+        );
+        assert_eq!(
+            f.http
+                .requests
+                .borrow()
+                .iter()
+                .filter(|url| url.contains("/openOrders"))
+                .count(),
+            1,
+            "replacement debounce fires at 15s, never the replaced 10s deadline"
+        );
+    });
+}
+
+#[test]
+fn browser_approval_export_has_no_constructed_native_entrypoint() {
+    run(async {
+        let f = Fixture::new();
+        assert!(
+            f.venue
+                .rt
+                .this
+                .get("checkAsterBuilderApproved")
+                .unwrap()
+                .is_undefined()
+        );
+        assert!(
+            f.venue
+                .rt
+                .shared
+                .globals
+                .get("checkAsterBuilderApproved")
+                .unwrap()
+                .is_undefined()
+        );
+        assert!(
+            f.http.requests.borrow().is_empty(),
+            "missing browser ApprovalHost remains an explicit exported-host residual"
+        );
+    });
 }
