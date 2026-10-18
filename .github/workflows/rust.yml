@@ -274,6 +274,19 @@ jobs:
         env:
           BINDING_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: git fetch --no-tags --depth=1 origin "$BINDING_BASE_SHA"
+      - name: Check shared candle-cache ignored oracles
+        if: matrix.check == 'test'
+        env:
+          SAFE_CEX_TYPESCRIPT_PATH: ${{ github.workspace }}/node_modules/typescript
+          P3B_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/0
+          P3B_REDIS_SERVER: /usr/bin/redis-server
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends redis-server
+          cargo test --locked -p safe-cex-candle-cache --test p4_calendar --test divergence_audit --jobs 1 -- --include-ignored
+          cargo test --locked -p safe-cex-candle-cache --lib --jobs 1 -- --list | grep -Fx 'tests::maintained_typescript_null_record_bugs: test'
+          cargo test --locked -p safe-cex-candle-cache --lib tests::maintained_typescript_null_record_bugs --jobs 1 -- --exact --include-ignored
+          cargo test --locked -p safe-cex-candle-cache --test runtime_backends --jobs 1 -- --include-ignored --test-threads=1
       - name: Run ${{ matrix.check }}
         env:
           VENUE_BINDING_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
@@ -333,19 +346,6 @@ jobs:
         run: |
           cargo test --locked -p safe-cex-crypto --features serde_json/arbitrary_precision --lib -- --list | grep -Fx 'ws_tests::arbitrary_precision_overflow_returns_correlated_errors: test'
           cargo test --locked -p safe-cex-crypto --features serde_json/arbitrary_precision --lib ws_tests::arbitrary_precision_overflow_returns_correlated_errors -- --exact
-      - name: Check shared candle-cache ignored oracles
-        if: matrix.check == 'test'
-        env:
-          SAFE_CEX_TYPESCRIPT_PATH: ${{ github.workspace }}/node_modules/typescript
-          P3B_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/0
-          P3B_REDIS_SERVER: /usr/bin/redis-server
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends redis-server
-          cargo test --locked -p safe-cex-candle-cache --test p4_calendar --test divergence_audit --jobs 1 -- --include-ignored
-          cargo test --locked -p safe-cex-candle-cache --lib --jobs 1 -- --list | grep -Fx 'tests::maintained_typescript_null_record_bugs: test'
-          cargo test --locked -p safe-cex-candle-cache --lib tests::maintained_typescript_null_record_bugs --jobs 1 -- --exact --include-ignored
-          cargo test --locked -p safe-cex-candle-cache --test runtime_backends --jobs 1 -- --include-ignored --test-threads=1
       - name: Regenerate crypto signing fixtures
         if: matrix.check == 'test'
         run: node safe-cex-crypto/tests/fixtures/generate.cjs
