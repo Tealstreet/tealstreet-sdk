@@ -1,5 +1,26 @@
 # WOO venue port
 
+The canonical spread, lifecycle for-of and array-pattern slots consume the shared
+iterator protocol. Spread retains native values and UTF-16 code points; loops
+observe collection mutation during the body. Array patterns advance only their
+selected length, skip value getters for elisions and close an unfinished iterator.
+Body throws win over close failures, while step/value failures do not close.
+`woo_host_*` tests use the constructed exchange’s actual operation tables; four
+regressions compiled and failed on master. The source private socket subscribes
+only to executionreport/algoexecutionreportv2: fills trigger REST position refresh,
+and balance remains a REST read. `binding_streams` and `binding_reads` retain those
+real signed-client paths; no balance socket topic is introduced.
+
+The V3 canonical/shadow/snapshot comparison bodies were test-only: the SDK index
+exports none of them and their TS imports occur only in audit tests. Their Rust
+bodies, unused operation holders and oracle-only tests are retired; tealstreet-next
+owns the test-only TS cleanup. CanonicalOps/CanonicalCallback remain the exact
+live legacy operation shape. The independent route enum/strict union codec stays
+with its declaration witness. Legacy client-ID validation, including the
+constructed class's Number.isSafeInteger call, is retained for separate binding
+verification. Four dead-method baseline entries and five capability exemptions
+are removed with the retired bodies. No V3 route is enabled.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/woo/CLAUDE.md).
 Composition: [exchange core contract](../safe-cex-exchange/CLAUDE.md).
 
@@ -18,7 +39,18 @@ oracle pins all eight false gates, endpoint order and route ownership metadata.
 Each gate has been independently flipped to true and rejected by a Rust test.
 
 `journal` projects filled historical orders into one synthetic execution per
-order. It does not import journal grading or implement the shared interval fold.
+order. The production Exchange trait dispatches `fetchHistoricalPositions` to the
+existing lifecycle body, with imports bound to that order adapter and the shared
+`position_intervals`/`fold_position_adapter` implementations. The canonical interval
+uses its native camelCase Serde bridge, retaining native numbers and optional-field
+absence. It does not import journal grading or duplicate interval arithmetic.
+`tests/binding_streams.rs` drives the constructed exchange through signed legacy
+order reads, reported-PnL folding, missing-PnL/open/window refusal and runtime-clock
+defaults. `scripts/journal-binding-controls.py` independently disconnects the trait,
+each of the three imports and the interval field spelling; each compiled mutation
+must fail the named production regression and pass after exact byte restoration.
+Its `--interval-only` mode separately proves the canonical object guard using the
+shared native bridge regression, including NaN, infinity, signed zero and absence.
 See the [source adapter and its rationale](../../packages/safe-cex/src/journal/woo.position-adapter.ts)
 and its [existing tests](../../packages/safe-cex/src/journal/woo.position-adapter.test.ts).
 
@@ -186,7 +218,7 @@ Infinity or -Infinity in these open string fields; Number::as_f64's finite-only
 projection must not erase the asset. Fourteen live-source cases pin both asset
 fields across overflow, signed zero, underflow and ordinary numbers.
 
-The three public ticker writers are callable extracted operations. Their
+The three public ticker writers run through the production socket class. Their
 87 source cases use the full production DefaultStore constructor and update
 path, tagging numeric bits before serialization. The implementation uses native
 ModelPatch numbers and drops the lookup borrow before writing; its Store result
@@ -196,12 +228,22 @@ commit-before-throw, ordered fanout abort and remaining-batch abort. Copied
 non-numeric fields remain a separate typed-output divergence. Seven compiling mutations
 pin field routing, filtering, batch continuation, deferred-refusal error priority
 and signed-zero preservation;
-live socket registration remains pending.
+real constructor/socket regressions additionally cover ticker, BBO and mark frames.
 
-A typed writer refusal is deferred until batch completion, allowing a later
-source TypeError to win with its own identity/text. The unrepresentable patch
+Typed writer reports are collected per refused row with its symbol, field and
+original value, then deferred until batch completion, allowing a later source
+TypeError to win with its own identity/text. The unrepresentable patch
 and its notification are still lost (declared); other representable writes are
 retained, and the operation never returns a successful subset.
+
+Public ticker callbacks capture the canonical RetainedJsonInput directly. Native
+number bits and UTF16 strings survive until row admission; ignored metadata cannot
+reject a frame. Symbol normalization runs on UTF16 before the final typed Store
+identifier check, so discarded surrogate segments do not reject valid targets.
+The ordinary UTF8 symbol wrapper uses the same normalizer. Six real socket
+regressions compiled and failed against master, covering all three public topics,
+ignored metadata, overflow/signed zero, and normalized identifier admission.
+Private timestamp callbacks retain their existing JSON input boundary.
 
 `private_socket` extracts the private ping and timestamp helper. Ping keeps the
 source sendWithLog wrapper: diagnostics are checked after sending, and heartbeat
@@ -217,8 +259,9 @@ that refusal, so adding a required inherited field cannot silently leave the
 reported schema unchanged. Other schema member walks consume type literals;
 class member extraction is a separate operation, not an interface census.
 
-Field-identity supplements preserve the three original declaration fixture
-artifacts byte-identically. Distinct samples address equal-valued field swaps;
+Field-identity supplements retain independent declaration fixture artifacts.
+The legacy types artifact excludes the removed unused order DTOs; retained
+cases stay byte-identical. Distinct samples address equal-valued field swaps;
 separate recursive native-field assertions address symmetric Serde renames that
 a roundtrip cannot see. FIELD_IDENTITY_AUDIT.md records the completed scope and
 remaining inventories; a stronger declaration test does not imply the whole
@@ -399,7 +442,7 @@ private remote schema as `v3_contracts`. See
 The focused runner retains full compiler discovery and selected-source scope
 checks; it does not classify the remaining Woo owners or aliases.
 
-The next accepted-set batch reviews thirty concrete declaration records, with
+The next accepted-set batch reviews 27 retained concrete declaration records, with
 native views of all fields and separate raw/owned/borrowed/qualified ingress.
 The V3 public mapper's five numeric validations are expanded from their former
 local macro so source discovery can inspect ordinary Rust. Its existing typed
@@ -411,3 +454,57 @@ additional exact free-function APIs, native bit/presence/borrow observations and
 their independent live TypeScript corpora. Its focused runner retains full
 compiler/source preflight and supplies copied-source controls; it does not claim
 whole-package accepted-set clearance.
+
+Live `mapLimitOrder` and `mapAlgoOrder` return runtime values in
+`binding/hosts/order_mapping`; the old typed mapper functions and their
+facade-only tests are removed. The real class preserves own undefined table
+hits, copied amount/reduceOnly/filled values and original parent info aliases.
+Order lookup tables retain their actual shared Object.prototype referents.
+The 103 source records, 36 native numeric-bit witnesses and 12 source timing
+cases now run through production class members. A real HTTP algo read keeps a
+partial STOP plus its two bracket peers instead of discarding all three.
+
+`scripts/algo-order-control.py` compiles a closed-output regression in the live
+mapper, requires named mapper and HTTP failures, restores exact bytes and reruns
+the native suite. `scripts/terminal-report-control.py` separately restores a
+closed-output refusal inside the real limit mapper and verifies the three
+terminal private-frame regressions. Both source scripts execute actual TS bodies.
+NEW/PARTIAL Store insertion and public typed results retain the separate shared
+Order field-domain obligations. This repair makes no shared-type or nonnumeric
+Store insertion claim; it neither coerces copied strings nor drops bad rows.
+
+The unused `WooxOrder`, `FetchOrderResponse` and nested meta DTOs are removed.
+Their strict declaration decoders rejected documented null metadata even though
+production order reads already consume raw runtime rows. The legacy declaration
+oracle and accepted-record cohort exclude these erased-only records; remaining
+record guards, field and numeric witnesses stay active. `binding_orders` exercises
+all four documented null fields through the real signed HTTP/class mapper and
+retains their own null keys in info. `scripts/legacy-order-null-control.py`
+compiles a live-mapper null-refusal control that must fail its named order-count
+assertion; decoder-only tests are not evidence
+for this production path.
+
+The production WOO signer now receives and returns the original native runtime
+config through `api` and `factory`. Shallow copies retain nested data identity,
+callables and own properties. V1 reuses the shared runtime qs serializer; V3 uses
+the existing native JSON.stringify operation at its signing boundary, retaining
+source BigInt throws and toJSON callbacks before any data-only transport capture. The constructed
+exchange regression in `native_signing_retention` observes NaN and Infinity in
+actual HMAC preimages before the terminal wire projection. Finite JSON fixture
+views in older tests are explicit observations after signing.
+
+The configured fetchOrders member admits mapped rows individually before either
+the Exchange trait or startup Store write. Order.amount/filled must be numbers;
+reduceOnly admits absent, own undefined and booleans. A malformed row emits its
+id, field and original typed value through emitAndLogError and is omitted; other
+rows keep their values and presence. This is an intentional accepted divergence
+from TypeScript retaining malformed typed fields, per shared-type decision 3.
+The raw mapAlgoOrder/fetchAlgoOrders source-value witnesses remain unchanged.
+The real mixed-row binding regression covers amount, filled and reduceOnly via
+both the public read and actual configured fetch-to-Store path.
+
+
+The constructed clientOrderIdRule retains its source Number(input) conversion and
+uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
+compares26 maintained-source identifiers, including safe-range and canonical-decimal
+boundaries, without replacing the rule or its operation table.

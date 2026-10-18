@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.ws-public.ts"
-rust_files = [ "safe-cex-venue-bybit/src/public_ticker_topics.rs", "safe-cex-venue-bybit/src/public_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/public_ticker_topics.rs", "safe-cex-venue-bybit/src/public_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs", "safe-cex-venue-bybit/src/ws_public/streams.rs", "safe-cex-venue-bybit/src/book_mapping.rs", "safe-cex-venue-bybit/src/ws_public/single_candles.rs", "safe-cex-venue-bybit/src/candle_mapping.rs" ]
 
 [[symbol]]
 ts = "BybitPublicWebsocket"
@@ -125,10 +125,10 @@ note = ""
 [[symbol]]
 ts = "BybitPublicWebsocket.listenOHLCV"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public/single_candles.rs::listen_ohlcv", "safe-cex-venue-bybit/src/candle_mapping.rs::apply_kline" ]
+status = "ported"
+note = "Live kline/trade state and subscription lifecycle run through the real socket. Dedicated class retry and cleanup quirks remain distinct from primary active/retry cancellation and diagnostics. Native calendar helper extends source bars without losing numeric bits; 12 maintained-source sequences and 2172 mapper outcomes cover the wired behavior. Renamed source member to safe-cex-venue-bybit/src/ws_public/single_candles.rs::listen_ohlcv, safe-cex-venue-bybit/src/candle_mapping.rs::apply_kline."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.listenOHLCVOld"
@@ -141,7 +141,7 @@ note = ""
 [[symbol]]
 ts = "BybitPublicWebsocket.listenOrderBook"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public/streams.rs::listen_order_book", "safe-cex-venue-bybit/src/book_mapping.rs::BookState::apply" ]
+status = "ported"
+note = "Rust rename: safe-cex-venue-bybit/src/ws_public/streams.rs::listen_order_book composes core-owned subscription and resync timers, handler replacement and cleanup; safe-cex-venue-bybit/src/book_mapping.rs::BookState::apply maps source snapshots/deltas. Real socket tests cover each family and the maintained source oracle covers 996 cases/1755 outcomes."

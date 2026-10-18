@@ -90,17 +90,17 @@ fn margin(s: MarginType) -> &'static str {
     }
 }
 fn position(v: &Position) -> Value {
-    let mut out = json!({"id":v.id,"symbol":v.symbol,"side":side(v.side),"entryPrice":number(v.entry_price),"notional":number(v.notional),"leverage":number(v.leverage),"unrealizedPnl":number(v.unrealized_pnl),"contracts":number(v.contracts),"liquidationPrice":number(v.liquidation_price)});
-    if let Some(s) = v.margin_type {
+    let mut out = json!({"id":v.id,"symbol":v.symbol,"side":side(v.side.into_value().expect("known source side")),"entryPrice":number(v.entry_price),"notional":number(v.notional),"leverage":number(v.leverage),"unrealizedPnl":number(v.unrealized_pnl),"contracts":number(v.contracts),"liquidationPrice":number(v.liquidation_price)});
+    if let Some(s) = v.margin_type.into_value() {
         out["marginType"] = json!(margin(s));
     }
-    if let Some(s) = v.position_mode {
+    if let Some(s) = v.position_mode.into_value() {
         out["positionMode"] = json!(mode(s));
     }
-    if let Some(s) = v.margin_size {
+    if let Some(s) = v.margin_size.into_value() {
         out["marginSize"] = number(s);
     }
-    if let Some(s) = &v.info {
+    if let Some(s) = v.info.as_ref() {
         out["info"] = observe(s);
     }
     assert!(
@@ -115,12 +115,12 @@ fn metadata(v: &PositionMetadata) -> Value {
 fn order(v: &Order) -> Value {
     assert_eq!(v.r#type, OrderType::Limit, "BINGX-POS native order type");
     assert_eq!(v.side, OrderSide::Buy, "BINGX-POS native order side");
-    let status = match v.status {
+    let status = match v.status.value().expect("present source enum in fixture") {
         OrderStatus::Open => "open",
         OrderStatus::Canceled => "canceled",
         _ => panic!("unexpected native order status"),
     };
-    json!({"id":v.id,"symbol":v.symbol,"status":status,"type":"limit","side":"buy","price":number(v.price),"amount":number(v.amount),"filled":number(v.filled),"remaining":number(v.remaining),"reduceOnly":v.reduce_only,"lastUpdate":number(v.last_update)})
+    json!({"id":v.id,"symbol":v.symbol,"status":status,"type":"limit","side":"buy","price":number((v.price).to_number()),"amount":number(v.amount),"filled":number(v.filled),"remaining":number(v.remaining),"reduceOnly":v.reduce_only,"lastUpdate":number(v.last_update)})
 }
 #[derive(Default)]
 struct Host {
@@ -184,7 +184,11 @@ impl ReadTransport for Transport {
         if let Some(hook) = self.hook.borrow().as_ref() {
             hook(&request);
         }
-        let body = request.body.as_ref().map(|b| b.untransformed().unwrap());
+        let body_value = request
+            .body
+            .as_ref()
+            .map(|b| b.untransformed().unwrap().clone().into_value().unwrap());
+        let body = body_value.as_ref();
         let args = if request.method == "POST" {
             body.cloned().unwrap()
         } else {
@@ -289,7 +293,8 @@ fn fixture(
     base.on(
         "error",
         Rc::new(move |_, v| {
-            events.borrow_mut().push(v[0].as_str().unwrap().into());
+            let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
+            events.borrow_mut().push(v.as_str().unwrap().into());
             Ok(())
         }),
     );

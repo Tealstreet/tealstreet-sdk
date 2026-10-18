@@ -198,7 +198,11 @@ impl ApexOmniPublicWebsocket {
                 return Ok(());
             }
             self.host.record_stats(topic)?;
-            let json = J::from(safe_cex_transport::how::json_parse(raw));
+            let json = J::from(
+                safe_cex_transport::how::json_parse(raw)
+                    .into_value()
+                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+            );
             if !truthy(&json) {
                 return Ok(());
             }
@@ -317,24 +321,39 @@ impl ApexOmniPublicWebsocket {
         callback: Rc<dyn Fn(Candle) -> Result<(), ExchangeError>>,
     ) -> Result<Cleanup, ExchangeError> {
         let interval = match opts.interval {
-            safe_cex_types::Timeframe::M1 => "1m",
-            safe_cex_types::Timeframe::M3 => "3m",
-            safe_cex_types::Timeframe::M5 => "5m",
-            safe_cex_types::Timeframe::M15 => "15m",
-            safe_cex_types::Timeframe::M30 => "30m",
-            safe_cex_types::Timeframe::H1 => "1h",
-            safe_cex_types::Timeframe::H2 => "2h",
-            safe_cex_types::Timeframe::H4 => "4h",
-            safe_cex_types::Timeframe::H6 => "6h",
-            safe_cex_types::Timeframe::H12 => "12h",
-            safe_cex_types::Timeframe::D1 => "1d",
-            safe_cex_types::Timeframe::W1 => "1w",
+            safe_cex_types::AnyTimeframe::Variant0(safe_cex_types::SecondsTimeframe::S1) => "1s",
+            safe_cex_types::AnyTimeframe::Variant0(safe_cex_types::SecondsTimeframe::S5) => "5s",
+            safe_cex_types::AnyTimeframe::Variant0(safe_cex_types::SecondsTimeframe::S15) => "15s",
+            safe_cex_types::AnyTimeframe::Variant0(safe_cex_types::SecondsTimeframe::S30) => "30s",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1) => "1m",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M3) => "3m",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M5) => "5m",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M15) => "15m",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M30) => "30m",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H1) => "1h",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H2) => "2h",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H4) => "4h",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H6) => "6h",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H12) => "12h",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::D1) => "1d",
+            safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::W1) => "1w",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H3) => "3h",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H5) => "5h",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H7) => "7h",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H8) => "8h",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H9) => "9h",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H10) => "10h",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H11) => "11h",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H24) => "24h",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::D2) => "2d",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::D3) => "3d",
+            safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::MN1) => "1M",
         };
         let value = protocol::INTERVAL
             .iter()
-            .find(|(k, _)| *k == interval)
-            .unwrap()
-            .1;
+            .find(|(key, _)| *key == interval)
+            .map(|(_, value)| *value)
+            .unwrap_or("undefined");
         let topic = format!("candle.{value}.{}", opts.symbol);
         let secondary = format!("recentlyTrade.H.{}", opts.symbol);
         let candle = Rc::new(RefCell::new(None::<Candle>));

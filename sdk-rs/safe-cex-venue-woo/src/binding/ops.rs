@@ -22,29 +22,69 @@ fn key(value: &Js) -> Result<Vec<u16>, Thrown> {
     Ok(value.to_js_string()?.to_vec())
 }
 
-fn items(value: &Js, what: &str) -> Result<Vec<Js>, Thrown> {
-    match value {
-        Js::Array(_) => Ok(value
-            .array_items()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|v| v.unwrap_or(Js::Undefined))
-            .collect()),
-        Js::Set(set) => Ok(set.borrow().clone()),
-        Js::Map(map) => Ok(map
-            .borrow()
-            .iter()
-            .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-            .collect()),
-        Js::String(s) => Ok(String::from_utf16_lossy(s)
-            .chars()
-            .map(|c| Js::str(&c.to_string()))
-            .collect()),
-        other => Err(Thrown::type_error(&format!(
-            "{} is not iterable ({what})",
-            other.to_display()
-        ))),
+/// IteratorStep/IteratorValue, with elisions advancing without reading value.
+fn step(iterator: &Js, next: &Js, read: bool) -> Result<Option<Js>, Thrown> {
+    let result = next.call(iterator.clone(), vec![])?;
+    if !result.is_object() {
+        return Err(Thrown::type_error("Iterator result is not an object"));
     }
+    if result.get("done")?.truthy() {
+        return Ok(None);
+    }
+    Ok(Some(if read {
+        result.get("value")?
+    } else {
+        Js::Undefined
+    }))
+}
+
+fn close(iterator: &Js) -> Result<(), Thrown> {
+    let close = iterator.get("return")?;
+    if close.is_nullish() {
+        return Ok(());
+    }
+    let result = close.call(iterator.clone(), vec![])?;
+    if !result.is_object() {
+        return Err(Thrown::type_error("Iterator result is not an object"));
+    }
+    Ok(())
+}
+
+fn binding(value: Js, pattern: &[bool]) -> Result<Vec<Js>, Thrown> {
+    let iterator = value.iterator()?;
+    let next = iterator.get("next")?;
+    let mut done = false;
+    let mut values = Vec::with_capacity(pattern.len());
+    for read in pattern {
+        values.push(if done {
+            Js::Undefined
+        } else {
+            match step(&iterator, &next, *read)? {
+                Some(value) => value,
+                None => {
+                    done = true;
+                    Js::Undefined
+                }
+            }
+        });
+    }
+    if !done {
+        close(&iterator)?;
+    }
+    Ok(values)
+}
+
+fn iterate(value: Js, body: &mut dyn FnMut(Js) -> Result<(), Thrown>) -> Result<(), Thrown> {
+    let iterator = value.iterator()?;
+    let next = iterator.get("next")?;
+    while let Some(value) = step(&iterator, &next, true)? {
+        if let Err(error) = body(value) {
+            // The body throw wins over a failure in IteratorClose.
+            let _ = close(&iterator);
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn canonical(weak: Weak<Shared>) -> Rc<CanonicalOps<Js, Thrown>> {
@@ -65,7 +105,7 @@ pub(crate) fn canonical(weak: Weak<Shared>) -> Rc<CanonicalOps<Js, Thrown>> {
             f.call(this, args)
         }),
         function: Rc::new(|name, _arity, body| Js::function(name, move |_, a| body(a))),
-        spread: Rc::new(|v| items(v, "spread")),
+        spread: Rc::new(Js::iterable_values),
         truthy: Rc::new(Js::truthy),
         strict_equal: Rc::new(Js::strict_equals),
         string: Rc::new(Js::str),
@@ -99,37 +139,8 @@ pub(crate) fn lifecycle(weak: Weak<Shared>, runtime: Runtime) -> Rc<LifecycleOps
         remainder: Rc::new(|a, b| ops::remainder(&a, &b)),
         less: Rc::new(|a, b| ops::less_than(&a, &b)),
         error_value: Rc::new(|e| e.value),
-        binding: Rc::new(|v, pattern| {
-            let values = items(&v, "array destructuring")?;
-            Ok(pattern
-                .iter()
-                .enumerate()
-                .map(|(i, read)| {
-                    if *read {
-                        values.get(i).cloned().unwrap_or(Js::Undefined)
-                    } else {
-                        Js::Undefined
-                    }
-                })
-                .collect())
-        }),
-        iterate: Rc::new(|v, f| {
-            // Arrays iterate live, as the array iterator re-reads length each step.
-            if let Js::Array(list) = &v {
-                let mut i = 0;
-                loop {
-                    let next = list.borrow().get(i).cloned();
-                    let Some(next) = next else { break };
-                    f(next.unwrap_or(Js::Undefined))?;
-                    i += 1;
-                }
-                return Ok(());
-            }
-            for item in items(&v, "for...of")? {
-                f(item)?;
-            }
-            Ok(())
-        }),
+        binding: Rc::new(binding),
+        iterate: Rc::new(iterate),
     })
 }
 

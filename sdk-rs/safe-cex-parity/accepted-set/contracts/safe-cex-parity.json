@@ -1273,7 +1273,7 @@
       53
     ],
     "rs": "safe-cex-parity/src/lib.rs::Result",
-    "sourceSha256": "74dd9cfce966f7952c8bc7a11d599ebc9f5279bd522c14d801163942f5d4d107",
+    "sourceSha256": "5951f28f8d9ed17ba8df26e5b2afab65172c213bd663bf09403d957495d2c522",
     "rawTarget": {
       "resolved_path": {
         "path": "core::result::Result",

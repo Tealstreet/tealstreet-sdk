@@ -62,7 +62,9 @@ function type(n, name) {
  if(k===ts.SyntaxKind.AnyKeyword||k===ts.SyntaxKind.UnknownKeyword) return 'serde_json::Value';
  throw Error('Unhandled '+ts.SyntaxKind[k]+' '+name);
 }
+const NOT_MODELED = require('./not-modeled-types.cjs');
 for(const statement of file.statements) {
+ if((ts.isInterfaceDeclaration(statement)||ts.isTypeAliasDeclaration(statement))&&NOT_MODELED.has(statement.name.text)) continue;
  if(ts.isInterfaceDeclaration(statement)) {
   owner=statement.name.text;
   // TypeScript declaration merging (UserFills and WsUserFunding).
@@ -121,10 +123,10 @@ const fieldIngress = `
 fn deserialize_present<'de,D:serde::Deserializer<'de>,T:Deserialize<'de>>(decoder:D)->Result<Option<T>,D::Error> {
  T::deserialize(decoder).map(Some)
 }
-fn deserialize_required_nullable<'de,D:serde::Deserializer<'de>,T:Deserialize<'de>>(decoder:D)->Result<Option<T>,D::Error> {
+`+([...defs.values()].some(text=>text.includes('deserialize_required_nullable'))?`fn deserialize_required_nullable<'de,D:serde::Deserializer<'de>,T:Deserialize<'de>>(decoder:D)->Result<Option<T>,D::Error> {
  Option::<T>::deserialize(decoder)
 }
-`;
+`:'');
 const source='//! Typed wire models from hyperliquid.types.ts; JS numbers remain binary64.\nuse serde::{Serialize, Deserialize};\n\n'+fieldIngress+'\n'+expanded.join('\n\n')+'\n\n'+registrations.join('\n\n')+'\n';
 const claimsText=JSON.stringify(claims,null,2)+'\n';
 if(process.argv.includes('--check')) {

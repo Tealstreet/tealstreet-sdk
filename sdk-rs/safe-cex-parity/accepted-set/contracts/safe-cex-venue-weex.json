@@ -724,7 +724,7 @@
     },
     "category": "non-decoder",
     "reason": "Selects a static ENDPOINTS entry by its internal name and encodes the URL as UTF-16; it does not parse a response or arbitrary request grammar.",
-    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/account_reads.rs at 74-82. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/account_reads.rs at 73-81. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
   },
   "safe_cex_venue_weex::market_reads::endpoint": {
     "api": {

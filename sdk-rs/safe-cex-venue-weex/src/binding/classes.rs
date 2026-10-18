@@ -38,7 +38,7 @@ pub(super) fn settings(h: &Host) -> ExchangeSettings {
             }),
             ClientOrderIdRuleOverrides {
                 mint: Some(Rc::new(move || {
-                    std::format!("ts{}", runtime.unique_id())
+                    std::format!("ts{}", runtime.unique_id().replace(['-', '_'], ""))
                         .chars()
                         .take(36)
                         .collect()
@@ -401,7 +401,11 @@ fn dispatch(mut h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, Thrown
                     string: |_, s| Ok(Js::str(s)),
                     emit_error: |h, message| h.emit(message.clone()),
                     new_error: |_, v| Thrown::error("Error", &v.to_display()),
-                    uuid: |h| Ok(Js::str(&h.0.shared.runtime.unique_id())),
+                    uuid: |h| {
+                        Ok(Js::str(
+                            &h.0.shared.runtime.unique_id().replace(['-', '_'], ""),
+                        ))
+                    },
                     integer_string: |_, v| v::integer(v).and_then(|v| v::units(&v)),
                 },
                 &first,

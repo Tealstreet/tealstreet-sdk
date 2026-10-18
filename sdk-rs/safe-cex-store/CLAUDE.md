@@ -11,6 +11,10 @@ gate executes every generator with `--check`; CI runs all targets with
 `--include-ignored`, including the in-memory derived gate. See DERIVED_PARITY
 for dependency injection, corpus pins, and JSON float-roundtrip requirements.
 
+Order upserts overlay every carried ModelField, including own Undefined, while
+Absent retains the old property. The production Store facade compares all 15
+fields against the live source; numeric retention is checked before JSON output.
+
 The derived live oracle compares object key sets and recursively checks values;
 key iteration order depended on serde_json Map's backing store and is not part
 of these domain results. Array order and exact float-bit comparisons remain
@@ -159,3 +163,24 @@ for nested option numbers and forwards Store.update's fromWorker flag, preservin
 worker market merge behavior. The facade `option_fields` target compares eight
 actual source mutation paths across five numeric profiles; the ordinary production
 Store wiring gate remains required for Store changes.
+
+Position upserts overlay all nine ModelField slots by property presence: an
+Absent incoming field preserves the previous value, while own Undefined clears
+it and Value replaces it. This includes side as well as optional metadata.
+Do not use ModelField::or for this merge: its value-only fallback has a separate
+meaning. The production JS facade's position_model_merge regression compares
+81 outcomes with the maintained TypeScript Store across single, batch and full
+upserts; the shared carrier API remains unchanged.
+
+Position patch batches carry `Option<String>` keys across the Store trait and
+concrete Store API. `None` means the source selector cannot match a native string
+ID, and preserves that row's place in the original batch. Retaining those rows
+keeps the source single-versus-indexed lookup threshold and duplicate-ID choice;
+no synthetic ID or filtered batch substitutes for an unmatched selector. Typed
+venue callers supply `Some(id)`. The native facade's168-case maintained Store
+comparison observes selection, duplicate rows and the position update counter.
+
+Order.reduceOnly follows the same ModelField overlay policy: an absent incoming
+property retains the existing value, while own undefined replaces it. The native
+Store facade regression exercises all four presence states across single/bulk
+upsert and updateOrder, alongside the actual TypeScript Store.

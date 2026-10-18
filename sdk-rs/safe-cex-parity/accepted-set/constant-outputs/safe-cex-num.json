@@ -1,98 +1,4 @@
 {
-  "safe_cex_num::numeric_ingress::output::Capture::serde_core::ser::Serializer::serialize_unit_struct": {
-    "owner": "safe_cex_num::numeric_ingress::output::Capture",
-    "ident": "Capture",
-    "api": {
-      "kind": "trait",
-      "trait": "serde_core::ser::Serializer",
-      "name": "serialize_unit_struct",
-      "signature": {
-        "inputs": [
-          [
-            "self",
-            {
-              "generic": "Self"
-            }
-          ],
-          [
-            "_",
-            {
-              "borrowed_ref": {
-                "lifetime": "'static",
-                "is_mutable": false,
-                "type": {
-                  "primitive": "str"
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "core::result::Result",
-            "args": {
-              "angle_bracketed": {
-                "args": [
-                  {
-                    "type": {
-                      "qualified_path": {
-                        "name": "Ok",
-                        "args": null,
-                        "self_type": {
-                          "generic": "Self"
-                        },
-                        "trait": {
-                          "path": "",
-                          "args": null
-                        }
-                      }
-                    }
-                  },
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "serde_json::error::Error",
-                        "args": null
-                      }
-                    }
-                  }
-                ],
-                "constraints": []
-              }
-            }
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "source": {
-      "file": "safe-cex-num/src/numeric_ingress/output.rs",
-      "begin": [
-        95,
-        5
-      ],
-      "end": [
-        97,
-        6
-      ],
-      "sha256": "e026a9148223711734ff9dd0afe6709a1166e40807ebf24ce689521e073fd146"
-    },
-    "call": "{ use serde::Serializer as _; let name = if $value == &serde_json::json!(\"First\") { \"First\" } else { \"Second\" }; let native = $type.serialize_unit_struct(name).expect(\"infallible unit capture\"); match native.0 { super::Node::Null => serde_json::Value::Null, _ => panic!(\"unit capture returned a non-null native node\") } }",
-    "cases": [
-      {
-        "input": "First",
-        "output": null
-      },
-      {
-        "input": "Second",
-        "output": null
-      }
-    ]
-  },
   "safe_cex_num::numeric_ingress::output::Capture::serde_core::ser::Serializer::serialize_tuple_struct": {
     "owner": "safe_cex_num::numeric_ingress::output::Capture",
     "ident": "Capture",
@@ -165,14 +71,14 @@
     "source": {
       "file": "safe-cex-num/src/numeric_ingress/output.rs",
       "begin": [
-        134,
+        138,
         5
       ],
       "end": [
-        136,
+        140,
         6
       ],
-      "sha256": "e026a9148223711734ff9dd0afe6709a1166e40807ebf24ce689521e073fd146"
+      "sha256": "70daa4e874515d8b8a81e72f337ffd67e4501dd005b061a151f0173ac8d1b2c6"
     },
     "call": "{ use serde::Serializer as _; let (name, len) = if $value == &serde_json::json!(\"First\") { (\"First\", 0) } else { (\"Second\", 7) }; let native = $type.serialize_tuple_struct(name, len).expect(\"infallible tuple capture\"); serde_json::json!({\"values\":native.values.len(), \"variant\":native.variant}) }",
     "cases": [

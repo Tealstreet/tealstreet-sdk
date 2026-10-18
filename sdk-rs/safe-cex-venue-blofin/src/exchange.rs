@@ -22,8 +22,8 @@ use safe_cex_transport::RestAdapter;
 use safe_cex_types::{
     Balance, Candle, ClosedPnlEntry, ExchangeName, ExchangeOptions, Execution, ExecutionsOptions,
     FetchedLeverage, HistoricalOrder, HistoricalTradeOptions, IncomeHistoryOptions, IncomeRecord,
-    MarginType, Market, OHLCVOptions, Order, OrderHistoryOptions, OrderStopTriggerType,
-    PlaceOrderOpts, Position, PositionMode, PositionRecord, Ticker,
+    MarginType, Market, OHLCVOptions, Order, OrderHistoryOptions, OrderStopTriggerType, Position,
+    PositionMode, PositionRecord, PreparedOrderOpts, Ticker,
 };
 use serde_json::{Map, Value};
 use std::{cell::Cell, rc::Rc};
@@ -182,7 +182,7 @@ pub trait BlofinExchangeHost: 'static {
         &self,
         base: &Self::Base,
         rule: &safe_cex_exchange::client_order_id::ClientOrderIdRule,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Option<String>, Self::Error>;
     fn assert_single_native_client_order_id(
         &self,
@@ -193,7 +193,7 @@ pub trait BlofinExchangeHost: 'static {
     fn assert_caller_client_order_ids(
         &self,
         base: &Self::Base,
-        opts: &[PlaceOrderOpts],
+        opts: &[PreparedOrderOpts],
     ) -> Result<(), Self::Error>;
     fn public_error(&self, error: PublicDataError<Self::Error>) -> Self::Error;
     fn service_error(&self, error: ServiceError<Self::Error>) -> Self::Error;
@@ -477,7 +477,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
     }
     pub async fn place_order(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Vec<Option<Value>>, ServiceError<H::Error>> {
         let service = self.service();
         let host = self.write_host(&service);
@@ -485,7 +485,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
     }
     pub async fn place_orders(
         &self,
-        opts: &[PlaceOrderOpts],
+        opts: &[PreparedOrderOpts],
     ) -> Result<Vec<Option<Value>>, ServiceError<H::Error>> {
         let service = self.service();
         let host = self.write_host(&service);
@@ -899,7 +899,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
     }
     pub async fn format_trigger_order(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
         source: Option<&UtilityInput>,
     ) -> Result<OrderPayload, ServiceError<H::Error>> {
         let host = self.format_host();
@@ -908,14 +908,14 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
     }
     pub async fn format_algo_order(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<OrderPayload, ServiceError<H::Error>> {
         let host = self.format_host();
         order_formatters::format_algo_order(opts, self.context.store.as_ref(), &host).await
     }
     pub async fn format_normal_order(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Vec<OrderPayload>, ServiceError<H::Error>> {
         let host = self.format_host();
         order_formatters::format_normal_order(opts, self.context.store.as_ref(), &host).await

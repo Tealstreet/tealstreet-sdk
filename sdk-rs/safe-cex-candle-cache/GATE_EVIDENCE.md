@@ -747,3 +747,79 @@ can select an installed executable. No browser security setting was changed.
 records() previously caught a cursor callback failure and returned before the write transaction completion, leaving already queued deletes free to commit. cursor_failure now aborts a write transaction from both request-error and callback-error paths while the callback is active, before sending the recovered error. Readonly failure continues to preserve its prefix; abort failure is retained in the diagnostic. clear and evictOldChunks own the manifest declarations.
 
 The browser probe now has a separate cursor_rollback_probe: two stored chunks, failure on the second real IDBCursor.continue after deletion begins, then exact original-chunk equality and one report. Removing the abort should allow partial deletion and fail that assertion, but this mutation has NOT been executed. The probe is prepared, compiled and wasm-linted only. No browser launch was retried. LoadedChunks and this new rollback execution coverage remain OPEN, not inferred from the earlier Chrome run and not closed by wasm clippy.
+
+## Malformed persisted Candle residual (superseded numeric-null policy)
+
+The later NaN codec decision below supersedes this section for null OHLC/volume.
+Its historical 48-case result is not the current structural-case count.
+
+The delegated shared-type decision keeps the six numeric Candle fields strict.
+`malformed_cached_candle_is_a_miss_and_refetches_without_error` exercises the real
+KV backend through `CandleCache::fetch`: all six required fields are independently
+missing, null, strings or booleans, in both ReadThrough and HydrateOnce (48 cases).
+It requires a successful exact-slot fetch, no hydration error, persistence of the
+replacement and a subsequent cache hit without another fetch. The existing
+`malformed_stored_candle_keeps_valid_siblings_and_fetches_only_its_gap` separately
+covers healthy siblings and partial-gap fetching.
+
+`scripts/retained-candle-source.cjs` executes the maintained KV and IndexedDB
+methods. TypeScript retains malformed objects and native clone values; the Rust
+typed refusal remains an accepted divergence, not a lossless cache claim. The
+IndexedDB source witness injects transactions and uses native structuredClone;
+it does not execute a browser database. No null-to-NaN substitution is made.
+
+`scripts/malformed-cache-control.py` changes only the real KV Candle-decoder
+failure branch to return an error. It requires compilation and a named request
+failure, restores exact source bytes, then requires all 48 cases to pass.
+
+
+## Persistent NaN codec: real backends, compiled RED/GREEN
+
+The final codec decision keeps Candle typed f64, keeps KV's existing JSON-null
+write representation, restores null OHLC/volume to NaN on read, and preserves
+native numeric fields through IndexedDB structured clone. Timestamp null,
+missing required fields and wrong kinds remain structural misses.
+
+Test-only commit `1737642256` ran against the unchanged production bodies.
+`filesystem_nan_candles_reload_as_cache_hits_without_a_venue_fetch` compiled and
+failed at `NAN-ROUNDTRIP open`: one venue request instead of zero. The existing
+reopen test and new structural-miss control passed. Logs:
+`/tmp/port-txflow-candle-kv-red.log` and `...-kv-green.log`.
+The compiled Wasm probe also failed against actual Chrome IndexedDB at
+`NAN-CACHE-IDB nan/volume/mode0`: one venue request instead of zero; see
+`/tmp/port-txflow-candle-idb-red.log` and `...-idb-green.log`.
+
+With the codec fix, actual filesystem/KV persistence and reopen pass ten profiles
+(five fields, both read modes), independently asserting stored JSON null, native
+field values, direct backend slots and zero venue fetches. Structural controls
+still refetch exactly once. Actual browser IndexedDB passes 26 profiles: five
+native NaN fields, five preexisting null fields and three structural misses,
+each under both read modes. The browser runner independently executes the
+maintained TS KV and IndexedDB writes, showing JSON null and native NaN
+respectively. It uses real browser transactions, not a replacement backend.
+
+Reproduce from the repository root (run cargo commands sequentially):
+
+```sh
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml -p safe-cex-candle-cache --jobs 1 --test runtime_backends filesystem_
+cargo +1.99.0 build --manifest-path sdk-rs/Cargo.toml -p safe-cex-candle-cache --jobs 1 --target wasm32-unknown-unknown --example indexed_db_probe
+wasm-bindgen sdk-rs/target/wasm32-unknown-unknown/debug/examples/indexed_db_probe.wasm --target web --out-dir sdk-rs/target/nan-codec-probe-green
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" CANDLE_CACHE_PLAYWRIGHT="$PWD/sdk-rs/target/candle-cache-probe-deps/node_modules/playwright/index.mjs" CANDLE_CACHE_BROWSER='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node sdk-rs/safe-cex-candle-cache/scripts/nan-browser-probe.mjs sdk-rs/target/nan-codec-probe-green
+python3 sdk-rs/safe-cex-candle-cache/scripts/malformed-cache-control.py
+```
+
+Playwright is a task-local ignored dependency; select an installed browser with
+CANDLE_CACHE_BROWSER. The structural control compiled with only decoder refusal
+changed to an error, failed the named CACHE-MALFORMED assertion (exit 101), then
+restored exact source bytes and passed all 38 current structural cases. This
+positive browser result does not close the older rollback/fault probe coverage.
+
+Readiness on the merged master base: scoped native all-target tests pass 60,
+with six explicit external-service/source-oracle ignores; the library source
+oracle was separately enabled and all 42 library tests pass. Native and wasm
+all-target Clippy both pass with -D warnings, and changed Rust files pass fmt.
+Full-resolution scoped parity passes 7,459 source rows / 80 public cache items
+with the existing 19 scoped exemptions; extractor check changes zero manifests.
+Required safe-cex-exchange all-features cancellable_future_inventory passes six,
+with the explicit discovery export ignored; no producer pin refresh is needed.
+Logs use `/tmp/port-txflow-candle-{all-targets,lib-all,clippy-native,clippy-wasm,parity,extract,cancellation}.log`.

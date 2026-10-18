@@ -271,7 +271,9 @@ fn setup(mut f: Value, v: Venue, family: &str) -> Bindings {
     }
     let mut e = ExchangeError::new("private fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!("private-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "private-code"
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"private detail"}}));
     Bindings(Rc::new(State {
         f,
@@ -392,24 +394,7 @@ impl PrivateEventBindings for Bindings {
     }
     fn reject_reason(&mut self, data: &EventValue) -> Result<EventValue, Failure> {
         self.0.log(Trace::Reject);
-        let raw = data.read("r")?;
-        let text = if raw.truthy() {
-            raw.text()?
-        } else {
-            String::new()
-        };
-        let record = serde_json::Map::from_iter([("r".into(), json!(text))]);
-        safe_cex_venue_binance::private_order_logic::get_order_reject_reason(&record)
-            .map(|r| {
-                r.map_or(EventValue::Undefined, |r| {
-                    EventValue::enum_value(PrivateEnum::Reject(r))
-                })
-            })
-            .map_err(|e| {
-                let mut err = ExchangeError::new(e.message);
-                err.name = e.name.into();
-                Rc::new(err)
-            })
+        get_order_reject_reason(data)
     }
     fn asset_price(&mut self, asset: &EventValue) -> Result<f64, Failure> {
         let s = &self.0;
@@ -568,7 +553,7 @@ fn projected(s: &State, error: Option<&Failure>) -> Value {
         })
         .collect::<Vec<_>>();
     let effects=s.effects.borrow().iter().map(|e|json!({"op":op_name(e.op),"args":e.args.iter().map(wire).collect::<Vec<_>>(),"identity":identity(s,e),"pending":e.pending})).collect::<Vec<_>>();
-    json!({"name":s.name(),"trace":trace,"effects":effects,"pending":s.flags.get(),"clocks":s.clocks.get(),"priceCalls":s.prices.get(),"eventLength":s.events.borrow().len(),"failure":error.map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))})
+    json!({"name":s.name(),"trace":trace,"effects":effects,"pending":s.flags.get(),"clocks":s.clocks.get(),"priceCalls":s.prices.get(),"eventLength":s.events.borrow().len(),"failure":error.map(|e|json!({"original":Rc::ptr_eq(e,&s.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))})
 }
 fn native_num(value: EventValue, expected: f64, label: &str) {
     let EventValue::Number(actual) = value else {
@@ -633,7 +618,7 @@ fn native_error(
                 "{label}: native error message"
             );
             assert_eq!(
-                e.code,
+                observed_error_code(&e.code),
                 Some(json!("private-code")),
                 "{label}: native error code"
             );
@@ -650,7 +635,11 @@ fn native_error(
             );
             assert_eq!(e.name, name, "{label}: native generated name");
             assert_eq!(e.message, message, "{label}: native generated message");
-            assert_eq!(e.code, None, "{label}: native generated code");
+            assert_eq!(
+                observed_error_code(&e.code),
+                None,
+                "{label}: native generated code"
+            );
             assert_eq!(e.response, None, "{label}: native generated response");
         }
         _ => panic!("{label}: native result/error path mismatch"),
@@ -1585,4 +1574,17 @@ fn pm_account_events() {
 #[ignore = "requires direct TypeScript oracle"]
 fn spot_account_events() {
     spot_account_test()
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

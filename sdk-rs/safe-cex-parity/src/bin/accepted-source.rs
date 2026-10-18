@@ -232,6 +232,91 @@ fn main() {
     }
 }
 
+struct CoreValueReferences {
+    identifiers: std::collections::HashSet<(usize, usize)>,
+    verified_std: bool,
+}
+impl CoreValueReferences {
+    fn record(&mut self, ident: &syn::Ident) {
+        if ident.to_string().trim_start_matches("r#") == "core" {
+            let at = ident.span().start();
+            self.identifiers.insert((at.line, at.column));
+        }
+    }
+}
+impl<'ast> syn::visit::Visit<'ast> for CoreValueReferences {
+    fn visit_pat_ident(&mut self, binding: &'ast syn::PatIdent) {
+        self.record(&binding.ident);
+        syn::visit::visit_pat_ident(self, binding);
+    }
+    fn visit_expr_path(&mut self, value: &'ast syn::ExprPath) {
+        if value.qself.is_none()
+            && value.path.leading_colon.is_none()
+            && value.path.segments.len() == 1
+        {
+            self.record(&value.path.segments[0].ident);
+        }
+        syn::visit::visit_expr_path(self, value);
+    }
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        // Only the authenticated std vec grammar is transparent here.
+        // Generic macro arguments, transcribers and cfg tokens stay opaque.
+        let vector = mac.path.is_ident("vec")
+            || mac.path.segments.len() == 2
+                && mac.path.segments[0].ident == "std"
+                && mac.path.segments[1].ident == "vec";
+        if self.verified_std && vector {
+            let bracket =
+                proc_macro2::Group::new(proc_macro2::Delimiter::Bracket, mac.tokens.clone());
+            if let Ok(expr) =
+                syn::parse2::<syn::Expr>(proc_macro2::TokenTree::Group(bracket).into())
+            {
+                self.visit_expr(&expr);
+            }
+        }
+        syn::visit::visit_macro(self, mac);
+    }
+}
+
+fn core_module_declarations(
+    items: &[syn::Item],
+    identifiers: &mut std::collections::HashSet<(usize, usize)>,
+    ends: &mut Vec<(usize, usize)>,
+) {
+    // Recurse only through modules. A function/impl/const-local module is
+    // not eligible; its identifier remains an ordinary token reference.
+    for item in items {
+        if let syn::Item::Mod(module) = item {
+            if module.ident.to_string().trim_start_matches("r#") == "core" {
+                let ident = module.ident.span().start();
+                identifiers.insert((ident.line, ident.column));
+                let end = syn::spanned::Spanned::span(module).end();
+                ends.push((end.line, end.column));
+            }
+            if let Some((_, items)) = &module.content {
+                core_module_declarations(items, identifiers, ends);
+            }
+        }
+    }
+}
+fn references_core_namespace(
+    tokens: proc_macro2::TokenStream,
+    declarations: &std::collections::HashSet<(usize, usize)>,
+) -> bool {
+    tokens.into_iter().any(|token| match token {
+        proc_macro2::TokenTree::Ident(ident)
+            if ident.to_string().trim_start_matches("r#") == "core" =>
+        {
+            let start = ident.span().start();
+            !declarations.contains(&(start.line, start.column))
+        }
+        proc_macro2::TokenTree::Group(group) => {
+            references_core_namespace(group.stream(), declarations)
+        }
+        _ => false,
+    })
+}
+
 // A module called core cannot redirect a trusted core macro when that spelling
 // is never used as a namespace anywhere in the selected source graph. Ordinary
 // value bindings/references do not resolve in the macro namespace. Inspect raw tokens
@@ -243,93 +328,7 @@ fn unreferenced_core_modules(
     verified_std: bool,
 ) -> Result<std::collections::HashSet<(std::path::PathBuf, usize, usize)>, String> {
     use std::collections::HashSet;
-    use syn::{
-        spanned::Spanned,
-        visit::{self, Visit},
-    };
-
-    struct Values {
-        identifiers: HashSet<(usize, usize)>,
-        verified_std: bool,
-    }
-    impl Values {
-        fn record(&mut self, ident: &syn::Ident) {
-            if ident.to_string().trim_start_matches("r#") == "core" {
-                let at = ident.span().start();
-                self.identifiers.insert((at.line, at.column));
-            }
-        }
-    }
-    impl<'ast> Visit<'ast> for Values {
-        fn visit_pat_ident(&mut self, binding: &'ast syn::PatIdent) {
-            self.record(&binding.ident);
-            visit::visit_pat_ident(self, binding);
-        }
-        fn visit_expr_path(&mut self, value: &'ast syn::ExprPath) {
-            if value.qself.is_none()
-                && value.path.leading_colon.is_none()
-                && value.path.segments.len() == 1
-            {
-                self.record(&value.path.segments[0].ident);
-            }
-            visit::visit_expr_path(self, value);
-        }
-        fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-            // Only the authenticated std vec grammar is transparent here.
-            // Generic macro arguments, transcribers and cfg tokens stay opaque.
-            let vector = mac.path.is_ident("vec")
-                || mac.path.segments.len() == 2
-                    && mac.path.segments[0].ident == "std"
-                    && mac.path.segments[1].ident == "vec";
-            if self.verified_std && vector {
-                let bracket =
-                    proc_macro2::Group::new(proc_macro2::Delimiter::Bracket, mac.tokens.clone());
-                if let Ok(expr) =
-                    syn::parse2::<syn::Expr>(proc_macro2::TokenTree::Group(bracket).into())
-                {
-                    self.visit_expr(&expr);
-                }
-            }
-            visit::visit_macro(self, mac);
-        }
-    }
-
-    fn declarations(
-        items: &[syn::Item],
-        identifiers: &mut HashSet<(usize, usize)>,
-        ends: &mut Vec<(usize, usize)>,
-    ) {
-        // Recurse only through modules. A function/impl/const-local module is
-        // not eligible; its identifier remains an ordinary token reference.
-        for item in items {
-            if let syn::Item::Mod(module) = item {
-                if module.ident.to_string().trim_start_matches("r#") == "core" {
-                    let ident = module.ident.span().start();
-                    identifiers.insert((ident.line, ident.column));
-                    let end = module.span().end();
-                    ends.push((end.line, end.column));
-                }
-                if let Some((_, items)) = &module.content {
-                    declarations(items, identifiers, ends);
-                }
-            }
-        }
-    }
-    fn referenced(
-        tokens: proc_macro2::TokenStream,
-        declarations: &HashSet<(usize, usize)>,
-    ) -> bool {
-        tokens.into_iter().any(|token| match token {
-            proc_macro2::TokenTree::Ident(ident)
-                if ident.to_string().trim_start_matches("r#") == "core" =>
-            {
-                let start = ident.span().start();
-                !declarations.contains(&(start.line, start.column))
-            }
-            proc_macro2::TokenTree::Group(group) => referenced(group.stream(), declarations),
-            _ => false,
-        })
-    }
+    use syn::visit::Visit;
 
     let mut output = HashSet::new();
     for path in paths {
@@ -337,8 +336,8 @@ fn unreferenced_core_modules(
         let syntax = syn::parse_file(&source).map_err(|error| error.to_string())?;
         let mut identifiers = HashSet::new();
         let mut ends = Vec::new();
-        declarations(&syntax.items, &mut identifiers, &mut ends);
-        let mut values = Values {
+        core_module_declarations(&syntax.items, &mut identifiers, &mut ends);
+        let mut values = CoreValueReferences {
             identifiers,
             verified_std,
         };
@@ -346,7 +345,7 @@ fn unreferenced_core_modules(
         let tokens = source
             .parse::<proc_macro2::TokenStream>()
             .map_err(|error| error.to_string())?;
-        if referenced(tokens, &values.identifiers) {
+        if references_core_namespace(tokens, &values.identifiers) {
             return Ok(HashSet::new());
         }
         output.extend(

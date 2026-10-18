@@ -1,3 +1,6 @@
+#[path = "support/oracle_clock.rs"]
+mod oracle_clock;
+
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -153,7 +156,7 @@ impl ReadTransport for Transport {
         let host = self.host.clone();
         let mut call = json!({"op":"http","method":r.method.to_uppercase(),"url":r.url});
         if let Some(body) = &r.body {
-            call["body"] = body.untransformed().unwrap().clone()
+            call["body"] = body.untransformed().unwrap().clone().into_value().unwrap()
         } else if let Some(p) = &r.params {
             call["body"] = p.clone()
         }
@@ -307,8 +310,11 @@ impl ApiHost for ApiImport {
         }
         Ok(())
     }
-    fn serialize(&self, v: &Value) -> Result<String, ExchangeError> {
-        Ok(qs(v))
+    fn serialize(
+        &self,
+        v: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<String, ExchangeError> {
+        Ok(qs(&v.clone().into_value().unwrap()))
     }
     fn hmac_sha256_hex(&self, key: &str, message: &str) -> Result<String, ExchangeError> {
         self.host
@@ -636,6 +642,7 @@ fn run(case: &Value) {
     let i = &case["input"];
     let (v, h, s) = fixture(i);
     let method = i["method"].as_str().unwrap();
+    let clock = oracle_clock::ClockWindow::start();
     let result = match method {
         "updateOrder" => ready(v.amendment.update_order(
             &serde_json::from_value(json!({"order":i["order"],"update":i["update"]})).unwrap(),
@@ -714,13 +721,15 @@ fn run(case: &Value) {
             )
         }
     };
+    let clock = clock.finish();
+    let mut native_orders = json!(s.orders().iter().map(order_value).collect::<Vec<_>>());
+    clock.normalize_orders(&mut native_orders, &case["orders"]);
     for (native, expected) in s.orders().iter().zip(case["orders"].as_array().unwrap()) {
         for (field, n) in [
-            ("price", native.price),
+            ("price", native.price.to_number()),
             ("amount", native.amount),
             ("remaining", native.remaining),
             ("filled", native.filled),
-            ("lastUpdate", native.last_update),
         ] {
             assert_eq!(
                 n.to_bits(),
@@ -815,9 +824,7 @@ fn run(case: &Value) {
         "BINGX-C logs {method}"
     );
     assert_eq!(
-        observe(&json!(
-            s.orders().iter().map(order_value).collect::<Vec<_>>()
-        )),
+        observe(&native_orders),
         observe(&case["orders"]),
         "BINGX-C native orders {method}"
     );
@@ -872,14 +879,18 @@ fn api_factory_matches_actual_typescript() {
             method: c["method"].as_str().unwrap().into(),
             url: c["url"].as_str().unwrap().into(),
             params: Some(c["params"].clone()),
-            body: c.get("data").cloned().map(RestBody::Untransformed),
+            body: c.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             ..Default::default()
         };
         let original = request.clone();
         let prepared = api.prepare(request).unwrap();
         let mut value = json!({"method":prepared.method,"url":prepared.url,"headers":prepared.headers,"params":prepared.params});
         if let Some(body) = &prepared.body {
-            value["data"] = body.untransformed().unwrap().clone();
+            value["data"] = body.untransformed().unwrap().clone().into_value().unwrap();
         }
         assert_eq!(
             observe(&value),
@@ -896,7 +907,14 @@ fn api_factory_matches_actual_typescript() {
                 prepared
                     .params
                     .as_ref()
-                    .or_else(|| prepared.body.as_ref().map(|b| b.untransformed().unwrap()))
+                    .cloned()
+                    .or_else(|| prepared.body.as_ref().map(|b| b
+                        .untransformed()
+                        .unwrap()
+                        .clone()
+                        .into_value()
+                        .unwrap()))
+                    .as_ref()
                     .unwrap()
             )
             .unwrap(),
@@ -1013,7 +1031,7 @@ fn startup_reports_private_task_rejection() {
 }
 
 #[test]
-fn api_nan_field_boundary_is_visible() {
+fn api_nan_field_signs_before_final_json_projection() {
     let c = &corpus()["nanApi"];
     assert_eq!(
         c["serializedNaNAsNull"], true,
@@ -1038,19 +1056,36 @@ fn api_nan_field_boundary_is_visible() {
         url: "/api".into(),
         params: Some(c["input"]["config"]["params"].clone()),
         body: Some(RestBody::Untransformed(
-            c["input"]["config"]["data"].clone(),
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                c["input"]["config"]["data"].clone(),
+            )
+            .unwrap(),
         )),
         ..Default::default()
     };
-    let e = api.prepare(request).unwrap_err();
+    let prepared = api.prepare(request).unwrap();
+    let body = prepared
+        .body
+        .as_ref()
+        .unwrap()
+        .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
+        .unwrap();
     assert_eq!(
-        e.message, "BingX native signing refuses NaN field",
-        "BINGX-C native POST NaN refusal"
+        body, c["prepared"]["data"],
+        "BINGX-C source final JSON retains NaN as null"
     );
     assert_eq!(
-        h.calls.borrow().last().unwrap()["op"],
-        "hmac",
-        "BINGX-C sign before field-number conversion"
+        observe(&json!(*h.calls.borrow())),
+        observe(&c["calls"]),
+        "BINGX-C complete source signing sequence precedes final JSON projection"
+    );
+    let wire: Value = serde_json::from_str(body.as_str().unwrap()).unwrap();
+    assert!(
+        wire["quantity"].is_null(),
+        "BINGX-C NaN projects only at the final JSON boundary"
     );
 }
 
@@ -1084,7 +1119,10 @@ fn api_prototype_key_refusal_is_visible() {
             method: "post".into(),
             url: "/api".into(),
             body: Some(RestBody::Untransformed(
-                c["input"]["config"]["data"].clone(),
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    c["input"]["config"]["data"].clone(),
+                )
+                .unwrap(),
             )),
             ..Default::default()
         })

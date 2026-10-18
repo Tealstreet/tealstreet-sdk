@@ -933,3 +933,46 @@ classifies only the selected22 native/default decoder owners. Other owners,
 undefined-only records, functions, aliases, receiver policies, local helpers,
 construction, feature and wasm accepted behavior remain independent obligations.
 No whole-venue completion is claimed.
+
+
+## Twenty-three scalar/validation helper bodies (2026-10-17)
+
+The full actual signer-utils source and selected exchange/utility declarations
+were read along with every native body. Production bodies remain byte-identical;
+only cfg(test) witness wiring is appended. The cohort individually separates16
+raw-value admission/projection/coercion decoders from7 typed/non-decoder roles.
+Native witnesses pass23 /zero failed /zero ignored on634 independently authored
+cases, including prepared Undefined/BigInt/NaN/nonfinite/negative zero, exact
+error strings, range/type boundaries, private display projection, native RandomId
+variants, entropy/clock counts, fee Math callback inputs/errors and borrowed
+prefix-slice pointer identity. Their fixed census and actual comparison counts
+are checked. The16 decoder contracts contain549 independently authored cases;
+all prior master contract values are preserved.
+
+The initial test-adapter return-type build error and initial unused-adapter
+production compile failure are tooling failures and are excluded from proof.
+No expected outcome was changed in response to native output.
+
+All23 isolated semantic controls compiled and failed their exact named native
+assertion at exit101. The16 decoder controls also failed the selected production
+owner's actual output comparison. Each restoration passed all23 native tests;
+restored decoder runs additionally passed all16 production outputs and7 explicit
+classifications. The final restoration verified all three source modules exactly
+and repeated the native/production checks. Classification receipts for the seven
+non-decoders are not claimed as runtime decoder coverage.
+
+After merging master `a5284334d4` without conflicts, the full scoped suite passes
+**260 / zero failed / zero ignored**, across14 target receipts including live TS
+oracles. Host and wasm all-target Clippy pass with warnings denied (19.04s /
+43.97s). Final fresh native/default production verification passes **16 runtime
+results /7 classifications /zero failed owners**, covering549 authored decoder
+cases. Frozen install, format and the maintained structural gates pass:7459
+manifest rows /17214 public items globally;287 Apex public obligations with the
+same82 existing exemptions and zero new ones. Cached structural-checker reuse
+was checked against its actual Rust/Cargo/lock/config inputs; only documentation
+differed. All48 master Apex contract values are preserved, plus23 new rows.
+
+Independent draft review found no issues. CodeRabbit returned a review limit;
+that status is not evidence of a completed bot review. These results classify
+only the selected23 native/default bodies; remaining owners, aliases, receiver
+policies, locals, construction, feature and wasm accepted behavior stay open.

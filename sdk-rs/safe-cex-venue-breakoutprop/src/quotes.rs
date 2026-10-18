@@ -1,18 +1,18 @@
 //! Market and quote reads over shared Store, transport requests and numeric ingress.
-use crate::types::{Instrument, InstrumentDetails, TickerResponse};
-use safe_cex_exchange::runtime::ExchangeError;
+use safe_cex_exchange::{
+    js_runtime::value::{Js, Thrown, from_json, to_typed},
+    runtime::ExchangeError,
+};
 use safe_cex_num::{
     js_number_output, js_truthy,
-    numeric_ingress::{
-        JsNumberInput, JsNumberOutput, js_deserialize_passthrough, js_from_value_ref,
-    },
+    numeric_ingress::{JsNumberInput, JsNumberOutput, js_deserialize_passthrough},
 };
 use safe_cex_store::Store;
 use safe_cex_transport::provider::{RestBody, RestRequest};
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision, Ticker,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::future::Future;
 #[derive(Serialize)]
@@ -32,33 +32,8 @@ fn raw(input: &JsNumberInput) -> Result<Value, ExchangeError> {
         .map(|r| r.value)
         .map_err(|e| ExchangeError::new(e.to_string()))
 }
-struct Combined {
-    instrument: Instrument,
-    instrument_details: InstrumentDetails,
-}
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "Combined", rename_all = "camelCase")]
-struct CombinedWire {
-    instrument: Instrument,
-    instrument_details: InstrumentDetails,
-}
-
-impl Serialize for Combined {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        CombinedWire::serialize(self, serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Combined {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        CombinedWire::deserialize(safe_cex_types::strict_decode::object(deserializer))
-    }
-}
-
-impl JsNumberOutput for Combined {
-    fn check_number_output(&self) {
-        js_number_output!(self,struct {instrument,instrument_details});
-    }
+fn market_property<T: serde::de::DeserializeOwned>(source: &Js, key: &str) -> Result<T, Thrown> {
+    to_typed(&source.get(key)?)
 }
 fn report(
     error: ExchangeError,
@@ -91,56 +66,71 @@ where
         if !js_truthy(Some(&raw)) || raw.as_array().is_some_and(Vec::is_empty) {
             return Ok(store.markets().to_vec());
         }
-        // ts-bug CHOSEN: declared response validation precedes mapping.
-        let rows = raw
-            .as_array()
-            .ok_or_else(|| ExchangeError::new("Expected combined instrument array"))?;
-        let mut markets = Vec::with_capacity(rows.len());
-        for (index, row) in rows.iter().enumerate() {
-            let row: Combined =
-                js_from_value_ref(row).map_err(|e| ExchangeError::new(e.to_string()))?;
-            let Some(tier) = row.instrument_details.margin_rate.tiers.first() else {
-                report(
-                    ExchangeError::new("Cannot read properties of undefined (reading 'value')"),
-                    logger,
+        let mapped = (|| -> Result<Vec<Market>, Thrown> {
+            let rows = raw
+                .as_array()
+                .ok_or_else(|| Thrown::type_error("data.map is not a function"))?;
+            let mut markets = Vec::with_capacity(rows.len());
+            for row in rows {
+                let row_value = from_json(row);
+                let instrument = row_value.get("instrument")?;
+                let details = row_value.get("instrumentDetails")?;
+                let raw_symbol = instrument.get("symbol")?;
+                let base = to_typed(
+                    &raw_symbol.call_method("replace", vec![Js::str("USD"), Js::str("")])?,
                 )?;
-                return Ok(store.markets().to_vec());
-            };
-            markets.push(Market {
-                id: row.instrument.symbol.clone(),
-                symbol: row.instrument.symbol.clone(),
-                pretty_symbol: None,
-                base: row.instrument.symbol.replacen("USD", "", 1),
-                quote: "USD".into(),
-                active: row.instrument_details.trading_status == "FULL",
-                precision: MarketPrecision {
-                    amount: row.instrument_details.min_order_size_increment,
-                    price: row.instrument.price_increment,
-                },
-                limits: MarketLimits {
-                    amount: MarketLimitsAmount {
-                        min: row.instrument_details.min_order_size,
-                        max: row.instrument_details.max_order_size.value,
+                let symbol: String = to_typed(&raw_symbol)?;
+                markets.push(Market {
+                    id: symbol.clone(),
+                    symbol,
+                    pretty_symbol: None,
+                    base,
+                    quote: "USD".into(),
+                    active: details
+                        .get("tradingStatus")?
+                        .strict_equals(&Js::str("FULL")),
+                    precision: MarketPrecision {
+                        amount: market_property(&details, "minOrderSizeIncrement")?,
+                        price: market_property(&instrument, "priceIncrement")?,
                     },
-                    leverage: MarketLimitsLeverage {
-                        min: 1.0,
-                        max: 1.0 / tier.value,
+                    limits: MarketLimits {
+                        amount: MarketLimitsAmount {
+                            min: market_property(&details, "minOrderSize")?,
+                            max: market_property(&details.get("maxOrderSize")?, "value")?,
+                        },
+                        leverage: MarketLimitsLeverage {
+                            min: 1.0,
+                            max: 1.0
+                                / details
+                                    .get("marginRate")?
+                                    .get("tiers")?
+                                    .get("0")?
+                                    .get("value")?
+                                    .to_number()?,
+                        },
+                        price: None,
                     },
-                    price: None,
-                },
-                contract_size: Some(row.instrument.lot_size),
-                is_expiring: Some(false),
-                is_inverse: Some(false),
-                is_spot: Some(false),
-                is_perpetual: None,
-                is_read_only: Some(false),
-                info: Some(raw[index].clone()),
-                taker_fee: Some(0.0),
-                maker_fee: Some(0.0),
-                option: None,
-            });
+                    contract_size: Some(market_property(&instrument, "lotSize")?),
+                    is_expiring: Some(false),
+                    is_inverse: Some(false),
+                    is_spot: Some(false),
+                    is_perpetual: None,
+                    is_read_only: Some(false),
+                    info: Some(row.clone()),
+                    taker_fee: Some(0.0),
+                    maker_fee: Some(0.0),
+                    option: None,
+                });
+            }
+            Ok(markets)
+        })();
+        match mapped {
+            Ok(markets) => Ok(markets),
+            Err(error) => {
+                report(error.to_exchange_error(), logger)?;
+                Ok(store.markets().to_vec())
+            }
         }
-        Ok(markets)
     }
 }
 pub fn fetch_tickers_for_symbols<S, A, R>(
@@ -165,7 +155,7 @@ where
                 method: "POST".into(),
                 url: "marketdata".into(),
                 body: Some(RestBody::Untransformed(
-                    json!({"eventTypes":[{"type":"Quote"}],"symbols":symbols,"account":account}),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"eventTypes":[{"type":"Quote"}],"symbols":symbols,"account":account})).map_err(|error|ExchangeError::new(error.to_string()))?,
                 )),
                 ..RestRequest::default()
             })
@@ -180,30 +170,46 @@ where
             }
         };
         let data = raw(&input)?;
-        if data.is_null() {
-            report(
-                ExchangeError::new("Cannot read properties of null (reading 'events')"),
-                logger,
-            )?;
-            return Ok(Some(store.tickers().to_vec()));
-        }
-        if data.get("events").is_none_or(Value::is_null) {
-            return Ok(None);
-        }
-        // ts-bug CHOSEN declared records; malformed event shapes refuse.
-        let typed: TickerResponse = input
-            .decode()
-            .map_err(|e| ExchangeError::new(e.to_string()))?;
-        let mut tickers = Vec::with_capacity(typed.events.len());
-        for (index, event) in typed.events.iter().enumerate() {
+        let mapped: Result<_, Thrown> = (|| {
+            let events = from_json(&data).get("events")?;
+            if events.is_nullish() {
+                return Ok(None);
+            }
+            let events = events
+                .array_values()
+                .ok_or_else(|| Thrown::type_error("data.events?.map is not a function"))?;
+            let mut fields = Vec::with_capacity(events.len());
+            for (index, event) in events.iter().enumerate() {
+                fields.push((
+                    event.get("symbol")?,
+                    event.get("bid")?,
+                    event.get("ask")?,
+                    index,
+                ));
+            }
+            Ok(Some(fields))
+        })();
+        let fields = match mapped {
+            Ok(Some(fields)) => fields,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                report(error.to_exchange_error(), logger)?;
+                return Ok(Some(store.tickers().to_vec()));
+            }
+        };
+        let mut tickers = Vec::with_capacity(fields.len());
+        for (symbol, bid, ask, index) in fields {
+            let symbol: String = to_typed(&symbol)?;
+            let bid = to_typed(&bid)?;
+            let ask = to_typed(&ask)?;
             tickers.push(Ticker {
-                id: event.symbol.clone(),
-                symbol: event.symbol.clone(),
-                bid: event.bid,
-                ask: event.ask,
-                last: event.bid,
-                mark: event.bid,
-                index: event.bid,
+                id: symbol.clone(),
+                symbol,
+                bid,
+                ask,
+                last: bid,
+                mark: bid,
+                index: bid,
                 mid_price: None,
                 percentage: 0.0,
                 open_interest: 0.0,

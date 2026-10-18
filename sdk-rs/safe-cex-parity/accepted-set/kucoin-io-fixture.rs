@@ -83,7 +83,7 @@ pub fn order(value: &safe_cex_types::Order) -> serde_json::Value {
     serde_json::json!({"id":value.id,"symbol":value.symbol,
         "side":format!("{:?}",value.side),"type":format!("{:?}",value.r#type),
         "status":format!("{:?}",value.status),"tif":format!("{:?}",value.time_in_force),
-        "bits":([value.price,value.amount,value.filled,value.remaining,value.last_update]
+        "bits":([value.price.to_number(),value.amount,value.filled,value.remaining,value.last_update]
             .map(|v|format!("{:016x}",v.to_bits()))),"reduce":value.reduce_only,
         "remainingNativeBits":value.extra.as_ref().and_then(|v|v.remaining_native).map(|v|format!("{:016x}",v.to_bits())),
         "infoId":value.info.as_ref().and_then(|v|v.get("id"))})

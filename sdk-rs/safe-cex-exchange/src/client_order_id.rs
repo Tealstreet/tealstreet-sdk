@@ -1,8 +1,8 @@
 use crate::runtime::ExchangeRuntime;
-use safe_cex_types::{Order, OrderType, PlaceOrderOpts};
+use safe_cex_types::{Order, OrderType, PlaceOrderOpts, PreparedOrderOpts};
 use std::rc::Rc;
 
-type ShapePredicate = Rc<dyn Fn(&PlaceOrderOpts) -> bool>;
+type ShapePredicate = Rc<dyn Fn(&PreparedOrderOpts) -> bool>;
 pub struct ClientOrderIdRule {
     pub label: String,
     pub requirement: String,
@@ -89,11 +89,12 @@ pub fn default_mint_candidates(runtime: &dyn ExchangeRuntime) -> Vec<String> {
         (100_000_000.0 + (runtime.random() * 900_000_000.0).floor()).to_string(),
     ]
 }
-pub fn client_order_id_shape_message(label: &str, options: &PlaceOrderOpts) -> String {
+pub fn client_order_id_shape_message(label: &str, options: impl Into<PreparedOrderOpts>) -> String {
+    let options = options.into();
     let kind = serde_json::to_value(options.r#type).unwrap();
     format!(
         "{label} clientOrderId cannot be honored for this order shape (type={}{}{}{}{}); caller client order IDs are supported only on plain Limit/Market orders",
-        kind.as_str().unwrap(),
+        kind.as_str().unwrap_or("undefined"),
         if options.stop_loss.is_some() {
             " +stopLoss"
         } else {
@@ -122,9 +123,12 @@ pub fn client_order_id_split_message(label: &str) -> String {
 pub fn same_client_order_id(value: Option<&serde_json::Value>, id: &str) -> bool {
     value.is_some_and(|value| !value.is_null() && js_string(value) == id)
 }
-pub fn is_regular_client_order_shape(order: &PlaceOrderOpts) -> bool {
-    matches!(order.r#type, OrderType::Limit | OrderType::Market)
-        && order.trigger_price.is_none()
+pub fn is_regular_client_order_shape(order: impl Into<PreparedOrderOpts>) -> bool {
+    let order = order.into();
+    matches!(
+        order.r#type,
+        safe_cex_types::ModelField::Value(OrderType::Limit | OrderType::Market)
+    ) && order.trigger_price.is_none()
         && order.stop_loss.is_none()
         && order.take_profit.is_none()
 }
@@ -165,7 +169,7 @@ pub fn order_carries_client_order_id(order: &Order, id: &str) -> bool {
     {
         return true;
     }
-    let Some(info) = order.info.as_ref() else {
+    let Some(info) = order.info.value() else {
         return false;
     };
     [

@@ -39,7 +39,7 @@ pub(super) fn settings(host: &Host) -> ExchangeSettings {
             }),
             ClientOrderIdRuleOverrides {
                 mint: Some(Rc::new(move || {
-                    format!("tealstreet-{}", runtime.unique_id())
+                    format!("tealstreet-{}", super::crypto::uuid(runtime.as_ref()))
                 })),
                 ..Default::default()
             },
@@ -111,7 +111,7 @@ impl CoinbaseConstructionHost for Host {
         ))
     }
     fn uuid(&self) -> Result<String, PortfolioFailure> {
-        Ok(self.shared.runtime.unique_id())
+        Ok(super::crypto::uuid(self.shared.runtime.as_ref()))
     }
     fn create_secondary(
         &self,

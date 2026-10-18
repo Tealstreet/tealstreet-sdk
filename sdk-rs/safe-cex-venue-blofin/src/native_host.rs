@@ -25,7 +25,7 @@ use safe_cex_transport::{
     TransportError, TransportFuture, rate_limit::RateLimitClock, secondary::SecondaryKeyClients,
     socket::SocketFrame,
 };
-use safe_cex_types::{ExchangeName, ExchangeOptions, Order, PlaceOrderOpts};
+use safe_cex_types::{ExchangeName, ExchangeOptions, Order, PreparedOrderOpts};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -335,7 +335,7 @@ impl BlofinExchangeHost for NativeHost {
         message: Option<&Value>,
     ) -> Result<(), ExchangeError> {
         let input = message.map_or(ExchangeErrorInput::Missing, |v| {
-            ExchangeErrorInput::Raw(v.clone())
+            ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(v))
         });
         base.get().emit_and_log_error(input, None, None)
     }
@@ -445,7 +445,7 @@ impl BlofinExchangeHost for NativeHost {
         &self,
         base: &NativeBase,
         _: &ClientOrderIdRule,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Option<String>, ExchangeError> {
         base.get().resolve_caller_client_order_id(opts)
     }
@@ -460,7 +460,7 @@ impl BlofinExchangeHost for NativeHost {
     fn assert_caller_client_order_ids(
         &self,
         base: &NativeBase,
-        opts: &[PlaceOrderOpts],
+        opts: &[PreparedOrderOpts],
     ) -> Result<(), ExchangeError> {
         base.get().assert_caller_client_order_ids(opts)
     }
@@ -488,7 +488,7 @@ impl RateLimitClock for ApiClock {
 }
 impl crate::api::ApiRuntime for ApiClock {
     fn timestamp(&self) -> f64 {
-        self.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time()
     }
     fn nonce(&self) -> String {
         uuid()
@@ -607,7 +607,10 @@ impl WsParent for Parent {
         self.live()?.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.live()?.emit(event, Value::String(message.into()))
+        self.live()?.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.live()?.sync_socket_health_to_store()
@@ -751,6 +754,12 @@ impl PublicStreamHost for PublicHost {
         Ok(())
     }
     fn send(&self, frame: &str) -> Result<(), ExchangeError> {
+        if frame == "ping" {
+            // Share the exact timestamp sampled by the venue ping body with
+            // BaseWebSocket, which owns pong latency and its next-ping timer.
+            self.socket
+                .set_ping_at(owner(&self.stream)?.core.ping_at.get());
+        }
         self.socket.send(frame)
     }
     fn performance_now(&self) -> f64 {
@@ -771,15 +780,14 @@ impl PublicStreamHost for PublicHost {
                 let Some(stream) = stream.borrow().upgrade() else {
                     return Ok(());
                 };
-                let added: Vec<String> = data
-                    .get("added")
-                    .and_then(Value::as_array)
-                    .map(|rows| {
-                        rows.iter()
-                            .filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_owned))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let added = data
+                    .get("added")?
+                    .array_values()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|row| row.get("id").ok())
+                    .filter_map(|id| id.as_str().map(|units| String::from_utf16_lossy(units)))
+                    .collect::<Vec<_>>();
                 stream.on_markets_changed(&added).map_err(public_error)
             }),
         );
@@ -812,9 +820,15 @@ impl PublicStreamHost for PublicHost {
         self.base()?.log(message, "warning")
     }
     fn emit_warning(&self, message: &str, force_toast: bool) -> Result<(), ExchangeError> {
-        self.base()?.emit(
+        self.base()?.emit_args(
             "warning",
-            json!({"message": message, "forceToast": force_toast}),
+            &[
+                safe_cex_exchange::js_runtime::value::Js::str(message),
+                safe_cex_exchange::js_runtime::value::Js::object(vec![(
+                    "forceToast",
+                    safe_cex_exchange::js_runtime::value::Js::Bool(force_toast),
+                )]),
+            ],
         )
     }
 }
@@ -929,6 +943,12 @@ impl pc::PrivateStreamHost for PrivateHost {
         })))
     }
     fn send_with_log(&self, frame: &str) -> Result<(), ExchangeError> {
+        if frame == "ping" {
+            // Share the exact timestamp sampled by the venue ping body with
+            // BaseWebSocket, which owns pong latency and its next-ping timer.
+            self.socket
+                .set_ping_at(owner(&self.stream)?.core.ping_at.get());
+        }
         self.socket.send_with_log(frame)
     }
     fn performance_now(&self) -> f64 {
@@ -938,7 +958,7 @@ impl pc::PrivateStreamHost for PrivateHost {
         uuid()
     }
     fn timestamp_ms(&self) -> f64 {
-        self.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
     fn remote_signer_present(&self) -> bool {
         self.base
@@ -1091,17 +1111,10 @@ impl PrivateDataHost for PrivateHost {
     fn emit_fill(&self, fill: PrivateFill) -> Result<(), ExchangeError> {
         self.base()?.emit(
             "fill",
-            json!({
-                "id": fill.id,
-                "orderId": fill.order_id,
-                "side": fill.side,
-                "symbol": fill.symbol,
-                "price": fill.price,
-                "amount": fill.amount,
-                "timestamp": fill.timestamp,
-            }),
+            safe_cex_exchange::js_runtime::value::from_typed(&fill)?,
         )
     }
+
     fn emit_mapping_error(&self, message: &str) -> Result<(), ExchangeError> {
         self.base()?
             .emit_and_log_error(ExchangeErrorInput::Message(message.into()), None, None)

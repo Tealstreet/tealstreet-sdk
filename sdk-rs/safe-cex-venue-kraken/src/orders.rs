@@ -161,39 +161,41 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
                 None
             };
             orders.push(Order {
-                client_order_id: None,
+                client_order_id: (None).into(),
                 id,
-                parent_id: None,
-                status: OrderStatus::Open,
+                parent_id: (None).into(),
+                status: safe_cex_types::ModelField::Value(OrderStatus::Open),
                 symbol,
-                r#type: order_type,
-                side,
-                price,
+                r#type: (order_type).into(),
+                side: side.into(),
+                price: price.into(),
                 amount: unfilled + filled,
                 filled,
                 remaining: number(nullish(row, &["unfilledSize"]))?,
-                reduce_only: js_truthy(row.get("reduceOnly")) || js_truthy(row.get("reduce_only")),
-                close: None,
-                info: Some(row.clone()),
-                time_in_force: Some(time_in_force),
+                reduce_only: (js_truthy(row.get("reduceOnly"))
+                    || js_truthy(row.get("reduce_only")))
+                .into(),
+                close: (None).into(),
+                info: (Some(row.clone())).into(),
+                time_in_force: (Some(time_in_force)).into(),
                 last_update,
-                trigger_type: None,
+                trigger_type: (None).into(),
                 tp_trigger_type: if matches!(
                     order_type,
                     OrderType::TakeProfit | OrderType::TrailingStopLoss
                 ) {
-                    trigger
+                    (trigger).into()
                 } else {
-                    None
+                    (None).into()
                 },
                 sl_trigger_type: if order_type == OrderType::StopLoss {
-                    trigger
+                    (trigger).into()
                 } else {
-                    None
+                    (None).into()
                 },
-                take_profit: None,
-                stop_loss: None,
-                extra: None,
+                take_profit: (None).into(),
+                stop_loss: (None).into(),
+                extra: (None).into(),
             });
         }
         Ok(orders)

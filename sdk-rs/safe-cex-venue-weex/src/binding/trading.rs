@@ -52,8 +52,16 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 step.to_number()?,
             )))
         },
-        uuid: |h| Ok(Js::str(&h.0.shared.runtime.unique_id())),
-        method: |h, name| v::method(h, &h.this(), name),
+        uuid: |h| {
+            Ok(Js::str(
+                &h.0.shared.runtime.unique_id().replace(['-', '_'], ""),
+            ))
+        },
+        method: |h, name| match name {
+            // Resolve the lowered Store operation with its source receiver.
+            "updateStoredOrder" => v::method(h, &h.root("store")?, "updateOrder"),
+            _ => v::method(h, &h.this(), name),
+        },
         call: v::invoke,
         call_async: v::invoke_async,
         request: |h, method, endpoint, data| {
@@ -134,10 +142,12 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 .truthy())
         },
         has: |_, value, key| Ok(value.has_own(key)),
-        valid_order_id: |value| match value {
-            Js::String(v) => !v.is_empty(),
-            Js::Number(n) => n.is_finite() && *n > 0.0,
-            _ => false,
+        valid_order_id: |value| {
+            let Js::String(units) = value else {
+                return false;
+            };
+            units.first().is_some_and(|unit| (49..=57).contains(unit))
+                && units.iter().all(|unit| (48..=57).contains(unit))
         },
         markets_by_symbol: |h| h.root("store.marketsBySymbol"),
         lookup: |_, map, key| map.get_key(&key.to_js_string()?),
@@ -153,7 +163,7 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 leverage.to_number()?,
             ))
         },
-        extract_array: |h, value| v::extract(h, value, &["items", "list", "rows"]),
+        extract_array: |h, value| v::extract(h, value, &[]),
         join: |_, value, sep| value.call_method("join", std::vec![Js::str(sep)]),
         unique_id: |h, value| {
             h.global("uniqBy")?

@@ -5,6 +5,7 @@ use crate::{
 };
 use safe_cex_exchange::{
     exchange::BaseExchange,
+    js_runtime::value::Js,
     runtime::{ExchangeError, ExchangeFuture, Listener},
     socket_lifecycle::SocketSlot,
     websocket::{BaseWebSocket, WsRuntime},
@@ -23,6 +24,7 @@ pub(super) struct PublicTopics {
     category: &'static str,
     active_symbols: bool,
     current: Topics,
+    streams: super::streams::Topics,
     active_listener: Option<String>,
     markets_listener: RefCell<Option<String>>,
 }
@@ -64,19 +66,25 @@ fn sync(parent: &BybitExchange, topics: &Topics) -> Result<(), ExchangeError> {
     )?;
     Ok(())
 }
-fn native_markets(values: &[Value]) -> primary::Markets {
-    Rc::new(RefCell::new(
-        values
-            .iter()
-            .filter(|value| !safe_cex_num::js_truthy(value.get("option")))
-            .map(|value| {
-                Rc::new(RefCell::new(primary::Market {
-                    symbol: value["symbol"].as_str().unwrap_or_default().into(),
-                    quote: value["quote"].as_str().unwrap_or_default().into(),
-                }))
-            })
-            .collect(),
-    ))
+fn native_markets(values: &[Js]) -> Result<primary::Markets, ExchangeError> {
+    let mut markets = Vec::new();
+    for value in values {
+        if value.get("option")?.truthy() {
+            continue;
+        }
+        let string = |key| -> Result<String, ExchangeError> {
+            Ok(value
+                .get(key)?
+                .as_str()
+                .map(|units| String::from_utf16_lossy(units))
+                .unwrap_or_default())
+        };
+        markets.push(Rc::new(RefCell::new(primary::Market {
+            symbol: string("symbol")?,
+            quote: string("quote")?,
+        })));
+    }
+    Ok(Rc::new(RefCell::new(markets)))
 }
 fn send(weak: &Weak<BaseWebSocket>, frame: &str) -> Result<(), ExchangeError> {
     match weak.upgrade() {
@@ -93,6 +101,10 @@ impl PublicTopics {
         base: &BaseExchange,
     ) -> Self {
         let current = Rc::new(RefCell::new(json!([])));
+        let streams = parent
+            .upgrade()
+            .expect("the exchange owns public socket construction")
+            .subscription_topics(category);
         // Dedicated Spot and Inverse register this before their first dial.
         // The primary optional inverse socket remains category-wide.
         let dedicated_inverse =
@@ -135,6 +147,7 @@ impl PublicTopics {
             category,
             active_symbols,
             current,
+            streams,
             active_listener,
             markets_listener: RefCell::new(None),
         }
@@ -143,9 +156,11 @@ impl PublicTopics {
         let topics = self.current.borrow().clone();
         let sender = Rc::downgrade(socket);
         let runtime = self.runtime.clone();
+        let mut subscriptions = serde_json::Map::from_iter([("tickers".into(), topics)]);
+        subscriptions.extend(self.streams.borrow().clone());
         // The canonical body sends the first chunk before yielding its async tail.
         let operation = lifecycle::subscribe(
-            move || Ok(serde_json::Map::from_iter([("tickers".into(), topics)])),
+            move || Ok(subscriptions),
             move |frame| send(&sender, frame),
             move |ms| runtime.sleep(ms),
         );
@@ -162,9 +177,7 @@ impl PublicTopics {
             let Some(socket) = weak.upgrade() else {
                 return Ok(());
             };
-            // The emitter's native market records have already crossed the shared
-            // typed Store boundary; no arbitrary JS getter/string coercion is claimed.
-            let added = payload["added"].as_array().cloned().unwrap_or_default();
+            let added = payload.get("added")?.array_values().unwrap_or_default();
             let topics = topics.clone();
             let output_topics = topics.clone();
             let has_ws = socket.has_websocket();
@@ -175,7 +188,15 @@ impl PublicTopics {
                 Box::pin(ticker::on_markets_changed(
                     added
                         .iter()
-                        .filter_map(|m| m["symbol"].as_str().map(str::to_owned))
+                        .map(|market| -> Result<Option<String>, ExchangeError> {
+                            Ok(market
+                                .get("symbol")?
+                                .as_str()
+                                .map(|units| String::from_utf16_lossy(units)))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter()
+                        .flatten()
                         .collect(),
                     move || has_ws,
                     move || disposed,
@@ -186,7 +207,7 @@ impl PublicTopics {
                 ))
             } else {
                 Box::pin(primary::on_markets_changed(
-                    native_markets(&added),
+                    native_markets(&added)?,
                     move || Ok(has_ws),
                     move || Ok(disposed),
                     move || Ok(category.into()),
@@ -264,9 +285,11 @@ impl PublicTopics {
                 },
                 || self.start_subscribe(&socket),
                 || super::ping(&socket),
-                // No OHLCV listeners are installed by this facade. Their recovery
-                // binding remains a separately pending source row.
-                || Ok(()),
+                || {
+                    parent
+                        .candle_recovery(&socket, self.category)
+                        .arm_existing()
+                },
                 || Ok(handler.clone()),
                 || Ok(off),
                 || Ok(on),

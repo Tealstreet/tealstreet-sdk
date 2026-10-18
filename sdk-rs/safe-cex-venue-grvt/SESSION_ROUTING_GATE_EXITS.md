@@ -1,4 +1,4 @@
-# GRVT session routing gate exits
+# GRVT session routing gate exits (historical snapshot)
 
 Base: `3a957718fe445a833bb10a464e16e7cc6c585276` (integration). Fresh branch:
 `feat/rust-grvt-session-routing`. No unreviewed feature branch is an ancestor
@@ -130,3 +130,17 @@ crate/dependency, oracle-input comparisons above against 7722: exit 0 each.
 Also compared GRVT manifests: exit 0. Cargo.lock still differs only for OKX.
 Pinned extractor check at 310b: exit 0, same 7341/512 census, would update 0
 manifests, 0 added/orphaned; output inspected. `git diff --check`: exit 0.
+
+## Uncalled helper retirement
+
+The isolated lastSegment group and its eight fake-host/source cases were removed
+with the uncalled generic helper. The nine-group/92-case table above is historical;
+the maintained session target retains eight groups and84 source cases. Production
+isGrvtRead still uses the shared transport predicate, which owns its path split.
+
+Retirement checks: retained production API prefix is byte-identical, and the
+eight retained live-source groups/84 cases equal the original oracle output.
+Production exchange_binding29 and session_routing8 pass, including actual private
+orders/fills/positions and balance UPNL. Scoped parity7459rows/538items passes.
+Native/wasm strict scoped Clippy, all-features cancellation6pass/1exportignore,
+and fmt/diff checks pass. No retained function body or cancellation pin changed.

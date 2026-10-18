@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/phemex/phemex.exchange.ts"
-rust_files = [ "safe-cex-venue-phemex/src/utilities.rs", "safe-cex-venue-phemex/src/account.rs", "safe-cex-venue-phemex/src/ticker_reads.rs", "safe-cex-venue-phemex/src/validation.rs", "safe-cex-venue-phemex/src/ticker_parser.rs", "safe-cex-venue-phemex/src/session_control.rs", "safe-cex-venue-phemex/src/position_control.rs", "safe-cex-venue-phemex/src/rest_account_control.rs", "safe-cex-venue-phemex/src/rest_order_control.rs", "safe-cex-venue-phemex/src/rest_data.rs", "safe-cex-venue-phemex/src/start_order_formatting.rs", "safe-cex-venue-phemex/src/binding/exchange.rs", "safe-cex-venue-phemex/src/binding/mod.rs", "safe-cex-venue-phemex/src/binding/rt.rs" ]
+rust_files = [ "safe-cex-venue-phemex/src/utilities.rs", "safe-cex-venue-phemex/src/account.rs", "safe-cex-venue-phemex/src/ticker_reads.rs", "safe-cex-venue-phemex/src/validation.rs", "safe-cex-venue-phemex/src/ticker_parser.rs", "safe-cex-venue-phemex/src/session_control.rs", "safe-cex-venue-phemex/src/position_control.rs", "safe-cex-venue-phemex/src/rest_account_control.rs", "safe-cex-venue-phemex/src/rest_order_control.rs", "safe-cex-venue-phemex/src/rest_data.rs", "safe-cex-venue-phemex/src/start_order_formatting.rs", "safe-cex-venue-phemex/src/binding/exchange.rs", "safe-cex-venue-phemex/src/binding/mod.rs", "safe-cex-venue-phemex/src/binding/rt.rs", "safe-cex-venue-phemex/src/binding/methods.rs" ]
 
 [[symbol]]
 ts = "PhemexExchange"
@@ -246,9 +246,9 @@ note = "Control and inline host projections extracted as safe-cex-venue-phemex/s
 ts = "PhemexExchange.cancelSymbolOrders"
 kind = "field-fn"
 layer = "mirror"
-rs = [ "safe-cex-venue-phemex/src/rest_order_control.rs::cancel_symbol_orders" ]
+rs = [ "safe-cex-venue-phemex/src/binding/methods.rs::async_method" ]
 status = "ported"
-note = "Control and inline host projections extracted as safe-cex-venue-phemex/src/rest_order_control.rs::cancel_symbol_orders. Project current store orders filter with strict symbol equality, then await current cancelOrders member with the fresh array of original order references. No new catch or return payload is introduced. Generic symbol/filter/result/error carriers preserve source identity and UTF-16 values. Actual-source tests/rest-account-order-oracle.cjs and decoded-native tests/rest_account_orders.rs establish request, store, native binary64/UTF-16, identity and Pending continuation assertions; one compiled production control per row discriminates with 101 then restored 0. Production does not convert opaque models or errors through JSON."
+note = "Renamed production target `safe-cex-venue-phemex/src/binding/methods.rs::async_method`. Its cancelSymbolOrders branch filters the real Store with strict symbol equality and awaits the concrete cancellation client. The unused rest_order_control callback copy and its fake-only test were removed. Native witness: binding::exchange::order_regressions::symbol_cancel_uses_the_live_store_filter_and_real_cancellation_client checks the exact signed DELETE query, selected IDs and matching/unrelated Store statuses."
 
 [[symbol]]
 ts = "PhemexExchange.updateOrder"

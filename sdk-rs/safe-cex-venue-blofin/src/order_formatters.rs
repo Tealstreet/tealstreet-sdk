@@ -9,7 +9,7 @@ use safe_cex_num::{adjust, js_number, js_number_string, js_string, js_truthy, pa
 use safe_cex_store::Store;
 use safe_cex_types::{
     MarginType, Market, Order, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
-    OrderType, PlaceOrderOpts,
+    OrderType, PreparedOrderOpts,
 };
 use serde_json::{Map, Value};
 use std::{future::Future, pin::Pin};
@@ -19,7 +19,7 @@ type MarginReader<'a, E> = Box<dyn Fn(&str) -> HostFuture<'a, MarginType, E> + '
 type ModeReader<'a, E> =
     Box<dyn Fn(&str) -> HostFuture<'a, Option<safe_cex_types::PositionMode>, E> + 'a>;
 type ClientIdReader<'a, E> =
-    Box<dyn Fn(&PlaceOrderOpts) -> Result<Option<String>, ServiceError<E>> + 'a>;
+    Box<dyn Fn(&PreparedOrderOpts) -> Result<Option<String>, ServiceError<E>> + 'a>;
 type SplitCheck<'a, E> = Box<dyn Fn(Option<&str>, usize) -> Result<(), ServiceError<E>> + 'a>;
 type CancelAlgo<'a, E> = Box<dyn Fn(Vec<Order>) -> HostFuture<'a, (), E> + 'a>;
 pub struct FormatHost<'a, E> {
@@ -52,14 +52,13 @@ fn margin(mode: MarginType) -> &'static str {
         "cross"
     }
 }
-fn side(side: OrderSide) -> &'static str {
-    if side == OrderSide::Buy {
-        "buy"
-    } else {
-        "sell"
-    }
+fn side(side: safe_cex_types::ModelField<OrderSide>) -> Option<&'static str> {
+    side.into_value().map(|side| match side {
+        OrderSide::Buy => "buy",
+        OrderSide::Sell => "sell",
+    })
 }
-fn market<E>(opts: &PlaceOrderOpts, store: &dyn Store) -> Result<Market, ServiceError<E>> {
+fn market<E>(opts: &PreparedOrderOpts, store: &dyn Store) -> Result<Market, ServiceError<E>> {
     store
         .markets_by_symbol()
         .get(&opts.symbol)
@@ -91,7 +90,7 @@ fn generated_id<E>(host: &FormatHost<'_, E>) -> Result<String, ServiceError<E>> 
     Ok(format!("{BROKER_ID}{uuid}").chars().take(32).collect())
 }
 async fn position_side<E>(
-    opts: &PlaceOrderOpts,
+    opts: &PreparedOrderOpts,
     host: &FormatHost<'_, E>,
 ) -> Result<&'static str, ServiceError<E>> {
     let options = PositionSideOptions {
@@ -109,18 +108,19 @@ fn trigger_type(value: Option<OrderStopTriggerType>) -> &'static str {
         _ => "last",
     }
 }
-fn order_type_key(value: OrderType) -> &'static str {
-    match value {
-        OrderType::Market => "market",
-        OrderType::Limit => "limit",
-        OrderType::Conditional => "conditional",
-        OrderType::StopLoss => "stop_market",
-        OrderType::TakeProfit => "take_profit_market",
-        OrderType::TrailingStopLoss => "trailing_stop_market",
+fn order_type_key(value: safe_cex_types::ModelField<OrderType>) -> &'static str {
+    match value.into_value() {
+        Some(OrderType::Market) => "market",
+        Some(OrderType::Limit) => "limit",
+        Some(OrderType::Conditional) => "conditional",
+        Some(OrderType::StopLoss) => "stop_market",
+        Some(OrderType::TakeProfit) => "take_profit_market",
+        Some(OrderType::TrailingStopLoss) => "trailing_stop_market",
+        None => "undefined",
     }
 }
 pub async fn format_trigger_order<E>(
-    opts: &PlaceOrderOpts,
+    opts: &PreparedOrderOpts,
     source: Option<&UtilityInput>,
     store: &dyn Store,
     host: &FormatHost<'_, E>,
@@ -220,7 +220,9 @@ pub async fn format_trigger_order<E>(
     insert(&mut req, "instId", market.id);
     insert(&mut req, "marginMode", margin_mode);
     insert(&mut req, "positionSide", position_side);
-    insert(&mut req, "side", side(opts.side));
+    if let Some(side) = side(opts.side) {
+        insert(&mut req, "side", side);
+    }
     insert(&mut req, "size", js_number_string(amount));
     insert(&mut req, "clientOrderId", generated_id(host)?);
     insert(&mut req, "orderPrice", js_number_string(order_price));
@@ -240,7 +242,7 @@ pub async fn format_trigger_order<E>(
     Ok(OrderPayload { fields: req })
 }
 pub async fn format_algo_order<E>(
-    opts: &PlaceOrderOpts,
+    opts: &PreparedOrderOpts,
     store: &dyn Store,
     host: &FormatHost<'_, E>,
 ) -> Result<OrderPayload, ServiceError<E>> {
@@ -260,14 +262,19 @@ pub async fn format_algo_order<E>(
     if host.broker_id_enabled {
         insert(&mut req, "brokerId", BROKER_ID);
     }
-    insert(&mut req, "side", side(opts.side));
+    if let Some(side) = side(opts.side) {
+        insert(&mut req, "side", side);
+    }
     insert(&mut req, "positionSide", position_side);
     insert(
         &mut req,
         "size",
         js_number_string(if amount == 0.0 { -1.0 } else { amount }),
     );
-    if matches!(opts.r#type, OrderType::StopLoss | OrderType::TakeProfit) {
+    if matches!(
+        opts.r#type.into_value(),
+        Some(OrderType::StopLoss | OrderType::TakeProfit)
+    ) {
         insert(&mut req, "reduceOnly", "true");
     }
     let price_text = price.map_or_else(|| "null".into(), js_number_string);
@@ -297,7 +304,7 @@ pub async fn format_algo_order<E>(
             .filter(|o| {
                 o.symbol == opts.symbol
                     && o.r#type == opposite
-                    && o.side == opts.side
+                    && o.side.value() == opts.side.value()
                     && o.status == OrderStatus::Open
                     && !number_truthy(o.amount)
             })
@@ -313,7 +320,11 @@ pub async fn format_algo_order<E>(
             insert(
                 &mut req,
                 &format!("{field}TriggerPrice"),
-                js_number_string(first.price),
+                first
+                    .price
+                    .into_value()
+                    .map(js_number_string)
+                    .unwrap_or_else(|| "undefined".into()),
             );
             insert(&mut req, &format!("{field}OrderPrice"), "-1");
         }
@@ -321,7 +332,7 @@ pub async fn format_algo_order<E>(
     Ok(OrderPayload { fields: req })
 }
 pub async fn format_normal_order<E>(
-    opts: &PlaceOrderOpts,
+    opts: &PreparedOrderOpts,
     store: &dyn Store,
     host: &FormatHost<'_, E>,
 ) -> Result<Vec<OrderPayload>, ServiceError<E>> {
@@ -342,17 +353,14 @@ pub async fn format_normal_order<E>(
             None => generated_id(host)?,
         },
     );
-    insert(&mut req, "side", side(opts.side));
-    insert(
-        &mut req,
-        "orderType",
-        if opts.time_in_force == Some(OrderTimeInForce::PostOnly) && opts.r#type == OrderType::Limit
-        {
-            Value::String("post_only".into())
-        } else {
-            REVERSE_ORDER_TYPE[order_type_key(opts.r#type)].clone()
-        },
-    );
+    if let Some(side) = side(opts.side) {
+        insert(&mut req, "side", side);
+    }
+    if opts.time_in_force == Some(OrderTimeInForce::PostOnly) && opts.r#type == OrderType::Limit {
+        insert(&mut req, "orderType", "post_only");
+    } else if let Some(kind) = REVERSE_ORDER_TYPE.get(order_type_key(opts.r#type)) {
+        insert(&mut req, "orderType", kind.clone());
+    }
     insert(&mut req, "size", js_number_string(amount));
     if opts.r#type == OrderType::Limit {
         insert(

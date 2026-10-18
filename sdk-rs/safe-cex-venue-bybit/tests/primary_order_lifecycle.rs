@@ -50,7 +50,7 @@ fn order(actual: &Order, expected: &Value) {
         "PRIMARY native order side"
     );
     for (name, value) in [
-        ("price", actual.price),
+        ("price", actual.price.to_number()),
         ("amount", actual.amount),
         ("filled", actual.filled),
         ("remaining", actual.remaining),
@@ -78,7 +78,7 @@ fn mutate(order: &Rc<RefCell<Order>>, fields: &Value) {
         order.symbol = value.as_str().unwrap().into();
     }
     if let Some(value) = fields.get("reduceOnly") {
-        order.reduce_only = value.as_bool().unwrap();
+        order.reduce_only = value.as_bool().unwrap().into();
     }
     if let Some(value) = fields.get("type") {
         order.r#type = serde_json::from_value(value.clone()).unwrap();
@@ -89,7 +89,7 @@ fn mutate(order: &Rc<RefCell<Order>>, fields: &Value) {
         }
     }
     if let Some(value) = fields.get("price") {
-        order.price = value.as_f64().unwrap();
+        order.price = (value.as_f64().unwrap()).into();
     }
     if let Some(value) = fields.get("filled") {
         order.filled = value.as_f64().unwrap();

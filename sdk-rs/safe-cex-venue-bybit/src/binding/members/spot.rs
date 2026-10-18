@@ -207,6 +207,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         .map_err(|e| error(&e.message))?;
         from_typed(&value)
     })?;
+    method(rt, "recordRecentlyPlacedOrder", |rt, a| {
+        super::lifecycle::record_variant_recently_placed_order(&rt, arg(&a, 0))
+    })?;
     method(rt, "recordRecentlyPlacedOrderFromOpts", |rt, a| {
         writes::record_recently_placed_order_from_opts(
             &rt,

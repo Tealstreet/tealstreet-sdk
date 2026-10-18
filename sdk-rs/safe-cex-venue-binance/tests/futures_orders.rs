@@ -164,9 +164,9 @@ fn run_cases(precision_supplement: bool) {
             Some("wrong-symbol") => position.symbol = "OTHER".into(),
             Some("wrong-side") => {
                 position.side = if opts.side == OrderSide::Buy {
-                    PositionSide::Long
+                    safe_cex_types::ModelField::Value(PositionSide::Long)
                 } else {
-                    PositionSide::Short
+                    safe_cex_types::ModelField::Value(PositionSide::Short)
                 }
             }
             Some("zero") => position.contracts = 0.0,
@@ -218,10 +218,14 @@ fn run_cases(precision_supplement: bool) {
         );
         let emissions = Rc::new(RefCell::new(Vec::new()));
         let capture = emissions.clone();
-        base.on(
+        base.on_args(
             "error",
             Rc::new(move |_, message| {
-                capture.borrow_mut().push(message.clone());
+                let message: Vec<serde_json::Value> = message
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
+                capture.borrow_mut().push(serde_json::json!(message));
                 Ok(())
             }),
         );

@@ -18,7 +18,7 @@ use crate::{
 };
 use indexmap::IndexMap;
 use safe_cex_exchange::js_runtime::value::{from_typed, to_typed};
-use safe_cex_types::{Market, Order, OrderStatus, PlaceOrderOpts};
+use safe_cex_types::{Market, Order, OrderStatus, PreparedOrderOpts};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
 
@@ -76,7 +76,7 @@ impl Host {
             .map(|order| {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
-                fields.info = Some(order.info.borrow().clone());
+                fields.info = (Some(order.info.borrow().clone())).into();
                 fields
             })
             .collect()
@@ -119,7 +119,7 @@ impl Host {
     }
     pub(super) fn place(
         &self,
-        options: PlaceOrderOpts,
+        options: impl Into<PreparedOrderOpts>,
     ) -> Promise<Result<Vec<String>, PortfolioFailure>> {
         let result =
             order_create::place_order(self.order_host(), options, &self.shared.extra.spawn);
@@ -173,7 +173,7 @@ impl CoinbaseOrderHost for OrderHost {
     }
     fn resolve_caller_client_order_id(
         &mut self,
-        options: &PlaceOrderOpts,
+        options: &PreparedOrderOpts,
     ) -> Result<Option<String>, CoinbaseOrderFailure> {
         self.host
             .base()
@@ -181,7 +181,7 @@ impl CoinbaseOrderHost for OrderHost {
             .map_err(|error| order_error(failure(error)))
     }
     fn uuid(&mut self) -> String {
-        self.host.shared.runtime.unique_id()
+        super::crypto::uuid(self.host.shared.runtime.as_ref())
     }
     fn post_create_order(
         &mut self,
@@ -229,27 +229,27 @@ impl CoinbaseOrderHost for OrderHost {
             .store
             .add_or_update_order(Order {
                 id: order.id.clone(),
-                parent_id: Some(order.parent_id.clone()),
-                status: order.status,
+                parent_id: (Some(order.parent_id.clone())).into(),
+                status: (order.status).into(),
                 symbol: order.symbol.clone(),
-                r#type: order.r#type,
-                side: order.side,
-                price: order.price,
+                r#type: (order.r#type).into(),
+                side: (order.side).into(),
+                price: (order.price).into(),
                 amount: order.amount,
                 filled: order.filled,
                 remaining: order.remaining,
-                extra: Some(order.extra.clone()),
-                reduce_only: order.reduce_only,
-                info: Some(info),
+                extra: (Some(order.extra.clone())).into(),
+                reduce_only: order.reduce_only.into(),
+                info: (Some(info)).into(),
                 last_update: order.last_update,
-                close: None,
-                client_order_id: None,
-                time_in_force: None,
-                trigger_type: None,
-                tp_trigger_type: None,
-                sl_trigger_type: None,
-                take_profit: None,
-                stop_loss: None,
+                close: (None).into(),
+                client_order_id: (None).into(),
+                time_in_force: (None).into(),
+                trigger_type: (None).into(),
+                tp_trigger_type: (None).into(),
+                sl_trigger_type: (None).into(),
+                take_profit: (None).into(),
+                stop_loss: (None).into(),
             })
             .map_err(|error| order_error(Rc::new(error.into())))
     }
@@ -342,7 +342,7 @@ impl OrderSnapshotHost for Host {
         Ok(
             crate::orders::map_coinbase_rest_order(&raw.borrow(), &market.borrow(), now).map(
                 |mut fields| {
-                    fields.info = None;
+                    fields.info = (None).into();
                     Rc::new(RefCell::new(SyncedOrder {
                         fields,
                         info: raw.clone(),
@@ -394,13 +394,13 @@ impl OrderEditHost for Host {
         Ok(self.cancel(Self::native_orders(&orders)))
     }
     fn place_order(&self, order: EditReplacement) -> EditAsync<Vec<String>> {
-        Ok(self.place(PlaceOrderOpts {
+        Ok(self.place(PreparedOrderOpts {
             symbol: order.symbol,
-            r#type: order.kind,
+            r#type: order.r#type,
             side: order.side,
             price: order.price,
             amount: order.amount.unwrap_or(f64::NAN),
-            reduce_only: Some(order.reduce_only),
+            reduce_only: order.reduce_only.into_property(),
             trigger_price: None,
             stop_loss: None,
             take_profit: None,

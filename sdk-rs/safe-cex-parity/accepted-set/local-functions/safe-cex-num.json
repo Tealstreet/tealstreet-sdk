@@ -1,7 +1,7 @@
 {
   "safe-cex-num/src/numeric_ingress.rs::LOCAL_FUNCTION:retained": {
     "category": "non-decoder",
-    "reason": "Inside js_capture_output: structurally converts an already captured JsNumberInput tree into RetainedJsonInput node for node. It admits no raw shape and rejects nothing; capture itself is the module-level owner's job.",
-    "sourceSha256": "694af92e5f68ffbbf760c5bc26bf54becfe8f7ffc5967bf1a6a6b6c0d762be4c"
+    "reason": "Inside js_capture_output: structurally converts an already captured JsNumberInput tree into RetainedJsonInput node for node. It admits no raw shape and rejects nothing; capture itself is the module-level owner's job. Reviewed source sincea89870329e: ModelField Undefined is copied as the same existing node; this migration encodes already captured UTF-8 text/keys to UTF-16 units. It remains a structural outbound conversion without raw admission or replacement.",
+    "sourceSha256": "932ca3a2bd8ec2d40d4daedc1a39393e8232d3cbca39e1032a8df73e11ccec40"
   }
 }

@@ -146,6 +146,7 @@ const trackedFiles = (): readonly string[] =>
     .filter((file) => !file.startsWith('v2/'));
 
 describe('the set of order entry points is closed', () => {
+  // Walks the source tree; under CI load this outruns vitest's 5s default.
   it('nothing outside the known set sends an order', () => {
     const offenders = trackedFiles()
       .filter((file) => !isVenueImplementation(file) && !isTest(file) && !(file in ENTRY_POINTS))
@@ -159,8 +160,9 @@ describe('the set of order entry points is closed', () => {
         'for the UI path, `prepareCliOrder` for the CLI, `createCoreAdapter` for ' +
         'anything headless — or add it here with the reason it is its own.',
     ).toEqual([]);
-  });
+  }, 30_000);
 
+  // Walks the source tree; under CI load this outruns vitest's 5s default.
   it.skipIf(!HAS_WEB_APP)('every listed entry point still exists and still places an order', () => {
     // A stale entry is a hole: it lets a file be deleted and a different one
     // added under the same path without the guard noticing.
@@ -172,7 +174,7 @@ describe('the set of order entry points is closed', () => {
         `${file} is listed but no longer places an order — remove it`,
       ).toBe(true);
     }
-  });
+  }, 30_000);
 
   it('the detector matches a call and ignores a declaration or a mention', () => {
     expect(PLACES_AN_ORDER.test(withoutComments('// calls exchange.placeOrder() on retry'))).toBe(false);

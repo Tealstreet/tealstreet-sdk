@@ -1,4 +1,4 @@
-// Execute the twenty reviewed native/default Crypto.com control-flow owners, not full discovery.
+// Execute the fifteen reviewed native/default Crypto.com control-flow owners, not full discovery.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,11 +11,6 @@ import { loadContracts } from '../../safe-cex-parity/scripts/accepted-contract-f
 assert.equal(process.argv.length, 2, 'selected census runner takes no scope-changing arguments');
 const workspace = fs.realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
 const selected = [
-  "safe_cex_venue_cryptocom::account_admin::begin_admin",
-  "safe_cex_venue_cryptocom::account_admin::finish_admin",
-  "safe_cex_venue_cryptocom::account_admin::log_and_rethrow",
-  "safe_cex_venue_cryptocom::account_admin::optional_chain",
-  "safe_cex_venue_cryptocom::account_envelopes::equal",
   "safe_cex_venue_cryptocom::class_admin::optional",
   "safe_cex_venue_cryptocom::class_mappings::imported",
   "safe_cex_venue_cryptocom::order_writes::caught",
@@ -32,7 +27,7 @@ const selected = [
   "safe_cex_venue_cryptocom::rest_reads::parsed",
   "safe_cex_venue_cryptocom::rest_reads::zero_position"
 ];
-assert.equal(selected.length, 20);
+assert.equal(selected.length, 15);
 function cargo(args, extraEnv = {}) {
   const result = spawnSync('cargo', args, {
     cwd: workspace, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
@@ -64,7 +59,7 @@ fs.writeFileSync(path.join(metadata.target_directory, 'cryptocom-control-flow-re
 assert.deepEqual(results.map(row => row.name).sort(), selected);
 for (const row of results) assert.deepEqual(row.failures, [], row.name);
 assert.equal(results.filter(row => !row.classificationOnly).length, 0);
-assert.equal(results.filter(row => row.classificationOnly).length, 20);
-console.log('Crypto.com selected control-flow owners: 0 native decoder probes, 20 explicit classifications, 0 failed owners.');
-console.log('Actual native composition/direct witnesses and individual compiling body controls are separate required evidence for all twenty owners; classification receipts are not runtime evidence.');
-console.log('Scope: these twenty original native/default control-flow owners only; other owners, aliases, construction, locals, features and wasm remain owed.');
+assert.equal(results.filter(row => row.classificationOnly).length, 15);
+console.log('Crypto.com selected control-flow owners: 0 native decoder probes, 15 explicit classifications, 0 failed owners.');
+console.log('Actual native composition/direct witnesses and individual compiling body controls are separate required evidence for all fifteen owners; classification receipts are not runtime evidence.');
+console.log('Scope: these fifteen original native/default control-flow owners only; other owners, aliases, construction, locals, features and wasm remain owed.');

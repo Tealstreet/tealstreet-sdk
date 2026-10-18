@@ -6,7 +6,21 @@ use safe_cex_types::{
 };
 use serde_json::{Map, Value};
 
+#[derive(Debug)]
+pub(crate) struct MarketProjectionRefusal {
+    pub error: WeexUtilityError,
+    pub value: Option<Value>,
+}
+
 pub fn normalize_market(raw: &WeexUtilityInput) -> Result<Market, WeexUtilityError> {
+    normalize_market_row(raw)?.map_err(|refusal| refusal.error)
+}
+
+// Finish source coercions before refusing a closed output field. The caller can
+// discard only this row; source failures still reach fetchMarkets' outer catch.
+pub(crate) fn normalize_market_row(
+    raw: &WeexUtilityInput,
+) -> Result<Result<Market, MarketProjectionRefusal>, WeexUtilityError> {
     let value = raw.as_value();
     if value.is_null() {
         return Err(WeexUtilityError {
@@ -58,14 +72,17 @@ pub fn normalize_market(raw: &WeexUtilityInput) -> Result<Market, WeexUtilityErr
     let contract_val = to_number(raw.pick_retained(&["contractVal"]).as_ref(), Some(1.0))?;
     // Source assigns these fields directly. Do not invent String coercion;
     // malformed records are refused at this typed Market projection boundary.
-    let text = |key: &str| -> Result<String, WeexUtilityError> {
+    let text = |key: &str| -> Result<String, MarketProjectionRefusal> {
         value
             .get(key)
             .and_then(Value::as_str)
             .map(str::to_owned)
-            .ok_or_else(|| WeexUtilityError {
-                name: "TypeError",
-                message: format!("Market.{key} requires a string"),
+            .ok_or_else(|| MarketProjectionRefusal {
+                error: WeexUtilityError {
+                    name: "TypeError",
+                    message: format!("Market.{key} requires a string"),
+                },
+                value: value.get(key).cloned(),
             })
     };
     let min_amount = to_number(
@@ -80,11 +97,16 @@ pub fn normalize_market(raw: &WeexUtilityInput) -> Result<Market, WeexUtilityErr
     let max_leverage = to_number(raw.pick_retained(&["maxLeverage"]).as_ref(), Some(1.0))?;
     let maker_fee = to_number(raw.pick_retained(&["makerFeeRate"]).as_ref(), None)?;
     let taker_fee = to_number(raw.pick_retained(&["takerFeeRate"]).as_ref(), None)?;
-    Ok(Market {
-        id: text("symbol")?,
-        symbol: text("symbol")?,
-        base: text("baseAsset")?,
-        quote: text("quoteAsset")?,
+    let strings = (|| Ok((text("symbol")?, text("baseAsset")?, text("quoteAsset")?)))();
+    let (symbol, base, quote) = match strings {
+        Ok(fields) => fields,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    Ok(Ok(Market {
+        id: symbol.clone(),
+        symbol,
+        base,
+        quote,
         active: value.get("forwardContractFlag") != Some(&Value::Bool(false)),
         precision: MarketPrecision {
             amount: amount_step,
@@ -112,7 +134,7 @@ pub fn normalize_market(raw: &WeexUtilityInput) -> Result<Market, WeexUtilityErr
         is_perpetual: None,
         is_read_only: None,
         option: None,
-    })
+    }))
 }
 
 pub fn normalize_ticker(

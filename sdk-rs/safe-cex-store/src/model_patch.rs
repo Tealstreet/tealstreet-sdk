@@ -46,12 +46,14 @@ impl std::error::Error for StorePatchError {}
 
 #[derive(Clone)]
 pub enum PatchValue {
+    Undefined,
     Json(Value),
     Number(f64),
     Native(std::sync::Arc<dyn std::any::Any + Send + Sync>),
 }
 #[derive(Clone, Copy)]
 pub enum PatchValueRef<'a> {
+    Undefined,
     Json(&'a Value),
     Number(f64),
     Native(&'a (dyn std::any::Any + Send + Sync)),
@@ -72,6 +74,9 @@ pub trait PatchSource: sealed::Sealed {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ModelPatch(pub IndexMap<String, PatchValue>);
 impl ModelPatch {
+    pub fn set_undefined(&mut self, field: impl Into<String>) {
+        self.0.insert(field.into(), PatchValue::Undefined);
+    }
     pub fn set_native<T: std::any::Any + Send + Sync>(
         &mut self,
         field: impl Into<String>,
@@ -106,6 +111,7 @@ impl PatchSource for ModelPatch {
             visitor(
                 key,
                 match value {
+                    PatchValue::Undefined => PatchValueRef::Undefined,
                     PatchValue::Json(value) => PatchValueRef::Json(value),
                     PatchValue::Number(value) => PatchValueRef::Number(*value),
                     PatchValue::Native(value) => PatchValueRef::Native(value.as_ref()),
@@ -158,7 +164,7 @@ fn decode<T: serde::de::DeserializeOwned + Clone + 'static>(
             .downcast_ref::<T>()
             .cloned()
             .ok_or_else(|| error(field, "native value has wrong field type")),
-        PatchValueRef::Number(_) => Err(error(
+        PatchValueRef::Undefined | PatchValueRef::Number(_) => Err(error(
             field,
             "native numeric patch applied to non-numeric field",
         )),
@@ -168,6 +174,36 @@ fn passthrough_value(field: &str, value: PatchValueRef<'_>) -> Result<Value, Sto
     match value {
         PatchValueRef::Json(value) => Ok(value.clone()),
         value => decode(field, value),
+    }
+}
+fn model_field<T: serde::de::DeserializeOwned + Clone + 'static>(
+    field: &str,
+    value: PatchValueRef<'_>,
+) -> Result<safe_cex_types::ModelField<T>, StorePatchError> {
+    if matches!(value, PatchValueRef::Undefined) {
+        Ok(safe_cex_types::ModelField::Undefined)
+    } else {
+        decode(field, value).map(safe_cex_types::ModelField::Value)
+    }
+}
+fn model_number(
+    field: &str,
+    value: PatchValueRef<'_>,
+) -> Result<safe_cex_types::ModelField<f64>, StorePatchError> {
+    if matches!(value, PatchValueRef::Undefined) {
+        Ok(safe_cex_types::ModelField::Undefined)
+    } else {
+        number(field, value).map(safe_cex_types::ModelField::Value)
+    }
+}
+fn model_info(
+    field: &str,
+    value: PatchValueRef<'_>,
+) -> Result<safe_cex_types::ModelField<Value>, StorePatchError> {
+    if matches!(value, PatchValueRef::Undefined) {
+        Ok(safe_cex_types::ModelField::Undefined)
+    } else {
+        passthrough_value(field, value).map(safe_cex_types::ModelField::Value)
     }
 }
 pub(crate) trait PatchModel {
@@ -190,28 +226,52 @@ impl PatchModel for safe_cex_types::Order {
         field: &str,
         value: PatchValueRef<'_>,
     ) -> Result<(), StorePatchError> {
+        if matches!(value, PatchValueRef::Undefined)
+            && !matches!(
+                field,
+                "parentId"
+                    | "status"
+                    | "type"
+                    | "side"
+                    | "price"
+                    | "reduceOnly"
+                    | "close"
+                    | "info"
+                    | "clientOrderId"
+                    | "timeInForce"
+                    | "triggerType"
+                    | "tpTriggerType"
+                    | "slTriggerType"
+                    | "takeProfit"
+                    | "stopLoss"
+                    | "extra"
+            )
+        {
+            return Ok(());
+        }
         match field {
             "id" => self.id = decode(field, value)?,
-            "parentId" => self.parent_id = Some(decode(field, value)?),
-            "status" => self.status = decode(field, value)?,
+            "parentId" => self.parent_id = model_field(field, value)?,
+            "status" => self.status = model_field(field, value)?,
             "symbol" => self.symbol = decode(field, value)?,
-            "type" => self.r#type = decode(field, value)?,
-            "side" => self.side = decode(field, value)?,
-            "price" => self.price = number(field, value)?,
+            "type" => self.r#type = model_field(field, value)?,
+            "side" => self.side = model_field(field, value)?,
+            "price" => self.price = model_number(field, value)?,
             "amount" => self.amount = number(field, value)?,
             "filled" => self.filled = number(field, value)?,
             "remaining" => self.remaining = number(field, value)?,
-            "reduceOnly" => self.reduce_only = decode(field, value)?,
-            "close" => self.close = Some(decode(field, value)?),
-            "info" => self.info = Some(passthrough_value(field, value)?),
-            "timeInForce" => self.time_in_force = Some(decode(field, value)?),
+            "reduceOnly" => self.reduce_only = model_field(field, value)?,
+            "close" => self.close = model_field(field, value)?,
+            "info" => self.info = model_info(field, value)?,
+            "clientOrderId" => self.client_order_id = model_field(field, value)?,
+            "timeInForce" => self.time_in_force = model_field(field, value)?,
             "lastUpdate" => self.last_update = number(field, value)?,
-            "triggerType" => self.trigger_type = Some(decode(field, value)?),
-            "tpTriggerType" => self.tp_trigger_type = Some(decode(field, value)?),
-            "slTriggerType" => self.sl_trigger_type = Some(decode(field, value)?),
-            "takeProfit" => self.take_profit = Some(number(field, value)?),
-            "stopLoss" => self.stop_loss = Some(number(field, value)?),
-            "extra" => self.extra = Some(decode(field, value)?),
+            "triggerType" => self.trigger_type = model_field(field, value)?,
+            "tpTriggerType" => self.tp_trigger_type = model_field(field, value)?,
+            "slTriggerType" => self.sl_trigger_type = model_field(field, value)?,
+            "takeProfit" => self.take_profit = model_number(field, value)?,
+            "stopLoss" => self.stop_loss = model_number(field, value)?,
+            "extra" => self.extra = model_field(field, value)?,
             _ => {}
         }
         Ok(())
@@ -224,24 +284,40 @@ impl PatchModel for safe_cex_types::Position {
         field: &str,
         value: PatchValueRef<'_>,
     ) -> Result<(), StorePatchError> {
+        if matches!(value, PatchValueRef::Undefined)
+            && !matches!(
+                field,
+                "side"
+                    | "marginType"
+                    | "positionMode"
+                    | "realizedPnl"
+                    | "marginSize"
+                    | "info"
+                    | "extra"
+                    | "lastUpdate"
+                    | "option"
+            )
+        {
+            return Ok(());
+        }
         match field {
             "id" => self.id = decode(field, value)?,
             "symbol" => self.symbol = decode(field, value)?,
-            "side" => self.side = decode(field, value)?,
+            "side" => self.side = model_field(field, value)?,
             "entryPrice" => self.entry_price = number(field, value)?,
             "notional" => self.notional = number(field, value)?,
             "leverage" => self.leverage = number(field, value)?,
-            "marginType" => self.margin_type = Some(decode(field, value)?),
-            "positionMode" => self.position_mode = Some(decode(field, value)?),
+            "marginType" => self.margin_type = model_field(field, value)?,
+            "positionMode" => self.position_mode = model_field(field, value)?,
             "unrealizedPnl" => self.unrealized_pnl = number(field, value)?,
-            "realizedPnl" => self.realized_pnl = Some(number(field, value)?),
+            "realizedPnl" => self.realized_pnl = model_number(field, value)?,
             "contracts" => self.contracts = number(field, value)?,
             "liquidationPrice" => self.liquidation_price = number(field, value)?,
-            "marginSize" => self.margin_size = Some(number(field, value)?),
-            "info" => self.info = Some(passthrough_value(field, value)?),
-            "extra" => self.extra = Some(decode(field, value)?),
-            "lastUpdate" => self.last_update = Some(number(field, value)?),
-            "option" => self.option = Some(decode(field, value)?),
+            "marginSize" => self.margin_size = model_number(field, value)?,
+            "info" => self.info = model_info(field, value)?,
+            "extra" => self.extra = model_field(field, value)?,
+            "lastUpdate" => self.last_update = model_number(field, value)?,
+            "option" => self.option = model_field(field, value)?,
             _ => {}
         }
         Ok(())
@@ -253,14 +329,33 @@ pub(crate) fn merge_position(
     incoming: safe_cex_types::Position,
 ) {
     let old = std::mem::replace(target, incoming);
-    target.margin_type = target.margin_type.take().or(old.margin_type);
-    target.position_mode = target.position_mode.take().or(old.position_mode);
-    target.realized_pnl = target.realized_pnl.take().or(old.realized_pnl);
-    target.margin_size = target.margin_size.take().or(old.margin_size);
-    target.info = target.info.take().or(old.info);
-    target.extra = target.extra.take().or(old.extra);
-    target.last_update = target.last_update.take().or(old.last_update);
-    target.option = target.option.take().or(old.option);
+    if target.side.is_absent() {
+        target.side = old.side;
+    }
+    if target.margin_type.is_absent() {
+        target.margin_type = old.margin_type;
+    }
+    if target.position_mode.is_absent() {
+        target.position_mode = old.position_mode;
+    }
+    if target.realized_pnl.is_absent() {
+        target.realized_pnl = old.realized_pnl;
+    }
+    if target.margin_size.is_absent() {
+        target.margin_size = old.margin_size;
+    }
+    if target.info.is_absent() {
+        target.info = old.info;
+    }
+    if target.extra.is_absent() {
+        target.extra = old.extra;
+    }
+    if target.last_update.is_absent() {
+        target.last_update = old.last_update;
+    }
+    if target.option.is_absent() {
+        target.option = old.option;
+    }
 }
 
 impl PatchModel for safe_cex_types::Market {
@@ -269,6 +364,9 @@ impl PatchModel for safe_cex_types::Market {
         field: &str,
         value: PatchValueRef<'_>,
     ) -> Result<(), StorePatchError> {
+        if matches!(value, PatchValueRef::Undefined) {
+            return Ok(());
+        }
         match field {
             "id" => self.id = decode(field, value)?,
             "symbol" => self.symbol = decode(field, value)?,
@@ -314,6 +412,9 @@ impl PatchModel for safe_cex_types::Ticker {
         field: &str,
         value: PatchValueRef<'_>,
     ) -> Result<(), StorePatchError> {
+        if matches!(value, PatchValueRef::Undefined) {
+            return Ok(());
+        }
         match field {
             "id" => self.id = decode(field, value)?,
             "symbol" => self.symbol = decode(field, value)?,
@@ -347,6 +448,7 @@ impl<'de> serde::Deserialize<'de> for ModelPatch {
 impl std::fmt::Debug for PatchValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Undefined => f.write_str("Undefined"),
             Self::Json(value) => f.debug_tuple("Json").field(value).finish(),
             Self::Number(value) => f.debug_tuple("Number").field(value).finish(),
             Self::Native(value) => f.debug_tuple("Native").field(&(**value).type_id()).finish(),
@@ -356,6 +458,7 @@ impl std::fmt::Debug for PatchValue {
 impl PartialEq for PatchValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::Undefined, Self::Undefined) => true,
             (Self::Json(a), Self::Json(b)) => a == b,
             (Self::Number(a), Self::Number(b)) => a == b,
             (Self::Native(a), Self::Native(b)) => std::sync::Arc::ptr_eq(a, b),

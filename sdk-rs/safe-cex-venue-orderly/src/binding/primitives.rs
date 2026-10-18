@@ -156,11 +156,14 @@ impl crate::api::ApiHost for Host {
     }
     fn axios_create(&self, config: V, options: V, _: V) -> R<V> {
         let rt = self.rt()?;
-        let options = safe_cex_exchange::js_runtime::base_exchange::exchange_options(&options)?;
-        Ok(v(safe_cex_exchange::js_runtime::client::create(
-            (rt.shared.extra.deps.http)(&options).map_err(Thrown::from)?,
+        let typed = safe_cex_exchange::js_runtime::base_exchange::exchange_options(&options)?;
+        Ok(v(safe_cex_exchange::js_runtime::client::factory::create(
+            (rt.shared.extra.deps.http)(&typed).map_err(Thrown::from)?,
+            &*rt.shared.runtime.transport(),
             (*config).clone(),
-        )))
+            &options,
+            rt.base(),
+        )?))
     }
     fn network_retry_condition(&self) -> R<V> {
         Ok(v(Js::function("networkErrorOnRead", |_, args| {
@@ -200,7 +203,7 @@ impl crate::api::ApiHost for Host {
                         reason: None,
                         headers: Default::default(),
                         body: safe_cex_transport::RestResponseBody::Untransformed(
-                            serde_json::Value::Null,
+                            safe_cex_types::retained_json::RetainedJsonInput::Null,
                         ),
                     }))
                 },
@@ -214,9 +217,17 @@ impl crate::api::ApiHost for Host {
         client.call_method("__configureRetry", vec![(*options).clone()])?;
         Ok(())
     }
-    fn transport(&self, _: V, _: V, _: V) -> R<()> {
-        Ok(())
-    } // Factory receives the exact transport options.
+    fn transport(&self, client: V, options: V, name: V) -> R<()> {
+        let rt = self.rt()?;
+        safe_cex_exchange::js_runtime::client::factory::install_transport_adapter(
+            rt.shared.http.clone(),
+            &*rt.shared.runtime.transport(),
+            &client,
+            &options,
+            safe_cex_exchange::js_runtime::value::to_typed(&name)?,
+            safe_cex_transport::RestAdapterVariant::Default,
+        )
+    }
 }
 impl crate::runtime_actions::RuntimeHost for Host {
     fn strict_eq(&self, a: &Js, b: &Js) -> bool {
@@ -582,6 +593,22 @@ impl crate::public_feeds::FeedHost for Host {
     }
 }
 impl crate::stream_reports::ReportHost for Host {
+    fn ticker_patch_refusal(&self, symbol: &[u16], fields: &[(&str, V)]) -> R<Option<String>> {
+        for (field, value) in fields {
+            if !matches!(&**value, Js::Number(_)) {
+                let rendered = self.global("JSON.stringify", vec![value.clone()])?;
+                return Ok(Some(format!(
+                    "Orderly ticker {} typed field {field} requires a number; received {}",
+                    String::from_utf16_lossy(symbol),
+                    text(&rendered)?
+                )));
+            }
+        }
+        Ok(None)
+    }
+    fn ticker_refusal_error(&self, messages: Vec<String>) -> Thrown {
+        Thrown::error("Error", &messages.join("; "))
+    }
     fn nullish(&self, value: &Js) -> bool {
         value.is_nullish()
     }

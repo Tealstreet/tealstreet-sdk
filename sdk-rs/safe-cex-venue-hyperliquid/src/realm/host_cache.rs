@@ -114,21 +114,42 @@ impl Realm {
     }
 }
 
+fn cache_module(realm: &mut Realm) -> Result<Rc<CacheModule<Value>>, Value> {
+    let slot = realm.module_slot();
+    let existing = slot.borrow().clone();
+    match existing {
+        Some(module) => Ok(module),
+        None => {
+            let module = Rc::new(cache_runtime::new_module(realm)?);
+            *slot.borrow_mut() = Some(module.clone());
+            Ok(module)
+        }
+    }
+}
+
 pub(crate) fn bind(realm: &Realm) {
     realm.bind_import(
         "getCrossCache",
         realm.native("getCrossCache", 0, |r, _, _| {
-            let slot = r.module_slot();
-            let existing = slot.borrow().clone();
-            let module = match existing {
-                Some(m) => m,
-                None => {
-                    let m = Rc::new(cache_runtime::new_module(r)?);
-                    *slot.borrow_mut() = Some(m.clone());
-                    m
-                }
-            };
+            let module = cache_module(r)?;
             cache_runtime::get_cross_cache(r, &module)
+        }),
+    );
+    realm.bind_import(
+        "hasSeenFill",
+        realm.native("hasSeenFill", 1, |r, _, args| {
+            let module = cache_module(r)?;
+            let fill = args.first().cloned().unwrap_or(Value::Undefined);
+            cache_runtime::has_seen_fill(r, &module, &fill)
+        }),
+    );
+    realm.bind_import(
+        "markFillSeen",
+        realm.native("markFillSeen", 1, |r, _, args| {
+            let module = cache_module(r)?;
+            let fill = args.first().cloned().unwrap_or(Value::Undefined);
+            cache_runtime::mark_fill_seen(r, &module, &fill)?;
+            Ok(Value::Undefined)
         }),
     );
 }

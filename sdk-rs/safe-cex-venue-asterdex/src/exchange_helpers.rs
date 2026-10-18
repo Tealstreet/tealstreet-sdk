@@ -1,11 +1,11 @@
 //! Pure exchange decisions, kept independent from lifecycle and transport state.
-use safe_cex_exchange::js_runtime::value::{Js, from_json};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_json};
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_num::{JsCoercionError, js_number, js_string, js_truthy, parse_float};
 use safe_cex_transport::{RestAdapter, RestRequest};
 use safe_cex_types::{
-    Balance, BothPositionSide, Candle, ExchangeAccount, Execution, ExecutionPositionSide,
-    OrderBook, OrderBookOrders, OrderSide, OrderType, PlaceOrderOpts, PositionSide,
+    Balance, BothPositionSide, ExchangeAccount, Execution, ExecutionPositionSide, OrderBook,
+    OrderBookOrders, OrderSide, OrderType, PositionSide,
 };
 use serde_json::{Map, Value};
 
@@ -22,14 +22,18 @@ pub fn is_aster_dex_unknown_order_error(
 }
 
 // ts: AsterDEXExchange.getOrderPositionSide
-pub fn get_order_position_side(opts: &PlaceOrderOpts, is_hedged: bool) -> &'static str {
+pub fn get_order_position_side(
+    opts: impl Into<safe_cex_types::PreparedOrderOpts>,
+    is_hedged: bool,
+) -> &'static str {
+    let opts = opts.into();
     if !is_hedged {
         return "BOTH";
     }
     let mut long = opts.side == OrderSide::Buy;
     if matches!(
-        opts.r#type,
-        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+        opts.r#type.into_value(),
+        Some(OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss)
     ) || opts.reduce_only == Some(true)
     {
         long = !long;
@@ -101,10 +105,12 @@ pub async fn fetch_open_interest_map(
             .map_err(|failure| failure.message)?;
         // Axios's default silent JSON transform keeps non-JSON response text
         // as a string (including an empty body) rather than rejecting it.
-        Ok(response
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| error.to_string())?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| error.to_string())
     }
 
     let mut map = Map::new();
@@ -140,7 +146,11 @@ pub fn is_algo_order(order_type: OrderType, info: Option<&Value>) -> bool {
     matches!(
         order_type,
         OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
-    ) || matches!(
+    ) || is_raw_algo_order(info)
+}
+
+fn is_raw_algo_order(info: Option<&Value>) -> bool {
+    matches!(
         info.and_then(|v| v.get("type")).and_then(Value::as_str),
         Some(
             "STOP" | "STOP_MARKET" | "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" | "TRAILING_STOP_MARKET"
@@ -417,24 +427,35 @@ pub fn transform_ticker(
 
 // ts: AsterDEXExchange.transformPosition
 pub fn transform_position(
-    pos: &crate::types::AsterDEXPositionResponse,
+    pos: &Value,
     existing: &[safe_cex_types::Position],
-) -> Result<safe_cex_types::Position, serde_json::Error> {
-    use safe_cex_num::parse_float;
+) -> Result<safe_cex_types::Position, (&'static str, String)> {
     use safe_cex_types::{MarginType, Position, PositionMode, PositionSide};
-    let amount = parse_float(&pos.position_amt);
-    let leverage = parse_float(if pos.leverage.is_empty() {
-        "0"
-    } else {
-        &pos.leverage
-    })
-    .abs();
+    let symbol = pos.get("symbol").and_then(Value::as_str).ok_or_else(|| {
+        (
+            "RepresentationError",
+            "transformPosition symbol is outside the shared string boundary".into(),
+        )
+    })?;
+    let number = |field: &str, or_zero: bool| -> Result<f64, (&'static str, String)> {
+        let value = pos.get(field);
+        let text = if or_zero && !js_truthy(value) {
+            "0".into()
+        } else {
+            js_string(value).map_err(|error| (error.name, error.to_string()))?
+        };
+        Ok(parse_float(&text))
+    };
+    let amount = number("positionAmt", false)?;
+    let leverage = number("leverage", true)?.abs();
     let leverage = if leverage == 0.0 || leverage.is_nan() {
         1.0
     } else {
         leverage
     };
-    let mode = if pos.position_side == "BOTH" || pos.position_side.is_empty() {
+    let mode = if pos.get("positionSide").and_then(Value::as_str) == Some("BOTH")
+        || !js_truthy(pos.get("positionSide"))
+    {
         PositionMode::OneWay
     } else {
         PositionMode::Hedged
@@ -442,48 +463,44 @@ pub fn transform_position(
     let long = if mode == PositionMode::OneWay {
         amount > 0.0
     } else {
-        pos.position_side == "LONG"
+        pos.get("positionSide").and_then(Value::as_str) == Some("LONG")
     };
     let side = if long {
         PositionSide::Long
     } else {
         PositionSide::Short
     };
-    let id = safe_cex_types::model_utils::create_position_id(&pos.symbol, Some(side), Some(mode));
+    let id = safe_cex_types::model_utils::create_position_id(symbol, Some(side), Some(mode));
     let realized_pnl = existing
         .iter()
         .find(|p| p.id == id)
-        .and_then(|p| p.realized_pnl)
+        .and_then(|p| (p.realized_pnl).into_value())
         .unwrap_or(0.0);
     Ok(Position {
         id,
-        symbol: pos.symbol.clone(),
-        side,
+        symbol: symbol.to_owned(),
+        side: side.into(),
         contracts: amount.abs(),
-        entry_price: parse_float(&pos.entry_price),
-        notional: parse_float(&pos.notional),
+        entry_price: number("entryPrice", false)?,
+        notional: number("notional", false)?,
         leverage,
-        unrealized_pnl: parse_float(&pos.un_realized_profit),
-        realized_pnl: Some(realized_pnl),
-        margin_type: Some(if pos.margin_type == "ISOLATED" {
-            MarginType::Isolated
-        } else {
-            MarginType::Cross
-        }),
-        liquidation_price: parse_float(if pos.liquidation_price.is_empty() {
-            "0"
-        } else {
-            &pos.liquidation_price
-        }),
-        position_mode: Some(mode),
-        info: Some(retained_info(
-            pos,
-            [("/updateTime".into(), Some(pos.update_time))],
-        )?),
-        margin_size: None,
-        extra: None,
-        last_update: None,
-        option: None,
+        unrealized_pnl: number("unRealizedProfit", false)?,
+        realized_pnl: Some(realized_pnl).into(),
+        margin_type: Some(
+            if pos.get("marginType").and_then(Value::as_str) == Some("ISOLATED") {
+                MarginType::Isolated
+            } else {
+                MarginType::Cross
+            },
+        )
+        .into(),
+        liquidation_price: number("liquidationPrice", true)?,
+        position_mode: Some(mode).into(),
+        info: Some(pos.clone()).into(),
+        margin_size: None.into(),
+        extra: None.into(),
+        last_update: None.into(),
+        option: None.into(),
     })
 }
 
@@ -521,7 +538,10 @@ pub fn get_open_algo_orders_count(symbol: &str, orders: &[safe_cex_types::Order]
         .filter(|o| {
             o.symbol == symbol
                 && o.status == safe_cex_types::OrderStatus::Open
-                && is_algo_order(o.r#type, o.info.as_ref())
+                && match o.r#type.into_value() {
+                    Some(kind) => is_algo_order(kind, o.info.as_ref()),
+                    None => is_raw_algo_order(o.info.as_ref()),
+                }
         })
         .count()
 }
@@ -606,21 +626,21 @@ pub fn map_order_type(order_type: OrderType) -> Result<&'static str, &'static st
 }
 
 // ts: AsterDEXExchange.mapTimeframe
-pub fn map_timeframe(timeframe: safe_cex_types::Timeframe) -> &'static str {
-    use safe_cex_types::Timeframe;
+pub fn map_timeframe(timeframe: safe_cex_types::AnyTimeframe) -> &'static str {
     match timeframe {
-        Timeframe::M1 => "1m",
-        Timeframe::M3 => "3m",
-        Timeframe::M5 => "5m",
-        Timeframe::M15 => "15m",
-        Timeframe::M30 => "30m",
-        Timeframe::H1 => "1h",
-        Timeframe::H2 => "2h",
-        Timeframe::H4 => "4h",
-        Timeframe::H6 => "6h",
-        Timeframe::H12 => "12h",
-        Timeframe::D1 => "1d",
-        Timeframe::W1 => "1w",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1) => "1m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M3) => "3m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M5) => "5m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M15) => "15m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M30) => "30m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H1) => "1h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H2) => "2h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H4) => "4h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H6) => "6h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H12) => "12h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::D1) => "1d",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::W1) => "1w",
+        _ => "1h",
     }
 }
 
@@ -736,18 +756,21 @@ pub fn balance_from_account_response(account: &Value) -> Result<Balance, JsCoerc
 }
 
 // ts: AsterDEXExchange.fetchOHLCV
-pub fn transform_klines(rows: &[crate::types::AsterDEXKlineResponse]) -> Vec<Candle> {
-    rows.iter()
-        .map(|candle| Candle {
-            timestamp: candle.0,
-            open: parse_float(&candle.1),
-            high: parse_float(&candle.2),
-            low: parse_float(&candle.3),
-            close: parse_float(&candle.4),
-            volume: parse_float(&candle.5),
-            last_side: None,
-        })
-        .collect()
+pub fn transform_klines(rows: &Js) -> Result<Js, Thrown> {
+    rows.call_method(
+        "map",
+        vec![Js::function("", |_, args| {
+            let row = arg(&args, 0);
+            Ok(Js::object(vec![
+                ("timestamp", row.get("0")?),
+                ("open", Js::Number(row.get("1")?.parse_float()?)),
+                ("high", Js::Number(row.get("2")?.parse_float()?)),
+                ("low", Js::Number(row.get("3")?.parse_float()?)),
+                ("close", Js::Number(row.get("4")?.parse_float()?)),
+                ("volume", Js::Number(row.get("5")?.parse_float()?)),
+            ]))
+        })],
+    )
 }
 
 // ts: AsterDEXExchange.fetchHistoricalFills
@@ -890,7 +913,7 @@ pub fn extract_filter_value(
 // ts: AsterDEXExchange.transformMarket
 pub fn transform_market(
     market: &crate::types::AsterDEXMarketResponse,
-    leverage_brackets: &std::collections::BTreeMap<String, f64>,
+    leverage_brackets: &std::collections::BTreeMap<String, Js>,
 ) -> Result<safe_cex_types::Market, (&'static str, String)> {
     use safe_cex_num::{ccxt_precision::precision_to_string, parse_float};
     use safe_cex_types::{
@@ -898,11 +921,15 @@ pub fn transform_market(
     };
     let price = parse_float(&precision_to_string(market.price_precision));
     let amount = parse_float(&precision_to_string(market.quantity_precision));
-    let max_leverage = leverage_brackets
+    let max_leverage = match leverage_brackets
         .get(&market.symbol)
-        .copied()
-        .filter(|v| *v != 0.0 && !v.is_nan())
-        .unwrap_or(10.0);
+        .filter(|value| value.truthy())
+    {
+        Some(value) => value
+            .to_number()
+            .map_err(|error| ("TypeError", error.message()))?,
+        None => 10.0,
+    };
     let filters = market
         .filters
         .iter()
@@ -1015,24 +1042,24 @@ pub fn transform_order(
     let amount = parse_float(&order.orig_qty);
     let filled = parse_float(&order.executed_qty);
     Ok(safe_cex_types::Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id: js_number_string(order.order_id),
-        parent_id: None,
+        parent_id: (None).into(),
         symbol: order.symbol.clone(),
-        r#type: kind,
+        r#type: (kind).into(),
         side: if order.side == "BUY" {
-            OrderSide::Buy
+            safe_cex_types::ModelField::Value(OrderSide::Buy)
         } else {
-            OrderSide::Sell
+            safe_cex_types::ModelField::Value(OrderSide::Sell)
         },
-        price,
+        price: price.into(),
         amount,
         filled,
         remaining: amount - filled,
-        status,
-        reduce_only: order.close_position == Some(true) || order.reduce_only == Some(true),
+        status: status.into(),
+        reduce_only: (order.close_position == Some(true) || order.reduce_only == Some(true)).into(),
         last_update: order.time,
-        info: Some(
+        info: (Some(
             retained_info(
                 order,
                 [
@@ -1043,15 +1070,16 @@ pub fn transform_order(
                 ],
             )
             .map_err(|error| ("Error", error.to_string()))?,
-        ),
-        close: None,
-        time_in_force: None,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
+        ))
+        .into(),
+        close: (None).into(),
+        time_in_force: (None).into(),
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
     })
 }
 

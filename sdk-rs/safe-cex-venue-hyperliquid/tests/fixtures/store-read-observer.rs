@@ -62,7 +62,10 @@ impl safe_cex_store::Store for ReadTrace {
     ) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::update_position(self.inner.as_ref(), id, changes)
     }
-    fn update_positions(&self, updates: &[(String, ModelPatch)]) -> Result<(), StoreMutationError> {
+    fn update_positions(
+        &self,
+        updates: &[(Option<String>, ModelPatch)],
+    ) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::update_positions(self.inner.as_ref(), updates)
     }
     fn add_or_update_position(&self, position: Position) -> Result<(), StoreMutationError> {

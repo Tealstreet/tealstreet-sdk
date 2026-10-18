@@ -88,15 +88,18 @@ pub(super) fn build(weak: Weak<Shared>) -> Js {
     let _ = g.define("ASTERDEX_ENDPOINTS", endpoints);
     bind("safeCexAxiosCreate", |rt, a| {
         let options = arg(&a, 1);
-        let options = if options.is_undefined() {
+        let typed = if options.is_undefined() {
             rt.base().options()
         } else {
             safe_cex_exchange::js_runtime::base_exchange::exchange_options(&options)?
         };
-        Ok(client::create(
-            (rt.shared.extra.deps.http)(&options).map_err(error)?,
+        client::factory::create(
+            (rt.shared.extra.deps.http)(&typed).map_err(error)?,
+            &*rt.shared.runtime.transport(),
             arg(&a, 0),
-        ))
+            &options,
+            rt.base(),
+        )
     });
     bind("axios.create", |rt, a| {
         // Bare axios bypasses safeCexAxiosCreate's hosted signing in the source.
@@ -104,8 +107,17 @@ pub(super) fn build(weak: Weak<Shared>) -> Js {
         settings.define("safeCexSkipRemoteSigning", Js::Bool(true))?;
         Ok(client::create(rt.shared.http.clone(), settings))
     });
-    // The HTTP factory already receives the exact transport-options object.
-    bind("installTransportAdapter", |_, a| Ok(arg(&a, 0)));
+    bind("installTransportAdapter", |rt, a| {
+        client::factory::install_transport_adapter(
+            rt.shared.http.clone(),
+            &*rt.shared.runtime.transport(),
+            &arg(&a, 0),
+            &arg(&a, 1),
+            to_typed(&arg(&a, 2))?,
+            safe_cex_transport::RestAdapterVariant::Default,
+        )?;
+        Ok(arg(&a, 0))
+    });
     bind("axiosRateLimit", |_, a| {
         let xhr = arg(&a, 0);
         xhr.call_method("__configureRateLimit", vec![arg(&a, 1)])?;
@@ -132,9 +144,11 @@ pub(super) fn build(weak: Weak<Shared>) -> Js {
                 status: response.get("status")?.to_number()? as u16,
                 reason: None,
                 headers: Default::default(),
-                body: safe_cex_transport::RestResponseBody::Untransformed(to_json(
-                    &response.get("data")?,
-                )?),
+                body: safe_cex_transport::RestResponseBody::Untransformed(
+                    safe_cex_exchange::js_runtime::value::to_retained_input(
+                        &response.get("data")?,
+                    )?,
+                ),
             }))
         };
         let code = thrown.get("code")?;

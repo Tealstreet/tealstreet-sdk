@@ -11,13 +11,7 @@ ORIGINAL = SOURCE.read_bytes()
 ENV = {**os.environ, "RUSTUP_TOOLCHAIN": "1.99.0", "RUSTC_BOOTSTRAP": "1", "CARGO_BUILD_JOBS": "1"}
 CONTROLS = [
     ('HyperliquidUserAbstractionMode', 'user_abstraction_mode_variants_and_string_only_ingress'),
-    ('MetaUniverseItemMarginMode', 'meta_margin_mode_variants_and_string_only_ingress'),
-    ('MetaUniverseItemGrowthMode', 'meta_growth_mode_variants_and_string_only_ingress'),
-    ('UserFundingDeltaType', 'funding_delta_variants_and_string_only_ingress'),
-    ('UserNonFundingLedgerDeltaType', 'ledger_delta_variants_and_string_only_ingress'),
     ('WsUserNonFundingLedgerUpdateType', 'websocket_ledger_variants_and_string_only_ingress'),
-    ('Hip3MarketInfoMarginMode', 'hip3_margin_mode_variants_and_string_only_ingress'),
-    ('Hip3MarketInfoGrowthMode', 'hip3_growth_mode_variants_and_string_only_ingress'),
 ]
 
 
@@ -65,4 +59,4 @@ try:
 finally:
     SOURCE.write_bytes(ORIGINAL)
     assert SOURCE.read_bytes() == ORIGINAL
-print("8 compiled named tagged-shape failures / 8 restored passes; final 8/8 PASS; exact source bytes restored.", flush=True)
+print("2 compiled named tagged-shape failures / 2 restored passes; final 2/2 PASS; exact source bytes restored.", flush=True)

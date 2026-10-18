@@ -7,116 +7,9 @@ use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use serde_json::{Value, json};
 
-const MARKETS: &str = "/api/v2/mix/market/contracts";
-const TICKERS: &str = "/api/v2/mix/market/tickers";
-
-fn market_row() -> Value {
-    json!({
-        "symbol": "BTCUSDT", "baseCoin": "BTC", "quoteCoin": "USDT", "symbolStatus": "normal",
-        "pricePlace": "1", "priceEndStep": "1", "sizeMultiplier": "0.001", "minTradeNum": "0.001",
-        "maxOrderQty": "100", "minLever": "1", "maxLever": "125"
-    })
-}
-
-fn ticker_row() -> Value {
-    json!({
-        "symbol": "BTCUSDT", "lastPr": "50000", "bidPr": "49999", "askPr": "50001", "indexPrice": "50000.5",
-        "changeUtc24h": "0.01", "fundingRate": "0.0001", "baseVolume": "10", "quoteVolume": "500000"
-    })
-}
-
-fn position_row() -> Value {
-    json!({
-        "symbol": "BTCUSDT", "holdSide": "long", "total": "0.01", "openPriceAvg": "50000", "markPrice": "50100",
-        "marginMode": "crossed", "posMode": "one_way_mode", "leverage": "10", "unrealizedPL": "1",
-        "liquidationPrice": "40000", "achievedProfits": "0", "totalFee": "0", "deductedFee": "0", "marginSize": "50"
-    })
-}
-
-fn order_row() -> Value {
-    json!({
-        "orderId": "o1", "clientOid": "c1", "symbol": "BTCUSDT", "side": "buy", "orderType": "limit",
-        "price": "49000", "size": "0.01", "baseVolume": "0", "status": "live", "tradeSide": "open",
-        "posSide": "long", "reduceOnly": "NO", "force": "gtc", "cTime": "1700000000000", "posMode": "one_way_mode"
-    })
-}
-
-/// A Classic (non-UTA) account: the v3 settings probe answers 40084.
-fn classic(http: &Http) {
-    http.ok(
-        "GET",
-        "/api/v2/spot/account/info",
-        json!({"userId": "123", "inviterId": "9", "parentId": null}),
-    );
-    http.ok("GET", MARKETS, json!([market_row()]));
-    http.ok("GET", TICKERS, json!([ticker_row()]));
-    http.ok(
-        "GET",
-        "/api/v2/mix/account/accounts",
-        json!([{"marginCoin": "USDT", "available": "100", "accountEquity": "120", "unrealizedPL": "2", "locked": "5"}]),
-    );
-    http.ok(
-        "GET",
-        "/api/v2/mix/position/all-position",
-        json!([position_row()]),
-    );
-    http.ok(
-        "GET",
-        "/api/v2/mix/order/orders-pending",
-        json!({"entrustedList": [order_row()], "endId": "o1"}),
-    );
-    http.ok(
-        "GET",
-        "/api/v2/mix/order/orders-pending",
-        json!({"entrustedList": [], "endId": null}),
-    );
-    http.ok(
-        "GET",
-        "/api/v2/mix/order/orders-plan-pending",
-        json!({"entrustedList": [], "endId": null}),
-    );
-    http.ok(
-        "POST",
-        "/api/v2/mix/account/set-position-mode",
-        json!({"posMode": "hedge_mode"}),
-    );
-    http.ok("POST", "/api/v2/mix/account/set-margin-mode", json!({}));
-    http.ok("POST", "/api/v2/mix/account/set-leverage", json!({}));
-    http.ok(
-        "POST",
-        "/api/v2/mix/order/batch-place-order",
-        json!({"successList": [{"orderId": "p1", "clientOid": "cp1"}], "failureList": []}),
-    );
-    http.ok(
-        "POST",
-        "/api/v2/mix/order/modify-order",
-        json!({"orderId": "o1", "clientOid": "c1"}),
-    );
-    http.ok(
-        "POST",
-        "/api/v2/mix/order/batch-cancel-orders",
-        json!({"successList": [{"orderId": "o1", "clientOid": "c1"}], "failureList": []}),
-    );
-    http.route(
-        "GET",
-        "/api/v3/account/settings",
-        400.0,
-        json!({"code": "40084", "msg": "Classic Account mode", "requestTime": 1, "data": null}),
-    );
-}
-
-fn loaded(h: &Harness) {
-    let markets = h.drive(h.venue().fetch_markets()).expect("markets");
-    Store::update(
-        &*h.store,
-        StoreUpdate {
-            markets: Some(markets),
-            ..Default::default()
-        },
-        false,
-    )
-    .expect("store markets");
-}
+#[path = "support/account_fixture.rs"]
+mod fixture;
+use fixture::*;
 
 #[test]
 fn get_account_signs_and_maps_parent() {
@@ -455,21 +348,39 @@ fn signature_retry_resolved_envelope_replays_each_family_read_once() {
 
 #[test]
 fn signature_retry_posts_run_signing_again_and_stop_after_second_refusal() {
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    struct RestoreClock(f64);
+    impl Drop for RestoreClock {
+        fn drop(&mut self) {
+            VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + self.0);
+        }
+    }
+    let _restore = RestoreClock(VIRTUAL_CLOCK.get_current_time_ms() - (VIRTUAL_CLOCK.now)());
     for status in [200.0, 401.0] {
         let path = "/api/v2/mix/account/set-position-mode";
         let h = harness(ExchangeName::Bitget, options(), |http| {
             http.route("POST", path, status, signature_refusal());
             classic(http);
         });
+        let first_lower = (VIRTUAL_CLOCK.now)() + 90_000.0;
+        VIRTUAL_CLOCK.sync_from_server_time(first_lower);
         h.http.advance_after_send_ms.set(17.0);
+        h.http.advance_signing_clock_after_send_ms.set(60_000.0);
         h.drive(h.venue().change_position_mode(true, None)).unwrap();
         let calls = h.http.calls(path);
         assert_eq!(calls.len(), 2, "signature_retry::write {status}");
-        assert_ne!(
-            calls[0].headers["ACCESS-TIMESTAMP"], calls[1].headers["ACCESS-TIMESTAMP"],
-            "signature_retry::fresh_timestamp"
-        );
-        for call in &calls {
+        for (index, call) in calls.iter().enumerate() {
+            let timestamp = call.headers["ACCESS-TIMESTAMP"].as_f64().unwrap();
+            let lower = if index == 0 {
+                first_lower
+            } else {
+                calls[0].signing_clock_at_send + 60_000.0
+            };
+            assert!(
+                (lower..=call.signing_clock_at_send).contains(&timestamp),
+                "signature_retry::shared_clock_timestamp attempt {index}: {timestamp} outside [{lower}, {}]",
+                call.signing_clock_at_send
+            );
             let body = r#"{"productType":"usdt-futures","posMode":"hedge_mode"}"#;
             assert_eq!(call.data, serde_json::from_str::<Value>(body).unwrap());
             let timestamp = call.headers["ACCESS-TIMESTAMP"]
@@ -527,5 +438,150 @@ fn signature_retry_does_not_replay_unrelated_http_or_resolved_errors() {
             1,
             "signature_retry::unrelated {status}"
         );
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bitget");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 720);
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetusdc,
+        ExchangeName::Bitgetinverse,
+    ] {
+        let mut opts = options();
+        opts.public_data_only = Some(true);
+        let quote = match name {
+            ExchangeName::Bitgetusdc => "USDC",
+            ExchangeName::Bitgetinverse => "USD",
+            _ => "USDT",
+        };
+        let h = harness(name, opts, |http| {
+            let market_rows: Vec<_> = ["BTC", "ETH", "ADA"]
+                .iter()
+                .map(|asset| {
+                    let mut row = market_row();
+                    row["symbol"] = json!(format!("{asset}USDT"));
+                    row["quoteCoin"] = json!(quote);
+                    row
+                })
+                .collect();
+            let ticker_rows: Vec<_> = ["BTC", "ETH", "ADA"]
+                .iter()
+                .map(|asset| {
+                    let mut row = ticker_row();
+                    row["symbol"] = json!(format!("{asset}USDT"));
+                    row
+                })
+                .collect();
+            http.ok("GET", MARKETS, json!(market_rows));
+            http.ok("GET", TICKERS, json!(ticker_rows));
+        });
+        h.drive(h.venue().start()).unwrap();
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        let seed = ticker_coercion::seed("bitget");
+        let markets = seed
+            .iter()
+            .map(|ticker| {
+                serde_json::from_value(serde_json::json!({
+            "id":ticker.id,"symbol":ticker.symbol,"base":"fixture","quote":"USDT","active":true,
+            "precision":{"amount":0.01,"price":0.25},
+            "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+        })).unwrap()
+            })
+            .collect();
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                tickers: Some(seed.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        h.runtime.advance(1000.0);
+        let sockets = h.runtime.sockets.borrow().clone();
+        assert_eq!(
+            sockets.len(),
+            3,
+            "actual public startup opens all three shards"
+        );
+        let shards: Vec<_> = seed
+            .iter()
+            .map(|ticker| {
+                sockets
+                    .iter()
+                    .find(|(_, socket)| {
+                        socket.sent.borrow().iter().any(|frame| {
+                            serde_json::from_str::<Value>(frame)
+                                .ok()
+                                .is_some_and(|frame| frame["args"][0]["instId"] == ticker.symbol)
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "each actual ticker shard subscribes to {}: {:?}",
+                            ticker.symbol,
+                            sockets
+                                .iter()
+                                .map(|(_, s)| s.sent.borrow().clone())
+                                .collect::<Vec<_>>()
+                        )
+                    })
+                    .1
+                    .clone()
+            })
+            .collect();
+        for first in 0..shards.len() {
+            for second in first + 1..shards.len() {
+                assert!(
+                    !std::rc::Rc::ptr_eq(&shards[first], &shards[second]),
+                    "each ticker shard must be a distinct production socket"
+                );
+            }
+        }
+        for case in source["cases"].as_array().unwrap() {
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(seed.clone()),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            let shard = match case["channel"].as_str().unwrap() {
+                "secondary" => 1,
+                "third" => 2,
+                _ => 0,
+            };
+            let socket = &shards[shard];
+            for frame in case["frames"].as_array().unwrap() {
+                socket
+                    .events
+                    .borrow_mut()
+                    .push_back(WsEvent::Message(SocketFrame::Text(
+                        frame.as_str().unwrap().into(),
+                    )));
+                h.runtime.pump();
+            }
+            ticker_coercion::assert_native(&h.store.tickers(), case);
+        }
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{:?}",
+            h.runtime.reports.borrow()
+        );
+        h.venue().dispose().unwrap();
     }
 }

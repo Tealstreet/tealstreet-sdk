@@ -117,18 +117,18 @@ note = "JSON representation of the declared response shape; binary64 numbers, re
 [[symbol]]
 ts = "WOOX_ORDER"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/types.rs::WooxOrder"
-status = "ported"
-note = "JSON representation of the declared response shape; binary64 numbers, required keys and optional non-null presence retained. Does not claim runtime validation parity with unchecked Axios responses. Renamed to safe-cex-venue-woo/src/types.rs::WooxOrder. Public Deserialize captures through shared JsNumberInput before the private companion and retains strict input shape. Native-bit witnesses pin bare raw/Value and shared raw/owned/borrowed routes, including overflow, signed zero and negative underflow."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript-only declaration erased at runtime. No production Rust consumer uses this DTO; the live legacy order-page path reads raw rows and retains documented null metadata. The unused strict record, nested meta record and decoder-only witnesses were removed rather than asserting a refusal that unchecked Axios never performs. Production binding_orders covers the documented four null fields, with a compiling live-mapper null-refusal control."
 
 [[symbol]]
 ts = "FETCH_ORDER_RESPONSE"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/types.rs::FetchOrderResponse", "safe-cex-venue-woo/src/types.rs::FetchOrderResponseMeta" ]
-status = "ported"
-note = "JSON representation of the declared response shape; binary64 numbers, required keys and optional non-null presence retained. Does not claim runtime validation parity with unchecked Axios responses. Split anonymous nested records and number/string union into named Rust types. Renamed to safe-cex-venue-woo/src/types.rs::FetchOrderResponse, safe-cex-venue-woo/src/types.rs::FetchOrderResponseMeta. Public Deserialize captures through shared JsNumberInput before the private companion and retains strict input shape. Native-bit witnesses pin bare raw/Value and shared raw/owned/borrowed routes, including overflow, signed zero and negative underflow."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript-only declaration erased at runtime. No production Rust consumer uses this DTO; the live legacy order-page path reads raw rows and retains documented null metadata. The unused strict record, nested meta record and decoder-only witnesses were removed rather than asserting a refusal that unchecked Axios never performs. Production binding_orders covers the documented four null fields, with a compiling live-mapper null-refusal control."
 
 [[symbol]]
 ts = "GET_FUTURES_LEVERAGE_RESPONSE"

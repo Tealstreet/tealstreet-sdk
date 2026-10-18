@@ -1,7 +1,27 @@
 # Coinbase venue parity port
 
+The production private write-check timeout emits warning arguments as
+`(reason, {forceToast: true})`; retain the second emitter argument and the
+once-only latch until a received user frame resets it. Portfolio selection
+projects only `uuid` and `type` into mutable `PortfolioState`, retaining unused
+metadata as JSON. The declaration DTO remains strict; missing or malformed
+`name`/`deleted` cannot reject runtime selection or balance reads. Production
+regressions are in `tests/private_binding_frames.rs` and `tests/exchange_binding.rs`;
+`scripts/health-portfolio-binding-controls.py` compiles each boundary reversion,
+requires its named failure, and restores the source byte-for-byte.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/coinbase/CLAUDE.md).
 Core contract: [shared exchange trait](../safe-cex-exchange/CLAUDE.md).
+
+The concrete API host uses the shared client factory and optional transport adapter
+from the runtime provider. Preserve executable adapter and query-serializer handles
+across the native signing carrier; neither is a JSON field. Real constructor/read
+witnesses and eight maintained TS factory/API scenes cover provider selection,
+no-adapter fallback, tunnel gating and Authorization header selection. Run
+`scripts/transport-binding-controls.py` for four independent compiled production
+reversions, and `scripts/private-binding-controls.py` for real private frame and
+fill-dispatch controls. Private user orders map snapshots/updates into Store and
+emit fills; the source does not dispatch balance or position topics.
 
 `tables.rs` mirrors every exported protocol table in `coinbase.types.ts`.
 `protocol.rs` mirrors the inert Starbase exported protocol constants, including
@@ -121,8 +141,9 @@ float output and every present numeric `info` field before JSON erases -0; both
 take-market `take_profit` and stop-market `stop_loss` trigger branches are
 covered by tagged negative-zero witnesses.
 The Store notification reachability audit follows the TypeScript call graph.
-The three private-health handlers return `StoreMutationError` unchanged,
-preserving Store-local subscriber identity and source error cause. Their
+The three private-health handlers preserve the original `StoreMutationError`,
+including Store-local subscriber identity and source error cause. Degraded/auth
+handlers use the existing `PortfolioFailure` carrier for Store and callback errors. Their
 regression test pins commit-before-error, ordered fanout stopping at the first
 failure, and skipped log/warning effects. Other Coinbase Store writers remain
 pending or divergent with a `FINDING` note until their handlers propagate the
@@ -151,18 +172,13 @@ No DTO production caller was found, and this evidence excludes shared numeric
 record graphs listed in MANIFEST-SPEC section 17.
 
 `private_health.rs` ports the private-stream message-received, degraded, and
-auth-failed transitions against the production `DefaultStore`. All three rows
-remain `divergent` with `FINDING` notes: TypeScript commits a health update and then
-can surface a subscriber throw, which skips later subscribers and (for the
-degraded path) prevents logging and the once-only warning. Rust's current Store
-notification API returns `StoreMutationError`; the remaining divergence is the
-different subscriber and subsequent-effect behavior pinned by the live-source
-test. Keep subscriber identity and commit-before-error semantics intact.
-
-are `ported` with `MIXED` notes: Store notification failures propagate after
-commit, retaining subscriber identity and cause; the degraded path reports the
-failure before logging and the once-only warning. The live-source test pins
-update state, notification snapshots, and effect ordering.
+auth-failed transitions against the production `DefaultStore`. Store failure
+propagates after commit and before logging. Log and warning callbacks are fallible:
+a log failure prevents the warning latch and emission; a warning failure escapes
+after setting the latch. Constructed private-write timers and an authentication
+error frame retain the original native callback cause and source retry behavior.
+The three existing health rows remain ported; other notification findings retain
+their independent scope.
 
 The Store notification reachability audit follows the TypeScript call graph and
 allows only the three health rows whose Rust handlers propagate the fallible
@@ -228,3 +244,36 @@ The JSON duplicate-key grammar now maps to `json_key_scanner.rs` method by metho
 Coinbase create/cancel and REST fallback bodies are mapped individually in `order_create.rs`: amount/price precision formatter, optimistic native Order carrier, own typed market resolver, hot Promise placement/cancellation, order polling/backoff and fresh WS/REST merging. Production Exchange assembly lives in `binding/`; its gate scope and remaining notification findings are recorded in `BINDING_GATES.md`. Explicit receiver capabilities preserve operation boundaries; transport returns native hot Promises. `CoinbaseOrderResponse` retains a shared root and shallow object/array field identities; primitive info fields copy. Tests use the actual installed p-iteration implementation, decoded native values and source error/timing/alias probes. String response IDs and own genuine Market records are the declared typed boundary; inherited non-Market prototype outputs are excluded.
 
 Public frame classification is complete in `starbase_public_frames.rs`, using `json_key_scanner.rs` before a guarded native JSON.parse bridge. Retain UTF16 strings/keys, f64 overflow/underflow/signed-zero, shared array/object payloads and primitive copies; serde Value cannot replace this data carrier. Context remains a plain typed JSON record. This module owns no socket or dispatch. Gates: `FRAME_CLASSIFICATION_GATES.md`.
+
+JWT signing and private user-order `lastUpdate` read the synchronized shared
+virtual clock, matching their source call sites. Polling, private health and
+optimistic REST timestamps retain the source Date.now runtime clock. The native
+clock regression syncs server time, signs real REST JWTs and delivers an opened
+private socket frame for both Coinbase variants with an unrelated host clock.
+
+`PlaceOrderRequest` serializes `leverage` before `order_configuration`, matching
+the source formatOrder object literal. The production transport regression
+observes exact encoded POST bytes for Coinbase and CoinbaseSpot; it drives the
+real class graph, signers, client factory and installed transport adapter.
+
+CDP key-name validation requires exactly one organization segment and one key-ID
+segment, matching the source regex. Slashes inside either segment are refused
+before local JWT signing or HTTP dispatch; Unicode and interior spaces stay
+accepted. The constructed credential binding witness checks eight actual-source
+profiles through WS signing and rejects an invalid REST key before transport.
+
+Concrete order generation, client-ID minting and JWT nonce capabilities use the
+shared source UUID helper (`safe_cex_crypto::uuid::uuid_with_entropy`) with runtime
+entropy: generate nanoid21, then remove both separators. Generic runtime.unique_id
+has a separate host contract. Constructed UUID regressions exercise both variants,
+exact POST client IDs, optimistic parent IDs, mint entropy consumption and signed
+JWT headers; Node-derived Ed25519 public keys verify the actual wire token.
+
+
+The native ticker census in `tests/exchange_binding.rs` verifies the maintained
+source has no active ticker_batch handler: its mapper and registration are
+commented out in TS. For both constructed Coinbase variants, 56 malformed
+three-row batches preserve all ticker numeric bits and produce one visible
+unsupported-channel report per frame. The shared control runner changes the
+actual dispatcher diagnostic and requires a compiled native assertion failure
+followed by exact-restored success. This does not invent ticker WS support.

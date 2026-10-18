@@ -17,7 +17,7 @@ return (async () => {
   context.sdk = sdk;
   context.signContract = new vm.Script(signerCode + '\\nsignContract').runInNewContext({exports:{},Array:walletArray,sdk,BigNumber:dependency('@ethersproject/bignumber').BigNumber,isAddress:dependency('ethers').isAddress});
   context.initSdk = async () => {};
-  clock = 1700000000000;
+  clock = Number(process.env.SAFE_CEX_VIRTUAL_TIME ?? '1700000000000');
   const s = store();
   s.update({markets:[{...market,precision:{amount:0.001,price:0.01},limits:{amount:{min:0.001,max:1000},leverage:{min:1,max:50}}}]});
   s.updateZkLinkConfig({id:'16909060',l2Key:'fixture-l2',contractAccount:{makerFeeRate:'0.0012',takerFeeRate:'0.0013'},contractConfig:{perpetualContract:[{symbol:'BTC-USDC',l2PairId:'11'}]}});

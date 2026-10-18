@@ -192,7 +192,7 @@ kind = "type"
 layer = "mirror"
 rs = "safe-cex-types/src/lib.rs::Order"
 status = "ported"
-note = ""
+note = "Static declaration projection is unchanged. Runtime output type/status/side, price, reduceOnly, and optional fields use ModelField to retain absent, own undefined, and typed values. Native model bridge preserves presence; JSON omits absent/undefined fields. Public placement input remains strict."
 
 [[symbol]]
 ts = "PositionSide"
@@ -328,7 +328,7 @@ kind = "type"
 layer = "mirror"
 rs = "safe-cex-types/src/lib.rs::OHLCVOptions"
 status = "ported"
-note = ""
+note = "Rust interval uses the maintained AnyTimeframe union (27 literals) for the worker runtime domain: monthly, seconds and extended intervals pass unchanged through actual source fetch/subscription handlers. The source OHLCVOptions annotation remains Timeframe; tests/ohlcv-interval-source.cjs pins the complete AnyTimeframe AST inventory and both live handler paths."
 
 [[symbol]]
 ts = "ExecutionsOptions"

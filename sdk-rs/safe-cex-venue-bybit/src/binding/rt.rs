@@ -6,6 +6,7 @@ use std::rc::{Rc, Weak};
 
 pub(crate) struct BybitExtra {
     pub venue: std::cell::RefCell<Weak<BybitExchange>>,
+    pub private_protocol: std::cell::RefCell<Weak<crate::ws_private::protocol::PrivateProtocol>>,
 }
 
 pub(crate) type Shared = ScopeShared<BybitExtra>;

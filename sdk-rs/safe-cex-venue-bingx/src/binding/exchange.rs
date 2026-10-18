@@ -1,8 +1,10 @@
 use super::hosts::Host;
 use crate::exchange::{BingxExchange as Bodies, BingxHosts};
 use safe_cex_exchange::{
-    capabilities::{CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding},
-    exchange::{BaseExchange, Exchange, ValidatedOrder},
+    capabilities::{
+        CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
+    },
+    exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
     js_runtime::{base_exchange::ExternalPublicDataFactory, client::JsHttpHost},
     runtime::{ExchangeError, ExchangeFuture},
     websocket::WsRuntime,
@@ -14,6 +16,7 @@ use std::rc::Rc;
 pub struct BingxDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub http: Rc<dyn JsHttpHost>,
+    pub local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
     pub external_public_data: Option<ExternalPublicDataFactory>,
 }
 
@@ -74,6 +77,7 @@ impl BingxExchange {
             capabilities: ExchangeCapabilities {
                 start: CapabilityBinding::implemented(|v, ()| v.start()),
                 place_order: PlaceOrderBinding::implemented::<Self>(Exchange::place_order),
+                place_orders: PlaceOrdersBinding::implemented::<Self>(Exchange::place_orders),
                 fetch_historical_fills: CapabilityBinding::implemented(|v, o| {
                     v.fetch_historical_fills(o)
                 }),
@@ -125,8 +129,20 @@ impl Exchange for BingxExchange {
             .assert_caller_client_order_ids(std::slice::from_ref(order.options()));
         Box::pin(async move {
             preflight?;
-            ids(self.inner.placement.place_order(order.options()).await?)
+            ids(self
+                .inner
+                .placement
+                .place_order(&safe_cex_types::PreparedOrderOpts::from(order.options()))
+                .await?)
         })
+    }
+    fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
+        let options: Vec<_> = orders
+            .orders()
+            .iter()
+            .map(|o| safe_cex_types::PreparedOrderOpts::from(o.options()))
+            .collect();
+        Box::pin(async move { ids(self.inner.placement.place_orders(&options).await?) })
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.inner.start())

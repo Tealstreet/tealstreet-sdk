@@ -2,7 +2,8 @@
 #[path = "support/binding_harness.rs"]
 mod support;
 use safe_cex_types::{
-    ExchangeName, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, UpdateOrderOpts,
+    ExchangeName, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, Position,
+    UpdateOrderOpts,
 };
 use serde_json::{Value, json};
 use support::{Harness, harness, options};
@@ -100,6 +101,105 @@ fn fetch_tickers_reads_the_rest_snapshot_for_known_markets() {
     assert_eq!(tickers[0].symbol, SYMBOL);
     assert_eq!(tickers[0].mark, 30000.25);
     assert_eq!(tickers[0].index, 30000.1);
+}
+
+#[test]
+fn futures_candles_refuse_only_nan_timestamp_rows() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/reads-cardinality-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let case = &source["futuresCandleBoundaries"][0];
+    assert_eq!(case["label"], "mixed-NaN-timestamps");
+    assert_eq!(case["result"].as_array().unwrap().len(), 4);
+    let original: Value = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+    let mut multiple = original.clone();
+    multiple["candles"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"time":"bad","open":"99"}));
+    for (body, expected_rows, expected_reports) in [
+        (original, 3, 1),
+        (multiple, 3, 2),
+        (json!({"candles":[{"time":"NaN"},{"time":"bad"}]}), 0, 2),
+    ] {
+        let url = format!("https://futures.kraken.com/api/charts/v1/trade/{SYMBOL}/1m");
+        let h = futures(|http| http.ok("GET", &url, body));
+        let candles = h
+            .drive(
+                h.venue().fetch_ohlcv(
+                    serde_json::from_value(json!({
+                        "symbol":SYMBOL,"interval":"1m","limit":4,"to":1700000000000.0
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            candles.len(),
+            expected_rows,
+            "valid candles survive bad timestamp rows"
+        );
+        for (index, candle) in candles.iter().enumerate() {
+            let expected = &case["result"][index];
+            for (field, actual) in [
+                ("timestamp", candle.timestamp),
+                ("open", candle.open),
+                ("high", candle.high),
+                ("low", candle.low),
+                ("close", candle.close),
+                ("volume", candle.volume),
+            ] {
+                assert_eq!(
+                    format!("{:016x}", actual.to_bits()),
+                    expected[field]["number"].as_str().unwrap(),
+                    "native {field}"
+                );
+            }
+        }
+        let console = h.runtime.console.borrow();
+        let refusals = console
+            .iter()
+            .filter(|(level, message)| level == "error" && message.contains("timestamp=NaN"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refusals.len(),
+            expected_reports,
+            "each refused timestamp is visible"
+        );
+        assert_eq!(h.http.calls(&url).len(), 1);
+    }
+    let url = format!("https://futures.kraken.com/api/charts/v1/trade/{SYMBOL}/1m");
+    let h = futures(|http| {
+        http.ok("GET", &url, json!({"candles":[{
+        "time":1000,"open":"NaN","high":"Infinity","low":"-0","close":"-Infinity","volume":"5"
+    }]}))
+    });
+    let candles = h
+        .drive(
+            h.venue().fetch_ohlcv(
+                serde_json::from_value(json!({
+                    "symbol":SYMBOL,"interval":"1m","to":1700000000000.0
+                }))
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(candles.len(), 1, "only timestamp controls row admission");
+    assert!(candles[0].open.is_nan());
+    assert_eq!(candles[0].high.to_bits(), f64::INFINITY.to_bits());
+    assert_eq!(candles[0].low.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(candles[0].close.to_bits(), f64::NEG_INFINITY.to_bits());
+    assert!(h.runtime.console.borrow().is_empty());
 }
 
 #[test]
@@ -302,6 +402,42 @@ fn set_leverage_puts_a_clamped_preference() {
 }
 
 #[test]
+fn change_margin_type_merges_refreshed_positions_into_the_store() {
+    let h = futures(|http| {
+        http.ok(
+            "PUT",
+            "/v3/leveragepreferences",
+            json!({"result": "success"}),
+        );
+        http.ok("GET", "/v3/openpositions", open_positions());
+    });
+    loaded(&h);
+    let mut other: Position = h
+        .drive(h.venue().fetch_positions(None))
+        .expect("fetchPositions")
+        .remove(0);
+    other.symbol = "PF_ETHUSD".into();
+    other.id = "PF_ETHUSD-long".into();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            positions: Some(vec![other]),
+            ..Default::default()
+        },
+        false,
+    )
+    .expect("seed positions");
+    h.drive(h.venue().change_margin_type(true, Some(SYMBOL.into())))
+        .expect("changeMarginType");
+    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    let symbols: Vec<&str> = positions.iter().map(|p| p.symbol.as_str()).collect();
+    assert!(
+        symbols.contains(&"PF_ETHUSD") && symbols.contains(&SYMBOL),
+        "refreshed positions must merge, not replace: {symbols:?}"
+    );
+}
+
+#[test]
 fn change_margin_type_to_isolated_sets_a_leverage_preference() {
     let h = futures(|http| {
         http.ok(
@@ -423,6 +559,54 @@ fn private_socket_sends_the_challenge_on_open_and_subscribes_after_auth() {
 }
 
 #[test]
+fn private_auth_error_without_message_logs_js_json_stringify_text() {
+    let h = futures(|http| {
+        http.ok(
+            "GET",
+            "/v3/leveragepreferences",
+            json!({"result": "success", "leveragePreferences": []}),
+        );
+        http.ok("GET", "/v3/openorders", open_orders());
+        http.ok("GET", "/v3/openpositions", open_positions());
+        http.ok("GET", "/v3/accounts", accounts());
+    });
+    let logs = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Value>::new()));
+    let sink = logs.clone();
+    h.venue().base().on(
+        "log",
+        std::rc::Rc::new(move |_, value| {
+            sink.borrow_mut().push(Value::String(
+                String::from_utf16(value.as_str().expect("source log message"))
+                    .expect("fixture log UTF16"),
+            ));
+            Ok(())
+        }),
+    );
+    h.drive(h.venue().start()).expect("start");
+    h.runtime.advance(100.0);
+    let private = h.runtime.sockets.borrow()[1].1.clone();
+    private
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(
+                r#"{"event":"error","message":"","code":1.0,"neg":-0.0,"big":1e16}"#.into(),
+            ),
+        ));
+    for _ in 0..5 {
+        h.runtime.advance(100.0);
+    }
+    let expected = r#"WebSocket authentication error: {"event":"error","message":"","code":1,"neg":0,"big":10000000000000000}"#;
+    assert!(
+        logs.borrow()
+            .iter()
+            .any(|log| log.as_str().is_some_and(|text| text.ends_with(expected))),
+        "auth error text must match JS JSON.stringify: {:?}",
+        logs.borrow()
+    );
+}
+
+#[test]
 fn inherited_base_members_reject_not_implemented() {
     let h = futures(|_| {});
     let msg = |e: safe_cex_exchange::runtime::ExchangeError| e.message;
@@ -514,6 +698,60 @@ fn place_order_with_stop_loss_places_the_derived_algo_order_through_place_orders
     assert!(stop.contains("orderType=stp"), "{stop}");
     assert!(stop.contains("stopPrice=29000"), "{stop}");
     assert!(stop.contains("side=sell"), "{stop}");
+}
+
+#[test]
+fn spot_place_order_spreads_transaction_ids_by_unicode_code_point() {
+    for (txids, expected) in [
+        (json!(["T-1", "T-2"]), vec!["T-1", "T-2"]),
+        (json!("A💰B"), vec!["A", "💰", "B"]),
+    ] {
+        let h = harness(ExchangeName::Krakenspot, options(), |http| {
+            http.ok(
+                "GET",
+                "/0/public/AssetPairs",
+                json!({"error": [], "result": {"XXBTZUSD": {
+                    "wsname": "XBT/USD", "pair_decimals": 1, "lot_decimals": 8,
+                    "ordermin": "0.0001", "status": "online", "altname": "XBTUSD"
+                }}}),
+            );
+            http.ok(
+                "POST",
+                "/0/private/AddOrder",
+                json!({"error": [], "result": {"txid": txids}}),
+            );
+        });
+        let markets = h.drive(h.venue().fetch_markets()).expect("spot markets");
+        safe_cex_store::Store::update(
+            h.store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .expect("store markets");
+        let ids = h
+            .drive(Box::pin(
+                safe_cex_exchange::exchange::Exchange::base(h.exchange.as_ref()).place_order(
+                    h.venue(),
+                    order(json!({"symbol": "XBT/USD", "type": "limit", "side": "buy",
+                    "amount": 0.5, "price": 30000})),
+                ),
+            ))
+            .expect("spot placement");
+        assert_eq!(
+            ids, expected,
+            "AddOrder txids use JavaScript string iteration"
+        );
+        let requests = h.http.calls("/0/private/AddOrder");
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0].headers["API-Sign"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+        );
+    }
 }
 
 #[test]
@@ -723,4 +961,673 @@ fn source_identity_flags_survive_spot_facade_construction() {
         assert!(!h.venue().base().is_demo);
         h.venue().dispose().unwrap();
     }
+}
+
+fn private_frame_fixture() -> Harness {
+    let h = futures(|http| {
+        http.ok(
+            "GET",
+            "/v3/leveragepreferences",
+            json!({"result":"success","leveragePreferences":[]}),
+        );
+        http.ok("GET", "/v3/openorders", open_orders());
+        http.ok("GET", "/v3/openpositions", open_positions());
+        http.ok("GET", "/v3/accounts", accounts());
+    });
+    h.drive(h.venue().start())
+        .expect("production constructor and startup");
+    h.runtime.pump();
+    h
+}
+fn private_frame(h: &Harness, value: Value) {
+    let socket = h.runtime.sockets.borrow()[1].1.clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(value.to_string()),
+        ));
+    h.runtime.pump();
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+}
+#[test]
+fn constructed_private_orders_frame_updates_store() {
+    let h = private_frame_fixture();
+    private_frame(
+        &h,
+        json!({"feed":"open_orders_snapshot","orders":[{"order_id":"frame-order","instrument":SYMBOL,"type":"lmt","direction":0,"qty":3,"filled":0.5,"limit_price":29100}]}),
+    );
+    let rows = h.store.orders();
+    assert_eq!(rows.len(), 1);
+    let order = &rows[0];
+    assert_eq!(
+        (order.id.as_str(), order.symbol.as_str()),
+        ("frame-order", SYMBOL)
+    );
+    assert_eq!(
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
+        (29100.0, 3.0, 0.5, 2.5)
+    );
+    assert_eq!(order.r#type, OrderType::Limit);
+}
+#[test]
+fn constructed_private_fill_frame_updates_order_and_emits_fill() {
+    let h = private_frame_fixture();
+    let fills = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let saved = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, data| {
+            saved.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    private_frame(
+        &h,
+        json!({"feed":"fills","fills":[{"order_id":"o-1","instrument":SYMBOL,"qty":0.25,"price":30002,"buy":true}]}),
+    );
+    let rows = h.store.orders();
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].filled, rows[0].remaining), (0.25, 1.75));
+    let fills = fills.borrow();
+    assert_eq!(fills.len(), 1);
+    let fill = &fills[0];
+    assert!(
+        fill.get("id")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("o-1"))
+    );
+    assert!(
+        fill.get("symbol")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(SYMBOL))
+    );
+    assert!(
+        fill.get("side")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("buy"))
+    );
+    assert_eq!(fill.get("amount").unwrap().as_f64(), Some(0.25));
+    assert_eq!(fill.get("price").unwrap().as_f64(), Some(30002.0));
+}
+#[test]
+fn constructed_private_position_frame_updates_store() {
+    let h = private_frame_fixture();
+    private_frame(
+        &h,
+        json!({"feed":"open_positions","positions":[{"instrument":SYMBOL,"balance":3,"entry_price":29000,"mark_price":30000,"pnl":7,"liquidation_threshold":25000}]}),
+    );
+    let rows = h.store.positions();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].symbol, SYMBOL);
+    assert_eq!(
+        (
+            rows[0].contracts,
+            rows[0].entry_price,
+            rows[0].notional,
+            rows[0].unrealized_pnl
+        ),
+        (3.0, 29000.0, 90000.0, 7.0)
+    );
+}
+#[test]
+fn constructed_private_balance_frame_updates_store() {
+    let h = private_frame_fixture();
+    private_frame(
+        &h,
+        json!({"feed":"account_balances","accounts":{"flex":{"type":"multiCollateralMarginAccount","portfolioValue":1250,"availableMargin":1100,"initialMargin":100,"maintenanceMargin":50,"pnl":9}}}),
+    );
+    let b = h.store.balance();
+    assert_eq!(
+        (b.total, b.free, b.used, b.upnl),
+        (1250.0, 1100.0, 150.0, 9.0)
+    );
+}
+
+fn spot_private_fixture() -> Harness {
+    let h = harness(ExchangeName::Krakenspot, options(), |http| {
+        http.ok(
+            "GET",
+            "/0/public/AssetPairs",
+            json!({"error":[],"result":{"XXBTZUSD":{
+                "wsname":"XBT/USD","pair_decimals":1,"lot_decimals":8,
+                "ordermin":"0.0001","status":"online","altname":"XBTUSD"
+            }}}),
+        );
+        http.ok("GET", "/0/public/Ticker", json!({"error":[],"result":{}}));
+        http.ok(
+            "POST",
+            "/0/private/OpenOrders",
+            json!({"error":[],"result":{"open":{}}}),
+        );
+        http.ok(
+            "POST",
+            "/0/private/Balance",
+            json!({"error":[],"result":{"ZUSD":"100"}}),
+        );
+        http.ok(
+            "POST",
+            "/0/private/GetWebSocketsToken",
+            json!({"error":[],"result":{"token":"private-token"}}),
+        );
+    });
+    h.drive(h.venue().start()).expect("Spot production startup");
+    h.runtime.pump();
+    let socket = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url == "wss://ws-auth.kraken.com/v2")
+        .expect("Spot private WS v2")
+        .1
+        .clone();
+    let subscriptions: Vec<Value> = socket
+        .sent
+        .borrow()
+        .iter()
+        .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    assert!(
+        subscriptions.contains(&json!({"method":"subscribe","params":{
+            "channel":"executions","token":"private-token","snap_orders":true,
+            "snap_trades":false,"order_status":true
+        }}))
+    );
+    assert!(
+        subscriptions.contains(&json!({"method":"subscribe","params":{
+            "channel":"balances","token":"private-token","snapshot":true
+        }}))
+    );
+    assert_eq!(h.http.calls("/0/private/GetWebSocketsToken").len(), 1);
+    assert_eq!(h.store.balance().total, 100.0);
+    assert_eq!(h.store.positions().len(), 2);
+    h
+}
+
+fn spot_private_order_frame() -> Value {
+    json!({"channel":"executions","type":"snapshot","data":[{
+        "order_id":"spot-frame-order","symbol":"XBT/USD","side":"buy",
+        "order_type":"limit","limit_price":"29100","order_qty":"3",
+        "cum_qty":"0.5","exec_type":"new","timestamp":"2023-11-14T22:13:20Z"
+    }]})
+}
+
+#[test]
+fn constructed_spot_private_orders_frame_updates_real_store() {
+    let h = spot_private_fixture();
+    private_frame(&h, spot_private_order_frame());
+    let orders = h.store.orders().to_vec();
+    assert_eq!(orders.len(), 1);
+    let order = &orders[0];
+    assert_eq!(
+        (order.id.as_str(), order.symbol.as_str()),
+        ("spot-frame-order", "XBT/USD")
+    );
+    assert_eq!(order.status, OrderStatus::Open);
+    assert_eq!(order.side, OrderSide::Buy);
+    assert_eq!(order.r#type, OrderType::Limit);
+    assert_eq!(
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
+        (29100.0, 3.0, 0.5, 2.5)
+    );
+    private_frame(
+        &h,
+        json!({"channel":"executions","type":"update","data":[{
+            "order_id":"spot-frame-order","exec_type":"canceled"
+        }]}),
+    );
+    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+}
+
+#[test]
+fn constructed_spot_private_fill_updates_store_and_emits_original_payload() {
+    let h = spot_private_fixture();
+    let fills = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let saved = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, data| {
+            saved.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    private_frame(&h, spot_private_order_frame());
+    assert!(fills.borrow().is_empty(), "snapshot has no trade emission");
+    private_frame(
+        &h,
+        json!({"channel":"executions","type":"update","data":[{
+            "order_id":"spot-frame-order","symbol":"XBT/USD","exec_type":"trade",
+            "side":"buy","order_qty":"3","cum_qty":"0.75","last_qty":"0.25",
+            "avg_price":"30002"
+        }]}),
+    );
+    assert_eq!(
+        (h.store.orders()[0].filled, h.store.orders()[0].remaining),
+        (0.75, 2.25)
+    );
+    assert_eq!(h.store.orders()[0].status, OrderStatus::Open);
+    let fills = fills.borrow();
+    assert_eq!(fills.len(), 1);
+    let fill = &fills[0];
+    assert_eq!(fill.own_keys().len(), 4);
+    for (key, expected) in [("side", "buy"), ("symbol", "XBT/USD")] {
+        assert!(fill.has_own(key));
+        assert!(
+            fill.get(key)
+                .unwrap()
+                .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(expected))
+        );
+    }
+    for (key, expected) in [("price", 30002.0_f64), ("amount", 0.25_f64)] {
+        assert!(fill.has_own(key));
+        assert_eq!(
+            fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+            expected.to_bits()
+        );
+    }
+}
+
+#[test]
+fn constructed_spot_private_balance_frame_refreshes_authoritative_rest_store() {
+    let h = spot_private_fixture();
+    let before = h.http.calls("/0/private/Balance").len();
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/0/private/Balance");
+    h.http.ok(
+        "POST",
+        "/0/private/Balance",
+        json!({"error":[],"result":{"ZUSD":"125","USDT":"7"}}),
+    );
+    private_frame(
+        &h,
+        json!({"channel":"balances","type":"update","data":[{
+            "asset":"USD","balance":"999999"
+        }]}),
+    );
+    h.runtime.advance(1000.0);
+    assert_eq!(h.http.calls("/0/private/Balance").len(), before + 1);
+    let b = h.store.balance();
+    assert_eq!((b.free, b.used, b.total, b.upnl), (132.0, 0.0, 132.0, 0.0));
+    let currencies = b.currencies.as_ref().unwrap();
+    assert_eq!(currencies["USD"].as_balance().unwrap().total, 125.0);
+    assert_eq!(currencies["USDT"].as_balance().unwrap().total, 7.0);
+}
+
+#[test]
+fn constructed_spot_private_position_topic_preserves_rest_owned_store() {
+    let h = spot_private_fixture();
+    private_frame(&h, spot_private_order_frame());
+    let orders = h.store.orders().to_vec();
+    assert_eq!(
+        orders.len(),
+        1,
+        "ignored-topic witness starts with a real WS order"
+    );
+    let positions = h.store.positions().to_vec();
+    let balance = h.store.balance().clone();
+    let fills = std::rc::Rc::new(std::cell::Cell::new(0));
+    let saved = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, _| {
+            saved.set(saved.get() + 1);
+            Ok(())
+        }),
+    );
+    private_frame(
+        &h,
+        json!({"channel":"positions","type":"update","data":[{
+            "symbol":"XBT/USD","contracts":99,"unrealizedPnl":123
+        }]}),
+    );
+    assert_eq!(&*h.store.orders(), orders.as_slice());
+    assert_eq!(&*h.store.positions(), positions.as_slice());
+    assert_eq!(&*h.store.balance(), &balance);
+    assert_eq!(
+        fills.get(),
+        0,
+        "Spot has no private positions/fill route for this channel"
+    );
+}
+
+#[test]
+fn constructed_public_book_frames_keep_source_string_iterables() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/orderbook-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    for (name, family, symbol) in [
+        (ExchangeName::Kraken, "Futures", SYMBOL),
+        (ExchangeName::Krakenspot, "Spot", "XBT/USD"),
+    ] {
+        let h = if family == "Futures" {
+            futures(|_| {})
+        } else {
+            harness(name, options(), |http| {
+                http.ok(
+                    "GET",
+                    "/0/public/AssetPairs",
+                    json!({"error":[],"result":{
+                        "XXBTZUSD":{"wsname":"XBT/USD","pair_decimals":1,"lot_decimals":8,
+                        "ordermin":"0.0001","status":"online","altname":"XBTUSD"}
+                    }}),
+                );
+                http.ok("GET", "/0/public/Ticker", json!({"error":[],"result":{}}));
+            })
+        };
+        loaded(&h);
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let sink = books.clone();
+        let cleanup = h
+            .venue()
+            .listen_order_book(
+                symbol.into(),
+                Rc::new(move |book| {
+                    sink.borrow_mut().push(book);
+                }),
+            )
+            .unwrap();
+        h.runtime.pump();
+        h.runtime.advance(100.0);
+        let socket = h.runtime.sockets.borrow()[0].1.clone();
+        assert!(
+            socket.sent.borrow().iter().any(|wire| {
+                let wire: Value = serde_json::from_str(wire).unwrap();
+                if family == "Futures" {
+                    wire["feed"] == "book" && wire["product_ids"] == json!([symbol])
+                } else {
+                    wire["params"]["channel"] == "book"
+                        && wire["params"]["symbol"] == json!([symbol])
+                }
+            }),
+            "real {family} subscription"
+        );
+        let frame = |snapshot: bool, bids: Value, asks: Value| {
+            let raw = if family == "Futures" {
+                assert!(snapshot);
+                json!({"feed":"book_snapshot","product_id":symbol,"bids":bids,"asks":asks})
+            } else {
+                json!({"channel":"book","type":if snapshot {"snapshot"} else {"update"},
+                    "data":[{"symbol":symbol,"bids":bids,"asks":asks,"checksum":123}]})
+            };
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(raw.to_string())));
+            h.runtime.pump();
+        };
+        let source_snapshot = source["books"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| {
+                row["family"] == family
+                    && row["operation"] == "snapshot"
+                    && row["config"]["bids"] == "ab"
+            })
+            .unwrap();
+        assert!(source_snapshot["failure"].is_null());
+        assert_eq!(source_snapshot["cache"], json!({"bids":[],"asks":[]}));
+        frame(true, json!("ab"), json!([]));
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "{family} source emits the string-side snapshot"
+        );
+        assert!(books.borrow()[0].bids.is_empty() && books.borrow()[0].asks.is_empty());
+        frame(
+            true,
+            json!([{"price":5.5,"qty":7.25},{"price":17.25,"qty":11.5}]),
+            json!([{"price":41.25,"qty":43.5},{"price":37.75,"qty":47.125}]),
+        );
+        assert_eq!(books.borrow().len(), 2);
+        assert_eq!(books.borrow()[1].bids.len(), 2);
+        assert_eq!(books.borrow()[1].asks.len(), 2);
+        if family == "Spot" {
+            let expected = source["books"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| {
+                    row["family"] == family
+                        && row["operation"] == "delta"
+                        && row["config"]["bids"] == "ab"
+                })
+                .unwrap();
+            assert!(expected["failure"].is_null());
+            frame(false, json!("ab"), json!([]));
+            let books = books.borrow();
+            assert_eq!(books.len(), 3, "Spot source emits its string-side delta");
+            for (side, levels) in [("bids", &books[2].bids), ("asks", &books[2].asks)] {
+                let expected = expected["cache"][side].as_array().unwrap();
+                assert_eq!(levels.len(), expected.len());
+                for expected in expected {
+                    let price =
+                        u64::from_str_radix(expected[0]["n"].as_str().unwrap(), 16).unwrap();
+                    let amount =
+                        u64::from_str_radix(expected[1]["n"].as_str().unwrap(), 16).unwrap();
+                    let level = levels
+                        .iter()
+                        .find(|level| {
+                            if f64::from_bits(price).is_nan() {
+                                level.price.is_nan()
+                            } else {
+                                level.price.to_bits() == price
+                            }
+                        })
+                        .unwrap();
+                    if f64::from_bits(amount).is_nan() {
+                        assert!(level.amount.is_nan());
+                    } else {
+                        assert_eq!(level.amount.to_bits(), amount);
+                    }
+                    assert_eq!(level.total.to_bits(), 0.0_f64.to_bits());
+                }
+            }
+        }
+        cleanup().unwrap();
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn constructed_spot_candles_keep_source_date_input_coercion() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/stream-updates-oracle.cjs"
+        ))
+        .arg("--date-inputs")
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["dates"].as_array().unwrap();
+    assert_eq!(cases.len(), 11);
+    let h = harness(ExchangeName::Krakenspot, options(), |http| {
+        http.ok(
+            "GET",
+            "/0/public/AssetPairs",
+            json!({"error":[],"result":{
+                "XXBTZUSD":{"wsname":"BTC/USD","pair_decimals":1,"lot_decimals":8,
+                "ordermin":"0.0001","status":"online","altname":"XBTUSD"}
+            }}),
+        );
+        http.ok("GET", "/0/public/Ticker", json!({"error":[],"result":{}}));
+    });
+    loaded(&h);
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let sink = candles.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTC/USD","interval":"1m"})).unwrap(),
+            Rc::new(move |candle| sink.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    h.runtime.advance(100.0);
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(socket.sent.borrow().iter().any(|wire| {
+        let wire: Value = serde_json::from_str(wire).unwrap();
+        wire["params"] == json!({"channel":"ohlc","symbol":["BTC/USD"],"interval":1})
+    }));
+    for (index, case) in cases.iter().enumerate() {
+        assert!(case["failure"].is_null(), "{case}");
+        let expected = &case["trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["kind"] == "candle")
+            .unwrap()["fields"];
+        let frame = json!({"channel":"ohlc","type":"update","data":[{
+            "symbol":"BTC/USD","interval":1,"interval_begin":case["input"],
+            "open":"17.25tail","high":19.5,"low":23.75,"close":29.125,"volume":31.5
+        }]});
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+        h.runtime.pump();
+        let candles = candles.borrow();
+        assert_eq!(candles.len(), index + 1, "source delivers {case}");
+        let candle = &candles[index];
+        for (name, actual) in [
+            ("timestamp", candle.timestamp),
+            ("open", candle.open),
+            ("high", candle.high),
+            ("low", candle.low),
+            ("close", candle.close),
+            ("volume", candle.volume),
+        ] {
+            let bits = u64::from_str_radix(expected[name]["number"].as_str().unwrap(), 16).unwrap();
+            if f64::from_bits(bits).is_nan() {
+                assert!(actual.is_nan(), "{name}: input={}", case["input"]);
+            } else {
+                assert_eq!(actual.to_bits(), bits, "{name}: input={}", case["input"]);
+            }
+        }
+    }
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+fn ticker_corpus(name: ExchangeName, source_name: &str, count: usize) {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    use std::rc::Rc;
+    let source = ticker_coercion::source(source_name);
+    assert_eq!(source["cases"].as_array().unwrap().len(), count);
+    let h = harness(name, options(), |_| {});
+    let seed = ticker_coercion::seed(source_name);
+    let markets = seed
+        .iter()
+        .map(|t| {
+            serde_json::from_value(json!({
+                "id":t.id,"symbol":t.symbol,"base":"fixture","quote":"USD","active":true,
+                "precision":{"amount":0.01,"price":0.25},
+                "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+            }))
+            .unwrap()
+        })
+        .collect();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            tickers: Some(seed.clone()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let cleanup = h
+        .venue()
+        .listen_order_book(seed[0].symbol.clone(), Rc::new(|_| {}))
+        .unwrap();
+    for _ in 0..8 {
+        h.runtime.pump();
+    }
+    let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+    assert!(
+        socket.is_connected(),
+        "production Kraken ticker socket opens"
+    );
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(seed.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    ticker_corpus(ExchangeName::Kraken, "kraken", 224);
+}
+#[test]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    ticker_corpus(ExchangeName::Krakenspot, "krakenspot", 40);
 }

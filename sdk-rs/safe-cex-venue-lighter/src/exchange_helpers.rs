@@ -493,9 +493,9 @@ pub fn infer_stop_loss_type_from_reduce_only_limit(
 ) -> Option<safe_cex_types::OrderType> {
     use safe_cex_types::{OrderSide, OrderType};
     if order.r#type != OrderType::Limit
-        || !order.reduce_only
-        || !order.price.is_finite()
-        || order.price <= 0.0
+        || order.reduce_only != true
+        || !order.price.to_number().is_finite()
+        || order.price.to_number() <= 0.0
     {
         return None;
     }
@@ -505,9 +505,9 @@ pub fn infer_stop_loss_type_from_reduce_only_limit(
         ticker.map(|t| t.index),
     ])?;
     if order.side == OrderSide::Sell {
-        (order.price <= reference_price).then_some(OrderType::StopLoss)
+        (order.price.to_number() <= reference_price).then_some(OrderType::StopLoss)
     } else {
-        (order.price >= reference_price).then_some(OrderType::StopLoss)
+        (order.price.to_number() >= reference_price).then_some(OrderType::StopLoss)
     }
 }
 

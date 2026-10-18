@@ -101,13 +101,115 @@ fn factory_timeout_is_independent_of_recv_window() {
     opts.extra = Some(serde_json::from_value(json!({"recvWindow":1234})).unwrap());
     let h = fixture_options(opts);
     h.drive(h.exchange.get_account()).unwrap();
-    assert_eq!(h.http.calls(BALANCE)[0].timeout.as_f64(), Some(20_000.0), "source factory fixed timeout");
+    assert_eq!(
+        h.http.calls(BALANCE)[0].timeout.as_f64(),
+        Some(20_000.0),
+        "source factory fixed timeout"
+    );
     done(&h);
 }
 #[test]
 fn factory_preserves_axios_accept_default() {
     let h = fixture();
     h.drive(h.exchange.get_account()).unwrap();
-    assert_eq!(h.http.calls(BALANCE)[0].headers["Accept"], "application/json, text/plain, */*", "source factory Accept default");
+    assert_eq!(
+        h.http.calls(BALANCE)[0].headers["Accept"],
+        "application/json, text/plain, */*",
+        "source factory Accept default"
+    );
     done(&h);
+}
+
+/// The real DirectTransport routing with a configured public CORS proxy.
+struct ProxyProvider(Option<String>);
+impl TransportProvider for ProxyProvider {
+    fn name(&self) -> &str {
+        "proxy-fixture"
+    }
+    fn rest(&self, c: RestTransportContext<'_>) -> Result<RestTransport, TransportError> {
+        safe_cex_transport::DirectTransport.rest(c)
+    }
+    fn rest_adapter(&self, _: RestAdapterContext<'_>) -> Option<Arc<dyn RestAdapter>> {
+        None
+    }
+    fn proxy_prefix(&self, c: RestTransportContext<'_>) -> String {
+        safe_cex_transport::DirectTransport.proxy_prefix(c)
+    }
+    fn public_cors_proxy(&self) -> Option<String> {
+        self.0.clone()
+    }
+    fn private_proxy(&self, n: &ExchangeName) -> Option<Arc<dyn safe_cex_transport::PrivateProxy>> {
+        safe_cex_transport::DirectTransport.private_proxy(n)
+    }
+    fn require_proxy(&self, o: ExchangeOptions) -> ExchangeOptions {
+        o
+    }
+    fn server_proxy_url(&self, n: &ExchangeName) -> Option<String> {
+        safe_cex_transport::DirectTransport.server_proxy_url(n)
+    }
+    fn ws_routing(
+        &self,
+        n: &ExchangeName,
+        o: &safe_cex_transport::RoutingOptions,
+    ) -> safe_cex_transport::ResolvedRouting {
+        safe_cex_transport::DirectTransport.ws_routing(n, o)
+    }
+    fn ws_connection(&self, _: &str) -> Option<safe_cex_transport::WsConnection> {
+        None
+    }
+}
+
+#[test]
+fn secondary_proxy_matches_source_truthy_resolution_and_clears_primary_override() {
+    for (secondary, public, expected) in [
+        (
+            None,
+            Some("https://public-proxy"),
+            Some("https://public-proxy"),
+        ),
+        (
+            Some(""),
+            Some("https://public-proxy"),
+            Some("https://public-proxy"),
+        ),
+        (None, None, None),
+        (Some(""), None, None),
+        (
+            Some("https://secondary-proxy"),
+            Some("https://public-proxy"),
+            Some("https://secondary-proxy"),
+        ),
+    ] {
+        let mut opts = options();
+        opts.override_proxy_url = Some("https://primary-proxy".into());
+        opts.secondary_key = Some("read-key".into());
+        opts.secondary_secret = Some("read-secret".into());
+        opts.secondary_proxy_url = secondary.map(str::to_owned);
+        let provider = Arc::new(ProxyProvider(public.map(str::to_owned)));
+        let h = harness(ExchangeName::Bingx, opts, |http| {
+            *http
+                .runtime
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .provider
+                .borrow_mut() = Some(provider);
+            http.ok("GET", BALANCE, json!([{"asset":"USDT","userId":"proxy-account","balance":"10","availableMargin":"8","usedMargin":"2","unrealizedProfit":"1"}]));
+            http.ok("DELETE", ORDER, json!({}));
+        });
+        h.drive(h.venue().get_account()).unwrap();
+        h.drive(h.venue().cancel_orders(vec![order()])).unwrap();
+        let read = &h.http.calls(BALANCE)[0];
+        let origin = "https://open-api.bingx.com";
+        assert_eq!(
+            read.base_url,
+            expected.map_or(origin.to_owned(), |p| format!("{p}/{origin}")),
+            "secondary={secondary:?}, public={public:?}"
+        );
+        assert_eq!(read.headers["X-BX-APIKEY"], "read-key");
+        let write = &h.http.calls(ORDER)[0];
+        assert_eq!(write.base_url, format!("https://primary-proxy/{origin}"));
+        assert_eq!(write.headers["X-BX-APIKEY"], "fixture-key");
+        done(&h);
+    }
 }

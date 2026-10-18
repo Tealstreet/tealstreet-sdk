@@ -190,3 +190,51 @@ fn binance_futures_resends_a_signature_rejection_once_on_the_native_host() {
         });
     }
 }
+
+fn signature_type_error(status: Option<u16>) {
+    run_local(async move {
+        let Harness { exchange, seen, .. } = binance_harness(Rc::new(move |request| {
+            if request.method != "POST" || request.path != "/fapi/v1/order" {
+                return None;
+            }
+            let data = json!({"code":{"toString":0}});
+            Some(match status {
+                Some(status) => json!({"__status":status,"body":data}),
+                None => data,
+            })
+        }))
+        .await;
+        exchange.start().await.unwrap();
+        let order: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":10}),
+        )
+        .unwrap();
+        let error = exchange
+            .base()
+            .place_order(exchange.as_ref(), order)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.name, "TypeError",
+            "BINANCE-SIGNATURE-TYPEERROR actual native order rejection retains coercion kind for {status:?}"
+        );
+        assert_eq!(error.message, "Cannot convert object to primitive value");
+        assert_eq!(
+            seen.borrow()
+                .iter()
+                .filter(|request| request.path == "/fapi/v1/order")
+                .count(),
+            1,
+            "BINANCE-SIGNATURE-TYPEERROR coercion failure must not resend"
+        );
+        exchange.dispose().unwrap();
+    });
+}
+#[test]
+fn resolved_signature_type_error_reaches_the_native_binance_exchange() {
+    signature_type_error(None);
+}
+#[test]
+fn rejected_signature_type_error_reaches_the_native_binance_exchange() {
+    signature_type_error(Some(400));
+}

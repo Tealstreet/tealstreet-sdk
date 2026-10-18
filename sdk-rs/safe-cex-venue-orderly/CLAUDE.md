@@ -1,5 +1,10 @@
 # Orderly venue port
 
+`classes::construct` is the constructor used by the production binding and the
+source-oracle class tests. Test-only convenience constructor wrappers were removed.
+`scripts/classes-controls.py` checks normalization and all family tags against
+those class tests and the real Exchange/signing binding, restoring exact source.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/orderly/CLAUDE.md).
 
 `types.rs` mirrors the ten runtime constants from `orderly.types.ts`. Ordered
@@ -204,3 +209,27 @@ preimages for all six names. The native registry shares hosted HTTP signing and 
 availability. Source private HTTP still signs locally before the hosted adapter;
 private WS never reads remoteSigner. Empty secrets retain the source HTTP error
 and the already approved shared WS onOpen recovery. See HOSTED_SIGNER_EVIDENCE.md.
+
+The public `set_all_leverage` trait hook invokes Orderly account leverage, even
+when the Store has no positions. The existing member validates finiteness, clamps
+and rounds 1..100, writes CROSS leverage once, skips unchanged values and advances
+its cache only after success. Binding regressions cover those source behaviors
+and emitted, swallowed failures through the actual signed HTTP client.
+
+Public trait cancellation invokes the existing Orderly cancel-all/symbol members.
+Both ordinary and algo endpoints are attempted in source order, even with an empty
+Store or a failed first request; source errors are emitted and swallowed. The real
+binding target checks both trait paths, signed symbol queries and continuation.
+Private execution and position frames assert Store changes and actual fill events.
+Orderly subscribes to executionreport, algoexecutionreportv2 and position only;
+balance comes from the REST fetchPositions path, not a private balance topic.
+
+
+Public ticker, BBO and mark-price frames enforce the approved strict Ticker row
+policy at the native Store boundary. A null/string/undefined numeric field
+refuses that complete row; valid siblings update before deferred reports name
+each refused symbol, field and value. Later source property or Store errors
+retain precedence. This intentionally differs from TS retaining malformed values.
+`exchange_trait` mixed-row regressions run each topic through all six real account
+classes and sockets. The source-only stream oracle retains its raw-value Store;
+it does not substitute for these native typed-boundary witnesses.

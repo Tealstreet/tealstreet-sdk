@@ -64,7 +64,9 @@ fn fixture() -> (Rc<BaseExchange>, Rc<DefaultStore>) {
 fn failure(message: &str) -> ExchangeError {
     let mut error = ExchangeError::new(message);
     error.name = "TypeError".into();
-    error.code = Some(json!("E_LISTENER"));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "E_LISTENER"
+    )));
     error.config = Some(json!({"url":"/fixture"}));
     error.request = Some(json!({"method":"POST"}));
     error.stack = Some("original stack".into());
@@ -93,7 +95,8 @@ fn real_store_commit_preserves_listener_failure_and_stops_both_fanouts() {
         "update",
         Rc::new(move |_, data| {
             assert_eq!(
-                data["options"]["isHedged"], true,
+                safe_cex_exchange::js_runtime::value::to_json(data).unwrap()["options"]["isHedged"],
+                true,
                 "notification sees committed setting"
             );
             seen.borrow_mut().push("first");
@@ -207,7 +210,7 @@ fn non_exchange_subscriber_response_survives_overlay_recovery() {
         "error",
         Rc::new(move |_, value| {
             seen.borrow_mut()
-                .push(value[0].as_str().unwrap().to_owned());
+                .push(String::from_utf16_lossy(value.as_str().unwrap()));
             Ok(())
         }),
     );
@@ -250,11 +253,24 @@ fn once_is_removed_before_throw_and_captured_list_survives_removal() {
         }),
     );
     assert_eq!(
-        base.emit("event", Value::Null).unwrap_err().name,
+        base.emit(
+            "event",
+            safe_cex_exchange::js_runtime::value::from_json(&Value::Null)
+        )
+        .unwrap_err()
+        .name,
         "TypeError"
     );
-    base.emit("event", Value::Null).unwrap();
-    base.emit("event", Value::Null).unwrap();
+    base.emit(
+        "event",
+        safe_cex_exchange::js_runtime::value::from_json(&Value::Null),
+    )
+    .unwrap();
+    base.emit(
+        "event",
+        safe_cex_exchange::js_runtime::value::from_json(&Value::Null),
+    )
+    .unwrap();
     assert_eq!(
         *seen.borrow(),
         ["once", "remove", "captured"],
@@ -291,7 +307,10 @@ fn price_order(fail: &str) -> Value {
     let result: Result<(), ExchangeError> = (|| {
         base.log("no market or ticker found", "info")?;
         events.borrow_mut().push("stop".into());
-        base.emit("error", json!("missing market"))?;
+        base.emit(
+            "error",
+            safe_cex_exchange::js_runtime::value::from_json(&json!("missing market")),
+        )?;
         Err(ExchangeError::new("missing"))
     })();
     let error = result.unwrap_err();
@@ -321,7 +340,10 @@ fn listener_rows() -> Vec<Value> {
             }),
         );
         let error = base
-            .emit(event, Value::Null)
+            .emit(
+                event,
+                safe_cex_exchange::js_runtime::value::from_json(&Value::Null),
+            )
             .expect_err("source throw must stop later emitter listeners");
         assert_eq!(
             *events.borrow(),
@@ -364,7 +386,10 @@ fn listener_rows() -> Vec<Value> {
             }),
         );
         let result: Result<(), ExchangeError> = ready(async {
-            if let Err(error) = base.emit("chaser:complete", json!({})) {
+            if let Err(error) = base.emit(
+                "chaser:complete",
+                safe_cex_exchange::js_runtime::value::from_json(&json!({})),
+            ) {
                 base.log(
                     &format!(
                         "chaser:complete listener threw: {}: {}",

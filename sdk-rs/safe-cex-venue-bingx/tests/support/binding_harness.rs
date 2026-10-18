@@ -1,4 +1,10 @@
 //! Scripted transport and runtime for driving the production BingxExchange.
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::js_runtime::{
     client::JsHttpHost,
     promise::JsFuture,
@@ -27,6 +33,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
 #[derive(Default)]
 pub struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     pub now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
@@ -41,12 +48,15 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     pub fn pump(&self) {
+        self.sleep_wakers.wake_due(self.now.get());
         for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let signal = std::sync::Arc::new(virtual_time::WakeSignal::default());
+            let waker = signal.waker();
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -61,7 +71,7 @@ impl Runtime {
             }
             let added = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !added {
+            if !progressed && !added && !signal.take() {
                 return;
             }
         }
@@ -81,10 +91,12 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleeper = self.sleep_wakers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -120,6 +132,7 @@ pub struct Socket {
     pub sent: RefCell<Vec<String>>,
     pub events: Rc<RefCell<VecDeque<WsEvent>>>,
     pub closed: Cell<bool>,
+    pub delivered_events: Rc<Cell<usize>>,
 }
 impl WsSocket for Socket {
     fn ready_state(&self) -> u8 {
@@ -127,11 +140,14 @@ impl WsSocket for Socket {
     }
     fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
         let events = self.events.clone();
+        let delivered = self.delivered_events.clone();
         Box::pin(std::future::poll_fn(move |_| {
-            events
-                .borrow_mut()
-                .pop_front()
-                .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+            if let Some(event) = events.borrow_mut().pop_front() {
+                delivered.set(delivered.get() + 1);
+                Poll::Ready(Ok(event))
+            } else {
+                Poll::Pending
+            }
         }))
     }
     fn send(&self, message: &str) -> Result<(), ExchangeError> {
@@ -221,6 +237,7 @@ fn decode(text: &str) -> String {
 pub struct Request {
     pub method: String,
     pub url: String,
+    pub base_url: String,
     pub query: Option<String>,
     pub params: Value,
     pub data: Value,
@@ -236,6 +253,7 @@ pub struct Http {
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
     pub advance_ms: Cell<f64>,
+    pub held_request: RefCell<Option<(String, String, Rc<Cell<bool>>)>>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
@@ -293,6 +311,7 @@ impl JsHttpHost for Http {
         self.requests.borrow_mut().push(Request {
             method: method.clone(),
             url: url.clone(),
+            base_url: read("baseURL").as_str().unwrap_or_default().to_owned(),
             query,
             params,
             data: match read("data") {
@@ -305,6 +324,10 @@ impl JsHttpHost for Http {
         });
         if let Some(runtime) = self.runtime.borrow().as_ref() {
             runtime.now.set(runtime.now.get() + self.advance_ms.get());
+        }
+        if self.advance_ms.get() != 0.0 {
+            let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+            clock.sync_from_server_time(clock.get_current_time_ms() + self.advance_ms.get());
         }
         let response = {
             let mut routes = self.routes.borrow_mut();
@@ -330,7 +353,25 @@ impl JsHttpHost for Http {
                 &format!("unscripted request {method} {url}"),
             )),
         };
-        Box::pin(async move { result })
+        let gate = self
+            .held_request
+            .borrow()
+            .as_ref()
+            .filter(|(held_method, held_url, _)| held_method == &method && held_url == &url)
+            .map(|(_, _, gate)| gate.clone());
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                std::future::poll_fn(|_| {
+                    if gate.get() {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                })
+                .await;
+            }
+            result
+        })
     }
 }
 
@@ -353,6 +394,15 @@ pub fn harness(
     options: ExchangeOptions,
     script: impl FnOnce(&Http),
 ) -> Harness {
+    harness_with_local_time(name, options, Rc::new(|ms| ms), script)
+}
+
+pub fn harness_with_local_time(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
+    script: impl FnOnce(&Http),
+) -> Harness {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(1_700_000_000_000.0);
     let http = Rc::new(Http::default());
@@ -367,6 +417,7 @@ pub fn harness(
             runtime: runtime.clone(),
             http: http.clone(),
             external_public_data: None,
+            local_wall_time_to_utc,
         },
     )
     .expect("BingxExchange constructs from real options");
@@ -400,4 +451,53 @@ impl Harness {
     pub fn venue(&self) -> &dyn Exchange {
         self.exchange.as_ref()
     }
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Runtime::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.now.set(runtime.now.get() + 9.0);
+    runtime.pump();
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.now.set(runtime.now.get() + 1.0);
+    runtime.pump();
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.now.set(runtime.now.get() + 10.0);
+    runtime.pump();
+    assert!(!latest.take(), "dropped sleep must not wake");
 }

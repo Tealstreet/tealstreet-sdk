@@ -322,7 +322,8 @@ fn spot_private_frames_deliver_live_orders_and_fills_without_positions() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
-            observed.borrow_mut().push(value[0].clone());
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
+            observed.borrow_mut().push(value.clone());
             Ok(())
         }),
     );
@@ -373,4 +374,69 @@ fn spot_private_frames_deliver_live_orders_and_fills_without_positions() {
     );
     h.venue().dispose().unwrap();
     assert!(private.closed.get());
+}
+
+#[test]
+fn split_spot_orders_omit_brackets_only_after_the_first_lot() {
+    let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let options: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":200,"price":25000,"stopLoss":24000,"takeProfit":26000})).unwrap();
+    let ids = h
+        .drive(Box::pin(h.venue().base().place_order(h.venue(), options)))
+        .expect("real Spot split placement");
+    assert_eq!(ids, ["created", "created"]);
+    let calls = h.wire.calls("/v5/order/create");
+    assert_eq!(calls.len(), 2);
+    for call in &calls {
+        assert_eq!(call.body["qty"], "100");
+        assert_eq!(call.body["price"], "25000");
+        assert_eq!(call.body["category"], "spot");
+    }
+    assert_eq!(calls[0].body["stopLoss"], "24000");
+    assert_eq!(calls[0].body["takeProfit"], "26000");
+    for field in ["stopLoss", "takeProfit", "slTriggerBy", "tpTriggerBy"] {
+        assert!(
+            calls[1].body.get(field).is_none(),
+            "second lot must omit {field}"
+        );
+    }
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn trailing_order_without_ticker_keeps_the_source_error() {
+    let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let options = serde_json::from_value::<safe_cex_types::PlaceOrderOpts>(json!({
+        "symbol":"BTCUSDT", "side":"sell", "type":"trailing_stop_market", "amount":0.01, "price":24000
+    })).unwrap();
+    let error = h
+        .drive(Box::pin(h.venue().base().place_order(h.venue(), options)))
+        .expect_err("source rejects missing ticker before sending a trailing order");
+    assert_eq!(error.name, "Error");
+    assert_eq!(
+        error.message, "Ticker BTCUSDT not found",
+        "actual Spot binding keeps the source error"
+    );
+    assert!(h.wire.calls("/v5/position/trading-stop").is_empty());
+    assert!(h.wire.calls("/v5/order/create").is_empty());
+    h.venue().dispose().unwrap();
 }

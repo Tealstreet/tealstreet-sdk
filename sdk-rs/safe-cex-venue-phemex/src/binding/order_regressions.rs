@@ -1,0 +1,209 @@
+//! Regressions run the assembled class, including the concrete HTTP clients.
+#[path = "../../tests/support/binding_harness.rs"]
+#[allow(dead_code)]
+mod support;
+use safe_cex_exchange::js_runtime::{promise::await_js, value::from_json};
+use safe_cex_store::{Store, StoreUpdate};
+use safe_cex_types::*;
+use serde_json::json;
+use support::{Harness, harness, options};
+
+fn venue() -> Harness {
+    harness(ExchangeName::Phemex, options(), |_| {})
+}
+fn orders(count: usize) -> Vec<Order> {
+    (0..count)
+        .map(|i| {
+            serde_json::from_value(json!({
+                "id":format!("order-{i}"), "symbol":"BTCUSDT", "side":"buy", "type":"limit",
+                "status":"open", "amount":1, "filled":0, "remaining":1, "price":100,
+                "reduceOnly":false, "lastUpdate":0, "info":{"posSide":"Long"}
+            }))
+            .unwrap()
+        })
+        .collect()
+}
+fn seed(h: &Harness, orders: &[Order]) {
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            orders: Some(orders.to_vec()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+}
+
+#[test]
+fn batch_cancel_success_checks_envelope_not_order_rows() {
+    let h = venue();
+    let orders = orders(12);
+    seed(&h, &orders);
+    h.http.ok(
+        "DELETE",
+        "/g-orders",
+        json!({"code":0,"data":[{"orderID":"order-0"}]}),
+    );
+    h.drive(h.venue().cancel_orders(orders))
+        .expect("successful envelope cancels both lots");
+    assert_eq!(h.http.calls("/g-orders").len(), 2);
+    assert!(
+        h.store
+            .orders()
+            .iter()
+            .all(|o| o.status == OrderStatus::Canceled)
+    );
+}
+
+#[test]
+fn symbol_cancel_uses_the_live_store_filter_and_real_cancellation_client() {
+    let h = venue();
+    let mut orders = orders(3);
+    orders[1].symbol = "ETHUSDT".into();
+    seed(&h, &orders);
+    h.http.ok("DELETE", "/g-orders/cancel", json!({"code":0}));
+    h.http
+        .ok("DELETE", "/g-orders", json!({"code":0,"data":[]}));
+    // Invoke the member installed on the actual PhemexExchange receiver.
+    h.drive(
+        h.exchange
+            .invoke_unit("cancelSymbolOrders", vec![from_json(&json!("BTCUSDT"))]),
+    )
+    .expect("symbol cancellation completes");
+    let requests = h.http.calls("/g-orders");
+    assert_eq!(requests.len(), 1, "one real matching-symbol batch");
+    assert_eq!(requests[0].method.to_uppercase(), "DELETE");
+    assert_eq!(requests[0].params["symbol"], "BTCUSDT");
+    assert_eq!(requests[0].params["orderID"], "order-0,order-2");
+    let stored = h.store.orders();
+    assert_eq!(stored.len(), 3);
+    assert_eq!(stored[0].status, OrderStatus::Canceled);
+    assert_eq!(
+        stored[1].status,
+        OrderStatus::Open,
+        "other symbol stays open"
+    );
+    assert_eq!(stored[2].status, OrderStatus::Canceled);
+}
+
+#[test]
+fn batch_cancel_rejection_preserves_live_orders_and_message() {
+    for data in [json!([]), json!(null), json!([{"code":0}])] {
+        let h = venue();
+        let orders = orders(2);
+        seed(&h, &orders);
+        h.http.ok(
+            "DELETE",
+            "/g-orders",
+            json!({"code":10002,"msg":"batch rejected","data":data}),
+        );
+        let error = h
+            .drive(h.venue().cancel_orders(orders))
+            .expect_err("rejected envelope");
+        assert_eq!(error.message, "batch rejected");
+        assert!(
+            h.store
+                .orders()
+                .iter()
+                .all(|o| o.status == OrderStatus::Open)
+        );
+    }
+}
+
+#[test]
+fn single_and_batch_cancels_bypass_the_read_rate_limiter() {
+    for count in [1, 2] {
+        let h = venue();
+        h.http.ok("DELETE", "/g-orders/cancel", json!({"code":0}));
+        h.http
+            .ok("DELETE", "/g-orders", json!({"code":0,"data":[]}));
+        // Fill the actual xhr client's 3-RPS window without advancing time.
+        let xhr = h.exchange.rt.this.get("xhr").unwrap();
+        h.http.ok("GET", "/read-window", json!({}));
+        for _ in 0..3 {
+            xhr.call_method(
+                "get",
+                vec![safe_cex_exchange::js_runtime::value::Js::str(
+                    "/read-window",
+                )],
+            )
+            .unwrap();
+        }
+        h.runtime.pump();
+        assert_eq!(h.http.calls("/read-window").len(), 3);
+        let future = h
+            .exchange
+            .rt
+            .this
+            .call_method(
+                "cancelOrders",
+                vec![from_json(&serde_json::to_value(orders(count)).unwrap())],
+            )
+            .unwrap();
+        h.runtime.pump();
+        assert_eq!(
+            h.http
+                .calls(if count == 1 {
+                    "/g-orders/cancel"
+                } else {
+                    "/g-orders"
+                })
+                .len(),
+            1,
+            "cancel must reach HTTP while the read window is full"
+        );
+        h.drive(async { await_js(future).await.map_err(|e| e.to_exchange_error()) })
+            .unwrap();
+    }
+}
+
+#[test]
+fn binding_place_orders_rejects_duplicate_ids_before_any_http() {
+    let h = venue();
+    // Allow an unchecked batch to place real requests, rather than fail on a
+    // missing market or an unscripted endpoint before exposing the ID defect.
+    Store::update(
+        h.store.as_ref(),
+        serde_json::from_value(json!({"markets":[{
+            "id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,
+            "precision":{"amount":0.001,"price":0.1},
+            "limits":{"amount":{"min":0.001,"max":100},"leverage":{"min":1,"max":50}}
+        }]}))
+        .unwrap(),
+        false,
+    )
+    .unwrap();
+    h.http.ok(
+        "GET",
+        "/g-accounts/accountPositions",
+        json!({"code":0,"data":{
+            "positions":[{"symbol":"BTCUSDT","size":"2","avgEntryPriceRp":"90","markPriceRp":"100",
+            "leverageRr":"-10","posSide":"Long","side":"Buy","posMode":"Hedged",
+            "crossMargin":true,"liquidationPriceRp":"50"}]
+        }}),
+    );
+    h.http.ok(
+        "PUT",
+        "/g-orders/create",
+        json!({"code":0,"data":{"orderID":"created"}}),
+    );
+    let order = json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":1,"price":100,"clientOrderId":"same-id"});
+    let future = h
+        .exchange
+        .rt
+        .this
+        .call_method("placeOrders", vec![from_json(&json!([order, order]))])
+        .unwrap();
+    let error = h
+        .drive(async { await_js(future).await.map_err(|e| e.to_exchange_error()) })
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "Phemex clientOrderId same-id is duplicated in one batch"
+    );
+    assert!(
+        h.http.requests.borrow().is_empty(),
+        "whole batch must reject before any request"
+    );
+}

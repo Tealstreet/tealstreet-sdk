@@ -61,14 +61,14 @@
     "source": {
       "file": "safe-cex-venue-grvt/src/binding/exchange.rs",
       "begin": [
-        272,
+        285,
         5
       ],
       "end": [
-        274,
+        287,
         6
       ],
-      "sha256": "3c5d52cf143cd44c879895ab48790aedbd0d36b1b87f3859a951766d2882e884"
+      "sha256": "dd4404b63d66f2884bb54cb914c0c809ddf67bc6a6d945306e3bf92a56afd340"
     },
     "typescript": {
       "base": {
@@ -212,14 +212,14 @@
     "source": {
       "file": "safe-cex-venue-grvt/src/binding/exchange.rs",
       "begin": [
-        285,
+        298,
         5
       ],
       "end": [
-        291,
+        304,
         6
       ],
-      "sha256": "3c5d52cf143cd44c879895ab48790aedbd0d36b1b87f3859a951766d2882e884"
+      "sha256": "dd4404b63d66f2884bb54cb914c0c809ddf67bc6a6d945306e3bf92a56afd340"
     },
     "typescript": {
       "base": {
@@ -365,14 +365,14 @@
     "source": {
       "file": "safe-cex-venue-grvt/src/binding/exchange.rs",
       "begin": [
-        292,
+        305,
         5
       ],
       "end": [
-        298,
+        311,
         6
       ],
-      "sha256": "3c5d52cf143cd44c879895ab48790aedbd0d36b1b87f3859a951766d2882e884"
+      "sha256": "dd4404b63d66f2884bb54cb914c0c809ddf67bc6a6d945306e3bf92a56afd340"
     },
     "typescript": {
       "base": {
@@ -535,14 +535,14 @@
     "source": {
       "file": "safe-cex-venue-grvt/src/binding/exchange.rs",
       "begin": [
-        312,
+        325,
         5
       ],
       "end": [
-        318,
+        331,
         6
       ],
-      "sha256": "3c5d52cf143cd44c879895ab48790aedbd0d36b1b87f3859a951766d2882e884"
+      "sha256": "dd4404b63d66f2884bb54cb914c0c809ddf67bc6a6d945306e3bf92a56afd340"
     },
     "typescript": {
       "base": {

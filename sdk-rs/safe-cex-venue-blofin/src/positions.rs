@@ -209,7 +209,7 @@ pub fn map_positions<E>(
         out.push(Position {
             id,
             symbol: market.symbol.clone(),
-            side,
+            side: side.into(),
             entry_price: if truthy(contracts) {
                 number(p.get("averagePrice"))?
             } else {
@@ -232,23 +232,25 @@ pub fn map_positions<E>(
             },
             contracts: contracts.abs(),
             liquidation_price: liquidation,
-            margin_type: Some(
+            margin_type: (Some(
                 if p.get("marginMode").and_then(Value::as_str) == Some("isolated") {
                     MarginType::Isolated
                 } else {
                     MarginType::Cross
                 },
-            ),
-            position_mode: Some(mode),
-            extra: Some(PositionExtra {
+            ))
+            .into(),
+            position_mode: (Some(mode)).into(),
+            extra: (Some(PositionExtra {
                 contracts_native: Some(pos.abs()),
                 unrealized_pnl_native: None,
-            }),
-            info: Some(p.clone()),
-            realized_pnl: None,
-            margin_size: None,
-            last_update: None,
-            option: None,
+            }))
+            .into(),
+            info: (Some(p.clone())).into(),
+            realized_pnl: (None).into(),
+            margin_size: (None).into(),
+            last_update: (None).into(),
+            option: (None).into(),
         });
     }
     Ok(out)

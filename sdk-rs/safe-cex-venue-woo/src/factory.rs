@@ -3,30 +3,37 @@ use crate::{
     api::{sign_v1, sign_v3},
     constants::{BROKER_ID, TESTNET_BROKER_ID},
 };
+use safe_cex_exchange::js_runtime::value::{
+    Js, from_json, from_retained_input, to_json, to_retained_input,
+};
 use safe_cex_transport::TransportProvider;
 use safe_cex_types::ExchangeOptions;
-use serde_json::{Map, Value};
 
 pub(crate) async fn prepare_attempt(
-    input: &Value,
+    input: &Js,
     options: &ExchangeOptions,
     remote_signer: bool,
     provider: &dyn TransportProvider,
     timestamp: f64,
-) -> Result<Value, String> {
-    let mut next = input
-        .as_object()
-        .cloned()
-        .ok_or("WOO request config must be an object")?;
-    let url = next
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+) -> Result<Js, String> {
+    let next = input.spread_object().map_err(|error| error.message())?;
+    let url = next.get("url").map_err(|error| error.message())?;
+    let url = url
+        .as_str()
+        .map(|units| String::from_utf16(units))
+        .transpose()
+        .map_err(|error| error.to_string())?
+        .unwrap_or_default();
     if url.contains("/public/") {
-        return Ok(Value::Object(next));
+        return Ok(next);
     }
-    let method = next.get("method").and_then(Value::as_str).unwrap_or("get");
+    let method = next.get("method").map_err(|error| error.message())?;
+    let method = method
+        .as_str()
+        .map(|units| String::from_utf16(units))
+        .transpose()
+        .map_err(|error| error.to_string())?
+        .unwrap_or_else(|| "get".into());
     let broker_key = if method.eq_ignore_ascii_case("post") {
         match url.as_str() {
             "/v1/order" => Some("broker_id"),
@@ -43,47 +50,43 @@ pub(crate) async fn prepare_attempt(
     };
     let mut array_property = None;
     if let Some(key) = broker_key {
-        match next.get_mut("data") {
-            Some(Value::Object(data)) => {
-                data.insert(key.into(), Value::String(broker.into()));
-            }
-            Some(Value::Array(_)) => {
+        let data = next.get("data").map_err(|error| error.message())?;
+        match &data {
+            Js::Object(_) => data
+                .set(key, Js::str(broker))
+                .map_err(|error| error.message())?,
+            Js::Array(_) => {
                 array_property = Some(key);
             }
             // Source catches failed property assignment and returns UNSIGNED.
-            _ => return Ok(Value::Object(next)),
+            _ => return Ok(next),
         }
     }
     if remote_signer || options.key.is_empty() || options.secret.is_empty() {
-        return Ok(Value::Object(next));
+        return Ok(next);
     }
     if url.contains("v1") {
-        // qs enumerates named own array properties. This temporary projection is
-        // only for V1 form signing; JSON serialization of the array omits them.
-        if let Some(key) = array_property
-            && let Some(Value::Array(values)) = next.get("data")
-        {
-            let mut data: Map<String, Value> = values
-                .iter()
-                .enumerate()
-                .map(|(index, value)| (index.to_string(), value.clone()))
-                .collect();
-            data.insert(key.into(), Value::String(broker.into()));
-            next.insert("data".into(), Value::Object(data));
+        if let Some(key) = array_property {
+            // qs observes the named array property; JSON array output omits it.
+            let data = next
+                .get("data")
+                .map_err(|error| error.message())?
+                .spread_object()
+                .map_err(|error| error.message())?;
+            data.set(key, Js::str(broker))
+                .map_err(|error| error.message())?;
+            next.set("data", data).map_err(|error| error.message())?;
         }
-        Ok(sign_v1(&Value::Object(next), options, provider, timestamp)
-            .await?
-            .config)
+        Ok(sign_v1(&next, options, provider, timestamp).await?.config)
     } else {
-        Ok(sign_v3(&Value::Object(next), options, provider, timestamp)
-            .await?
-            .config)
+        Ok(sign_v3(&next, options, provider, timestamp).await?.config)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use std::{
         future::Future,
         task::{Context, Poll, Waker},
@@ -111,13 +114,14 @@ mod tests {
             }))
             .unwrap();
             let result = ready(prepare_attempt(
-                &case["input"],
+                &from_json(&case["input"]),
                 &options,
                 extra.get("remoteSigner").is_some(),
                 &safe_cex_transport::DirectTransport,
                 1700000000123.0,
             ))
             .unwrap();
+            let result = to_json(&result).unwrap();
             let expected = &case["adapterInput"];
             assert_eq!(result["url"], expected["url"], "{} URL", case["name"]);
             let data = result.get("data").map(|data| match data {
@@ -177,15 +181,27 @@ impl RestAdapter for Attempt {
         mut request: RestRequest,
     ) -> RestFuture<'_, safe_cex_transport::RestExecution> {
         Box::pin(async move {
-            let mut config = serde_json::json!({"url":request.url,"method":request.method,"headers":request.headers});
+            let config = from_json(
+                &serde_json::json!({"url":request.url,"method":request.method,"headers":request.headers}),
+            );
             if let Some(params) = &request.params {
-                config["params"] = params.clone();
+                config
+                    .set("params", from_json(params))
+                    .map_err(|error| RestFailure::pre_transmit(error.message(), request.clone()))?;
             }
             if let Some(body) = &request.body {
-                config["data"] = body
-                    .untransformed()
-                    .map_err(|e| RestFailure::from_transport(e, request.clone()))?
-                    .clone();
+                config
+                    .set(
+                        "data",
+                        from_retained_input(
+                            body.untransformed()
+                                .map_err(|error| {
+                                    RestFailure::from_transport(error, request.clone())
+                                })?
+                                .clone(),
+                        ),
+                    )
+                    .map_err(|error| RestFailure::pre_transmit(error.message(), request.clone()))?;
             }
             let next = prepare_attempt(
                 &config,
@@ -195,31 +211,62 @@ impl RestAdapter for Attempt {
                 (self.now)() as f64,
             )
             .await
-            .map_err(|e| RestFailure::pre_transmit(e, request.clone()))?;
-            if let Some(url) = next["url"].as_str() {
-                request.url = url.to_owned();
+            .map_err(|error| RestFailure::pre_transmit(error, request.clone()))?;
+            let read = |key| {
+                next.get(key)
+                    .map_err(|error| RestFailure::pre_transmit(error.message(), request.clone()))
+            };
+            let next_url = read("url")?;
+            let next_method = read("method")?;
+            let params = read("params")?;
+            let data = read("data")?;
+            let headers = read("headers")?;
+            if let Some(units) = next_url.as_str() {
+                request.url = String::from_utf16(units).map_err(|error| {
+                    RestFailure::pre_transmit(error.to_string(), request.clone())
+                })?;
             }
-            if let Some(method) = next["method"].as_str() {
-                request.method = method.to_owned();
+            if let Some(units) = next_method.as_str() {
+                request.method = String::from_utf16(units).map_err(|error| {
+                    RestFailure::pre_transmit(error.to_string(), request.clone())
+                })?;
             }
-            request.params = next.get("params").cloned();
-            // Retried Axios data carries its transform phase through signing.
-            request.body = next
-                .get("data")
-                .cloned()
-                .map(|data| {
-                    request.body.as_ref().map_or_else(
-                        || Ok(RestBody::Untransformed(data.clone())),
-                        |body| body.with_signed_data(data.clone()),
-                    )
-                })
-                .transpose()
-                .map_err(|error| RestFailure::from_transport(error, request.clone()))?;
-            if let Some(headers) = next["headers"].as_object() {
+            request.params =
+                if params.is_undefined() {
+                    None
+                } else {
+                    Some(to_json(&params).map_err(|error| {
+                        RestFailure::pre_transmit(error.message(), request.clone())
+                    })?)
+                };
+            request.body = if next.has_own("data") {
+                let data = to_retained_input(&data)
+                    .map_err(|error| RestFailure::pre_transmit(error.message(), request.clone()))?;
+                Some(
+                    match &request.body {
+                        Some(body) => body.with_signed_data(data),
+                        None => Ok(RestBody::Untransformed(data)),
+                    }
+                    .map_err(|error| RestFailure::from_transport(error, request.clone()))?,
+                )
+            } else {
+                None
+            };
+            if matches!(headers, Js::Object(_)) {
                 request.headers = headers
-                    .iter()
-                    .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
-                    .collect();
+                    .own_entries()
+                    .map_err(|error| RestFailure::pre_transmit(error.message(), request.clone()))?
+                    .into_iter()
+                    .filter_map(|(key, value)| {
+                        value.as_str().map(|units| {
+                            String::from_utf16(&key)
+                                .and_then(|key| String::from_utf16(units).map(|value| (key, value)))
+                        })
+                    })
+                    .collect::<Result<_, _>>()
+                    .map_err(|error| {
+                        RestFailure::pre_transmit(error.to_string(), request.clone())
+                    })?;
             }
             self.client.execute_with_receipt(request).await
         })
@@ -302,7 +349,7 @@ pub fn create_api(
         .headers
         .insert("x-api-key".into(), options.key.clone());
     host.params_serializer = Some(Arc::new(|params| {
-        crate::api::sorted_query(params, false).map_err(TransportError::Host)
+        crate::api::sorted_query(&from_json(params), false).map_err(TransportError::Host)
     }));
     let client = safe_cex_axios_create(host, registry)?;
     if options.tealstreet_tunnel == Some(true) {

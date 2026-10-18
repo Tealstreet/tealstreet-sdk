@@ -1,5 +1,8 @@
 //! Native JS value model handed to host-trait-generic ported venue bodies.
 //! Strings are UTF-16, arrays keep holes, objects keep own-key order and accessors.
+pub mod owned;
+pub use owned::OwnedJsValue;
+
 use crate::runtime::ExchangeError;
 use indexmap::IndexMap;
 use safe_cex_num::{JsCoercionError, js_number_string, parse_float};
@@ -98,7 +101,7 @@ impl Thrown {
             other => other.to_display(),
         }
     }
-    pub fn to_exchange_error(&self) -> ExchangeError {
+    fn error_fields(&self) -> ExchangeError {
         if let Some(native) = &self.native {
             return (**native).clone();
         }
@@ -107,6 +110,21 @@ impl Thrown {
             && let Js::String(name) = name
         {
             error.name = String::from_utf16_lossy(&name);
+        }
+        error
+    }
+    pub fn to_exchange_error(&self) -> ExchangeError {
+        let mut error = self.error_fields();
+        if !self.value.is_object() {
+            return error;
+        }
+        let code = self
+            .value
+            .get("code")
+            .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
+        match code {
+            Ok(code) => error.code = code,
+            Err(cause) => return cause.error_fields(),
         }
         error
     }
@@ -121,6 +139,30 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
+        if let Some(failure) = error.origin.as_ref().and_then(|origin| {
+            origin
+                .error()
+                .downcast_ref::<safe_cex_transport::RestFailure>()
+        }) && let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+            failure.transport_error.as_deref()
+            && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
+        {
+            for (field, projected) in [("name", &error.name), ("message", &error.message)] {
+                if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                    && String::from_utf16(units).is_err()
+                    && String::from_utf16_lossy(units) == *projected
+                {
+                    value
+                        .set(field, Js::String(units.clone().into()))
+                        .expect("fresh error metadata property");
+                }
+            }
+        }
+        if let Some(code) = &error.code {
+            value
+                .define("code", code.clone())
+                .expect("fresh error code property");
+        }
         Self {
             value,
             native: Some(Rc::new(error)),
@@ -149,11 +191,113 @@ impl From<Thrown> for ExchangeError {
     }
 }
 
-pub fn error_object(name: &str, message: &str) -> Js {
+fn error_data_property(object: &Js, key: &str, value: Js, enumerable: bool) {
+    let Js::Object(data) = object else {
+        unreachable!("fresh error/prototype object")
+    };
+    data.props.borrow_mut().insert(
+        utf16(key),
+        Prop::DataDescriptor {
+            value,
+            writable: true,
+            enumerable,
+            configurable: true,
+        },
+    );
+}
+
+// Shared stock prototypes carry inherited names; no constructor/runtime captures
+// or reference cycles are retained by this immutable thread-local lookup table.
+fn error_prototype(name: &str) -> (Js, bool) {
+    thread_local! {
+        static ERROR_PROTOTYPES: IndexMap<&'static str, Js> = {
+            let base = Js::object(vec![]);
+            error_data_property(&base, "name", Js::str("Error"), false);
+            error_data_property(&base, "message", Js::str(""), false);
+            error_data_property(&base, "toString", Js::function("toString", |this, _| {
+                error_string(&this).map(Js::String)
+            }), false);
+            let mut prototypes = IndexMap::new();
+            prototypes.insert("Error", base.clone());
+            for name in ["EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError"] {
+                let prototype = Js::object(vec![]);
+                let Js::Object(data) = &prototype else { unreachable!() };
+                *data.proto.borrow_mut() = Some(base.clone());
+                error_data_property(&prototype, "name", Js::str(name), false);
+                error_data_property(&prototype, "message", Js::str(""), false);
+                prototypes.insert(name, prototype);
+            }
+            prototypes
+        };
+    }
+    ERROR_PROTOTYPES.with(|prototypes| match prototypes.get(name) {
+        Some(prototype) => (prototype.clone(), false),
+        None => (prototypes["Error"].clone(), true),
+    })
+}
+
+fn make_error_object(name: &str, message: Option<Str>) -> Js {
+    let (prototype, custom_name) = error_prototype(name);
     let object = Js::object_with_class("Error", vec![]);
-    let _ = object.define("message", Js::str(message));
-    let _ = object.define("name", Js::str(name));
+    let Js::Object(data) = &object else {
+        unreachable!()
+    };
+    *data.proto.borrow_mut() = Some(prototype);
+    if let Some(message) = message {
+        // Native Axios diagnostics assign their own name/message; standard
+        // Error constructors define a non-enumerable own message instead.
+        error_data_property(&object, "message", Js::String(message), custom_name);
+    }
+    if custom_name {
+        error_data_property(&object, "name", Js::str(name), true);
+    }
     object
+}
+
+pub fn error_object(name: &str, message: &str) -> Js {
+    make_error_object(name, Some(utf16(message)))
+}
+
+pub(super) fn error_constructor(name: &'static str) -> Js {
+    Js::constructor(name, move |_, args| {
+        let message = arg(&args, 0);
+        let message = if message.is_undefined() {
+            None
+        } else {
+            Some(message.to_js_string()?)
+        };
+        Ok(make_error_object(name, message))
+    })
+}
+
+fn error_string(error: &Js) -> Result<Str, Thrown> {
+    if !error.is_object() {
+        return Err(Thrown::type_error(
+            "Error.prototype.toString requires an object",
+        ));
+    }
+    let name = error.get("name")?;
+    let name = if name.is_undefined() {
+        utf16("Error")
+    } else {
+        name.to_js_string()?
+    };
+    let message = error.get("message")?;
+    let message = if message.is_undefined() {
+        utf16("")
+    } else {
+        message.to_js_string()?
+    };
+    if name.is_empty() {
+        return Ok(message);
+    }
+    if message.is_empty() {
+        return Ok(name);
+    }
+    let mut out = name.to_vec();
+    out.extend(": ".encode_utf16());
+    out.extend_from_slice(&message);
+    Ok(out.into())
 }
 
 impl fmt::Debug for Js {
@@ -269,7 +413,13 @@ impl Js {
     }
     /// GetIterator for iterable spread and for-of consumers.
     pub fn iterator(&self) -> Result<Js, Thrown> {
+        if self.is_nullish() {
+            return Err(super::globals::not_iterable(self));
+        }
         let method = self.get_property(&Js::SymbolIterator)?;
+        if !method.is_callable() {
+            return Err(super::globals::not_iterable(self));
+        }
         let iterator = method.call(self.clone(), vec![])?;
         if !iterator.is_object() {
             return Err(Thrown::type_error("Iterator result is not an object"));
@@ -379,73 +529,78 @@ impl Js {
     /// ToString, with OrdinaryToPrimitive's string hint for live objects.
     pub fn to_js_string(&self) -> Result<Str, Thrown> {
         if matches!(self, Js::Object(_) | Js::Function(_)) {
-            for name in ["toString", "valueOf"] {
-                let declared = self.has_property(&utf16(name));
-                // None is the value model's implicit stock prototype. An
-                // explicit null prototype contributes no inherited methods.
-                let method = if !declared && self.string_prototype_is_null() {
-                    Js::Undefined
-                } else {
-                    self.get(name)?
-                };
-                if name == "toString"
-                    && !declared
-                    && method.is_undefined()
-                    && self.has_implicit_string_prototype()
-                {
-                    return self.intrinsic_string();
-                }
-                if !method.is_callable() {
-                    continue;
-                }
-                let primitive = match &method {
-                    Js::Builtin(reference)
-                        if reference.member()
-                            == safe_cex_num::BuiltinIdentity::Object(
-                                safe_cex_num::ProtoMember::ToString,
-                            ) =>
-                    {
-                        let tag = match self {
-                            Js::Function(_) => "Function",
-                            Js::Object(object) if object.class == "Buffer" => "Uint8Array",
-                            Js::Object(object)
-                                if matches!(
-                                    object.class,
-                                    "Error"
-                                        | "Blob"
-                                        | "ArrayBuffer"
-                                        | "Map Iterator"
-                                        | "Set Iterator"
-                                        | "Array Iterator"
-                                        | "String Iterator"
-                                ) =>
-                            {
-                                object.class
-                            }
-                            Js::Object(_) => "Object",
-                            _ => unreachable!(),
-                        };
-                        Js::str(&format!("[object {tag}]"))
-                    }
-                    Js::Builtin(reference)
-                        if reference.member()
-                            == safe_cex_num::BuiltinIdentity::Object(
-                                safe_cex_num::ProtoMember::ValueOf,
-                            ) =>
-                    {
-                        self.clone()
-                    }
-                    _ => method.call(self.clone(), vec![])?,
-                };
-                if !primitive.is_object() {
-                    return primitive.to_js_string();
-                }
-            }
-            return Err(Thrown::type_error(
-                "Cannot convert object to primitive value",
-            ));
+            return self
+                .ordinary_to_primitive(["toString", "valueOf"])?
+                .to_js_string();
         }
         self.intrinsic_string()
+    }
+    pub(super) fn ordinary_to_primitive(&self, names: [&str; 2]) -> Result<Js, Thrown> {
+        for name in names {
+            let declared = self.has_property(&utf16(name));
+            // None is the value model's implicit stock prototype. An
+            // explicit null prototype contributes no inherited methods.
+            let method = if !declared && self.string_prototype_is_null() {
+                Js::Undefined
+            } else {
+                self.get(name)?
+            };
+            if name == "toString"
+                && !declared
+                && method.is_undefined()
+                && self.has_implicit_string_prototype()
+            {
+                return self.intrinsic_string().map(Js::String);
+            }
+            if !method.is_callable() {
+                continue;
+            }
+            let primitive = match &method {
+                Js::Builtin(reference)
+                    if reference.member()
+                        == safe_cex_num::BuiltinIdentity::Object(
+                            safe_cex_num::ProtoMember::ToString,
+                        ) =>
+                {
+                    let tag = match self {
+                        Js::Function(_) => "Function",
+                        Js::Object(object) if object.class == "Buffer" => "Uint8Array",
+                        Js::Object(object)
+                            if matches!(
+                                object.class,
+                                "Error"
+                                    | "Blob"
+                                    | "ArrayBuffer"
+                                    | "Map Iterator"
+                                    | "Set Iterator"
+                                    | "Array Iterator"
+                                    | "String Iterator"
+                            ) =>
+                        {
+                            object.class
+                        }
+                        Js::Object(_) => "Object",
+                        _ => unreachable!(),
+                    };
+                    Js::str(&format!("[object {tag}]"))
+                }
+                Js::Builtin(reference)
+                    if reference.member()
+                        == safe_cex_num::BuiltinIdentity::Object(
+                            safe_cex_num::ProtoMember::ValueOf,
+                        ) =>
+                {
+                    self.clone()
+                }
+                _ => method.call(self.clone(), vec![])?,
+            };
+            if !primitive.is_object() {
+                return Ok(primitive);
+            }
+        }
+        Err(Thrown::type_error(
+            "Cannot convert object to primitive value",
+        ))
     }
     fn has_implicit_string_prototype(&self) -> bool {
         match self {
@@ -511,26 +666,7 @@ impl Js {
                 ) {
                     utf16(&format!("[object {}]", o.class))
                 } else if o.class == "Error" {
-                    let name = self.get("name")?;
-                    let message = self.get("message")?;
-                    let name = if name.is_undefined() {
-                        utf16("Error")
-                    } else {
-                        name.to_js_string()?
-                    };
-                    let message = if message.is_undefined() {
-                        utf16("")
-                    } else {
-                        message.to_js_string()?
-                    };
-                    if message.is_empty() {
-                        name
-                    } else {
-                        let mut out = name.to_vec();
-                        out.extend(": ".encode_utf16());
-                        out.extend_from_slice(&message);
-                        out.into()
-                    }
+                    error_string(self)?
                 } else {
                     utf16("[object Object]")
                 }
@@ -570,9 +706,10 @@ impl Js {
             }
             Js::String(s) => string_to_number(&String::from_utf16_lossy(s)),
             Js::Builtin(reference) => string_to_number(&reference.js_string()),
-            Js::Array(_) | Js::Object(_) => {
-                string_to_number(&String::from_utf16_lossy(&self.to_js_string()?))
-            }
+            Js::Object(_) | Js::Function(_) => self
+                .ordinary_to_primitive(["valueOf", "toString"])?
+                .to_number()?,
+            Js::Array(_) => string_to_number(&String::from_utf16_lossy(&self.to_js_string()?)),
             _ => f64::NAN,
         })
     }
@@ -1128,36 +1265,7 @@ pub fn array_index(key: &[u16]) -> Option<usize> {
 
 /// StringToNumber per ECMAScript (whitespace trim, hex/octal/binary, Infinity).
 pub fn string_to_number(text: &str) -> f64 {
-    let t = safe_cex_num::js_trim(text);
-    if t.is_empty() {
-        return 0.0;
-    }
-    for (prefix, radix) in [
-        ("0x", 16),
-        ("0X", 16),
-        ("0o", 8),
-        ("0O", 8),
-        ("0b", 2),
-        ("0B", 2),
-    ] {
-        if let Some(digits) = t.strip_prefix(prefix) {
-            return u128::from_str_radix(digits, radix)
-                .map(|v| v as f64)
-                .unwrap_or(f64::NAN);
-        }
-    }
-    match t {
-        "Infinity" | "+Infinity" => return f64::INFINITY,
-        "-Infinity" => return f64::NEG_INFINITY,
-        _ => {}
-    }
-    let valid = t
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'));
-    if !valid || t.contains("inf") {
-        return f64::NAN;
-    }
-    t.parse::<f64>().unwrap_or(f64::NAN)
+    safe_cex_num::number_from_string(text)
 }
 
 /// serde_json::Value -> fresh native value (objects/arrays are new allocations).
@@ -1235,6 +1343,18 @@ pub fn to_typed_preserving_undefined<T: serde::de::DeserializeOwned>(
 }
 pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown> {
     typed::encode(value)
+}
+
+/// Capture data-only adapter config before JSON projection, retaining own
+/// undefined fields and native number bits through transport/signing/retry.
+pub fn to_retained_input(
+    value: &Js,
+) -> Result<safe_cex_types::retained_json::RetainedJsonInput, Thrown> {
+    typed::capture(value, 0, false, true)
+}
+/// Restore the canonical retained data carrier without a JSON roundtrip.
+pub fn from_retained_input(value: safe_cex_types::retained_json::RetainedJsonInput) -> Js {
+    typed::from_input(value)
 }
 
 /// The JSON-shaped projection a typed wire body takes, keeping undefined and BigInt.

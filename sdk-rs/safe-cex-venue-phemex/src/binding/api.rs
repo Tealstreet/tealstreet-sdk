@@ -126,14 +126,17 @@ impl ApiHost for Api {
         timeout: f64,
         credentials: bool,
     ) -> Result<Js, Thrown> {
-        Ok(client::create(
+        client::factory::create(
             self.host.rt.shared.http.clone(),
+            &*self.host.rt.shared.runtime.transport(),
             Js::object(vec![
                 ("baseURL", Js::str(base)),
                 ("timeout", Js::Number(timeout)),
                 ("withCredentials", Js::Bool(credentials)),
             ]),
-        ))
+            &self.options,
+            self.host.rt.base(),
+        )
     }
     fn retry_condition(&mut self) -> Result<Js, Thrown> {
         Ok(Js::function("networkErrorOnRead", |_, a| {

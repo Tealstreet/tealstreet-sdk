@@ -1,5 +1,6 @@
 use crate::payload::{StoreWorkerOp, StoreWorkerPayload};
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_types::ModelField;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -120,11 +121,7 @@ impl UpdatePositionsHandler {
             Ok(false) => {}
             Err(error) => {
                 self.last_failed_request.set(now);
-                self.done(
-                    &request_id,
-                    false,
-                    Some(format!("{}: {}", error.name, error.message)),
-                );
+                self.done(&request_id, false, Some(error.js_error_string()));
             }
         }
         guard.settled = true;
@@ -167,6 +164,15 @@ fn positions_equal(left: &[safe_cex_types::Position], right: &[safe_cex_types::P
     fn number(a: f64, b: f64) -> bool {
         a == b || (a.is_nan() && b.is_nan())
     }
+    // lodash isEqual counts own keys, so an own undefined differs from an absent one.
+    fn field<T>(a: &ModelField<T>, b: &ModelField<T>, eq: impl Fn(&T, &T) -> bool) -> bool {
+        match (a, b) {
+            (ModelField::Value(a), ModelField::Value(b)) => eq(a, b),
+            (ModelField::Absent, ModelField::Absent)
+            | (ModelField::Undefined, ModelField::Undefined) => true,
+            _ => false,
+        }
+    }
     fn optional(a: Option<f64>, b: Option<f64>) -> bool {
         match (a, b) {
             (Some(a), Some(b)) => number(a, b),
@@ -174,6 +180,7 @@ fn positions_equal(left: &[safe_cex_types::Position], right: &[safe_cex_types::P
             _ => false,
         }
     }
+    let num = |a: &f64, b: &f64| number(*a, *b);
     left.len() == right.len()
         && left.iter().zip(right).all(|(a, b)| {
             a.id == b.id
@@ -185,24 +192,16 @@ fn positions_equal(left: &[safe_cex_types::Position], right: &[safe_cex_types::P
                 && a.margin_type == b.margin_type
                 && a.position_mode == b.position_mode
                 && number(a.unrealized_pnl, b.unrealized_pnl)
-                && optional(a.realized_pnl, b.realized_pnl)
+                && field(&a.realized_pnl, &b.realized_pnl, num)
                 && number(a.contracts, b.contracts)
                 && number(a.liquidation_price, b.liquidation_price)
-                && optional(a.margin_size, b.margin_size)
-                && optional(a.last_update, b.last_update)
-                && match (&a.info, &b.info) {
-                    (Some(a), Some(b)) => json_equal(a, b),
-                    (None, None) => true,
-                    _ => false,
-                }
-                && match (&a.extra, &b.extra) {
-                    (None, None) => true,
-                    (Some(a), Some(b)) => {
-                        optional(a.contracts_native, b.contracts_native)
-                            && optional(a.unrealized_pnl_native, b.unrealized_pnl_native)
-                    }
-                    _ => false,
-                }
+                && field(&a.margin_size, &b.margin_size, num)
+                && field(&a.last_update, &b.last_update, num)
+                && field(&a.info, &b.info, json_equal)
+                && field(&a.extra, &b.extra, |a, b| {
+                    optional(a.contracts_native, b.contracts_native)
+                        && optional(a.unrealized_pnl_native, b.unrealized_pnl_native)
+                })
         })
 }
 fn json_equal(a: &Value, b: &Value) -> bool {

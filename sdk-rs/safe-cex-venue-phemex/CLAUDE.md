@@ -144,6 +144,16 @@ history, disposal during a pending read, public-only startup and remote signing
 failure/acknowledgement ordering against a scripted transport. Amount and price
 steps differ in the fixtures so selecting the wrong axis changes the payload.
 
+Cancellation also uses the unlimited client. Single and batch replies validate
+the response envelope's code/msg, leaving live Store orders untouched on a
+rejected batch. The assembled placeOrders member checks all caller IDs before
+placing its first order, matching the inherited source batch preflight.
+The order_regressions unit tests run the real assembled binding/clients;
+they cover both batch outcomes, a full read-limiter window, and duplicate IDs.
+Symbol cancellation checks the actual Store filter, selected IDs in the signed
+DELETE query and unrelated orders staying open. Its dead callback helper and
+fake-only test were removed; the manifest points to binding/methods.rs::async_method.
+
 The production symbol helpers and raw ticker reader use the shared Js carrier.
 `utilities::{format_symbol_in_value, format_symbol_out_value}` retain lone UTF-16
 surrogates and raw info values, while `ticker_reads::fetch_tickers_raw_value`
@@ -153,6 +163,13 @@ helpers for all 2048 lone-surrogate units, raw info output and raw response iden
 The private reconciliation prefix resets its timer, snapshots/clears its symbol
 queue and begins the account read before returning a future. A detached AccountRead
 keeps the continuation from borrowing mutable host state across that boundary.
+
+The Exchange trait binds candle history and public candle/book listeners to the
+venue readers and production public socket, applying source symbol formatting.
+The socket reads its parent's timeframes and xhr. Snapshot await continuation
+yields before consuming buffered deltas, including an already settled response.
+The bound_chart regressions cover REST candle rows, socket frames, snapshot-plus-
+delta merging and unsubscribe cleanup through the real assembled binding.
 
 Five preexisting typed-edge FINDING rows remain: response-envelope msg,
 account.currency, getAccount.userId, validateAccount.error, and parseTickers' symbol
@@ -193,3 +210,36 @@ non-decoder/typed roles. See safe-cex-parity/accepted-set/PHEMEX-REVIEW.md for t
 scope and commands. This is not full current discovery: post-census binding
 owners, aliases, local scopes, feature combinations and WASM remain explicit
 obligations rather than inheriting the selected contracts.
+
+Order-side and reduceOnly formatting use BaseExchange's
+getOrFetchPositionsForSymbol with a scalar symbol. Stored rows avoid REST;
+missing rows fetch and populate the cache only after loaded.positions is true.
+Before positions load, only order-side raw-mode recovery reads the account,
+and the empty positions result keeps reduceOnly omitted as in the source.
+The production binding tests cover cached placement/cancellation, unloaded
+formatting, and the single cached recovery read after positions load.
+
+
+`tests/support/private_binding_topics.rs` drives authenticated frames through the
+real constructed private socket and shared Store. Separate cases cover order
+snapshots replacing Store without fill notifications, terminal deltas emitting
+the execution price, supported-market position updates, and per-currency balance
+merging with current position PnL. These are coverage of existing source behavior,
+not additional venue fixes.
+
+
+Post-merge #418 review found snapshot failure warnings dispatching to the socket's
+missing log instead of parent.log, and stringifying Error rather than reading its
+message. The real constructed public-book regression proves both failures with
+compiled REDs. It compares the maintained TS subscription, asserts the warning
+text/severity, next-delta retries, 30-second warning throttling/reopening and later
+snapshot recovery with the buffered delta. Error instances read message; other
+thrown values retain String(value). The source supplement includes plain object
+and string rejections. The real read limiter remains active in this regression.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` drives 72 packed
+three-row frames through the live public socket. Each of nine numeric inputs
+varies independently across eight malformed/coercion values, while every native
+Ticker number is compared by bits with the maintained constructed TS exchange
+and DefaultStore. The control runner swaps last/mark in the live packed mapper
+and requires a compiled native assertion failure followed by exact restoration.

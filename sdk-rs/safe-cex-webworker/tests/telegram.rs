@@ -1,4 +1,4 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
@@ -228,7 +228,10 @@ fn venue(
             effects.borrow_mut().push(Effect::Log(
                 label.clone(),
                 event.into(),
-                data["message"].as_str().unwrap().into(),
+                safe_cex_exchange::js_runtime::value::to_json(data).unwrap()["message"]
+                    .as_str()
+                    .unwrap()
+                    .into(),
             ));
             Ok(())
         }),

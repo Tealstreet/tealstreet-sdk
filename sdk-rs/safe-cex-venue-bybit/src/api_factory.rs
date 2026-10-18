@@ -6,12 +6,14 @@ use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
     exchange::Exchange,
     http::HttpClientOptions,
+    js_runtime::value::owned::{OwnedCallbackError, OwnedJsValue},
     runtime::{ExchangeError, ExchangeRuntime},
 };
 use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     RestAdapter, RestExecution, RestFailure, RestFuture, RestRequest, RestResponse,
     RestResponseBody, TransportError, TransportRegistry,
+    provider::TransportErrorOrigin,
     rate_limit::RateLimitClock,
     retry::{ClassifiedRequest, ReadClassification},
 };
@@ -235,11 +237,18 @@ impl Client {
             let retries = request
                 .config_extensions
                 .get("axios-retry")
-                .and_then(|state| state.get("retries"));
-            let retries = match retries {
-                Some(value) => safe_cex_num::js_number(Some(value)).map_err(|error| {
-                    RestFailure::pre_transmit(error.to_string(), request.clone())
-                })?,
+                .cloned()
+                .map(safe_cex_exchange::js_runtime::value::from_retained_input);
+            let retries = match retries.filter(|state| state.has_own("retries")) {
+                Some(state) => state
+                    .get("retries")
+                    .and_then(|value| value.to_number())
+                    .map_err(|error| {
+                        RestFailure::pre_transmit(
+                            error.to_exchange_error().to_string(),
+                            request.clone(),
+                        )
+                    })?,
                 None => 3.0,
             };
             let receipt = retry_bybit(
@@ -295,7 +304,27 @@ impl Client {
         owner
             .base()
             .emit_and_log_error(ExchangeErrorInput::Message(message.into()), None, None)
-            .map_err(|error| RestFailure::pre_transmit(error.to_string(), request.clone()))
+            .map_err(|error| {
+                let mut fields = vec![
+                    ("name", OwnedJsValue::string(&error.name)),
+                    ("message", OwnedJsValue::string(&error.message)),
+                ];
+                if let Some(code) = &error.code {
+                    let code = match OwnedJsValue::from_js(code) {
+                        Ok(code) => code,
+                        Err(error) => {
+                            return RestFailure::pre_transmit(error.message, request.clone());
+                        }
+                    };
+                    fields.push(("code", code));
+                }
+                RestFailure::from_transport(
+                    TransportError::Rejected(TransportErrorOrigin::new(OwnedCallbackError::new(
+                        OwnedJsValue::object(fields),
+                    ))),
+                    request.clone(),
+                )
+            })
     }
 
     async fn get_env_probe_result(self: &Rc<Self>) -> Result<ProbeResult, ExchangeError> {
@@ -359,7 +388,9 @@ impl Client {
         match result {
             Err(_) => ProbeResult::Failed,
             Ok(execution) => {
-                let data = response_data(&execution.receipt.response.body);
+                let Ok(data) = response_data(&execution.receipt.response.body) else {
+                    return ProbeResult::Failed;
+                };
                 if get_bybit_response_meta(&data).is_success {
                     ProbeResult::Mismatch(probe.diagnostic.clone())
                 } else {
@@ -401,7 +432,14 @@ impl Client {
     ) -> Result<Execution, RestFailure> {
         let request = &execution.receipt.config;
         let response = &mut execution.receipt.response;
-        let mut data = response_data(&response.body);
+        let mut data = response_data(&response.body).map_err(|error| RestFailure {
+            code: None,
+            transport_error: None,
+            message: format!("Bybit response representation refused: {error}"),
+            response: Some(Box::new(response.clone())),
+            request: Box::new(request.clone()),
+            context: None,
+        })?;
         let meta = get_bybit_response_meta(&data);
         if !meta.has_explicit_status && response.status >= 400 {
             let blocked = crate::api_request::blocked_by_cdn(&data);
@@ -427,7 +465,11 @@ impl Client {
             body.insert("retCode".into(), Value::from(response.status));
             data = Value::Object(body);
             set_message(&mut data, message);
-            response.body = RestResponseBody::Transformed(data);
+            response.body = RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(data).map_err(
+                    |error| RestFailure::pre_transmit(error.to_string(), request.clone()),
+                )?,
+            );
             return Ok(execution);
         }
         if execution.flags.env_probe {
@@ -461,7 +503,12 @@ impl Client {
                 .maybe_prepend_env_mismatch(meta.ret_code, meta.ret_msg.clone(), request)
                 .await?;
             set_message(&mut data, message);
-            response.body = RestResponseBody::Transformed(data.clone());
+            response.body = RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone())
+                    .map_err(|error| {
+                        RestFailure::pre_transmit(error.to_string(), request.clone())
+                    })?,
+            );
         }
         let final_meta = get_bybit_response_meta(&data);
         if safe_cex_num::js_truthy(Some(&data))
@@ -508,8 +555,8 @@ impl Client {
 fn is_auth_code(code: Option<f64>) -> bool {
     matches!(code, Some(10003. | 10004. | 10005. | 10010. | 33004.))
 }
-fn response_data(body: &RestResponseBody) -> Value {
-    body.clone().into_data()
+fn response_data(body: &RestResponseBody) -> Result<Value, serde_json::Error> {
+    body.clone().into_data().into_value()
 }
 
 // A string body (CloudFront's HTML page) would spread into one key per character.
@@ -596,7 +643,12 @@ fn retry_bybit<'a>(
             } else {
                 let rejected = !signature_retry.get()
                     && error.response.as_deref().is_some_and(|response| {
-                        crate::api::is_bybit_sign_rejection(&response.body.clone().into_data())
+                        response
+                            .body
+                            .clone()
+                            .into_data()
+                            .into_value()
+                            .is_ok_and(|data| crate::api::is_bybit_sign_rejection(&data))
                     });
                 if rejected {
                     signature_retry.set(true);

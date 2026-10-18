@@ -619,51 +619,19 @@ impl Realm {
     }
     /// GetIterator for for-of / spread / destructuring.
     pub(crate) fn get_iterator(&mut self, v: &Value) -> Result<Value, Thrown> {
-        match v {
-            Value::String(u) => {
-                return Ok(self.iterator_object(IterSource::String {
-                    units: u.clone(),
-                    index: 0,
-                }));
-            }
-            Value::Object(o) => {
-                let native = match &o.borrow().kind {
-                    Kind::Array(_) => Some(IterSource::Array {
-                        target: o.clone(),
-                        index: 0,
-                    }),
-                    Kind::Map(_) => Some(IterSource::MapEntries {
-                        target: o.clone(),
-                        index: 0,
-                    }),
-                    Kind::Set(_) => Some(IterSource::SetValues {
-                        target: o.clone(),
-                        index: 0,
-                    }),
-                    Kind::Iterator(_) => return Ok(v.clone()),
-                    _ => None,
-                };
-                // A built-in collection still honours an own/proto override of @@iterator.
-                let key = PropKey::Symbol(self.intrinsics().symbol_iterator.clone());
-                let method = self.get(v, &key)?;
-                if method.is_callable()
-                    && method
-                        .function()
-                        .is_some_and(|f| f.name.0 != units("[Symbol.iterator]")[..])
-                {
-                    let iterator = self.call(&method, v, &[])?;
-                    let next = self.get_str(&iterator, "next")?;
-                    return Ok(self.iterator_object(IterSource::Protocol { iterator, next }));
-                }
-                if let Some(source) = native {
-                    return Ok(self.iterator_object(source));
-                }
-            }
-            _ => {}
+        let key = PropKey::Symbol(self.intrinsics().symbol_iterator.clone());
+        let method = self.get(v, &key)?;
+        if !method.is_callable() {
+            let shown =
+                String::from_utf16_lossy(&self.to_string(v).unwrap_or_else(|_| units("object")));
+            return Err(self.type_error(&format!("{shown} is not iterable")));
         }
-        let shown =
-            String::from_utf16_lossy(&self.to_string(v).unwrap_or_else(|_| units("object")));
-        Err(self.type_error(&format!("{shown} is not iterable")))
+        let iterator = self.call(&method, v, &[])?;
+        if iterator.object().is_none() {
+            return Err(self.type_error("Result of the Symbol.iterator method is not an object"));
+        }
+        let next = self.get_str(&iterator, "next")?;
+        Ok(self.iterator_object(IterSource::Protocol { iterator, next }))
     }
     pub(crate) fn iterator_step(&mut self, iterator: &Value) -> Result<Option<Value>, Thrown> {
         let Some(o) = iterator.object().cloned() else {

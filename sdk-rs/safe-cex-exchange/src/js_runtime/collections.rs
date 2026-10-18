@@ -56,7 +56,7 @@ impl<T> Collection<T> {
         self.values.iter_mut()
     }
 
-    fn following(&self, position: u64) -> Option<(u64, &T)> {
+    pub(super) fn following(&self, position: u64) -> Option<(u64, &T)> {
         let index = self.positions.partition_point(|at| *at < position);
         self.positions
             .get(index)
@@ -221,3 +221,7 @@ pub(crate) fn iterator_method(value: &Js) -> Result<Js, Thrown> {
         _ => Ok(Js::Undefined),
     }
 }
+
+#[cfg(test)]
+#[path = "collection_contract_tests.rs"]
+pub(super) mod accepted_contract_tests;

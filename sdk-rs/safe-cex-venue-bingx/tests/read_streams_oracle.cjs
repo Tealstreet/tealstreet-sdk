@@ -4,7 +4,7 @@ const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH),root=path.resolve(__dirna
 function compile(text,file){const r=ts.transpileModule(text,{fileName:file,reportDiagnostics:true,compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}});assert(!r.diagnostics.some(d=>d.category===ts.DiagnosticCategory.Error));return r.outputText;}
 function load(file){if(cache.has(file))return cache.get(file);const module={exports:{}};cache.set(file,module.exports);const req=spec=>{
  if(spec.startsWith('@tealstreet/'))return load(path.join(root,'packages',spec.slice('@tealstreet/'.length)+'.ts'));
- if(spec.endsWith('/virtualClock'))return {virtualClock:{getCurrentTimeMs:()=>1234}};
+ if(spec.endsWith('/virtualClock'))return {virtualClock:{getCurrentTimeMs:()=>5678}};
  if(spec.startsWith('.'))return load(path.resolve(path.dirname(file),spec+'.ts'));
  return require(require.resolve(spec,{paths:[path.join(root,'node_modules')]}));
 };vm.runInThisContext(`(function(require,module,exports){${compile(fs.readFileSync(file,'utf8'),file)}\n})`,{filename:file})(req,module,module.exports);cache.set(file,module.exports);return module.exports;}
@@ -26,7 +26,7 @@ const e=members(exFile,'BingxExchange',['fetchOrders','fetchOHLCV','fetchHistori
 const p=members(publicFile,'BingxPublicWebsocket',['listenOHLCV','listenOrderBook','messageHandlers','topics']);
 const d=members(privateFile,'BingxPrivateWebsocket',['onMessage']);
 const parent='class Parent{dispose(){baseDispose(this);}}';
-const bundle=vm.runInNewContext(compile(`${parent} class Exchange extends Parent{${e}} class Public{${p}} class Private{${d}} ({Exchange,Public,Private});`,exFile),{...types,...constants,v,subtract,createPositionId,dayjs,baseDispose:receiver=>{active.calls.push({op:"baseDispose"});if(active.input.failDispose==="base")throw active.failure;active.store.reset();receiver.isDisposed=true;},Date:FixedDate,virtualClock:{getCurrentTimeMs:()=>1234},calcOrderBookTotal,bigIntAsStringJsonParse,Blob,
+const bundle=vm.runInNewContext(compile(`${parent} class Exchange extends Parent{${e}} class Public{${p}} class Private{${d}} ({Exchange,Public,Private});`,exFile),{...types,...constants,v,subtract,createPositionId,dayjs,baseDispose:receiver=>{active.calls.push({op:"baseDispose"});if(active.input.failDispose==="base")throw active.failure;active.store.reset();receiver.isDisposed=true;},Date:FixedDate,virtualClock:{getCurrentTimeMs:()=>5678},calcOrderBookTotal,bigIntAsStringJsonParse,Blob,
  nanoid:()=> 'n'+(++active.id),readBlob:async blob=>{active.calls.push({op:'blob'});const text=await blob.text();if(active.input.disposeAfterBlob)active.private.isDisposed=true;return text;},
  setTimeout:(fn,delay)=>{const id=active.timers.length+1;active.timers.push({id,fn,cleared:false});active.calls.push({op:'timer',delay,id});return id;},clearTimeout:id=>{active.calls.push({op:'clear',id});active.timers.find(t=>t.id===id).cleared=true;},loop:(fn,delay)=>{active.loops.push(fn);active.calls.push({op:'loop',delay});}
 },{filename:exFile});

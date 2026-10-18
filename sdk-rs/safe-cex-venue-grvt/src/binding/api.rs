@@ -24,7 +24,7 @@ impl ApiHost for Host {
             self.0.shared.runtime.transport().as_ref(),
             config,
             &options,
-            self.0.shared.extra.name.clone(),
+            self.0.base(),
         ))
     }
     fn read_retry_condition(&self) -> JsResult<Js> {

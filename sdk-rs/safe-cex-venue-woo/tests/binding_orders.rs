@@ -807,6 +807,57 @@ fn fetch_orders_concatenates_limit_then_algo_rows() {
 }
 
 #[test]
+fn fetch_orders_accepts_documented_null_legacy_metadata_through_the_binding() {
+    let row = json!({"order_id":11,"symbol":"PERP_BTC_USDT","side":"BUY",
+        "type":"LIMIT","price":99,"quantity":2,"executed":0,"status":"NEW",
+        "reduce_only":false,"amount":null,"client_order_id":null,
+        "realized_pnl":null,"average_executed_price":null});
+    let h =
+        harness(ExchangeName::Woo, options(), |http| {
+            http.route("GET", LIMIT_PAGE, 200.0,
+            json!({"success":true,"rows":[row.clone()],"meta":{"total":1,"records_per_page":100}}));
+            http.route("GET", ALGO_PAGE, 200.0,
+            json!({"success":true,"data":{"rows":[],"meta":{"total":0,"records_per_page":100}}}));
+        });
+    seed(&h, vec![], vec![]);
+    let orders = h
+        .drive(h.venue().fetch_orders(None))
+        .expect("legacy nullable order read");
+    assert_eq!(
+        orders.len(),
+        1,
+        "documented nullable metadata must not drop the order: {}",
+        log(&h)
+    );
+    let order = &orders[0];
+    assert_eq!(order.id, "11");
+    assert_eq!(order.symbol, "BTCUSDT");
+    assert_eq!(
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
+        (99.0, 2.0, 0.0, 2.0)
+    );
+    let info = order.info.as_ref().expect("original raw order metadata");
+    for field in [
+        "amount",
+        "client_order_id",
+        "realized_pnl",
+        "average_executed_price",
+    ] {
+        assert_eq!(
+            info.get(field),
+            Some(&Value::Null),
+            "retained own null {field}"
+        );
+    }
+    assert_eq!(h.http.calls(LIMIT_PAGE).len(), 1);
+}
+
+#[test]
 fn fetch_orders_read_failure_yields_the_other_side() {
     let h = harness(ExchangeName::Woo, options(), |http| {
         http.route(
@@ -971,7 +1022,7 @@ fn cancel_symbol_orders_deletes_by_venue_symbol_and_reports_failure() {
     h.venue().base().on(
         "error",
         std::rc::Rc::new(move |_, payload| {
-            sink.borrow_mut().push(payload.to_string());
+            sink.borrow_mut().push(payload.to_display());
             Ok(())
         }),
     );

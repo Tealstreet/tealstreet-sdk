@@ -185,7 +185,7 @@ fn ohlcv_native_requests_and_candles() {
         let requests = RefCell::new(Vec::new());
         let opts = OHLCVOptions {
             symbol: row["symbol"].as_str().unwrap().into(),
-            interval: Timeframe::M5,
+            interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M5),
             from: Some(if index == 14 {
                 0.0
             } else if index == 15 {
@@ -217,9 +217,11 @@ fn ohlcv_native_requests_and_candles() {
                 std::future::ready(if name == "request-error" {
                     Err(ExchangeError::new("post-fail"))
                 } else {
-                    Ok(safe_cex_transport::how::json_parse(
-                        row["raw"].as_str().unwrap(),
-                    ))
+                    Ok(
+                        safe_cex_transport::how::json_parse(row["raw"].as_str().unwrap())
+                            .into_value()
+                            .unwrap(),
+                    )
                 })
             },
             log(name, &effects),
@@ -368,9 +370,11 @@ fn book_native_levels_and_totals() {
                 std::future::ready(if name == "request-error" {
                     Err(ExchangeError::new("post-fail"))
                 } else {
-                    Ok(safe_cex_transport::how::json_parse(
-                        row["raw"].as_str().unwrap(),
-                    ))
+                    Ok(
+                        safe_cex_transport::how::json_parse(row["raw"].as_str().unwrap())
+                            .into_value()
+                            .unwrap(),
+                    )
                 })
             },
             log(name, &effects),
@@ -475,9 +479,11 @@ fn sdk<'a>(
         std::future::ready(if name == "sdk-error" {
             Err(ExchangeError::new("sdk-fail"))
         } else {
-            Ok(safe_cex_transport::how::json_parse(
-                row["raw"].as_str().unwrap(),
-            ))
+            Ok(
+                safe_cex_transport::how::json_parse(row["raw"].as_str().unwrap())
+                    .into_value()
+                    .unwrap(),
+            )
         })
     }
 }

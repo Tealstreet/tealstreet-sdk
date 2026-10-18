@@ -117,7 +117,7 @@ pub fn fetch_ohlcv<'a, F: Future<Output = Result<Value, ExchangeError>> + 'a>(
             )?;
             return Ok(None);
         }
-        let timeframe = serde_json::to_value(opts.interval).expect("closed timeframe");
+        let timeframe = serde_json::to_value(&opts.interval).expect("closed timeframe");
         let TableHit::Mapped(interval) =
             crate::order_semantics::convert_interval(timeframe.as_str().expect("timeframe string"))
         else {

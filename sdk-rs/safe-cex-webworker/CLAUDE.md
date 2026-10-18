@@ -1,10 +1,15 @@
 # Worker port
 
+The production exchange event bridge subscribes with `on_args` for log events
+and posts that list once. Fill messages contain the first emitted argument.
+`install_exchange_event_bridge` is shared by worker startup and native venue
+regressions, so tests exercise its actual registration and forwarding logic.
+
 Behavioral source: [worker guidance](../../packages/safe-cex/src/webworker/CLAUDE.md)
 and its linked subsystem guidance. This crate consumes Exchange and Store
 directly; hosts provide the existing ExchangeRuntime clock and local scheduler.
 
-Keyed ThrottleManager follows the source's leading call and resettable trailing
+The shared exchange-core keyed ThrottleManager follows the source's leading call and resettable trailing
 timer. This differs from the worker bridge's fixed-window lodash throttle.
 Clear cancels the timers still registered by key, including the source bug where
 an older orphan tail survives a newer leading call and clear. Drop cancels all
@@ -14,7 +19,17 @@ only weak references, so discarded host tasks cannot retain the manager.
 Worker payloads preserve missing versus explicit-null data. Incoming/outgoing op
 sets are pinned against the live TypeScript unions. Store payloads reuse the
 existing StoreUpdate directly, including PackedTickerDelta, rather than duplicate
-that contract. Serde's owned JSON boundary replaces structured-clone identity.
+that contract. Incoming commands and ordinary worker payloads retain their owned JSON boundary.
+CallMethod results and OHLCV DATA posts use required WorkerDataPost with existing
+runtime Js, alongside separate native book and Error capabilities. DATA envelopes
+have no Serialize implementation; browser materialization retains native numbers
+and own undefined before postMessage. No default or JSON adapter is supplied.
+Native Error DATA retains its intrinsic prototype and hidden message/stack/cause
+properties before post, including UTF-16 message units. The real Wasm witness
+compares TypeError descriptors and structured clone with the host JS engine.
+Error DATA materialization ignores custom enumerable fields without invoking
+their getters; cause is retained only as an own data property. Standard
+name/message/stack reads stay observable, matching native Error structured clone.
 
 The CLI executor is injected and owns its emitted handled results; the handler
 never manufactures success from a resolved void future. Missing/rejected executors
@@ -28,7 +43,15 @@ Market-load buffering uses separate 500ms self-rescheduling checks and a 30s
 deadline. Timeout reports are cooled down for five minutes and contain only
 bounded telemetry; loaded markets reset the episode. Timer guards are created
 before spawn, release only their own slots, and never retain the handler.
-The JSON post callback carries error name/message rather than a JS Error object.
+Timeout Error construction and post are required fallible host capabilities.
+WorkerErrorPost keeps the Error opaque; its Wasm binding creates a real Error at
+the report point and posts it without JSON conversion. Structured clone retains
+the stack and Error identity while resetting the custom name. Creation/post
+failure reports through the runtime without committing cooldown or clearing pending.
+A fired deadline stays registered after a throw until markets flush or dispose;
+new subscriptions cannot arm a replacement deadline during that failed episode.
+The concrete Wasm host witness uses examples/worker_error_host.rs, wasm-bindgen
+and tests/worker-error-host.cjs; it does not claim browser startup composition.
 
 Sentry worker errors read only nonempty string message/name/stack properties;
 plain structured-clone objects work, primitive rejections use the supplied
@@ -59,9 +82,10 @@ Pass current options and metadata into each displayed-position pass. Freezing th
 UPnL policy at construction loses live tuning changes; rebuilding the processor
 to apply them would wrongly discard its rolling PnL queues.
 
-CallMethodHandler keeps unassigned results null and omits assigned void results
-at the JSON boundary. Unknown methods omit result; Error replies retain optional
-stack/code. Pre-spawn reply guards settle dropped tasks once; metadata throttling
+CallMethodHandler keeps unassigned results null and assigned void results as own
+undefined at the DATA post boundary. Unknown methods omit result; Error replies
+retain own stack and present code. Post rejection enters the source error-reply
+catch; if that post also rejects, the runtime receives the original failure. Pre-spawn reply guards settle dropped tasks once; metadata throttling
 stays detached, so its late failure reports to the host rather than changing
 the already-successful method reply. removeOrders accepts objects carrying id.
 
@@ -647,3 +671,20 @@ cover all option terms, price minimum and Order.clientOrderId. Fixed inventories
 include 36 market-identity cases, 59/43 TWAP option cases/leaves, 56/41 TWAP state
 cases/leaves and 3960 numeric comparisons; future source additions still fail
 closed instead of shrinking the compared fields.
+
+Command dispatch rejects missing, null and primitive payloads before looking up
+or calling its executor; arrays retain the source object admission. Position
+failure replies use JavaScript Error string rules for empty names and messages.
+
+The exchange event bridge consumes `WorkerDataPost` directly: fill is one native
+value, and log/error events retain their variadic argument array. Assembly hosts
+must supply `post_event(WorkerDataPayload)`; ordinary JSON control payloads keep
+their separate `post_payload` capability. Do not serialize native emitter values
+before invoking the required DATA post.
+
+OHLCV fetch and subscription requests decode the shared AnyTimeframe interval. The exact 27 source literals are checked against the live type AST; both real handlers forward every interval, and native listeners must deliver each candle. Monthly, extended and seconds intervals must never disappear at worker decoding.
+
+Constructed AsterDEX private-frame/worker emitter witnesses live in
+`../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
+The venue retains private facade tests without importing the worker crate. Both paths preserve
+variadic event arguments; the real fill bridge retains Infinity and object identity.

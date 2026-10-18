@@ -8,7 +8,21 @@ from real options, a Store, HTTP and WebSocket runtime dependencies. The Exchang
 trait forwards the supported methods and reproduces inherited source rejections
 for `fetchSymbolMaxLeverage`, `scheduleCancel` and `fetchPublicTrades`;
 `fetchHistoricalFills` returns the source's empty list. Registry wiring belongs
-to the registry lane. Tunnel installation currently rejects explicitly.
+to the registry lane. `safeCexAxiosCreate` goes through the shared
+`client::factory::create` with the runtime's transport provider, so a proxied
+account takes the provider's private-proxy baseURL and proxy authorization after
+venue signing. `installTransportAdapter` installs the provider's default adapter.
+`create_api_routes_through_the_provider_and_tunnel_adapter` covers both, and two
+`scripts/binding-controls.py` controls disconnect each.
+
+Private data coverage in `tests/exchange_binding.rs` drives code-zero frames
+through the authenticated production `/user` socket: batched regular/advanced
+orders, partial/full fills and cancellations, hedged positions and zero-quantity
+closure, and balance/currency replacement plus empty-update handling. Expected
+values follow `cryptocom.ws-private.ts`; the order handler updates Store orders.
+`scripts/private-frame-controls.py` disconnects each production topic handler,
+requires its named test to fail at runtime, then restores exact bytes and requires
+a pass. Run these controls alone because they temporarily edit production source.
 
 Disposal follows the source flag write and public/private socket teardown.
 The shared writable `isDisposed` accessor updates the typed base flag without
@@ -23,6 +37,14 @@ loop surrounds the complete response chain, while axios-retry runs before the
 venue's rejection formatter. Delaying rejection formatting preserves the HTTP
 response/config used to identify a signature rejection. Removing the wrapper
 must fail the non-2xx signature-resend E2E test until the shared ordering is fixed.
+
+`cancelSymbolOrders` and `cancelAllOrders` forward to the source bodies, which post
+the venue `private/cancel-all-orders`; the base store-only sweep would miss
+orders the Store has not mapped. Both rethrow a venue rejection.
+
+`fetchOHLCV`, `listenOHLCV` and `listenOrderBook` forward to the source bodies
+(GET `public/get-candlestick`, `candlestick.<interval>.<symbol>`, `book.<symbol>.50`);
+the base defaults returned `[]` and never subscribed.
 
 Source REST `fetchBalance` returns currency records with `available`/`locked`
 under an `as any` cast. The binding uses shared `CurrencyBalance::AvailableLocked`
@@ -321,10 +343,10 @@ construction records, locals, features and target execution remain separate
 obligations. No decoder behavior or manifest classification is changed.
 
 Native/default accepted-contract review for six concrete scalar wire records and
-eight finite carrier enum APIs is documented in RECORD_CARRIER_CONTRACT_REVIEW.md.
+five finite carrier enum APIs is documented in RECORD_CARRIER_CONTRACT_REVIEW.md.
 The closed selector is scripts/record-carrier-contracts.mjs; native field/variant
 observations and mutation controls run independently of compiler shape discovery.
-This is fourteen original census owners and six specific Clone reviews; other
+This is eleven original census owners and six specific Clone reviews; other
 owners, aliases, construction entries, locals, features and WASM execution remain
 separate obligations.
 
@@ -356,19 +378,59 @@ field/presence/bit/cardinality cases and mutation controls. This is the declared
 static projection boundary, with no JSON/property binding or live alias claim.
 Other owners, aliases, construction and full discovery/matrix remain owed.
 
-The twenty-owner helper batch reviews three enum-returning mapping decoders and
-seventeen specific comparison/rendering/dispatch/state roles. Every owner has a
+The seventeen-owner helper batch reviews three enum-returning mapping decoders and
+fourteen specific comparison/rendering/dispatch/state roles. Every owner has a
 direct native witness and individual compiling body control; compiler
 classification receipts remain separate from executed evidence. See
 HELPER_BATCH_CONTRACT_REVIEW.md and scripts/helper-batch-contracts.mjs. Supplied
 host parsers, generic Clone behavior, downstream decoders, aliases and the full
 discovery/feature/target matrix remain independent obligations.
 
-Twenty control-flow/property/adapter owners have individual accepted-contract
-role reviews backed by four direct native witnesses and sixteen helpers reached
-through unchanged actual-source native caller tests. All twenty body corruptions
-and all five counted fixture walks require compiled named failures and restored
+Fifteen control-flow/property/adapter owners have individual accepted-contract
+role reviews backed by three direct native witnesses and twelve helpers reached
+through unchanged actual-source native caller tests. All fifteen body corruptions
+and the retained counted fixture walks require compiled named failures and restored
 passes. See CONTROL_FLOW_CONTRACT_REVIEW.md and scripts/control-flow-contracts.mjs.
-The twenty compiler classification receipts remain separate from behavioral
+The fifteen compiler classification receipts remain separate from behavioral
 proof; downstream admission, parser grammar, generic hosts, aliases, construction
 and full discovery/matrix obligations remain independent.
+
+The test-only account_admin, account_envelopes, private_lifecycle and
+public_lifecycle modules and their fixtures/oracles were removed after the
+wave2-vacuous-tests audit found no production callers. Their accepted-contract
+entries and selectors were removed with them; manifest rows now point at the
+production class and socket bodies. Retained historical logs are archives, not
+coverage claims. Production lifecycle and admin coverage lives in
+`tests/exchange_binding.rs`; streams/history and private data frames are separate
+follow-up obligations.
+
+The binding’s REST and private WebSocket auth helpers read the shared synchronized
+VirtualClock directly. Do not reconstruct a clock from one raw runtime reading.
+The isolated native_clock target syncs the actual singleton, checks emitted IDs,
+nonces and HMACs, authenticates the private socket and maps a private order frame
+whose missing update timestamp falls back to the same synchronized clock.
+
+The concrete binding's spread and IteratorRecord slots consume the shared native
+GetIterator protocol. Spread keeps astral code points and lone UTF-16 units;
+for-of caches next once and pulls between source body calls. Body throws perform
+IteratorClose without replacing their original cause; next/done/value errors do
+not close. Pair destructuring closes early and validates the return result.
+`binding::exchange::iterable_tests` reuses the real constructor/transport harness
+and connected public socket; it checks callback identity, emitted subscription
+channels, native string units, pull ordering and cleanup. These iterator-valued
+inputs exercise latent language contracts; maintained wire inputs remain arrays.
+
+The SocketOps pair reader used by book listeners now reuses the existing
+IteratorRecord helpers. Numeric-key objects from real JSON frames are refused
+before the book callback, matching source array destructuring; the error remains
+visible and a later valid array frame still reaches the listener.
+
+The constructed ticker census in `tests/exchange_binding.rs` drives 96 cases
+through 288 real ticker, book and valuation frames, comparing every native
+Ticker number with the constructed TS exchange and DefaultStore. Source uses
+fresh exchanges per frame to isolate numeric mapping from throttle timing;
+native frames advance the terminal clock beyond the throttle window. Index
+fixtures retain the actual underlyingSymbol lookup. No throttle timing parity
+is claimed. The finite oracle exits after flushing captured output because the
+maintained disposal does not release all timer handles. A live last/bid mutation
+must compile and fail, then pass after exact source restoration.

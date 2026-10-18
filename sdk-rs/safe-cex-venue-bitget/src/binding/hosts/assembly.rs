@@ -101,12 +101,37 @@ fn get_key(obj: &Js, key: &str) -> Result<Js, Thrown> {
     if obj.is_nullish() {
         return Ok(Js::Undefined);
     }
+    if !obj.is_object() {
+        return Err(Thrown::type_error(&format!(
+            "Cannot use 'in' operator to search for '{key}' in {}",
+            obj.to_display()
+        )));
+    }
+    fn contains(value: &Js, key: &str) -> bool {
+        if value.has_own(key) {
+            return true;
+        }
+        match value {
+            Js::Object(data) => data
+                .proto
+                .borrow()
+                .as_ref()
+                .is_some_and(|p| contains(p, key)),
+            Js::Array(_) => {
+                key == "length" || crate::binding::builtins::member(value, &utf16(key)).is_some()
+            }
+            Js::Function(_) => {
+                key == "name" || crate::binding::builtins::member(value, &utf16(key)).is_some()
+            }
+            _ => crate::binding::builtins::member(value, &utf16(key)).is_some(),
+        }
+    }
     for candidate in [
         key.to_owned(),
         safe_cex_num::lodash_snake_case(key),
         safe_cex_num::lodash_camel_case(key),
     ] {
-        if obj.has_own(&candidate) {
+        if contains(obj, &candidate) {
             return obj.get(&candidate);
         }
     }
@@ -339,7 +364,14 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     def(
         "safeCexAxiosCreate",
         Js::function("safeCexAxiosCreate", move |_, a| {
-            Ok(client::create(shared(&w)?.shared.http.clone(), arg(&a, 0)))
+            let rt = shared(&w)?;
+            client::factory::create(
+                rt.shared.http.clone(),
+                rt.shared.runtime.transport().as_ref(),
+                arg(&a, 0),
+                &arg(&a, 1),
+                rt.base(),
+            )
         }),
     );
     def(
@@ -374,12 +406,26 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
                 if method != "get" && method != "head" {
                     return Ok(Js::Bool(false));
                 }
+                if error.get("response")?.truthy() {
+                    return Ok(Js::Bool(false));
+                }
                 let code = error.get("code")?;
-                Ok(Js::Bool(
-                    error.get("response")?.is_undefined()
-                        && code.truthy()
-                        && text(&code)? != "ECONNABORTED",
-                ))
+                if !code.truthy() {
+                    return Ok(Js::Bool(false));
+                }
+                // axios-retry compares codes strictly; non-string codes never
+                // match its string deny list and must not be string-coerced.
+                let Js::String(code) = code else {
+                    return Ok(Js::Bool(true));
+                };
+                let mut failure = safe_cex_transport::RestFailure::pre_transmit(
+                    String::new(),
+                    Default::default(),
+                );
+                failure.code = Some(String::from_utf16_lossy(&code));
+                Ok(Js::Bool(safe_cex_transport::retry::is_network_error(
+                    &failure,
+                )))
             }))
         }),
     );
@@ -437,13 +483,20 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
             Ok(Js::Bool(is_bitget_signature_rejection(&arg(&a, 0))?))
         }),
     );
+    let w = weak.clone();
     def(
         "installTransportAdapter",
-        Js::function("installTransportAdapter", |_, _| {
-            Err(Thrown::error(
-                "Error",
-                "Tealstreet tunnel transport is not available in the Rust Bitget binding",
-            ))
+        Js::function("installTransportAdapter", move |_, a| {
+            let rt = shared(&w)?;
+            client::factory::install_transport_adapter(
+                rt.shared.http.clone(),
+                rt.shared.runtime.transport().as_ref(),
+                &arg(&a, 0),
+                &arg(&a, 1),
+                crate::binding::value::to_typed(&arg(&a, 2))?,
+                safe_cex_transport::RestAdapterVariant::Default,
+            )?;
+            Ok(Js::Undefined)
         }),
     );
     def(

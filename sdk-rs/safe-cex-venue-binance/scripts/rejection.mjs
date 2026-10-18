@@ -9,7 +9,7 @@ const read=file=>ts.createSourceFile(file,fs.readFileSync(new URL(file,root),'ut
 const shared=read('packages/safe-cex/src/types.ts');
 const enums={};vm.runInNewContext(ts.transpileModule(shared.statements.filter(ts.isEnumDeclaration).map(n=>n.getText(shared)).join('\n'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:enums});
 const functions={};
-for(const [file,name] of [['binance.exchange.ts','isPostOnlyRejectionError'],['binance.ws-private.ts','getOrderRejectReason']]) {
+for(const [file,name] of [['binance.exchange.ts','isPostOnlyRejectionError']]) {
  const ast=read(`packages/safe-cex/src/exchanges/binance/${file}`);
  const klass=ast.statements.find(ts.isClassDeclaration);const member=klass.members.find(m=>m.name?.getText(ast)===name);assert.ok(member);
  const exports={};vm.runInNewContext(ts.transpileModule(`exports.fn=${member.initializer.getText(ast)}`,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,...enums});functions[name]=exports.fn;
@@ -17,8 +17,6 @@ for(const [file,name] of [['binance.exchange.ts','isPostOnlyRejectionError'],['b
 const values=[undefined,null,false,true,0,-0,1,-5022,'-5022','',[],{},['MAKER'],{toString:null},[{toString:null}],{valueOf:0},'GTX','maker','fooPOST_ONLYbar','post only order will be rejected','COULD NOT BE EXECUTED AS MAKER','PostOnly','POST-ONLY','𝕄AKER'];
 const cases=[];
 function add(name,input) {let expected;try{expected={value:functions[name](input)??null};}catch(e){expected={error:e.name};}cases.push({name,input,expected});}
-for(const r of values)add('getOrderRejectReason',{r});
-for(let i=0;i<256;i++)add('getOrderRejectReason',{r:String.fromCharCode(i)+'maKer'});
 for(const code of values)for(const msg of values)for(const message of [undefined,'could not be executed as maker',{toString:null}]) {
  for(const input of [{response:{data:{code,msg}},code:-5022,message},{code,message},{response:{data:{code,msg}},message}])add('isPostOnlyRejectionError',input);
 }

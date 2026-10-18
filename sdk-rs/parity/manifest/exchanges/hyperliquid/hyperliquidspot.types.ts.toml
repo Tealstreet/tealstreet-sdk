@@ -70,33 +70,33 @@ note = "Spot-only native table compared to actual source exports with independen
 ts = "Tif"
 kind = "type"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::Tif", "safe-cex-venue-hyperliquid/src/spot_models.rs::Tif" ]
+rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::Tif"
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::Tif` - generated spot_models closed-literal/wire decoder for this declaration."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
 
 [[symbol]]
 ts = "Tpsl"
 kind = "type"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::Tpsl", "safe-cex-venue-hyperliquid/src/spot_models.rs::Tpsl" ]
+rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::Tpsl"
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::Tpsl` - generated spot_models closed-literal/wire decoder for this declaration."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
 
 [[symbol]]
 ts = "LimitOrderType"
 kind = "type"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::LimitOrderType", "safe-cex-venue-hyperliquid/src/spot_models.rs::LimitOrderType" ]
+rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::LimitOrderType"
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::LimitOrderType` - generated spot_models closed-literal/wire decoder for this declaration."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
 
 [[symbol]]
 ts = "TriggerOrderType"
 kind = "type"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::TriggerOrderType", "safe-cex-venue-hyperliquid/src/spot_models.rs::TriggerOrderType" ]
+rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::TriggerOrderType"
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::TriggerOrderType` - generated spot_models closed-literal/wire decoder for this declaration."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
 
 [[symbol]]
 ts = "Grouping"
@@ -110,25 +110,25 @@ note = "Exact closed source declaration and all transitive references checked ag
 ts = "OrderType"
 kind = "type"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::OrderType", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderType" ]
+rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::OrderType"
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderType` - generated spot_models closed-literal/wire decoder for this declaration."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
 
 [[symbol]]
 ts = "Cloid"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::Cloid"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "OidOrCloid"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::OidOrCloid"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "AllMids"
@@ -141,66 +141,66 @@ note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and bin
 [[symbol]]
 ts = "Meta"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::Meta", "safe-cex-venue-hyperliquid/src/spot_models.rs::MetaUniverseItem", "safe-cex-venue-hyperliquid/src/spot_models.rs::MetaTokensItem" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::MetaUniverseItem` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::MetaTokensItem` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "ClearinghouseState"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseState", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPositionCumFunding", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPositionLeverage", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPosition", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItem", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateCrossMarginSummary", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateMarginSummary" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPositionCumFunding` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPositionLeverage` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPosition` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItem` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateCrossMarginSummary` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateMarginSummary` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserFills"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserFills"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "OrderResponse"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponse", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItemResting", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItemFilled", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItem", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseData", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponse" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItemResting` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItemFilled` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItem` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseData` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponse` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsTrade"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsTrade"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsBook"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsBook"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsLevel"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsLevel"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsOrder"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::WsOrder", "safe-cex-venue-hyperliquid/src/spot_models.rs::WsOrderOrder" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::WsOrderOrder` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsUserEvent"
@@ -245,18 +245,18 @@ note = "Declared spot model with native UTF-16 string units and binary64 numbers
 [[symbol]]
 ts = "SpotClearinghouseState"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotClearinghouseState", "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotClearinghouseStateBalancesItem" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::SpotClearinghouseStateBalancesItem` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "FrontendOpenOrders"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::FrontendOpenOrders"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserRateLimit"
@@ -277,178 +277,178 @@ note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and bin
 [[symbol]]
 ts = "L2Book"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::L2Book", "safe-cex-venue-hyperliquid/src/spot_models.rs::L2BookLevelsItem0Item", "safe-cex-venue-hyperliquid/src/spot_models.rs::L2BookLevelsItem1Item" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::L2BookLevelsItem0Item` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::L2BookLevelsItem1Item` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "CandleSnapshot"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::CandleSnapshot"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "AssetCtx"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::AssetCtx"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "MetaAndAssetCtxs"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::MetaAndAssetCtxs"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserFundingDelta"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::UserFundingDelta", "safe-cex-venue-hyperliquid/src/spot_models.rs::UserFundingDeltaType" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::UserFundingDeltaType` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserFundingEntry"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserFundingEntry"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserFunding"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserFunding"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserNonFundingLedgerDelta"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerDelta", "safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerDeltaType" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerDeltaType` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserNonFundingLedgerEntry"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerEntry"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserNonFundingLedgerUpdates"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerUpdates"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "FundingHistoryEntry"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::FundingHistoryEntry"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "FundingHistory"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::FundingHistory"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotToken"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotToken"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotMarket"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotMarket"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotMeta"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotMeta"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotAssetCtx"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotAssetCtx"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotMetaAndAssetCtxs"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotMetaAndAssetCtxs"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserOpenOrder"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserOpenOrder"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserOpenOrders"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserOpenOrders"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "OrderRequest"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderRequest"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "OrderWire"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderWire"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "CancelOrderRequest"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::CancelOrderRequest"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "CancelOrderRequests"
@@ -461,103 +461,103 @@ note = "Exact closed spot/core declaration checked; real spot alias reuses stric
 [[symbol]]
 ts = "CancelByCloidRequest"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::CancelByCloidRequest"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "ModifyRequest"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::ModifyRequest"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "ModifyWire"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::ModifyWire"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "ScheduleCancelAction"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::ScheduleCancelAction"
-status = "ported"
-note = "Spot-specific nullable schedule model: absent None, explicit null Some(None), numeric Some(Some(f64)). Actual spot declaration differs from perpetual time?: number. Native presence/literal/number bits and rejected inputs checked against ten strict actual-TypeScript cases; strict map and JsNumberInput ingress."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "Signature"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::Signature"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "Notification"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::Notification"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "Candle"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::Candle"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "HyperliquidCandle"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::HyperliquidCandle"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsUserFill"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserFill"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsUserFills"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserFills"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsUserFundings"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserFundings"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsUserNonFundingLedgerUpdate"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserNonFundingLedgerUpdate", "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserNonFundingLedgerUpdateType" ]
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserNonFundingLedgerUpdateType` - generated spot_models struct for an inline nested object/literal shape of this declaration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsUserNonFundingLedgerUpdates"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserNonFundingLedgerUpdates"
-status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."

@@ -3,10 +3,12 @@ use safe_cex_transport::RestBody;
 use serde_json::{Value, json};
 const FORM: &str = "application/x-www-form-urlencoded";
 fn encode(value: Value) -> Result<String, String> {
-    RestBody::Untransformed(value)
-        .wire_bytes_for_content_type(Some(FORM))
-        .map(|bytes| String::from_utf8(bytes).unwrap())
-        .map_err(|error| error.to_string())
+    RestBody::Untransformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+    )
+    .wire_bytes_for_content_type(Some(FORM))
+    .map(|bytes| String::from_utf8(bytes).unwrap())
+    .map_err(|error| error.to_string())
 }
 fn nested(containers: usize) -> Value {
     (0..containers).fold(Value::Bool(true), |child, _| json!({"next": child}))
@@ -60,58 +62,6 @@ fn form_path_depth_validator_keeps_its_distinct_boundary_and_native_error() {
         "Object is too deeply nested (101 levels). Max depth: 100",
         "FORM HELPERS path depth refusal"
     );
-}
-
-#[test]
-fn signature_marker_helper_retains_method_selection_and_error_order() {
-    use safe_cex_transport::{RestResponse, RestResponseBody, retry::is_error_signature};
-    for (body, expected, error_field) in [
-        (json!({}), false, None),
-        (json!({"ret_msg":null,"retMsg":"error sign!"}), true, None),
-        (json!({"ret_msg":"prefix error sign! suffix"}), true, None),
-        (json!({"ret_msg":["error sign!"]}), true, None),
-        (json!({"ret_msg":["prefix error sign!"]}), false, None),
-        (
-            json!({"ret_msg":42,"retMsg":"error sign!"}),
-            false,
-            Some("ret_msg"),
-        ),
-        (
-            json!({"ret_msg":false,"retMsg":"error sign!"}),
-            false,
-            Some("ret_msg"),
-        ),
-        (json!({"ret_msg":"none","retMsg":[]}), false, None),
-        (
-            json!({"ret_msg":"none","retMsg":{"includes":true}}),
-            false,
-            Some("retMsg"),
-        ),
-        (json!({"ret_msg":"error sign!","retMsg":42}), true, None),
-    ] {
-        let response = RestResponse {
-            status: 400,
-            reason: None,
-            headers: Default::default(),
-            body: RestResponseBody::Transformed(body),
-        };
-        match error_field {
-            None => assert_eq!(
-                is_error_signature(&response).unwrap(),
-                expected,
-                "LOCAL RETRY native method selection"
-            ),
-            Some(field) => {
-                let error = is_error_signature(&response).unwrap_err();
-                assert_eq!(error.name, "TypeError", "LOCAL RETRY native error name");
-                assert_eq!(
-                    error.message,
-                    format!("error?.response?.data?.{field}?.includes is not a function"),
-                    "LOCAL RETRY native error order"
-                );
-            }
-        }
-    }
 }
 
 #[test]

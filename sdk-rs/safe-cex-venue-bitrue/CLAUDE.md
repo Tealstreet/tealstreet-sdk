@@ -98,8 +98,8 @@ source distinction instead of adding rounding.
 Balance parsing takes a borrow of the production Store balance for the falsy
 input fallback. It uses shared JsObjectMap insertion order and math_max, and
 coerces only fields explicitly Number-coerced by source. Nonnumeric upnl is a
-CHOSEN shared-model refusal, after the entire source reduction (including
-replacements and later coercion failures). The witness inspects native fields,
+maintainer-approved per-row refusal: warn with currency, Balance.upnl and its
+original value, and preserve valid rows even when the rejected row repeats a coin. The witness inspects native fields,
 not serialized Balance bytes; every maximum candidate can independently win.
 
 Cardinality is asserted at source totals/subcorpora, per-case arrays, independent
@@ -197,3 +197,45 @@ The registry's native_host_bitrue test verifies the HMAC at a local HTTP server.
 `routing-controls.py` compiles disconnected factory and adapter bindings; both
 must fail the constructed venue routing assertion, then pass after restoration.
 Run these controls sequentially without another compiler.
+
+The typed `Exchange::update_symbol_metadata` entry forwards to the assembled
+`updateSymbolMetadata` body. It fetches the symbol's leverage bracket and commits
+the returned maximum to the Store, preserving the source public-only guard and
+caught-fetch behavior. The real-binding regression in `tests/exchange_binding.rs`
+checks both the HTTP request and replacement of the stored leverage limit.
+The same test target drives a real private socket frame for each of orders,
+fills, positions and balance. Account/balance notifications exercise the source
+350ms refresh through the signed REST binding before checking the Store.
+
+
+The production collection host consumes `ReadHost::items` with the shared iterator
+protocol. The background order loop reads the actual `prioritySymbols` Set before
+issuing requests; requiring an array there aborts every symbol refresh. The
+constructed-binding `background_orders` target checks known LIMIT rows alongside
+IOC/FOK/POST_ONLY/STOP_LIMIT rows, real HMACs and asynchronous Store commits.
+Those REST type lookups preserve own undefined through shared ModelField rather
+than dropping the symbol’s snapshot. The private parser separately maps these
+native types to Limit; `exchange_binding` checks that source behavior on actual
+private frames. REST and WebSocket lookup rules must remain distinct.
+
+REST signing uses `PrivateHost::virtual_now`, bound to the shared synced clock,
+matching the API's `virtualClock.getCurrentTimeMs()`. `PrivateHost::now` remains
+raw for the private order-event `Date.now()` fallback. Registry
+`native_host_bitrue_clock` proves the distinction with a 90-second server offset
+and independently verifies the HMAC on a real native signed account request.
+
+Public depth rows use the shared iterator protocol for the source two-entry
+array pattern, including early close after two entries. Numeric-keyed objects
+and scalar rows must not be published as books. The constructed raw-socket
+regression compares actual source refusals and verifies a later valid snapshot
+still reaches its callback; it does not claim an async rejection diagnostic sink.
+
+
+`exchange_binding::production_ticker_coercion_matches_constructed_typescript` exercises
+32 field-independent cases through the constructed venue's actual socket and
+DefaultStore. Null, numeric/prefix/NaN strings, objects, overflow, signed zero and
+false arrive beside good rows as consecutive single-row protocol frames. The
+maintained TS exchange and actual TS DefaultStore produce the comparison values;
+eleven native number fields are checked before JSON. The shared ticker census
+records the witness; `parity/scripts/ticker-native-controls.py bitrue` compiles
+a production binding fault, requires the named assertion, restores and reruns.

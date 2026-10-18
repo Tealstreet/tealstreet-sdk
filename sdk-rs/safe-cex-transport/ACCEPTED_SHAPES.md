@@ -47,3 +47,32 @@ The resolution records preserve optional flag presence and metadata region order
 `TransportMetadata::requires_cors` remains required; no serialization trait is
 added to that public metadata carrier. Their two focused guard controls can also
 run with `accepted-shape-controls.py ResolvedTransport TransportMetadata`.
+
+## Historical remote-signer debt
+
+The shared ledger's two transport owners described positional struct decoders
+that are absent from the current production protocol. `RemoteSignerRequest` is
+a `http`/`ws-auth` union: its original raw payload first passes the object-only
+`SigningHeader` decoder, then the selected operation decoder. The old fixture
+starts with `sample`, which is not a valid operation discriminator.
+
+`RemoteSignerResponse` has no unconstrained `Deserialize` implementation.
+`RemoteSignerRequest::decode_response` selects HTTP or WS decoding from the
+originating request. HTTP request/config/response records use object-only
+frontdoors; the WS records use the canonical `safe-cex-types` decoder. The
+registry's `HostSigner::sign` invokes this originating-request decoder, while
+`sign_query` directly decodes the distinct typed HTTP response. Neither path
+restores the historical positional response decoder.
+
+This matches the operation ownership in `packages/safe-cex/src/types.ts` and
+`remoteSigningAdapter.ts`: the adapter constructs a named HTTP request and reads
+its signed config; websocket callers consume their own auth signature. Existing
+`p2c` witnesses exercise positional HTTP refusal, both operation identities,
+correlated error-only responses and native signed fields. The real registry
+`native_account_methods::hosted_signer_signs_native_query_requests` witness
+observes the outgoing named request and signed HTTP header at a loopback server.
+
+Retiring these two stale owners removes eight historical failure fingerprints.
+It does not claim that arbitrary malformed signer values match JavaScript
+coercion, or change shared scalar/record admission policies. The scoped audit
+found no outstanding ledger owner in `safe-cex-registry` or `safe-cex-ffi`.

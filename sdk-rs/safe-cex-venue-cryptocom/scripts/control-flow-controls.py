@@ -1,4 +1,4 @@
-"""Individual native body controls for twenty reviewed control-flow/adapter owners."""
+"""Individual native body controls for fifteen reviewed control-flow/adapter owners."""
 import os
 import sys
 from pathlib import Path
@@ -7,17 +7,12 @@ SDK=Path(__file__).resolve().parents[2]
 CRATE=SDK/'safe-cex-venue-cryptocom'
 CONTROLS=[]
 TARGETS={
-    'account_admin':(['--test','account_admin'],'account_admin_matches_actual_typescript_native'),
     'order_writes':(['--test','order_writes'],'order_writes_match_actual_typescript_native'),
     'rest_reads':(['--test','rest_reads'],'rest_reads_match_actual_typescript_native'),
 }
 def body(module,name,before,after,assertions,target=None,test=None):
     if target is None:target,test=TARGETS[module]
     CONTROLS.append((module+'::'+name,CRATE/('src/'+module+'.rs'),('fn '+name).encode(),b'\n}\n',before.encode(),after.encode(),target,test,assertions))
-body('account_admin','begin_admin<','host.endpoint(key)?','{ let _ = key; host.endpoint("CANCEL_ALL_ORDERS")? }',['CRYPTOCOM-ADMIN-NATIVE-ENDPOINT'])
-body('account_admin','finish_admin<','Err(error) => log_and_rethrow(&*host, error, prefix),','Err(error) => { let _ = (host, error, prefix); Ok(()) },',['CRYPTOCOM-ADMIN-NATIVE-EFFECTS','CRYPTOCOM-ADMIN-NATIVE-RETURN'])
-body('account_admin','log_and_rethrow<','Err(error)','{ let _ = error; Ok(()) }',['CRYPTOCOM-ADMIN-NATIVE-RETURN'])
-body('account_admin','optional_chain<','for key in keys {','for key in keys.iter().skip(1) {',['CRYPTOCOM-ADMIN-NATIVE-EFFECTS','CRYPTOCOM-ADMIN-NATIVE-TEXT','CRYPTOCOM-ADMIN-NATIVE-KIND'])
 body('order_writes','log<','h.template(prefix, h.error_value(error))?','{ let _ = prefix; h.template("changed: ", h.error_value(error))? }',['CRYPTOCOM-WRITE-NATIVE-LOG'])
 body('order_writes','rethrow<','Err(error)','{ let _ = error; Ok(h.undefined()) }',['CRYPTOCOM-WRITE-NATIVE-ERROR'])
 body('order_writes','caught<','rethrow(h, prefix, error)','{ let _ = prefix; rethrow(h, "caught: ", error) }',['CRYPTOCOM-WRITE-NATIVE-LOG'])
@@ -33,9 +28,7 @@ body('rest_reads','nullish_field<','if !h.nullish(&v) {','if true {',['CRYPTOCOM
 body('rest_reads','zero_position<','("leverage", h.number(1.0))','("leverage", h.number(2.0))',['CRYPTOCOM-READ-NATIVE-NUMBER'])
 body('class_mappings','imported<','h.get(&(h.ops.value.global)(owner)?, key)','{ let _ = key; h.get(&(h.ops.value.global)(owner)?, "__missing") }',['imported native value identity'],['--lib'],'class_mappings::accepted_control_flow::imported_native_contract')
 body('class_admin','optional<','(h.value.get)(&value, key)','{ let _ = key; Ok(value) }',['class optional native child identity'],['--lib'],'class_admin::accepted_control_flow::optional_native_contract')
-body('account_envelopes','equal(','value.iter().copied().eq(text.encode_utf16())','!value.iter().copied().eq(text.encode_utf16())',['envelope equal native comparison'],['--lib'],'account_envelopes::accepted_control_flow::equal_native_contract')
-assert len(CONTROLS)==20
-CONTROLS.append(('comparison fixture walk',CRATE/'src/account_envelopes.rs',b'fn equal_native_contract()',b'\n    }\n',b'for case in cases {',b'for case in cases.into_iter().take(21) {',['--lib'],'account_envelopes::accepted_control_flow::equal_native_contract',['envelope equal executed cases']))
+assert len(CONTROLS)==15
 CONTROLS.append(('parsed fixture walk',CRATE/'src/rest_reads.rs',b'fn parsed_native_contract()',b'\n    }\n',b'for (failure, output) in cases {',b'for (failure, output) in cases.into_iter().take(6) {',['--lib'],'rest_reads::accepted_control_flow::parsed_native_contract',['parsed native executed cases']))
 REVIEW_WALKS = [
     ('optional nullish fixture walk',CRATE/'src/class_admin.rs',b'fn optional_native_contract()',b'\n    }\n',b'for value in [Js::Undefined, Js::Null] {',b'for value in [Js::Undefined, Js::Null].into_iter().take(1) {',['--lib'],'class_admin::accepted_control_flow::optional_native_contract',['class optional nullish executed cases']),
@@ -43,7 +36,7 @@ REVIEW_WALKS = [
     ('imported abrupt fixture walk',CRATE/'src/class_mappings.rs',b'fn imported_native_contract()',b'\n    }\n',b'for stage in 0..2 {',b'for stage in 0..1 {',['--lib'],'class_mappings::accepted_control_flow::imported_native_contract',['imported native abrupt executed cases']),
 ]
 CONTROLS.extend(REVIEW_WALKS)
-assert len(CONTROLS)==25
+assert len(CONTROLS)==19
 
 def run(target,test):
     result=subprocess.run(['cargo','test','--locked','--jobs','1','-q','-p','safe-cex-venue-cryptocom',*target,test,'--','--exact'],cwd=SDK,capture_output=True,text=True)

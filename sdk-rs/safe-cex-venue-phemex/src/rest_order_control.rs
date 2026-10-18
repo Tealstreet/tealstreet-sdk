@@ -230,15 +230,6 @@ pub async fn get_or_fetch_market<H: MarketLookupHost>(
     }
     host.find(&markets, &symbol)
 }
-pub async fn cancel_symbol_orders<S, O, E, F: Future<Output = Result<(), E>>>(
-    symbol: S,
-    filter: impl FnOnce(&S) -> Result<O, E>,
-    cancel: impl FnOnce(O) -> F,
-) -> Result<(), E> {
-    let orders = filter(&symbol)?;
-    cancel(orders).await
-}
-
 #[cfg(test)]
 mod accepted_native_contract {
     use super::*;

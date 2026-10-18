@@ -120,3 +120,45 @@ also affect the request that consumes them; the controller requires exactly
 those declared dependent failures. The selector's separate fallback fault must
 fail the named maintained-source constructor test, then restore all 729 cases.
 Run these source-sensitive controls serially with all other compiler probes.
+
+## Signature retries and remote operations
+
+This bounded review observes five complete compiler owners: the raw-data resend
+helper, rejected-response condition, resolved-response resend, combined read/write
+retry engine and remote-signer operation union. It adds evidence to existing
+production behavior; the TypeError carrier repair is a separate dependency.
+
+The three decision helpers observe actual approvals, predicate counts and the
+one-use stamp, including a stamp arranged through a prior production decision.
+False predicates, spent stamps and thrown TypeErrors remain separate outcomes.
+The rejected-response path also observes absence of a response; thrown failures
+retain the actual failed/effective request and JavaScript error name/message.
+
+The async engine runs immediate deterministic adapter receipts and an advancing
+clock. Its nine cases observe every request method, URL and timeout, scheduled
+zero-delay sleeps, callback count, stamp and returned success/failure. Network
+reads may retry; network writes may not. Signature rejection permits one write
+resend. Failed configuration rewrites survive replay, and measured attempt time
+reduces the original timeout. Exhaustion consumes the approved stamp but starts
+no further attempt. `accepted-retry-source.mjs` independently executes 13 cases
+against the maintained signature helpers and nine traces through installed Axios
+and axios-retry, with the maintained network/read and signature conditions.
+Native request/error carriers are inspected separately from source Error objects.
+
+The signer union replaces an inherited invalid `type: sample` fixture with the
+actual HTTP and WS-auth variants. Native observations inspect enum identity,
+account/exchange fields, HTTP method/baseURL/headers, optional null presence,
+negative-zero parameter bits and untouched WS raw metadata. Valid objects and
+invalid operation tags, field shapes and complete positional arrays pass through
+ordinary owned, qualified and alternate decoder witnesses. The actual
+`decode_response` method is executed: the same error-only wire reply must become
+HTTP or WS according to its originating request; config, signature and correlation
+id presence are observed without serializing a decoded owner.
+
+`accepted-retry-native.mjs --inventory=FILE --out=FILE` uses fresh compiler APIs.
+`accepted-retry-controls.py` separately faults both approval helpers, effective
+error configuration, write replay configuration, timeout budget, read-network
+retry, response-origin selection, WS account retention and unknown-operation
+admission. Each fault must compile, produce exactly its declared named native
+output/admission failures, then pass all five receipts after byte-exact source
+restoration. Run these controls serially with all other source-sensitive probes.

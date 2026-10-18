@@ -1,3 +1,5 @@
+// Finite source-semantics host. Production import registration is tested through
+// HyperliquidExchange in binding.rs; unknown names must never auto-resolve here.
 use super::{
     account,
     cache::{self, N, arr, eq, object, s},
@@ -77,6 +79,32 @@ impl WsPingHost for Host {
         WsPingHost::callback(&mut self.base, capture)
     }
     fn global(&mut self, k: &str) -> Result<N, N> {
+        assert!(
+            matches!(
+                k,
+                "Boolean"
+                    | "Number"
+                    | "String"
+                    | "Error"
+                    | "Array"
+                    | "Set"
+                    | "OrderType"
+                    | "OrderSide"
+                    | "OrderTimeInForce"
+                    | "OrderStatus"
+                    | "PositionSide"
+                    | "HyperliquidExchange"
+                    | "HyperliquidSpotExchange"
+                    | "ENDPOINTS"
+                    | "virtualClock"
+                    | "resolveHyperliquidBuilder"
+                    | "maskHyperliquidAddress"
+                    | "HyperliquidUnreadableOrderResponseError"
+                    | "signL1Action"
+                    | "createWalletFromPrivateKey"
+            ),
+            "unreviewed placement-test global {k}"
+        );
         Ok(N::Builtin(k.into()))
     }
     fn get(&mut self, v: &N, k: &str) -> Result<N, N> {
@@ -426,7 +454,18 @@ impl SpotAccountHost for Host {
                 "getCurrentTimeMs",
                 N::Builtin("getCurrentTimeMs".into()),
             )]),
-            _ => N::Builtin(k.into()),
+            "symbolToCoin"
+            | "adjust"
+            | "isFinitePositiveNumber"
+            | "orderRequestToOrderWire"
+            | "orderWiresToOrderAction"
+            | "orderWiresToPositionalTPSLAction"
+            | "signL1Action"
+            | "createWalletFromPrivateKey"
+            | "mintHyperliquidCloid"
+            | "mapSeries"
+            | "isOnlyHyperliquidTerminalCancelError" => N::Builtin(k.into()),
+            _ => panic!("unreviewed placement-test import {k}"),
         })
     }
     fn construct(&mut self, f: &N, args: &[N]) -> Result<N, N> {

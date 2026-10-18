@@ -21,7 +21,7 @@ pub fn add_inline_tpsl_fallback_orders(
 ) -> Result<Vec<Order>, JsCoercionError> {
     let mut protective = HashSet::new();
     for order in orders {
-        let Some(kind) = protective_type(order.r#type) else {
+        let Some(kind) = order.r#type.into_value().and_then(protective_type) else {
             continue;
         };
         let raw_parent = order.info.as_ref().and_then(|info| info.get("orderId"));
@@ -90,17 +90,17 @@ pub fn add_inline_tpsl_fallback_orders(
                 );
                 if !protective.contains(&key) {
                     fallback.push(Order {
-                        client_order_id: None,
+                        client_order_id: (None).into(),
                         id: format!("{}{suffix}", order.id),
-                        status: OrderStatus::Open,
+                        status: safe_cex_types::ModelField::Value(OrderStatus::Open),
                         symbol: order.symbol.clone(),
-                        r#type: kind,
-                        side,
-                        price,
+                        r#type: (kind).into(),
+                        side: side.into(),
+                        price: price.into(),
                         amount: remaining,
                         filled: 0.0,
                         remaining,
-                        extra: Some(OrderExtra {
+                        extra: (Some(OrderExtra {
                             remaining_native: Some(native),
                             filled_in_placement_units: None,
                             remaining_notional: None,
@@ -110,18 +110,19 @@ pub fn add_inline_tpsl_fallback_orders(
                             chaser_id: None,
                             chaser_attempts: None,
                             chaser_max_attempts: None,
-                        }),
-                        reduce_only: true,
+                        }))
+                        .into(),
+                        reduce_only: true.into(),
                         last_update: now(),
-                        info: info.cloned(),
-                        parent_id: None,
-                        close: None,
-                        time_in_force: None,
-                        trigger_type: None,
-                        tp_trigger_type: None,
-                        sl_trigger_type: None,
-                        take_profit: None,
-                        stop_loss: None,
+                        info: (info.cloned()).into(),
+                        parent_id: (None).into(),
+                        close: (None).into(),
+                        time_in_force: (None).into(),
+                        trigger_type: (None).into(),
+                        tp_trigger_type: (None).into(),
+                        sl_trigger_type: (None).into(),
+                        take_profit: (None).into(),
+                        stop_loss: (None).into(),
                     });
                     protective.insert(key);
                 }

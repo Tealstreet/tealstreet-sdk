@@ -12,7 +12,9 @@ use std::{
 fn error(message: &str) -> Rc<ExchangeError> {
     let mut error = ExchangeError::new(message);
     error.name = "RangeError".into();
-    error.code = Some(json!("fixture-code"));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "fixture-code"
+    )));
     Rc::new(error)
 }
 fn run<F: Future>(future: F) -> F::Output {
@@ -239,7 +241,11 @@ fn throttle(variant: &str) {
                 assert!(failed);
                 assert_eq!(e.name, "RangeError", "native error name");
                 assert_eq!(e.message, "throttle fixture", "native error message");
-                assert_eq!(e.code, Some(json!("fixture-code")), "native error metadata");
+                assert_eq!(
+                    observed_error_code(&e.code),
+                    Some(json!("fixture-code")),
+                    "native error metadata"
+                );
                 assert!(
                     Rc::ptr_eq(e, &error),
                     "native original scheduler error identity"
@@ -588,7 +594,7 @@ fn fetch(variant: &str) {
                 let order = &patch.orders[row];
                 assert_eq!(order.id, id, "native order id");
                 assert_eq!(
-                    order.price.to_bits(),
+                    order.price.to_number().to_bits(),
                     price.to_bits(),
                     "native decoded order price"
                 );
@@ -716,4 +722,17 @@ fn futures_fetch() {
 #[ignore = "requires configured local TypeScript"]
 fn pm_fetch() {
     fetch("binancepm");
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

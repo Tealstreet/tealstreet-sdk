@@ -35,6 +35,16 @@ impl CommandHandler {
             return Ok(());
         }
         let data = payload.data.unwrap_or(Value::Null);
+        // Source typeof treats arrays as objects too; primitives never reach the executor.
+        if !data.is_object() && !data.is_array() {
+            command_failure(
+                self.exchange.as_ref(),
+                None,
+                false,
+                "Invalid command payload.".into(),
+            )?;
+            return Ok(());
+        }
         let req_id = data.get("reqId").and_then(Value::as_str).map(str::to_owned);
         let Some(executor) = get_command_executor() else {
             command_failure(
@@ -81,11 +91,16 @@ fn command_failure(
     if let Some(id) = &req_id {
         log["reqId"] = json!(id);
     }
-    exchange.base().emit("exec-log", log)?;
+    exchange.base().emit(
+        "exec-log",
+        safe_cex_exchange::js_runtime::value::from_json(&log),
+    )?;
     if let Some(id) = req_id {
         exchange.base().emit(
             "exec-result",
-            json!({"reqId":id,"handled":handled,"success":false,"error":message}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"reqId":id,"handled":handled,"success":false,"error":message}),
+            ),
         )?;
     }
     Ok(())

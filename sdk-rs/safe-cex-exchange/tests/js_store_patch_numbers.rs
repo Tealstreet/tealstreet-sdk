@@ -123,7 +123,10 @@ fn all_model_patch_methods_keep_every_numeric_field() {
                 facade
                     .call_method(
                         method,
-                        vec![Js::str(id), Js::object(vec![(field, Js::Number(value))])],
+                        vec![
+                            Js::object(vec![("id", Js::str(id))]),
+                            Js::object(vec![(field, Js::Number(value))]),
+                        ],
                     )
                     .unwrap_or_else(|e| {
                         panic!("{method}.{field} refused {value:?}: {}", e.message())
@@ -153,7 +156,7 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
         .call_method(
             "updatePosition",
             vec![
-                Js::str("p"),
+                Js::object(vec![("id", Js::str("p"))]),
                 Js::object(vec![
                     ("leverage", Js::Undefined),
                     ("entryPrice", Js::function("ignored", |_, _| Ok(Js::Null))),
@@ -175,7 +178,10 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
         facade
             .call_method(
                 "updatePosition",
-                vec![Js::str("p"), from_json(&json!({"leverage":null}))]
+                vec![
+                    Js::object(vec![("id", Js::str("p"))]),
+                    from_json(&json!({"leverage":null})),
+                ]
             )
             .is_err(),
         "explicit null is still refused as a numeric patch"
@@ -185,7 +191,10 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
         facade
             .call_method(
                 "updatePosition",
-                vec![Js::str("p"), Js::object(vec![("info", Js::Number(value))])],
+                vec![
+                    Js::object(vec![("id", Js::str("p"))]),
+                    Js::object(vec![("info", Js::Number(value))]),
+                ],
             )
             .unwrap();
         assert_eq!(
@@ -199,7 +208,7 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
         .call_method(
             "updatePositions",
             vec![Js::array(vec![Js::array(vec![
-                Js::str("absent"),
+                Js::object(vec![("id", Js::str("absent"))]),
                 Js::object(vec![("leverage", Js::Number(f64::NAN))]),
             ])])],
         )

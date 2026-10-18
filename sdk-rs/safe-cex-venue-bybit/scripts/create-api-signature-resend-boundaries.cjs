@@ -103,7 +103,8 @@ let expectations = {
   'rejected-then-resolved-sign': { attempts: 2, retCode: 10004, authFailures: 2, authSuccesses: 0, rejected: false },
   'resolved-other-error': { attempts: 1, retCode: 10001, authFailures: 0, authSuccesses: 0, rejected: false },
 };
-const retryBudgets = process.argv.includes('--retry-budgets');
+const nativeBudgets = process.argv.includes('--native-retry-budgets');
+const retryBudgets = nativeBudgets || process.argv.includes('--retry-budgets');
 if (retryBudgets) {
   inputs = [
     { id: 'rejected-sign-zero', retries: 0, replies: [[400, '{"retCode":10004,"retMsg":"error sign!"}'], [200, '{"retCode":0,"retMsg":"OK"}']] },
@@ -119,6 +120,11 @@ if (retryBudgets) {
   ].map(([id, attempts, rejected, retCode]) => [id, { attempts, rejected, retCode,
     authFailures: 0, authSuccesses: id === 'resolved-sign-zero' ? 1 : 0 }]));
 }
+if (nativeBudgets) {
+  inputs = [{ id: 'network-own-undefined', retries: undefined }, { id: 'network-nan', retries: NaN }]
+    .map(value => ({ ...value, network: true, replies: Array.from({ length: 7 }, () => [0, '']) }));
+  expectations = Object.fromEntries(inputs.map(value => [value.id, { attempts: 1, rejected: true, retCode: null, authFailures: 0, authSuccesses: 0 }]));
+}
 async function run(input) {
   let nextId = 0, authSuccesses = 0, authFailures = 0;
   const physical = [], payloads = [], logs = [];
@@ -130,6 +136,10 @@ async function run(input) {
       safeCexAxiosCreate(config) {
         return axios.create({ ...config, timeout: 20000, adapter: async current => {
           physical.push({ id: current.params.requestId, data: current.data });
+          if (nativeBudgets) {
+            assert.ok(Object.hasOwn(current['axios-retry'], 'retries'), 'actual retry config retains own key');
+            assert.ok(Object.is(current['axios-retry'].retries, input.retries), 'actual retry config retains native undefined/NaN');
+          }
           const reply = input.replies[physical.length - 1];
           assert.ok(reply, 'unscripted extra physical attempt');
           const [status, data] = reply;
@@ -173,9 +183,9 @@ async function run(input) {
 (async () => {
   const cases = [];
   for (const input of inputs) cases.push({ id: input.id, source: await run(input) });
-  assert.equal(cases.length, retryBudgets ? 6 : 4, 'executed review case floor');
+  assert.equal(cases.length, nativeBudgets ? 2 : retryBudgets ? 6 : 4, 'executed review case floor');
   process.stdout.write(JSON.stringify({
     scope: 'source-only; unchanged maintained API/response/read-retry/signatureRejection with actual Axios/axios-retry/qs; scripted common constructor/physical adapter and recording signer; no native proof',
-    declaredCases: retryBudgets ? 6 : 4, cases,
+    declaredCases: nativeBudgets ? 2 : retryBudgets ? 6 : 4, cases,
   }) + '\n');
 })().catch(error => { console.error(error); process.exitCode = 1; });

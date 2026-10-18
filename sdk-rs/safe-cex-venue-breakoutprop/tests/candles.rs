@@ -266,7 +266,7 @@ fn candle_owned_options_and_drop_boundary() {
     }
     let options = || OHLCVOptions {
         symbol: "ORIGINAL".into(),
-        interval: safe_cex_types::Timeframe::M1,
+        interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),
         from: None,
         to: None,
         limit: None,
@@ -338,7 +338,7 @@ fn candle_nan_and_utf8_boundaries() {
     );
     let options = OHLCVOptions {
         symbol: "BTCUSD".into(),
-        interval: safe_cex_types::Timeframe::M1,
+        interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),
         from: Some(f64::NAN),
         to: Some(f64::NAN),
         limit: None,

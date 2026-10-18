@@ -176,7 +176,19 @@ pub fn build_create_grouped_orders_data(
     params: &CreateGroupedOrdersParams,
     nonce: &BigInt,
 ) -> SigningResult<GroupedOrdersData> {
-    validate_create_grouped_orders_params(params)?;
+    build_grouped_orders_with_side_comparison(context, crypto, params, nonce, &|a, b| {
+        params.orders[a].is_buy == params.orders[b].is_buy
+    })
+}
+
+pub(crate) fn build_grouped_orders_with_side_comparison(
+    context: &TransactionBuildContext<'_>,
+    crypto: &dyn TransactionCrypto,
+    params: &CreateGroupedOrdersParams,
+    nonce: &BigInt,
+    same_side: &dyn Fn(usize, usize) -> bool,
+) -> SigningResult<GroupedOrdersData> {
+    validate_grouped_orders_with_side_comparison(params, same_side)?;
     ready(crypto)?;
     let expired_at = clock_bigint((context.now_millis)() + 600_000.0)?;
     let default_order_expiry =

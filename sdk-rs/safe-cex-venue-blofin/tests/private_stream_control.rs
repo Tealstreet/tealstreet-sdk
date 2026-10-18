@@ -74,9 +74,9 @@ fn order_assert(order: &Order, e: &Value) {
     assert_eq!(order.status, OrderStatus::Open);
     assert_eq!(order.r#type, OrderType::Limit);
     assert_eq!(order.side, OrderSide::Buy);
-    assert!(!order.reduce_only);
+    assert_eq!(order.reduce_only, false);
     for (a, key) in [
-        (order.price, "price"),
+        (order.price.to_number(), "price"),
         (order.amount, "amount"),
         (order.filled, "filled"),
         (order.remaining, "remaining"),
@@ -120,7 +120,7 @@ impl Host {
         let order: Order = js_from_value(corpus()["order"].clone()).unwrap();
         let mut old = order.clone();
         old.id = "o-old".into();
-        old.price = 3.0;
+        old.price = (3.0).into();
         let store = Rc::new(DefaultStore::default());
         Store::update(
             store.as_ref(),
@@ -633,7 +633,7 @@ fn group(name: &str, floor: usize) {
             let current = Store::serialize(host.store.as_ref());
             if old.is_empty() {
                 let mut added: Order = js_from_value(corpus()["order"].clone()).unwrap();
-                added.price = 77.0;
+                added.price = (77.0).into();
                 old.push(added);
                 assert_eq!(
                     current.orders.len(),
@@ -641,7 +641,7 @@ fn group(name: &str, floor: usize) {
                     "native empty fetched array remains owned"
                 );
             } else {
-                old[0].price = 77.0;
+                old[0].price = (77.0).into();
                 assert_eq!(
                     current.orders[0].price, 11.0,
                     "native Store owns fetched order records"

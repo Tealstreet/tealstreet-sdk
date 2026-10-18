@@ -73,10 +73,12 @@ The store contract is `safe-cex-store`'s port of
 that trait directly; it never defines a projection or another store shape.
 `ExchangeRuntime` supplies clock, local task/timer cancellation, runtime logging
 and worker requests. Runtime signing handles stay outside serializable options.
-The native wall clock supplies integer epoch milliseconds for Date.now timestamps
-and signing nonces; its monotonic clock retains fractional milliseconds. The shared
-JS Date.now facade also rounds down an injected wall clock, while performance.now
-keeps the host's fractional precision.
+The native wall clock supplies integer epoch milliseconds for Date.now timestamps;
+its monotonic clock retains fractional milliseconds. Source virtualClock reads,
+including the shared JS facade, use safe-cex-store's VIRTUAL_CLOCK instead so
+server offsets and its native/worker policies remain authoritative for signing.
+The shared JS Date.now facade rounds down an injected wall clock, while
+performance.now keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
@@ -498,8 +500,9 @@ The override contract has two independent gates in `tests/override_contract.rs`:
 `override-inventory.cjs` resolves TypeScript class ancestry and inventories every
 callable override of a BaseExchange member; each must have a dynamic hook (or the
 explicit typed-placement binding). The Rust source audit rejects direct base
-bypasses and captured base method references, and pins hook call sites plus their
-enclosing function token fingerprints in `override-call-sites.json`. This is a
+bypasses and captured base method references, and pins each function's hook call
+edges (kind, hook, receiver base/dynamic/path, count) in `override-call-sites.json`;
+unrelated body edits keep the pin, edge changes fail. This is a
 syntax/alias audit with review-required inventory changes, not Rust type inference.
 It sees local receiver/alias syntax, not ambient type-alias or field-type changes
 outside the function; macros are unexpanded. Those still need semantic review.
@@ -566,6 +569,21 @@ elapsed time and the next delay, and exhaustion returns the terminal failure
 without sleeping or sending again. No caller supplies a remaining-timeout value.
 The installed Axios truthy guards retain timeout zero as unlimited and skip the
 first subtraction for a clock starting exactly at epoch zero.
+
+Transport JavaScript coercion failures retain their name and unprefixed message
+when converted into ExchangeError. The original RestFailure remains the opaque
+origin. Direct JsCoercionError conversion retains its typed native cause too;
+Binance and BingX signature predicates use these conversions instead of rebuilding
+an Error from text. The native order/account witnesses cover resolved envelopes
+and HTTP rejection, and assert that coercion failures never trigger a resend.
+
+The JS REST adapter keeps string error-code UTF-16 units in the existing owned
+callback origin; `RestFailure.code` remains its explicit UTF-8 diagnostic view.
+The shared ExchangeError conversion applies response and context views to both
+retained callback causes and ordinary failures, preserving the complete original
+RestFailure for downcasts. The constructed Aster rejection regression compares
+normal and lone-surrogate codes to the maintained source; the core origin test
+also checks response phase, own undefined, signed zero, keys and request metadata.
 
 `RestFailure.context` is boxed to keep the response-bearing error small; the
 metadata is unchanged. `RestFailure.code` preserves general host/status error codes as well as the code
@@ -744,6 +762,11 @@ already-decoded string. Constructors must state the response representation.
 
 
 Listener callbacks and `BaseExchange::emit`, `log`, and `emit_and_log_error`
+use one variadic dispatch operation. `emit_args`/`on_args` retain the argument
+list; `emit` sends one value and `on`/`once` observe its first argument. Array
+values are never interpreted as argument lists. The JS facade and worker log
+bridge use the full list, while native fill listeners receive the fill object.
+Callbacks and emission methods
 return `Result<(), ExchangeError>`. TinyEmitter snapshots the current listener
 list, removes a once listener before invoking it, and stops on the first throw;
 Rust retains that order and invokes callbacks outside all listener-map borrows.
@@ -864,7 +887,13 @@ Factory profiles are copied before the venue interceptor; no global array format
 is assumed. Query JSON diagnostic projection is separate from URL rendering.
 
 Shared journal intervals and fold projection live in position_intervals and
-fold_position_adapter. Reconstruction is path-dependent: seeds remain incomplete,
+fold_position_adapter. PositionInterval's camelCase Serde bridge lets production
+venue bindings pass the canonical interval through native JS values; optional
+fields omit absence and the shared native serializer retains floating-point values.
+Its private remote decoder requires an object and uses the existing numeric ingress
+pipeline; raw number spelling and native nonfinite/signed-zero bits must survive.
+No second interval model or fold implementation is introduced.
+Reconstruction is path-dependent: seeds remain incomplete,
 partial missing reducing PnL refuses a total, and crossing fills split fees by
 size while assigning all realized PnL to the closing interval. Funding includes
 both endpoints and remains unattributed for hedges/incomplete/open intervals.
@@ -1184,3 +1213,388 @@ then restores exact source bytes. Algorithms follow
 [CreateMapIterator](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-createmapiterator)
 and [CreateSetIterator](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-createsetiterator)
 within the runtime's existing value/property profile.
+
+The five iterator-related accepted owners have separate reviews in
+[ITERATOR_CONTRACT_EVIDENCE.md](ITERATOR_CONTRACT_EVIDENCE.md). Three private
+callable factories retain specific non-decoder classifications; `Collection`'s
+native `Deref` view and the added `Js` protocol APIs have executed output
+observations. Independently authored Node fixtures and per-owner compiled
+controls supplement these bounded native/default receipts.
+
+The JS Store facade exposes `markOrdersTerminal` by delegating to the existing
+native terminal-memory operation. It remembers IDs even when the Store has no
+orders, and preserves committed-state subscriber errors through the existing
+mutation bridge. IDs cross the declared typed string boundary without lossy
+surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
+snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
+real private-frame witnesses cover the production caller and final fill ordering.
+
+`JsProtocol::resyncs_private_state_on_reopen` reads the receiver's
+`resyncsPrivateStateOnReopen` member; undefined keeps the private-socket default.
+OKX's business socket defines it, so a business-only re-open runs the private
+snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
+
+The shared Promise global is a native constructor with its existing static
+methods. It runs the executor synchronously with resolve/reject functions that
+share a first-call lock, including while adopting a pending value. Resolution
+reads a thenable's `then` synchronously and queues its invocation in the same
+runtime FIFO as Promise reactions;
+self-resolution rejects and original thrown values survive. The native scheduler
+retains the queued job after observer drop. `tests/js_promise_constructor.rs`
+uses NativeRuntime/native HTTP hosting without replacement hosts and compares
+executor/thenable traces with Node; Bitrue's production binding witnesses
+connected candle-request resolution, cache reuse and timeout rejection.
+
+`__configureRateLimit` registers a request interceptor at the source registration point. Axios LIFO ordering therefore waits before the earlier signing interceptor, while later request hooks still run before the wait. Each registration owns its window. The queued nonce regression and installed Axios oracle are `tests/js_runtime.rs::rate_limit_dequeues_before_signing_and_keeps_interceptor_registration_order` and `tests/rate-limit-signing-source.cjs`.
+
+JS runtime StringToNumber delegates directly to `safe_cex_num::number_from_string`.
+It rejects signs inside radix digits (for example `0x+1`) and preserves the shared
+full-string, whitespace and arbitrary-length binary64 rounding rules. The native
+host `js_string_number` target compares 93 Node results through installed Number,
+including signed radix refusals, large values, overflow and signed zero.
+
+Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
+JavaScript callbacks need not define a Rust total order: NaN comparison results
+mean equality, and inconsistent callbacks must not panic. The first source throw
+stops comparisons immediately. Default Array sorting compares original UTF-16
+units, puts undefined before holes and rejects a present non-callable comparator.
+The native-host `js_sort` target checks the compiled master panic and error count,
+plus Node ordering across merge boundaries. Ordering under an inconsistent
+comparator remains implementation-dependent under ECMAScript.
+
+Ordinary numeric conversion of live objects/functions calls `valueOf` before
+`toString`, reading each member only when reached and retaining the original
+receiver and thrown value. String conversion uses the same private primitive
+conversion algorithm with its string-hint ordering. Object results and
+non-callable members advance to the next method; no primitive result throws.
+The production native-host `js_number_coercion` witness compares Node traces,
+negative-zero/NaN results, inheritance, live lookup and conversion failures.
+
+The JS Number `toFixed` builtin delegates to `safe_cex_num::js_to_fixed` after
+ordinary digits coercion. Exact binary ties round away from zero; negative zero,
+nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
+`tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
+Polymarket's concrete binding witness checks the resulting signed order amounts.
+
+JS socket listener throws are host exceptions, never transport errors. Plain
+EventTarget dispatch continues after each throw; source ReconnectingWebSocket
+(header/relay/configured wrapper) dispatch stops its grouped callback at the
+throw. The resolved connection records that choice before delivery. Returned
+promises do not enter the socket-error path; general unhandled-rejection
+reporting is a separate runtime concern. `tests/js_socket_listener_errors.rs`
+compares eight real native loopback open/message cases with Node EventTarget
+and the maintained RWS implementation, and checks the native exception output.
+
+The shared `qs.stringify` binding consumes arrayFormat (indices/repeat/comma/
+brackets), callable sort, RFC3986/RFC1738 format and the encode boolean. It
+sorts keys at every object/array level before reading child values and keeps
+undefined omissions. Comparator failures propagate; native sorting does not
+claim V8's comparator call schedule. `tests/js_qs_options.rs` executes the actual
+installed qs package over 96 option/input combinations. The BingX registry
+regression additionally observes final signed GET query ordering through the
+production HTTP client and verifies the signature against the source preimage.
+Other qs options remain outside this imported runtime surface.
+
+The JS socket's lastReceived accessor shares the native core's Number field;
+pre-assembly writes are retained until lazy core creation. Frames and JS session
+resets therefore update the same health timestamp, preserving native f64 bits.
+Receive timers dispatch the instance checkLastReceived method through WsProtocol;
+the inherited facade method calls the base check directly, avoiding recursion.
+Scoped js_runtime witnesses cover lazy initialization, bidirectional reads/writes,
+raw bits, zero reset/reinitialization and a derived watchdog receiver. A real GRVT
+private socket witnesses its 30-second ping / 90-second Warning reconnect behavior;
+all three regressions compile and fail before this bridge/dispatch repair.
+
+Installed Promise.all/allSettled consume the shared synchronous iterator protocol,
+including Map/Set iterators and Unicode strings. Iterator acquisition/step errors
+reject the returned Promise. Inputs remain native Js values until existing
+combinator settlement; pending members, object identity, negative zero and NaN
+payloads survive. `js_runtime`'s two promise_combinators tests compare eighteen
+Node outcomes and exercise native pending members; both compile/fail on the old
+array-only globals dispatch. Promise scheduling remains in the shared promise core.
+
+Map/Set `forEach` uses stable insertion positions, like the live iterators, and
+releases its collection borrow before each callback. Deletions, clear/reinsert,
+updates and new entries are observed during traversal. Callbacks receive the
+source thisArg and native value/key/owner references; invalid callbacks reject
+even on empty collections. `js_collection_foreach` checks fourteen Node traces,
+nested traversal, abrupt completion, native signed-zero/reference identity and
+thisArg. Both named regressions compiled and failed on the snapshot implementation.
+
+Both JS `virtualClock` getters delegate to the shared synced singleton.
+`getCurrentTime` wraps `VirtualClock::get_current_time` in the existing dayjs
+object, retaining date clipping and arithmetic; `getCurrentTimeMs` remains the
+numeric hot path. Source `Date.now()` still reads the runtime wall clock.
+Registry `native_host_phemex_clock` exercises the real dayjs consumer through a
+signed native HTTP request, verifying its HMAC and expiry after a 90-second
+server correction. The core virtual-clock regression checks both getters and
+the independent raw Date clock.
+
+Shared JS promises run on a runtime-owned FIFO job queue. Their async bodies
+start synchronously through the first suspension; settled awaits and reactions
+resume in queued jobs. Returned promises receive a separate resolution job.
+Nonempty all/allSettled register each input reaction synchronously, retaining
+input order while observing the first rejection in settlement order.
+
+NativeRuntime drains that queue before and after each host future poll. All
+callbacks within a poll remain one batch; the checkpoint does not split socket
+frames that the host delivers together. Scope timers use the same queue and
+drain reactions before the next timer. Other runtime embedders still control
+their host callback boundaries; the scoped native witnesses cover this native
+checkpoint, timer cancellation and host task discard.
+
+The shared JS Promise sink reports unhandled rejections through the runtime
+exception boundary at a quiescent microtask checkpoint. Registering an await or
+reaction handles its source immediately; an unhandled propagated rejection
+belongs to the derived promise. Reading result() alone does not handle it.
+Checks retain discarded rejection values until their reporting turn, and host
+driver discard releases those pending captures without reporting them.
+
+Bitrue's constructed public socket regression drives malformed raw depth frames
+through the real socket dispatcher. Its discarded async listener promise reports
+the source TypeError exactly once; the next valid snapshot still reaches its
+callback. Native host controls cover catches before rejection, during the same
+microtask checkpoint, and after the first report, plus host-discard cleanup.
+
+String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
+units and honor their position argument after search-string coercion. Positions
+truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
+endsWith defaults to the full length only for undefined. The native Node corpus
+covers surrogate halves, empty needles, all position boundaries and thrown
+position conversion identity.
+
+The shared JS facade's async snapshot/order/position methods return rejected
+Promises for preparation errors, including errors before their first await.
+Snapshot privacy/disposal guards precede retry-count coercion. The native
+`js_async_facade` target compares return/catch behavior with the maintained TS
+async field bodies executed by Node, preserving original conversion exceptions.
+
+Emitter callbacks and `BaseExchange::emit`/`emit_args` carry shared `Js` directly.
+Scalar listeners read a missing first argument as Undefined; variadic listeners
+retain the original argument count. Producers use `from_typed` before any JSON
+serialization; already-JSON inputs opt into `from_json` explicitly. Listener
+errors stop dispatch, and once rows are removed before invoking their callback.
+
+`ExchangeError.code` is `Option<Js>`: absent differs from own Undefined, and
+thrown-error roundtrips retain native number bits and object references. Sentry
+formatter results are also `Js`, including own Undefined keys. The runtime's
+exception-report callbacks remain explicit JSON host boundaries. Worker event
+posts use the required native DATA capability; main-thread worker RPC arguments
+and successful results keep their separately scoped JSON ABI.
+
+Adapter config capture/restore reuses the canonical RetainedJsonInput and existing
+native typed codec through two thin value helpers. Shared HTTP adapters retain
+own undefined, raw NaN payloads, infinities and signed zero at the terminal and
+effective success/error config; they do not JSON-copy extension data. Transport
+HOW owns the eventual protocol projection. This retains the typed codec
+limitations and does not claim executable callbacks or live JS alias identity.
+
+SubscribedCandle.interval uses ModelField<AnyTimeframe> at the callback boundary.
+Its native record codec preserves absent, own undefined and concrete intervals,
+including 1M, and omits undefined intervals from JSON. Candle number bits remain
+native through that codec; strict public OHLCV(S) request options are unchanged.
+The scoped subscribed_candle_fields witness exercises the actual native bridge.
+
+The JS emitter facade follows the installed tiny-emitter removal algorithm:
+omitted or falsy callbacks clear the event, and callback removal filters every
+matching function or live `_` alias. Alias getters run without a listener borrow;
+a successful removal commits the original filtered snapshot, preserving source
+reentrant removal/addition behavior. Getter errors preserve their original value
+and side effects. Core host listeners share that snapshot, and an in-flight emit
+keeps its own snapshot. `tests/js_emitter_off.rs` compares 20 cases through the
+production native runtime and BaseExchange facade against installed tiny-emitter.
+
+Singular JS Store order/position/market mutators read the selector's `id` and
+compare it strictly with native string IDs. Non-string IDs and bare primitives
+do not identify those rows; nullish selectors and throwing getters propagate
+when the source actually reads them. Empty order/position arrays retain their
+findIndex short circuit. Ticker mutation follows its distinct object-key lookup
+with property-key coercion. `tests/js_store_id_matching.rs` compares132 actual
+maintained Store outcomes through DefaultStore's production facade. Bulk order
+lookup and the adaptive multi-position index are separate paths.
+
+JS `updatePositions` keeps the maintained adaptive lookup: strict IDs for a
+single update or stored position, property-key coercion only when both counts
+exceed one. It resolves every selector before patches, preserves unmatched rows
+as `None` in the Store batch, and avoids reading patches for unmatched IDs.
+`tests/js_store_position_batch_ids.rs` compares168 maintained Store cases with
+real DefaultStore, including empty, single, distinct and duplicate-ID states.
+
+
+The JS Axios dispatcher lets installed callable adapters own response settlement,
+as Axios does. HOW fulfills non-2xx and zero-status responses, so their configured
+transforms and fulfilled response interceptors run; default native HTTP responses
+still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
+the actual native runtime, factory, transport and HOW protocol against scripted
+socket I/O and compares four statuses with the maintained HOW adapter and Axios.
+
+Array `slice` applies ToIntegerOrInfinity's NaN-to-zero rule to both bounds,
+including malformed numeric strings. `tests/js_array_slice.rs` compares422 Node
+cases through the installed native builtins, observing each output slot's value
+and presence so copied holes stay distinct from own undefined elements.
+
+The runtime JSON builtin and default encoded-HTTP response parser decode through the canonical retained carrier
+into existing Js values. JSON strings/keys preserve escaped and raw UTF-16 units,
+including lone surrogates; object members use own data-property definition, and
+numbers retain binary64 bits. Both consumers delegate to the canonical lower retained JSON parser. Invalid
+HTTP JSON retains Axios's existing raw-text result, while the builtin throws
+SyntaxError. tests/js_json_parse.rs compares 200 valid/invalid syntax cases and
+all 65,536 escaped units with Node and checks a real loopback HTTP response
+against actual Axios. scripts/json-parse-controls.py restores the original
+builtin parser, raw-unit replacement, and HTTP parser independently; each fault
+must compile, fail its named real-boundary assertion, and pass after exact
+restoration. This does not widen HOW response data or typed Store/model strings;
+JSON reviver behavior and exact engine diagnostic text remain outside this fix.
+
+
+Plain JS socket dispatch follows the DOM listener snapshot and per-registration
+removed flag: removal before a callback's turn skips it, and readding the same
+function cannot revive its old registration. ReconnectingWebSocket retains its
+vendored captured-array removal behavior. The native TCP
+`js_socket_listener_removal` witness compares 16 open/message cases with Node
+EventTarget and the actual vendored class, using only shared Node/DOM outcomes.
+The browser rule is https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke;
+Node's additions-during-dispatch quirk is outside this removal comparison.
+
+For array inputs, JS Store `removeOrders` reads each element's `id` and applies
+source object-key coercion; it never treats a bare element as the ID itself.
+Property access and string-hint conversion failures propagate after the source's
+empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
+30 maintained Store cases through the production facade, including numeric keys,
+primitive elements, nullish elements and throwing getters/conversions. Direct
+Symbols and object IDs converting to Symbols stay unmatched to native string IDs;
+conversion uses the shared string-hint property-key operation. The object-to-Symbol
+case compiles and fails on master before this repair.
+
+The numeric patch witnesses pass entity selectors (`{id}`), matching the source
+Store signatures, while retaining all numeric-bit, null and omission assertions.
+Bare primitive selectors remain negative cases in the source ID corpus.
+
+Standard Error instances inherit stock names and define supplied messages with
+writable/configurable, non-enumerable descriptors. Omitted or undefined constructor
+messages stay inherited; string coercion preserves UTF-16 and propagates failures.
+The existing native string diagnostic factory shares this creation body; custom
+Axios diagnostic name/message fields retain their distinct enumerable profile.
+Stock prototypes contain no runtime captures or constructor backreferences.
+`tests/js_error_enumerability.rs` compares156 Node cases through actual installed
+constructors, Object.keys/assign, JSON and native spread, including assignments,
+message deletion, coercion failures and lone surrogates. It inspects real native
+Prop descriptors directly because Object.getOwnPropertyDescriptor is not bound;
+constructor.prototype/stack reflection is outside this instance-property repair.
+An actual installed AxiosError supplies the separate custom descriptor witness.
+
+Shared console.info/debug route to the native runtime console sink and return
+undefined. `tests/js_console_info_debug.rs` captures the actual NativeRuntime
+output in a child process and compares its payloads with Node, including exact
+info/debug severity dispatch. The original shared globals compile but fail at
+console.info before either host output can be observed. Console.log is handled
+by its separate source-binding change.
+
+Number.toString applies radix coercion and range validation before formatting,
+including for NaN, infinities and zero. Radix 10 uses the existing number formatter;
+other radices use the private V8-derived precision/rounding algorithm documented
+in THIRD_PARTY_NOTICES.md. The installed-native `js_number_radix` witness compares
+5,320 Node outputs across all radices 2..36, fixed boundaries and deterministic
+binary64 samples, plus 60 coercion/error cases. Its test-only commit compiles and
+fails on the original binding at `(255).toString(2)`. This does not change the separate
+BigInt formatter or the existing Number method receiver profile.
+
+BigNumber's private value representation distinguishes finite decimals, signed
+infinities and NaN; finite zero retains its sign. Arithmetic and comparisons use
+that representation directly, including zero division and infinity operations.
+Rounding a negative nonzero value to zero retains the minus in toFixed, while an
+actual negative zero formats unsigned. valueOf/toJSON and toNumber preserve its
+sign, and cloning uses the same value representation. The installed native
+`js_bignumber_special_values` target compares 22 scalar inputs, 49 operand pairs
+across six bound arithmetic and six comparison methods, and five min/max argument
+sets against the actual npm dependency. Positive finite precision stays decimal;
+the public shared model types are unchanged.
+
+Error prototype thread-local storage stays inside its sole private accessor.
+Module-level item macros are rejected by the parity indexer. The focused
+`safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
+module graph and requires the public Error factory to remain discoverable.
+
+Orderbook utility bindings preserve raw price/amount comparisons and the source
+binary-search read order. They read only visited prices, defer amount reads until
+lookup completes, and retain the inserted update object. Totals capture both sides
+before looping, re-read live lengths/rows and use JS addition; missing/null sides
+throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
+147 update and10 total cases against the maintained TS utility modules through
+installed NativeRuntime bindings, observing getter order, holes, duplicate amount
+reads, inserted identity and reentrant row/length changes. Both regressions compile
+and fail on the prior implementation; their inputs do not replace utility code.
+
+String and RegExp split share the source ToUint32 limit conversion, including
+large finite values reduced modulo 2^32 before an integer cast. Plain splitting
+coerces limit before separator even when limit is zero, retains empty fields,
+and searches/slices UTF-16 units without replacement decoding. Existing RegExp
+symbol dispatch and dense own-undefined captures are preserved. The installed
+native `js_split_limit` target compares 1,440 Node cases across five strings,
+12 separators and 24 limits, including lone surrogates, regex captures, wrapping
+limits and throwing coercions. Regex literals use the actual production parser;
+this host does not install a global RegExp constructor.
+
+String.localeCompare uses the existing pinned JsRootCollator for the imported
+runtime's default English/root collation, including case, accents, canonical
+combining forms and lexicographic digits. Argument conversion uses the ordinary
+string hint and preserves thrown identity. No new collation dependency or data
+is added. tests/js_locale_compare.rs compares 2,116 Node pairs through the
+installed String and native host, plus primitive/default coercion and abrupt
+conversion. Locale/options selection is outside this default-profile binding.
+The overseer explicitly permits ICU replacement of unpaired UTF-16 surrogates;
+a separate native test pins both Node's distinct weights and ICU's equal weights.
+
+The imported get-key `v` helper rejects non-null primitive right-hand operands
+with TypeError before key conversion can execute user code. Null/undefined
+short-circuit without coercing the key. Property traversal stops at an explicit
+null prototype; existing own/inherited keys and alias precedence remain intact.
+The internal `in` helper is fallible, and lodash throttle checks whether options
+are objects before using it, as the maintained implementation does.
+`tests/js_get_key_in.rs` executes the complete maintained get-key module and
+installed lodash through 126 real native-host scenes, including poisonous keys,
+null prototypes and primitive/default throttle options. String-key diagnostics
+match Node; malformed non-string keys use an engine-neutral TypeError diagnostic.
+
+BigNumber.isFinite reads the private decimal/Infinity/NaN variant directly; it
+never converts through f64. The Node oracle includes finite values at +/-1e1000
+and +/-1e-1000, which overflow or underflow a Number conversion, as well as
+NaN, both infinities, signed zero, clones and arithmetic results.
+
+
+Raw error reporter inputs use `ExchangeErrorInput::Raw(Js)`. Pass the original
+shared-runtime value; already-JSON readers use explicit `from_json` at that boundary.
+The reporter retains lazy reads, native formatted messages and worker error identity.
+Optional message/extra-data and main-thread exception-host ABIs retain their stated
+UTF-8/JSON profiles; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
+
+Worker/native delivery services live in exchange-core so constructor hosts never
+depend upward on safe-cex-webworker. `delivery_timers` owns the existing timer
+capability; `store_delivery` owns its single leading/trailing Store throttle;
+`store_payload` owns snapshot preparation; `message_stats` owns socket-stat
+projection; `throttle` owns the distinct keyed metadata throttle. Worker and native
+hosts import these implementations directly. `ExchangeWorkerHost` inherits the
+minimal StoreUpdateThrottleHost capability; each host supplies its existing timer
+error reporter. The deterministic timer fixture and keyed cancellation witness
+also live with the lower core owner.
+
+GetIterator rejects missing or non-callable iterator methods with the shared V8
+non-iterable diagnostic, before invoking input coercion hooks. Nullish inputs use
+that diagnostic as well. `tests/js_iterator_errors.rs` compares 30 live Node
+Promise.all/allSettled errors through NativeRuntime and the shared iterator API.
+
+
+Number.isSafeInteger accepts only native Number values that are finite, integral
+and at most 2^53-1 in magnitude; it never coerces arguments. The installed-native
+js_number_safe_integer witness compares239 raw-bit inputs and13 argument types
+with Node, including poisonous objects. WOO’s constructed client-ID rule compares
+26 actual maintained-source cases through this shared builtin. Both regressions
+compile and fail when the static binding is absent.
+
+String uppercase/lowercase conversion maps whole valid Unicode runs and preserves
+unpaired UTF-16 units verbatim. Context-sensitive lowercase mappings keep their
+valid-run context. Trim slices the original units using the shared RegExp
+whitespace predicate. `tests/js_string_utf16.rs` compares 4,109 Node cases per
+method through the installed String builtin on NativeRuntime, including every
+surrogate unit, paired astral letters, Greek sigma and whitespace boundaries.
+All three regressions compile and fail against the original production bodies.

@@ -23,10 +23,13 @@ pub async fn fetch_orders_recursively(
     loop {
         let params = RetainedJsonInput::Object(vec![
             (
-                "status".into(),
-                RetainedJsonInput::Text("INCOMPLETE".into()),
+                "status".encode_utf16().collect(),
+                RetainedJsonInput::Text("INCOMPLETE".encode_utf16().collect()),
             ),
-            ("page".into(), RetainedJsonInput::Float(page)),
+            (
+                "page".encode_utf16().collect(),
+                RetainedJsonInput::Float(page),
+            ),
         ])
         .into_value()?;
         let response = adapter
@@ -41,9 +44,12 @@ pub async fn fetch_orders_recursively(
             return Ok(result);
         }
         let data = match response.body.into_data() {
-            Value::String(text) => safe_cex_transport::how::json_parse(&text),
+            RetainedJsonInput::Text(text) => {
+                RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Null)
+            }
             native => native,
         };
+        let data = data.into_value()?;
         let object = data
             .as_object()
             .ok_or_else(|| refusal("order page requires an object response"))?;

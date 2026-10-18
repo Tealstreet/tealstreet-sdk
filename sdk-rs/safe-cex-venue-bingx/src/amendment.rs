@@ -10,7 +10,7 @@ use safe_cex_num::numeric_ingress::{JsNumberOutput, js_deserialize_passthrough, 
 use safe_cex_num::{adjust, js_number, js_string, js_truthy};
 use safe_cex_transport::{RestBody, RestRequest};
 use safe_cex_types::{
-    Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PlaceOrderOpts, UpdateOrderOpts,
+    Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PreparedOrderOpts, UpdateOrderOpts,
     UpdateOrderOptsUpdate,
 };
 use serde::Serialize;
@@ -96,26 +96,30 @@ fn protection(v: Option<&Value>) -> Result<bool, ExchangeError> {
     }
     Ok(false)
 }
-fn opts(order: &Order, price: f64, kind: OrderType) -> PlaceOrderOpts {
-    PlaceOrderOpts {
+fn opts(
+    order: &Order,
+    price: f64,
+    kind: safe_cex_types::ModelField<OrderType>,
+) -> PreparedOrderOpts {
+    PreparedOrderOpts {
         symbol: order.symbol.clone(),
-        r#type: kind,
-        side: order.side,
+        r#type: kind.into_property(),
+        side: order.side.into_property(),
         amount: order.amount,
         price: Some(price),
-        reduce_only: Some(order.reduce_only),
-        close: order.close,
+        reduce_only: order.reduce_only.into_property(),
+        close: order.close.into_value(),
         time_in_force: None,
         client_order_id: None,
         stop_loss: None,
         take_profit: None,
         tp_trigger_type: if kind == OrderType::TakeProfit {
-            order.tp_trigger_type.or(order.sl_trigger_type)
+            order.tp_trigger_type.or(order.sl_trigger_type).into_value()
         } else {
             None
         },
         sl_trigger_type: if kind == OrderType::StopLoss {
-            order.sl_trigger_type.or(order.tp_trigger_type)
+            order.sl_trigger_type.or(order.tp_trigger_type).into_value()
         } else {
             None
         },
@@ -151,7 +155,10 @@ impl BingxAmendment {
             .send(RestRequest {
                 method: "POST".into(),
                 url: url.into(),
-                body: Some(RestBody::Untransformed(body)),
+                body: Some(RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
+                        .map_err(|error| ExchangeError::new(error.to_string()))?,
+                )),
                 ..Default::default()
             })
             .await;
@@ -198,7 +205,10 @@ impl BingxAmendment {
             UpdateOrderOptsUpdate::Variant0(u) => (Some(u.amount), u.price),
             UpdateOrderOptsUpdate::Variant1(u) => (u.amount, Some(u.price)),
         };
-        if matches!(order.r#type, OrderType::StopLoss | OrderType::TakeProfit) {
+        if matches!(
+            order.r#type,
+            safe_cex_types::ModelField::Value(OrderType::StopLoss | OrderType::TakeProfit)
+        ) {
             if amount.is_some() {
                 return self.reject("BingX trigger order movement supports price updates only");
             }
@@ -224,7 +234,9 @@ impl BingxAmendment {
         };
         if !matches!(
             order.time_in_force,
-            Some(OrderTimeInForce::GoodTillCancel | OrderTimeInForce::PostOnly)
+            safe_cex_types::ModelField::Value(
+                OrderTimeInForce::GoodTillCancel | OrderTimeInForce::PostOnly
+            )
         ) {
             return self.reject(
                 "BingX native amendment requires a reconciled GTC or PostOnly time in force",
@@ -253,7 +265,7 @@ impl BingxAmendment {
                 .and_then(Value::as_str)
                 .is_none_or(|s| s.replace('-', "") != order.symbol)
             || kind != "LIMIT"
-            || raw_side(&side) != Some(order.side)
+            || raw_side(&side) != order.side.into_value()
             || !matches!(position.as_str(), "BOTH" | "LONG" | "SHORT")
         {
             return self.reject(format!(
@@ -261,7 +273,7 @@ impl BingxAmendment {
                 order.id
             ));
         }
-        if reduce.is_some_and(|b| b != order.reduce_only) {
+        if reduce.is_some_and(|b| order.reduce_only != b) {
             return self.reject(format!(
                 "BingX cannot safely amend {}: reduce-only state is not reconciled",
                 order.id
@@ -277,7 +289,7 @@ impl BingxAmendment {
         } else {
             parsed
         };
-        if parsed.is_none() || tif.is_none() || tif != order.time_in_force {
+        if parsed.is_none() || tif.is_none() || tif != order.time_in_force.into_value() {
             return self.reject(format!(
                 "BingX cannot safely amend {}: time in force is not reconciled",
                 order.id
@@ -365,7 +377,10 @@ impl BingxAmendment {
         next_price: f64,
     ) -> Result<Vec<Option<Value>>, ExchangeError> {
         if order.status != OrderStatus::Open
-            || !matches!(order.r#type, OrderType::StopLoss | OrderType::TakeProfit)
+            || !matches!(
+                order.r#type,
+                safe_cex_types::ModelField::Value(OrderType::StopLoss | OrderType::TakeProfit)
+            )
         {
             return self
                 .reject("BingX trigger replacement supports only reconciled open STOP/TP orders");
@@ -389,7 +404,9 @@ impl BingxAmendment {
             .find(|(k, _)| *k == kind)
             .map(|(_, v)| *v)
             .filter(|v| matches!(v, OrderType::StopLoss | OrderType::TakeProfit));
-        let replacement = mapped.unwrap_or(order.r#type);
+        let replacement = mapped
+            .map(safe_cex_types::ModelField::Value)
+            .unwrap_or(order.r#type);
         if symbol
             .and_then(Value::as_str)
             .is_some_and(|s| s.replace('-', "") != order.symbol)
@@ -400,7 +417,7 @@ impl BingxAmendment {
             ));
         }
         if (!kind.is_empty() && mapped.is_none())
-            || (!side.is_empty() && raw_side(&side) != Some(order.side))
+            || (!side.is_empty() && raw_side(&side) != order.side.into_value())
             || (!status.is_empty() && !open_status(&status))
             || order.filled != 0.0
             || filled != 0.0
@@ -416,7 +433,7 @@ impl BingxAmendment {
         if !price.is_finite() || price <= 0.0 {
             return self.reject("BingX replacement trigger price must be greater than zero");
         }
-        if price == adjust(order.price, market.precision.price) {
+        if price == adjust(order.price.to_number(), market.precision.price) {
             return self.reject(
                 "BingX replacement trigger price must change after market-precision normalization",
             );
@@ -490,7 +507,11 @@ impl BingxAmendment {
         } else {
             self.placement
                 .get_order_position_side(
-                    &opts(reconciled, reconciled.price, reconciled.r#type),
+                    &opts(
+                        reconciled,
+                        reconciled.price.to_number(),
+                        OrderType::Limit.into(),
+                    ),
                     None,
                 )
                 .await?
@@ -500,7 +521,7 @@ impl BingxAmendment {
                 .and_then(Value::as_str)
                 .is_some_and(|s| s.replace('-', "") != reconciled.symbol)
             || (!kind.is_empty() && kind != "LIMIT")
-            || (!side.is_empty() && raw_side(&side) != Some(reconciled.side))
+            || (!side.is_empty() && raw_side(&side) != reconciled.side.into_value())
             || (!position.is_empty() && !valid_position)
         {
             return self.reject(format!(
@@ -508,7 +529,7 @@ impl BingxAmendment {
                 order.id
             ));
         }
-        if reduce.is_some_and(|b| b != reconciled.reduce_only) {
+        if reduce.is_some_and(|b| reconciled.reduce_only != b) {
             return self.reject(format!(
                 "BingX cannot safely replace {}: reduce-only state is not reconciled",
                 order.id
@@ -523,11 +544,11 @@ impl BingxAmendment {
         let tif = if post == Some(true) {
             Some(OrderTimeInForce::PostOnly)
         } else {
-            parsed.or(reconciled.time_in_force)
+            parsed.or(reconciled.time_in_force.into_value())
         };
         if tif.is_none()
             || (post == Some(false) && parsed.is_none() && reconciled.time_in_force.is_none())
-            || tif != reconciled.time_in_force
+            || tif != reconciled.time_in_force.into_value()
         {
             return self.reject(format!(
                 "BingX cannot safely replace {}: time in force is not reconciled",
@@ -565,7 +586,7 @@ impl BingxAmendment {
         if !price.is_finite() || price <= 0.0 {
             return self.reject("BingX replacement order price must be greater than zero");
         }
-        if price == adjust(reconciled.price, market.precision.price) {
+        if price == adjust(reconciled.price.to_number(), market.precision.price) {
             return self.reject(
                 "BingX replacement order price must change after market-precision normalization",
             );
@@ -595,7 +616,7 @@ impl BingxAmendment {
                 "ONLY_NEW"
             });
         }
-        if resolved == "BOTH" && reconciled.reduce_only {
+        if resolved == "BOTH" && reconciled.reduce_only == true {
             payload["reduceOnly"] = json!(true)
         }
         let result = async {
@@ -663,7 +684,7 @@ impl BingxAmendment {
             let replacement = map_order(
                 &raw,
                 &self.reads.base.store.orders(),
-                self.reads.base.runtime.now_ms(),
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )?;
             self.reads
                 .base

@@ -6,6 +6,8 @@ use crate::{
         LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE, LighterAccountTier,
         extract_lighter_account_tier_from_payload, has_non_zero_lighter_integrator_fee,
         is_lighter_account_tier_eligible_for_partner_attribution,
+        is_lighter_partner_attribution_approval_missing_rejection,
+        is_lighter_partner_attribution_tier_rejection,
     },
     builder_fee::resolve_lighter_builder_fee_config,
     deployment::{resolve_lighter_deployment_profile, resolve_lighter_interval},
@@ -21,7 +23,7 @@ use crate::{
 };
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_typed, to_json, to_typed};
 use safe_cex_num::{JsBigIntError, JsCoercionError};
-use safe_cex_types::{ExchangeName, Market, Order, Timeframe};
+use safe_cex_types::{ExchangeName, Timeframe};
 use std::rc::Rc;
 
 fn coercion(e: JsCoercionError) -> Thrown {
@@ -67,6 +69,30 @@ fn tier(value: &Js) -> Result<Option<LighterAccountTier>, Thrown> {
         Some(s) if s == "plus" => Some(LighterAccountTier::Plus),
         _ => None,
     })
+}
+
+fn partner_rejection(
+    input: Js,
+    classify: fn(
+        Option<&serde_json::Value>,
+        Option<&serde_json::Value>,
+    ) -> Result<bool, JsCoercionError>,
+) -> Result<Js, Thrown> {
+    let string = |value: Js| -> Result<serde_json::Value, Thrown> {
+        Ok(serde_json::Value::String(if value.is_nullish() {
+            String::new()
+        } else {
+            String::from_utf16_lossy(&value.to_js_string()?)
+        }))
+    };
+    let code = string(input.get("code")?)?;
+    if classify(Some(&code), None).map_err(coercion)? {
+        return Ok(Js::Bool(true));
+    }
+    let message = string(input.get("message")?)?;
+    classify(Some(&code), Some(&message))
+        .map(Js::Bool)
+        .map_err(coercion)
 }
 
 fn helper(name: &str, f: impl Fn(Vec<Js>) -> Result<Js, Thrown> + 'static) -> (String, Js) {
@@ -165,25 +191,16 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
                 .map_err(coercion)
         }),
         helper("getLighterAmountDecimals", |a| {
-            let market: Market = to_typed(&arg(&a, 0))?;
-            get_lighter_amount_decimals(&market)
-                .map(Js::Number)
-                .map_err(coercion)
+            get_lighter_amount_decimals(&arg(&a, 0)).map(Js::Number)
         }),
         helper("getLighterPriceDecimals", |a| {
-            let market: Market = to_typed(&arg(&a, 0))?;
-            get_lighter_price_decimals(&market)
-                .map(Js::Number)
-                .map_err(coercion)
+            get_lighter_price_decimals(&arg(&a, 0)).map(Js::Number)
         }),
         helper("getLighterOrderMinimums", |a| {
-            let market: Market = to_typed(&arg(&a, 0))?;
-            from_typed(&get_lighter_order_minimums(&market).map_err(coercion)?)
+            from_typed(&get_lighter_order_minimums(&arg(&a, 0))?)
         }),
         helper("resolveLighterCancelTargets", |a| {
-            let orders: Vec<Order> = to_typed(&arg(&a, 0))?;
-            let markets: indexmap::IndexMap<String, Market> = to_typed(&arg(&a, 1))?;
-            from_typed(&resolve_lighter_cancel_targets(&orders, &markets))
+            resolve_lighter_cancel_targets(&arg(&a, 0), &arg(&a, 1))
         }),
         helper("resolveLighterInterval", |a| {
             let interval: Timeframe = to_typed(&arg(&a, 0))?;
@@ -270,14 +287,21 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
             Ok(Js::Bool(has_non_zero_lighter_integrator_fee(maker, taker)))
         }),
         helper("extractLighterAccountTierFromPayload", |a| {
-            let payload = optional_json(&arg(&a, 0))?;
+            let payload = arg(&a, 0);
             Ok(
-                match extract_lighter_account_tier_from_payload(payload.as_ref())
-                    .map_err(coercion)?
-                {
+                match extract_lighter_account_tier_from_payload(Some(&payload))? {
                     None => Js::Undefined,
                     Some(tier) => from_typed(&tier)?,
                 },
+            )
+        }),
+        helper("isLighterPartnerAttributionTierRejection", |a| {
+            partner_rejection(arg(&a, 0), is_lighter_partner_attribution_tier_rejection)
+        }),
+        helper("isLighterPartnerAttributionApprovalMissingRejection", |a| {
+            partner_rejection(
+                arg(&a, 0),
+                is_lighter_partner_attribution_approval_missing_rejection,
             )
         }),
         helper("isLighterAccountTierEligibleForPartnerAttribution", |a| {

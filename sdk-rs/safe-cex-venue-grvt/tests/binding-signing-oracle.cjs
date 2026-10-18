@@ -32,4 +32,37 @@ const cases = [false,true].flatMap(large=>[false,true].flatMap(isMarket=>[325,32
   return {key,typed,signature,decoded:Signer.decode(signature)};
 })));
 assert.equal(cases.length,8);
-process.stdout.write(JSON.stringify({template,cases}));
+const builders = [
+  '0xee8f3559f298fffa79b8253437969d15b5dccff3',
+  '0xEE8F3559F298FFFA79B8253437969D15B5DCCFF3',
+  '0xEe8f3559F298fffa79b8253437969d15b5dccff3',
+];
+const expanded = cases.flatMap(original => builders.map(builder => {
+  const typed = {...original.typed, message: {...original.typed.message, builder}};
+  const signature = Signer.sign(original.key, typed);
+  assert.equal(signature, original.signature, 'SDK address casing does not change signed bytes');
+  return {key:original.key, typed, signature, decoded:Signer.decode(signature)};
+}));
+assert.equal(expanded.length, 24, 'three address spellings for every native signing configuration');
+const admissionInputs = [
+  ['upper-prefix', '0XEE8F3559F298FFFA79B8253437969D15B5DCCFF3'],
+  ['short-odd', '0x1'], ['short-even', '0x12'], ['short-mixed', '0xAbC'],
+  ['zero-hex', '0x0'], ['unprefixed-decimal', '123'],
+  ['unprefixed-hex', 'ee8f3559f298fffa79b8253437969d15b5dccff3'],
+  ['legacy-nonhex', '0xgg'], ['empty', ''], ['empty-prefix', '0x'],
+  ['unicode', '\u{1f600}'], ['legacy-long', '9'.repeat(80)],
+  ['number-zero', 0], ['number-one', 1], ['number-max-safe', Number.MAX_SAFE_INTEGER],
+  ['fraction', 1.5], ['negative', -1], ['unsafe', Number.MAX_SAFE_INTEGER + 1],
+  ['negative-text', '-1'], ['hex-too-long', '0x' + 'a'.repeat(41)],
+  ['null', null], ['boolean', false], ['array', []], ['object', {}],
+];
+assert.equal(admissionInputs.length, 24, 'independent builder input floor');
+const admissionCases = admissionInputs.map(([name, builder]) => {
+  const typed = {...cases[0].typed, message: {...cases[0].typed.message, builder}};
+  try {
+    return {name, builder, signature: Signer.sign(key, typed)};
+  } catch (error) {
+    return {name, builder, error: {name: error.name, message: error.message}};
+  }
+});
+process.stdout.write(JSON.stringify({template,cases:expanded,admissionCases}));

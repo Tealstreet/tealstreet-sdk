@@ -68,7 +68,9 @@ where
                 if order.symbol != symbol {
                     continue;
                 }
-                let algo = crate::order_logic::is_algo_order_type(order.r#type);
+                let algo = order
+                    .r#type
+                    .is_some_and(crate::order_logic::is_algo_order_type);
                 drop(order);
                 if algo {
                     algo_orders.push(handle);

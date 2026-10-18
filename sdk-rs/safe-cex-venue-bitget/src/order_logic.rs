@@ -3,7 +3,7 @@ use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{adjust, js_number_string};
 use safe_cex_types::{
     OrderSide, OrderStopTriggerType, OrderType, PlaceOrderOpts, Position, PositionMode,
-    PositionSide,
+    PositionSide, PreparedOrderOpts,
 };
 use serde::Serialize;
 
@@ -128,7 +128,7 @@ fn enum_text(value: impl Serialize) -> String {
     serde_json::to_value(value)
         .expect("domain enum serialization")
         .as_str()
-        .expect("domain enum string value")
+        .unwrap_or("undefined")
         .to_owned()
 }
 
@@ -167,11 +167,12 @@ pub fn floor_to_lot(value: f64, step: Option<f64>) -> f64 {
 
 // ts: BitgetExchange.selectPlanTypeAndAmount
 pub fn select_plan_type_and_amount(
-    opts: &PlaceOrderOpts,
+    opts: impl Into<PreparedOrderOpts>,
     positions: &[Position],
     amount_step: Option<f64>,
     mut emit_and_log_error: impl FnMut(String),
 ) -> Result<(&'static str, f64), ExchangeError> {
+    let opts = opts.into();
     if opts.r#type == OrderType::TrailingStopLoss {
         return Ok(("track_plan", opts.amount));
     }
@@ -253,17 +254,19 @@ pub fn select_plan_type_and_amount(
 }
 
 // ts: BitgetExchange.buildUtaStrategyPlaceOptsFromOrder
-pub fn build_uta_strategy_place_opts_from_order(order: &safe_cex_types::Order) -> PlaceOrderOpts {
-    PlaceOrderOpts {
+pub fn build_uta_strategy_place_opts_from_order(
+    order: &safe_cex_types::Order,
+) -> PreparedOrderOpts {
+    PreparedOrderOpts {
         symbol: order.symbol.clone(),
-        r#type: order.r#type,
-        side: order.side,
-        price: Some(order.price),
+        r#type: order.r#type.into_property(),
+        side: order.side.into_property(),
+        price: order.price.into_value(),
         amount: order.amount,
-        reduce_only: Some(order.reduce_only),
-        time_in_force: order.time_in_force,
-        tp_trigger_type: order.tp_trigger_type,
-        sl_trigger_type: order.sl_trigger_type,
+        reduce_only: order.reduce_only.into_property(),
+        time_in_force: (order.time_in_force).into_value(),
+        tp_trigger_type: (order.tp_trigger_type).into_value(),
+        sl_trigger_type: (order.sl_trigger_type).into_value(),
         trigger_price: None,
         stop_loss: None,
         take_profit: None,
@@ -340,9 +343,21 @@ pub enum PlanSelectionOptions<'a> {
     Order(&'a safe_cex_types::Order),
 }
 impl<'a> PlanSelectionOptions<'a> {
-    fn fields(self) -> (&'a str, OrderType, OrderSide, f64) {
+    fn fields(
+        self,
+    ) -> (
+        &'a str,
+        safe_cex_types::ModelField<OrderType>,
+        safe_cex_types::ModelField<OrderSide>,
+        f64,
+    ) {
         match self {
-            Self::Place(opts) => (&opts.symbol, opts.r#type, opts.side, opts.amount),
+            Self::Place(opts) => (
+                &opts.symbol,
+                opts.r#type.into(),
+                opts.side.into(),
+                opts.amount,
+            ),
             Self::Order(opts) => (&opts.symbol, opts.r#type, opts.side, opts.amount),
         }
     }

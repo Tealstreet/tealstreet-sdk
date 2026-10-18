@@ -10,7 +10,7 @@ use safe_cex_exchange::{
 use safe_cex_num::{JsJsonValue as J, math_round, subtract};
 use safe_cex_types::{
     Balance, ExchangeOptions, Execution, MarginType, Market, MarketLimits, MarketLimitsAmount,
-    MarketLimitsLeverage, MarketPrecision, Order, OrderSide, OrderStopTriggerType,
+    MarketLimitsLeverage, MarketPrecision, ModelField, Order, OrderSide, OrderStopTriggerType,
     OrderTimeInForce, OrderType, Position, PositionMode, PositionSide,
 };
 use std::{
@@ -114,12 +114,12 @@ pub(crate) fn fields(value: &J) -> Result<serde_json::Value, ExchangeError> {
             J::Null => R::Null,
             J::Bool(v) => R::Bool(*v),
             J::Number(v) => R::Float(*v),
-            J::String(v) => R::Text(v.clone()),
+            J::String(v) => R::Text(v.encode_utf16().collect()),
             J::Array(v) => R::Array(v.iter().map(retained).collect::<Result<_, _>>()?),
             J::Object(v) => R::Object(
                 v.iter()
                     .filter(|(_, v)| !matches!(v, J::Undefined))
-                    .map(|(k, v)| Ok((k.clone(), retained(v)?)))
+                    .map(|(k, v)| Ok((k.encode_utf16().collect(), retained(v)?)))
                     .collect::<Result<_, ExchangeError>>()?,
             ),
             _ => {
@@ -261,6 +261,13 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.mapPosition
     pub fn map_position(&self, row: &J) -> Result<Option<Position>, ExchangeError> {
+        self.map_position_with_log(row, |message| self.base.log(message, "warning"))
+    }
+    pub(crate) fn map_position_with_log(
+        &self,
+        row: &J,
+        log: impl FnOnce(&str) -> Result<(), ExchangeError>,
+    ) -> Result<Option<Position>, ExchangeError> {
         let entry = if truthy(data::v(row, "avgPrice")?) {
             data::v(row, "avgPrice")?.clone()
         } else {
@@ -276,10 +283,7 @@ impl ApexOmniExchange {
         let unrealized_pnl = float(&or_zero(data::v(row, "unrealisedPnl")?))?;
         let symbol = text(get(row, "symbol"))?;
         let Some(market) = self.base.store.markets_by_id().get(&symbol).cloned() else {
-            self.base.log(
-                &format!("Market not found for position symbol: {symbol}"),
-                "warning",
-            )?;
+            log(&format!("Market not found for position symbol: {symbol}"))?;
             return Ok(None);
         };
         let id = safe_cex_types::model_utils::create_position_id(
@@ -324,21 +328,22 @@ impl ApexOmniExchange {
         Ok(Some(Position {
             id,
             symbol: market.symbol,
-            side,
+            side: side.into(),
             entry_price,
             notional: contracts * entry_price,
             leverage: math_round(leverage),
             unrealized_pnl,
-            realized_pnl: Some(float(&or_zero(data::v(row, "curRealisedPnl")?))?),
+            realized_pnl: (Some(float(&or_zero(data::v(row, "curRealisedPnl")?))?)).into(),
             contracts,
             liquidation_price: float(&or_zero(data::v(row, "liqPrice")?))?,
-            position_mode: Some(PositionMode::Hedged),
-            margin_type: Some(MarginType::Cross),
-            info: Some(fields(row)?),
-            last_update: Some(self.base.runtime.now_ms()),
-            margin_size: None,
-            extra: None,
-            option: None,
+            position_mode: (Some(PositionMode::Hedged)).into(),
+            margin_type: (Some(MarginType::Cross)).into(),
+            info: (Some(fields(row)?)).into(),
+            last_update: (Some(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()))
+                .into(),
+            margin_size: (None).into(),
+            extra: (None).into(),
+            option: (None).into(),
         }))
     }
     // ts: ApexOmniExchange.mapOrder
@@ -394,7 +399,7 @@ impl ApexOmniExchange {
             numeric(&nullish_zero(property(row, "size")?))?,
             numeric(&nullish_zero(data::v(row, "cumSuccessFillSize")?))?,
         );
-        let last_update = self.base.runtime.now_ms();
+        let last_update = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let trigger_type = |part: &J| -> Result<Option<OrderStopTriggerType>, ExchangeError> {
             let key = text(data::v(part, "triggerPriceType")?)?;
             Ok(match js_table_lookup(&protocol::ORDER_TRIGGER_TYPE, &key) {
@@ -431,76 +436,91 @@ impl ApexOmniExchange {
         ] {
             if price > 0.0 {
                 let id = format!("{}{suffix}", text(raw_id)?);
-                let updated = self.base.runtime.now_ms();
+                let updated = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
                 brackets.push((id, price, kind, updated, trigger_type(part)?));
             }
         }
-        let TableHit::Mapped(order_type) = order_type else {
-            return Err(failure(
-                "shared typed Order refuses unknown venue order type".into(),
-            ));
+        let order_type = match order_type {
+            TableHit::Mapped(value) => ModelField::Value(*value),
+            TableHit::Missing => ModelField::Undefined,
+            TableHit::Inherited(_) => {
+                return Err(failure(
+                    "shared typed Order refuses unknown venue order type".into(),
+                ));
+            }
         };
-        let TableHit::Mapped(status) = status else {
-            return Err(failure(
-                "shared typed Order refuses unknown venue order status".into(),
-            ));
+        let status = match status {
+            TableHit::Mapped(value) => ModelField::Value(*value),
+            TableHit::Missing => ModelField::Undefined,
+            TableHit::Inherited(_) => {
+                return Err(failure(
+                    "shared typed Order refuses unknown venue order status".into(),
+                ));
+            }
         };
-        let TableHit::Mapped(side) = side else {
-            return Err(failure(
-                "shared typed Order refuses unknown venue order side".into(),
-            ));
+        let side = match side {
+            TableHit::Mapped(value) => ModelField::Value(*value),
+            TableHit::Missing => ModelField::Undefined,
+            TableHit::Inherited(_) => {
+                return Err(failure(
+                    "shared typed Order refuses unknown venue order side".into(),
+                ));
+            }
         };
         let reduce_only = match raw_reduce_only {
             J::Bool(value) => *value,
             value if !truthy(value) => false,
-            _ => {
-                return Err(failure(
-                    "shared typed Order refuses non-boolean reduceOnly".into(),
-                ));
+            value => {
+                self.host.console(
+                    "warn",
+                    &format!("[APEX OMNI] Refused order row: Order.reduceOnly must be boolean, got {value:?}"),
+                    None,
+                )?;
+                return Ok(Vec::new());
             }
         };
         let order = Order {
-            client_order_id: None,
+            client_order_id: (None).into(),
             id: field_string(raw_id)?,
-            status: *status,
+            status,
             symbol: market.symbol,
-            r#type: *order_type,
-            side: *side,
-            price,
+            r#type: order_type,
+            side,
+            price: price.into(),
             amount,
             filled,
             remaining,
-            reduce_only,
-            info: Some(fields(row)?),
-            time_in_force,
+            reduce_only: reduce_only.into(),
+            info: (Some(fields(row)?)).into(),
+            time_in_force: time_in_force.into(),
             last_update,
-            tp_trigger_type,
-            sl_trigger_type,
-            parent_id: None,
-            close: None,
-            trigger_type: None,
-            take_profit: None,
-            stop_loss: None,
-            extra: None,
+            tp_trigger_type: tp_trigger_type.into(),
+            sl_trigger_type: sl_trigger_type.into(),
+            parent_id: (None).into(),
+            close: (None).into(),
+            trigger_type: (None).into(),
+            take_profit: (None).into(),
+            stop_loss: (None).into(),
+            extra: (None).into(),
         };
         let mut orders = vec![order.clone()];
         for (id, price, kind, updated, trigger) in brackets {
             let mut bracket = order.clone();
             bracket.id = id;
-            bracket.r#type = kind;
+            bracket.r#type = (kind).into();
             bracket.side = if order.side == OrderSide::Buy {
-                OrderSide::Sell
+                safe_cex_types::ModelField::Value(OrderSide::Sell)
             } else {
-                OrderSide::Buy
+                safe_cex_types::ModelField::Value(OrderSide::Buy)
             };
-            bracket.price = price;
+            bracket.price = (price).into();
             bracket.filled = 0.0;
             bracket.remaining = order.amount;
             bracket.last_update = updated;
             if kind == OrderType::StopLoss {
-                bracket.sl_trigger_type = trigger;
+                bracket.sl_trigger_type = (trigger).into();
             } else {
-                bracket.tp_trigger_type = trigger;
+                bracket.tp_trigger_type = (trigger).into();
             }
             orders.push(bracket);
         }
@@ -739,21 +759,21 @@ impl ApexOmniExchange {
                         Some(PositionMode::Hedged),
                     ),
                     symbol: market.symbol.clone(),
-                    side,
+                    side: side.into(),
                     entry_price: 0.0,
                     notional: 0.0,
                     unrealized_pnl: 0.0,
                     contracts: 0.0,
                     leverage,
                     liquidation_price: 0.0,
-                    position_mode: Some(PositionMode::Hedged),
-                    margin_type: Some(MarginType::Cross),
-                    realized_pnl: None,
-                    last_update: None,
-                    info: None,
-                    margin_size: None,
-                    extra: None,
-                    option: None,
+                    position_mode: (Some(PositionMode::Hedged)).into(),
+                    margin_type: (Some(MarginType::Cross)).into(),
+                    realized_pnl: (None).into(),
+                    last_update: (None).into(),
+                    info: (None).into(),
+                    margin_size: (None).into(),
+                    extra: (None).into(),
+                    option: (None).into(),
                 });
             }
         }
@@ -822,34 +842,56 @@ impl ApexOmniExchange {
             ));
         }
         let mut markets = Vec::new();
-        for (row, precision, limits) in mapped {
-            let active = if let J::Bool(value) = get(row, "enableTrade") {
-                *value
-            } else {
-                return Err(failure(
-                    "shared typed Market refuses non-boolean enableTrade".into(),
-                ));
-            };
-            markets.push(Market {
-                id: field_string(get(row, "symbol"))?,
-                symbol: field_string(get(row, "crossSymbolName"))?,
-                base: field_string(get(row, "baseTokenId"))?,
-                quote: field_string(get(row, "settleAssetId"))?,
-                active,
-                precision,
-                limits,
-                is_expiring: Some(false),
-                is_perpetual: None,
-                info: Some(fields(row)?),
-                pretty_symbol: None,
-                contract_size: None,
-                is_inverse: None,
-                is_spot: None,
-                is_read_only: None,
-                taker_fee: None,
-                maker_fee: None,
-                option: None,
-            });
+        for (index, (row, precision, limits)) in mapped.into_iter().enumerate() {
+            let projected: Result<Market, ExchangeError> = (|| {
+                let typed_string = |field, raw_field| {
+                    let value = get(row, raw_field);
+                    field_string(value)
+                        .map_err(|cause| failure(format!("{field}={value:?}: {}", cause.message)))
+                };
+                let active = if let J::Bool(value) = get(row, "enableTrade") {
+                    *value
+                } else {
+                    return Err(failure(format!(
+                        "active={:?}: expected boolean",
+                        get(row, "enableTrade")
+                    )));
+                };
+                Ok(Market {
+                    id: typed_string("id", "symbol")?,
+                    symbol: typed_string("symbol", "crossSymbolName")?,
+                    base: typed_string("base", "baseTokenId")?,
+                    quote: typed_string("quote", "settleAssetId")?,
+                    active,
+                    precision,
+                    limits,
+                    is_expiring: Some(false),
+                    is_perpetual: None,
+                    info: Some(
+                        fields(row)
+                            .map_err(|cause| failure(format!("info={row:?}: {}", cause.message)))?,
+                    ),
+                    pretty_symbol: None,
+                    contract_size: None,
+                    is_inverse: None,
+                    is_spot: None,
+                    is_read_only: None,
+                    taker_fee: None,
+                    maker_fee: None,
+                    option: None,
+                })
+            })();
+            match projected {
+                Ok(market) => markets.push(market),
+                Err(cause) => self.base.log(
+                    &format!(
+                        "Refused ApexOmni market row {index} id={:?}: {}",
+                        get(row, "symbol"),
+                        cause.message
+                    ),
+                    "warning",
+                )?,
+            }
         }
         Ok(markets)
     }

@@ -3,23 +3,12 @@ use safe_cex_transport::{
 };
 use safe_cex_transport::{polling::*, rate_limit::*, retry::*, secondary::*, signing::*};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-async fn retry_signature_rejection(
-    request: ClassifiedRequest,
-    adapter: &dyn RestAdapter,
-    retries: usize,
-    venue: SignatureRetryVenue,
-    clock: &dyn RateLimitClock,
-) -> Result<RestResponse, safe_cex_transport::RestFailure> {
-    retry_signature_rejection_with_receipt(request, adapter, retries, venue, clock)
-        .await
-        .map(|execution| execution.response)
-}
 fn run<T>(future: impl Future<Output = T>) -> T {
     let waker = Waker::noop();
     let mut future = std::pin::pin!(future);
@@ -183,7 +172,7 @@ fn network_retry_excludes_timeout_response_errors_and_exhausts_budget() {
     assert_eq!(venue.accepted.lock().unwrap().len(), 4);
 }
 #[test]
-fn asterdex_status_retry_and_signature_rejection_are_separate() {
+fn asterdex_status_retry_uses_the_read_policy() {
     let venue = Venue::default();
     venue.replies.lock().unwrap().push_back(Ok(RestResponse {
         status: 503,
@@ -201,38 +190,6 @@ fn asterdex_status_retry_and_signature_rejection_are_separate() {
         200
     );
     assert_eq!(venue.accepted.lock().unwrap().len(), 2);
-    for key in ["ret_msg", "retMsg"] {
-        venue
-            .replies
-            .lock()
-            .unwrap()
-            .push_back(Err(signature_failure(
-                serde_json::to_vec(&json!({key: "error sign!"})).unwrap(),
-            )));
-        assert!(
-            run(retry_signature_rejection(
-                ReadClassification::Methods.classify(req("POST", "/orders")),
-                &venue,
-                1,
-                SignatureRetryVenue::Bybit,
-                &RetryClock::default(),
-            ))
-            .is_ok()
-        );
-    }
-    assert_eq!(venue.accepted.lock().unwrap().len(), 6);
-    venue.replies.lock().unwrap().push_back(Err(reset()));
-    assert!(
-        run(retry_signature_rejection(
-            ReadClassification::Methods.classify(req("POST", "/orders")),
-            &venue,
-            3,
-            SignatureRetryVenue::Bybit,
-            &RetryClock::default(),
-        ))
-        .is_err()
-    );
-    assert_eq!(venue.accepted.lock().unwrap().len(), 7);
 }
 struct Signer {
     calls: Mutex<Vec<RemoteSignerRequest>>,
@@ -264,7 +221,7 @@ fn signing_config() -> SigningConfig {
         url: "/orders".into(),
         base_url: "https://venue".into(),
         params: Some(json!("{\"symbol\":\"BTCUSDT\",\"side\":\"Buy\"}")),
-        data: Some(json!("{\"symbol\":\"BTCUSDT\",\"side\":\"Buy\"}")),
+        data: Some(retained(json!("{\"symbol\":\"BTCUSDT\",\"side\":\"Buy\"}"))),
         headers: indexmap::IndexMap::from([
             ("Authorization".into(), "Bearer ours".into()),
             ("X-Old-Signature".into(), "stale".into()),
@@ -293,11 +250,13 @@ fn remote_signature_omissions_are_authoritative_and_transport_auth_survives() {
         panic!("HTTP must not dispatch WS auth")
     };
     assert_eq!(call.config.method, "POST");
-    for value in [&call.config.data, &call.config.params] {
-        assert_eq!(
-            serde_json::to_string(value.as_ref().unwrap()).unwrap(),
-            r#"{"symbol":"BTCUSDT","side":"Buy"}"#
-        );
+    for value in [
+        safe_cex_num::js_retained_json_stringify(call.config.data.as_ref().unwrap())
+            .unwrap()
+            .unwrap(),
+        serde_json::to_string(call.config.params.as_ref().unwrap()).unwrap(),
+    ] {
+        assert_eq!(value, r#"{"symbol":"BTCUSDT","side":"Buy"}"#);
     }
     assert_eq!(call.account_name.as_deref(), Some("account"));
     let accepted = venue.accepted.lock().unwrap();
@@ -487,43 +446,6 @@ fn polling_override_replaces_clamps_and_preserves_wildcard_fallthrough() {
     assert_eq!(get_tick_interval_multiplier("bybit"), 1.0);
 }
 
-#[test]
-fn bybit_excludes_instruments_network_retry_but_keeps_signature_retry() {
-    let venue = Venue::default();
-    let instruments = || {
-        ClassifiedRequest::Read(read(
-            ReadClassification::Methods,
-            req("GET", "/v5/market/instruments-info"),
-        ))
-    };
-    venue.replies.lock().unwrap().push_back(Err(reset()));
-    assert!(
-        run(retry_signature_rejection(
-            instruments(),
-            &venue,
-            3,
-            SignatureRetryVenue::Bybit,
-            &RetryClock::default(),
-        ))
-        .is_err()
-    );
-    assert_eq!(venue.accepted.lock().unwrap().len(), 1);
-    let mut failure = signature_failure(br#"{"retMsg":"error sign!"}"#.to_vec());
-    failure.request = Box::new(req("GET", "/v5/market/instruments-info"));
-    venue.replies.lock().unwrap().push_back(Err(failure));
-    assert!(
-        run(retry_signature_rejection(
-            instruments(),
-            &venue,
-            3,
-            SignatureRetryVenue::Bybit,
-            &RetryClock::default(),
-        ))
-        .is_ok()
-    );
-    assert_eq!(venue.accepted.lock().unwrap().len(), 3);
-}
-
 struct HeldClock(Mutex<u64>);
 impl RateLimitClock for HeldClock {
     fn now_ms(&self) -> u64 {
@@ -623,7 +545,7 @@ fn tag_survives_a_retry_policy_and_signed_params_and_latency_reach_inner() {
     venue.replies.lock().unwrap().push_back(Err(reset()));
     let signer = signer(SignedConfig {
         params: Some(json!({"signature":"good"})),
-        data: Some(json!({"side":"Buy"})),
+        data: Some(retained(json!({"side":"Buy"}))),
         ..Default::default()
     });
     let time = Arc::new(Mutex::new(1000));
@@ -980,88 +902,13 @@ fn direct_http_reason_is_optional_and_survives_adapter_return() {
     assert_eq!(ok().reason, None);
 }
 
-fn signature_failure(body: Vec<u8>) -> safe_cex_transport::RestFailure {
-    safe_cex_transport::RestFailure {
-        code: None,
-        message: "Request failed with status code 400".into(),
-        transport_error: None,
-        response: Some(Box::new(RestResponse {
-            status: 400,
-            body: safe_cex_transport::RestResponseBody::Encoded(body),
-            ..ok()
-        })),
-        request: Box::new(req("POST", "/orders")),
-        context: None,
-    }
-}
-#[test]
-fn resolved_signature_text_never_replays_an_accepted_write() {
-    let venue = Venue::default();
-    let response = RestResponse {
-        body: safe_cex_transport::RestResponseBody::Encoded(
-            br#"{"retMsg":"one leg: error sign!"}"#.to_vec(),
-        ),
-        ..ok()
-    };
-    venue
-        .replies
-        .lock()
-        .unwrap()
-        .push_back(Ok(response.clone()));
-    assert_eq!(
-        run(retry_signature_rejection(
-            ReadClassification::Methods.classify(req("POST", "/orders")),
-            &venue,
-            3,
-            SignatureRetryVenue::Bybit,
-            &RetryClock::default(),
-        ))
-        .unwrap(),
-        response
-    );
-    assert_eq!(
-        venue.accepted.lock().unwrap().len(),
-        1,
-        "resolved response must never enter signature retry"
-    );
-}
-
-#[test]
-fn signature_retry_exhaustion_retains_terminal_response_request_and_context() {
-    let venue = Venue::default();
-    let first = signature_failure(br#"{"retMsg":"first error sign!"}"#.to_vec());
-    let mut last = signature_failure(br#"{"retMsg":"terminal error sign!","code":51603}"#.to_vec());
-    last.message = "terminal rejection".into();
-    last.context = Some(Box::new(json!({"attempt":2})));
-    last.request.url = "/terminal-attempt".into();
-    last.response.as_mut().unwrap().reason = Some("terminal reason".into());
-    venue
-        .replies
-        .lock()
-        .unwrap()
-        .extend([Err(first), Err(last.clone())]);
-    let result = run(retry_signature_rejection(
-        ReadClassification::Methods.classify(req("POST", "/orders")),
-        &venue,
-        1,
-        SignatureRetryVenue::Bybit,
-        &RetryClock::default(),
-    ));
-    assert_eq!(
-        result,
-        Err(last),
-        "exhaustion returns the full terminal failure"
-    );
-    assert_eq!(venue.accepted.lock().unwrap().len(), 2);
-}
-
 #[test]
 fn body_wire_transform_uses_js_numeric_spelling_and_property_order() {
     use safe_cex_transport::RestBody;
     let raw: serde_json::Value =
         serde_json::from_str(r#"{"z":1e-7,"10":2,"2":10001.0,"a":1e400}"#).unwrap();
     assert_eq!(
-        RestBody::Untransformed(raw).wire_bytes().unwrap(),
+        RestBody::Untransformed(retained(raw)).wire_bytes().unwrap(),
         br#"{"2":10001,"10":2,"z":1e-7,"a":null}"#,
         "request transformation must use canonical JS number and own-key semantics"
     );
@@ -1080,7 +927,9 @@ fn skip_remote_signing_still_transforms_raw_data_without_inferencing_encoded_ori
         venue.clone(),
     );
     for body in [
-        safe_cex_transport::RestBody::Untransformed(json!({"x":1})),
+        safe_cex_transport::RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"x":1})).unwrap(),
+        ),
         safe_cex_transport::RestBody::Encoded(vec![255]),
     ] {
         let expected = body.transform(None).unwrap();
@@ -1256,7 +1105,7 @@ fn remote_http_union_keeps_explicit_null_distinct_from_signed_omission() {
             .unwrap();
     assert_eq!(
         response.config.as_ref().unwrap().data,
-        Some(json!(null)),
+        Some(retained(json!(null))),
         "signed envelope must retain explicit null before transformation"
     );
     let signer = Arc::new(Signer {
@@ -1276,7 +1125,7 @@ fn remote_http_union_keeps_explicit_null_distinct_from_signed_omission() {
     let sent = wire.accepted.lock().unwrap();
     assert_eq!(
         sent[0].body.as_ref().unwrap().untransformed().unwrap(),
-        &json!(null),
+        &retained(json!(null)),
         "explicit signed null reaches the inner adapter as null, not omission"
     );
     assert_eq!(sent[0].params, Some(serde_json::Value::Null));
@@ -1288,7 +1137,7 @@ fn remote_signed_data_is_authoritative_at_inner_adapter_boundary() {
     for data in ["raw text", "", "  {\"x\":1} \n", "\u{feff}{\"x\":1}"] {
         let venue = Arc::new(Venue::default());
         let signer = signer(SignedConfig {
-            data: Some(json!(data)),
+            data: Some(retained(json!(data))),
             headers: indexmap::IndexMap::from([("Content-Type".into(), "application/json".into())]),
             ..Default::default()
         });
@@ -1301,7 +1150,7 @@ fn remote_signed_data_is_authoritative_at_inner_adapter_boundary() {
             venue.clone(),
         );
         let mut config = signing_config();
-        config.data = Some(json!("unsigned raw text"));
+        config.data = Some(retained(json!("unsigned raw text")));
         run(adapter.execute_signed(SigningRequest::new(config))).unwrap();
         assert_eq!(
             venue.accepted.lock().unwrap()[0]
@@ -1310,7 +1159,7 @@ fn remote_signed_data_is_authoritative_at_inner_adapter_boundary() {
                 .unwrap()
                 .untransformed()
                 .unwrap(),
-            &json!(data),
+            &retained(json!(data)),
             "remote returned data must reach inner adapter without another transform"
         );
         let capture = serde_json::to_value(&signer.calls.lock().unwrap()[0]).unwrap();
@@ -1339,7 +1188,7 @@ impl RestAdapter for RetryTransformWire {
 fn remote_retry_keeps_transform_phase_and_signed_failure_headers() {
     let wire = Arc::new(RetryTransformWire::default());
     let signer = signer(SignedConfig {
-        data: Some(json!("raw text")),
+        data: Some(retained(json!("raw text"))),
         headers: [
             ("Content-Type".into(), "application/json".into()),
             ("X-Time".into(), "first".into()),
@@ -1357,9 +1206,10 @@ fn remote_retry_keeps_transform_phase_and_signed_failure_headers() {
         wire.clone(),
     );
     let first = run(adapter.execute(RestRequest {
-        body: Some(safe_cex_transport::RestBody::Untransformed(json!(
-            "raw text"
-        ))),
+        body: Some(safe_cex_transport::RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!("raw text"))
+                .unwrap(),
+        )),
         ..req("GET", "/data")
     }))
     .unwrap_err();
@@ -1371,12 +1221,12 @@ fn remote_retry_keeps_transform_phase_and_signed_failure_headers() {
             .unwrap()
             .untransformed()
             .unwrap(),
-        &json!("raw text"),
+        &retained(json!("raw text")),
         "remote failure must retain actual returned adapter data"
     );
     *signer.response.lock().unwrap() = Some(RemoteSignerResponse::Http(HttpSigningResponse {
         config: Some(SignedConfig {
-            data: Some(json!("replacement raw text")),
+            data: Some(retained(json!("replacement raw text"))),
             headers: first.request.headers.clone(),
             ..Default::default()
         }),
@@ -1389,7 +1239,7 @@ fn remote_retry_keeps_transform_phase_and_signed_failure_headers() {
     };
     assert_eq!(
         second.config.data,
-        Some(json!("raw text")),
+        Some(retained(json!("raw text"))),
         "remote retry signs actual returned adapter data"
     );
     assert_eq!(second.config.headers["X-Time"], "first");
@@ -1417,9 +1267,10 @@ fn skipped_remote_signer_preserves_retry_transform_provenance() {
         wire,
     );
     let failure = run(adapter.execute(RestRequest {
-        body: Some(safe_cex_transport::RestBody::Untransformed(json!(
-            "raw text"
-        ))),
+        body: Some(safe_cex_transport::RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!("raw text"))
+                .unwrap(),
+        )),
         headers: [("Content-Type".into(), "application/json".into())]
             .into_iter()
             .collect(),
@@ -1435,7 +1286,7 @@ fn skipped_remote_signer_preserves_retry_transform_provenance() {
             .unwrap()
             .untransformed()
             .unwrap(),
-        &json!("\"raw text\""),
+        &retained(json!("\"raw text\"")),
         "skip-signing failure must retain transform provenance"
     );
     assert!(signer.calls.lock().unwrap().is_empty());
@@ -1446,7 +1297,7 @@ fn remote_server_headers_generate_before_client_signing_and_preserve_null_retry_
     for data in [json!(null), json!({"x":1}), json!([1])] {
         let wire = Arc::new(RetryTransformWire::default());
         let signer = signer(SignedConfig {
-            data: Some(data.clone()),
+            data: Some(retained(data.clone())),
             headers: [
                 ("apikey".into(), "old".into()),
                 ("ApiKey".into(), "signed".into()),
@@ -1464,7 +1315,9 @@ fn remote_server_headers_generate_before_client_signing_and_preserve_null_retry_
             wire.clone(),
         );
         let failure = run(adapter.execute(RestRequest {
-            body: Some(safe_cex_transport::RestBody::Untransformed(data.clone())),
+            body: Some(safe_cex_transport::RestBody::Untransformed(retained(
+                data.clone(),
+            ))),
             headers: [
                 ("apikey".into(), "old".into()),
                 ("ApiKey".into(), "input".into()),
@@ -1497,7 +1350,7 @@ fn remote_server_headers_generate_before_client_signing_and_preserve_null_retry_
         );
         assert_eq!(
             sent[0].body.as_ref().unwrap().untransformed().unwrap(),
-            &data,
+            &retained(data.clone()),
             "remote returned object/null identity must survive"
         );
         if data.is_null() {
@@ -1509,7 +1362,7 @@ fn remote_server_headers_generate_before_client_signing_and_preserve_null_retry_
                     .unwrap()
                     .untransformed()
                     .unwrap(),
-                &json!(null),
+                &retained(json!(null)),
                 "null retry data must retain null rather than string origin"
             );
         }
@@ -1587,7 +1440,7 @@ fn http_signer_decoding_preserves_native_field_identity() {
     );
     assert_eq!(
         native.config.data,
-        Some(json!({"body":"data-value"})),
+        Some(retained(json!({"body":"data-value"}))),
         "native HTTP data identity"
     );
     assert_eq!(native.config.headers["key-header"], "key-value");
@@ -1611,7 +1464,7 @@ fn http_signer_decoding_preserves_native_field_identity() {
     );
     assert_eq!(
         config.data,
-        Some(json!({"body":"signed-data"})),
+        Some(retained(json!({"body":"signed-data"}))),
         "native signed data identity"
     );
     assert_eq!(config.headers["key-header"], "signed-key");
@@ -1756,9 +1609,37 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
             method: "POST".into(),
             url: "/remote-input".into(),
             skip_remote_signing: skip,
-            config_extensions: [("grvtCookie".into(), json!("gravity=retained"))].into(),
+            config_extensions: [
+                (
+                    "grvtCookie".into(),
+                    safe_cex_types::retained_json::RetainedJsonInput::Text(
+                        "gravity=retained".encode_utf16().collect(),
+                    ),
+                ),
+                (
+                    "nativeConfig".into(),
+                    safe_cex_types::retained_json::RetainedJsonInput::Object(vec![
+                        (
+                            "missing".encode_utf16().collect(),
+                            safe_cex_types::retained_json::RetainedJsonInput::Undefined,
+                        ),
+                        (
+                            "nan".encode_utf16().collect(),
+                            safe_cex_types::retained_json::RetainedJsonInput::Float(
+                                f64::from_bits(0x7ff8000000000042),
+                            ),
+                        ),
+                        (
+                            "negativeZero".encode_utf16().collect(),
+                            safe_cex_types::retained_json::RetainedJsonInput::Float(-0.0),
+                        ),
+                    ]),
+                ),
+            ]
+            .into(),
             body: Some(safe_cex_transport::RestBody::Untransformed(
-                json!({"input":79}),
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"input":79}))
+                    .unwrap(),
             )),
             ..Default::default()
         }))
@@ -1778,10 +1659,30 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
             "receipt_remote_native_signed_config {skip}"
         );
         assert_eq!(
-            venue.requests.lock().unwrap()[0].config_extensions["grvtCookie"],
+            venue.requests.lock().unwrap()[0].config_extensions["grvtCookie"]
+                .clone()
+                .into_value()
+                .unwrap(),
             json!("gravity=retained"),
             "REST CONFIG signed/bypass terminal extensions {skip}"
         );
+        {
+            use safe_cex_types::retained_json::RetainedJsonInput as Input;
+            let requests = venue.requests.lock().unwrap();
+            let Input::Object(fields) = &requests[0].config_extensions["nativeConfig"] else {
+                panic!("native config object");
+            };
+            assert_eq!(fields.len(), 3, "hosted config retains every data field");
+            assert!(
+                matches!(&fields[0], (key, Input::Undefined) if key == &"missing".encode_utf16().collect::<Vec<_>>())
+            );
+            assert!(
+                matches!(&fields[1], (key, Input::Float(value)) if key == &"nan".encode_utf16().collect::<Vec<_>>() && value.to_bits() == 0x7ff8000000000042)
+            );
+            assert!(
+                matches!(&fields[2], (key, Input::Float(value)) if key == &"negativeZero".encode_utf16().collect::<Vec<_>>() && value.to_bits() == (-0.0_f64).to_bits())
+            );
+        }
         assert_eq!(
             signer.calls.lock().unwrap().len(),
             usize::from(!skip),
@@ -1926,4 +1827,35 @@ fn zero_delay_retry_invokes_scheduler_for_each_retried_attempt() {
         [0, 0],
         "retry native zero-delay scheduler calls"
     );
+}
+
+#[test]
+fn signing_rate_slots_release_cancelled_waiters_without_spending_capacity() {
+    let clock = Arc::new(HeldClock(Mutex::new(0)));
+    let limiter = RateLimiter::new(clock.clone(), 1, 1000);
+    drop(limiter.acquire()); // An unpolled reservation has no queue side effects.
+    run(limiter.acquire()).unwrap();
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut cancelled = Box::pin(limiter.acquire());
+    let mut next = Box::pin(limiter.acquire());
+    assert!(cancelled.as_mut().poll(&mut cx).is_pending());
+    assert!(next.as_mut().poll(&mut cx).is_pending());
+    drop(cancelled);
+    *clock.0.lock().unwrap() = 1000;
+    assert!(matches!(next.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
+    let mut later = Box::pin(limiter.acquire());
+    assert!(later.as_mut().poll(&mut cx).is_pending());
+    *clock.0.lock().unwrap() = 2000;
+    assert!(matches!(later.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
+}
+
+fn retained(value: Value) -> safe_cex_types::retained_json::RetainedJsonInput {
+    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap()
+}
+fn try_parse_json(value: Value) -> Value {
+    safe_cex_transport::RestResponseBody::Transformed(safe_cex_transport::signing::try_parse_json(
+        retained(value),
+    ))
+    .json_value()
+    .unwrap()
 }

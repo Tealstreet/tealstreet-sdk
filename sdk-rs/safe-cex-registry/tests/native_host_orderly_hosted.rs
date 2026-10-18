@@ -229,10 +229,15 @@ async fn exercise(local: bool) {
         }
         let logs = Rc::new(RefCell::new(vec![]));
         let capture = logs.clone();
-        h.exchange.base().on(
+        h.exchange.base().on_args(
             "log",
             Rc::new(move |_, args| {
-                capture.borrow_mut().push(args.clone());
+                capture.borrow_mut().push(
+                    safe_cex_exchange::js_runtime::value::to_json(
+                        &safe_cex_exchange::js_runtime::value::Js::array(args.to_vec()),
+                    )
+                    .unwrap(),
+                );
                 Ok(())
             }),
         );

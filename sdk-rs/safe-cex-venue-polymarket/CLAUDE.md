@@ -17,12 +17,9 @@ pass after restoration. Existing method-body oracles and controls remain in use.
 Measured concrete transport gates and controls are recorded in
 [BINDING_EVIDENCE.md](BINDING_EVIDENCE.md).
 
-FINDING: the shared JS client factory does not yet implement the source
-`safeCexAxiosCreate` proxy/tunnel policy. This binding currently uses the supplied
-HTTP host directly. Default direct-host behavior is exercised; options requesting
-`tealstreetTunnel` or proxy routing must not be represented as verified here.
-The shared-runtime lane owns the generic service. Retain this finding until a
-shared implementation and concrete routing regression replace it.
+The binding uses the shared `safeCexAxiosCreate` factory for proxy selection and
+request outcomes. Registry `native_account_factory_routing` and napi
+`native-account-factory-routing.test.mjs` exercise that production path.
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/polymarket/CLAUDE.md).
 
@@ -243,3 +240,32 @@ before awaiting. A seventh control reinstalls deferred setLeverage logging and
 must fail `spot_warning_native_eager:setLeverage`, then restore to a pass. The
 control floor is seven, ending at eager-prefix. Native future-drop scheduling
 beyond this body is not claimed.
+
+The imported ethers `decodeBase64` native binding reuses the shared Node Buffer
+decoder already used for Kraken WS auth. Supplied L2 secrets retain source
+acceptance of noncanonical trailing bits, ignored characters and incomplete
+quartets. `exchange_binding` compares actual signed balance requests for eight
+secrets against the maintained TS helper with real ethers and independent Node
+crypto. This measures the Node dependency profile, not a new browser-profile claim.
+Private order frames assert Store orders and matched fills; trade frames assert
+fill delivery and authoritative position refresh. The source has no private
+balance topic, so those frames retain the REST account balance until its poll.
+
+Private-read binding snapshot checks preserve every serialized store field except
+request outcome counters, whose exact deltas are checked independently against
+the maintained `safeCexAxiosCreate` interceptor running with installed Axios.
+Each successful cursor page increments `ok`; a rejected HTTP 503 increments
+`other`. These telemetry updates do not commit positions, orders, or balances.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` observes 24 cases / 40 price-change and last-trade frames with production token mappings
+through the production socket protocol and DefaultStore. Independent null,
+string, NaN-producing, object, overflow, signed-zero and false fields accompany
+distinct good rows. The maintained TS constructor and actual DefaultStore provide
+native numeric-bit expectations. Fresh TS receivers and advancing native clocks
+isolate numeric mapping from throttle timing. `ticker-native-controls.py polymarket-store polymarket`
+compiles a live publication fault, requires a native assertion failure, then
+restores exact source bytes and requires the named test to pass.
+
+Last-trade updates pass `{ id: tokenId }` as the Store selector. Passing the
+raw token string silently leaves existing prices unchanged. The constructed
+corpus fails with that old binding and passes with the object selector.

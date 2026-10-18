@@ -10,7 +10,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_num::JsJsonValue as J;
 use safe_cex_store::StoreUpdate;
-use safe_cex_types::{Balance, Candle, OHLCVOptions, OrderBook, Ticker};
+use safe_cex_types::{AccountValidationError, Balance, Candle, OHLCVOptions, OrderBook, Ticker};
 use std::rc::Rc;
 pub type Cleanup = Rc<dyn Fn() -> Result<(), ExchangeError>>;
 pub trait ApexServices {
@@ -29,7 +29,7 @@ pub trait ApexServices {
     fn throttle_fetch_orders(&self) -> Result<(), ExchangeError>;
     fn place_orders(
         &self,
-        orders: Vec<safe_cex_types::PlaceOrderOpts>,
+        orders: Vec<safe_cex_types::PreparedOrderOpts>,
     ) -> ExchangeFuture<'_, Vec<String>>;
     fn dayjs_value_ms(&self, input: Option<f64>) -> Result<f64, ExchangeError>;
     fn dayjs_subtract(&self, end_ms: f64, amount: f64, unit: &str) -> Result<f64, ExchangeError>;
@@ -50,7 +50,7 @@ impl ApexOmniExchange {
             .emit_and_log_error(ExchangeErrorInput::Error(Box::new(error)), None, None)
     }
     // ts: ApexOmniExchange.validateAccount
-    pub async fn validate_account(&self) -> Result<String, ExchangeError> {
+    pub async fn validate_account(&self) -> Result<AccountValidationError, ExchangeError> {
         if let Err(error) = self
             .request("get", "/v3/user", J::Undefined, J::Undefined, false)
             .await
@@ -60,25 +60,22 @@ impl ApexOmniExchange {
                 .as_ref()
                 .and_then(|v| v.get("data"))
                 .and_then(|v| v.get("msg"));
-            let message = match response_message.filter(|v| safe_cex_num::js_truthy(Some(v))) {
-                Some(serde_json::Value::String(value)) => value.clone(),
-                Some(_) => {
-                    return Err(failure(
-                        "typed validation result refuses a non-string API error message".into(),
-                    ));
-                }
-                None => error.message.clone(),
-            };
+            let message = response_message
+                .filter(|value| safe_cex_num::js_truthy(Some(value)))
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::String(error.message.clone()));
             self.base.emit_and_log_error(
-                ExchangeErrorInput::Message(message.clone()),
+                ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(&message)),
                 None,
                 None,
             )?;
-            return Ok(if message.is_empty() {
-                "Invalid API key or secret".into()
-            } else {
-                message
-            });
+            return Ok(AccountValidationError::from_value(
+                if safe_cex_num::js_truthy(Some(&message)) {
+                    message
+                } else {
+                    serde_json::Value::String("Invalid API key or secret".into())
+                },
+            ));
         }
         let services = self.host.services()?;
         let result = async {
@@ -92,11 +89,11 @@ impl ApexOmniExchange {
                 .map(|_| ())
         }
         .await;
-        Ok(if result.is_err() {
-            "Invalid OmniKey seed".into()
+        Ok(AccountValidationError::from(if result.is_err() {
+            "Invalid OmniKey seed"
         } else {
-            String::new()
-        })
+            ""
+        }))
     }
     fn mark_loaded(
         &self,
@@ -235,7 +232,7 @@ impl ApexOmniExchange {
             if self.base.is_disposed() {
                 return Ok(());
             }
-            let now = self.base.runtime.now_ms();
+            let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
             if self
                 .last_websocket_positions_update
                 .get()
@@ -293,7 +290,7 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.fetchOHLCV
     pub async fn fetch_ohlcv(&self, opts: &OHLCVOptions) -> Result<Vec<Candle>, ExchangeError> {
-        let key = serde_json::to_value(opts.interval)
+        let key = serde_json::to_value(&opts.interval)
             .map_err(|e| failure(e.to_string()))?
             .as_str()
             .ok_or_else(|| failure("Invalid interval".into()))?

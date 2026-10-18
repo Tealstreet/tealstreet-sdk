@@ -1,4 +1,4 @@
-use safe_cex_types::{DisplayedMargin, PositionSide, StoreData};
+use safe_cex_types::{DisplayedMargin, ModelField, PositionSide, StoreData};
 use std::collections::HashMap;
 
 // ts: DisplayedMarginPostprocessor
@@ -20,8 +20,9 @@ impl DisplayedMarginPostprocessor {
             };
             margin.total_notional += notional;
             match position.side {
-                PositionSide::Long => margin.long_exposure += notional,
-                PositionSide::Short => margin.short_exposure += notional,
+                ModelField::Value(PositionSide::Long) => margin.long_exposure += notional,
+                ModelField::Value(PositionSide::Short) => margin.short_exposure += notional,
+                ModelField::Absent | ModelField::Undefined => {}
             }
         }
         store.displayed_margin = Some(margin);

@@ -21,6 +21,94 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
+    let status_rt = rt.clone();
+    def(
+        "getBybitResponseMeta",
+        Js::function("getBybitResponseMeta", move |_, args| {
+            let scope = scope_of(&status_rt)?;
+            super::members::orders::position_response_meta(&scope, &arg(&args, 0))
+        }),
+    );
+    let json = g.get("JSON").expect("installed JSON builtin");
+    def(
+        "jsonParse",
+        Js::function("jsonParse", move |_, args| {
+            Ok(json.call_method("parse", args).unwrap_or(Js::Null))
+        }),
+    );
+    def(
+        "RegExp",
+        Js::function("RegExp", |_, args| {
+            let pattern = arg(&args, 0);
+            let flags = arg(&args, 1);
+            safe_cex_exchange::js_runtime::regexp::regexp(
+                &if pattern.is_undefined() {
+                    vec![]
+                } else {
+                    pattern.to_js_string()?.to_vec()
+                },
+                &if flags.is_undefined() {
+                    vec![]
+                } else {
+                    flags.to_js_string()?.to_vec()
+                },
+            )
+        }),
+    );
+    // The source import omits literal top-level keys from object-literal requests.
+    def(
+        "omit",
+        Js::function("omit", |_, args| {
+            let request = arg(&args, 0).spread_object()?;
+            for paths in args.iter().skip(1) {
+                for key in paths.array_values().unwrap_or_else(|| vec![paths.clone()]) {
+                    request.delete(&key.to_js_string()?);
+                }
+            }
+            Ok(request)
+        }),
+    );
+    let income_rt = rt.clone();
+    def(
+        "fetchBybitIncomeHistory",
+        Js::function("fetchBybitIncomeHistory", move |_, args| {
+            let rt = scope_of(&income_rt)?;
+            Ok(crate::ledger_history::fetch_bybit_income_history(
+                std::rc::Rc::new(rt),
+                arg(&args, 0),
+                arg(&args, 1),
+            ))
+        }),
+    );
+    let range_rt = rt.clone();
+    def(
+        "fetchBybitIncomeHistoryRange",
+        Js::function("fetchBybitIncomeHistoryRange", move |_, args| {
+            let rt = scope_of(&range_rt)?;
+            Ok(crate::ledger_history::fetch_bybit_income_history_range(
+                std::rc::Rc::new(rt),
+                arg(&args, 0),
+                arg(&args, 1),
+                arg(&args, 2),
+                arg(&args, 3),
+            ))
+        }),
+    );
+    def(
+        "splitTimeRange",
+        Js::function("splitTimeRange", |_, args| {
+            Ok(Js::array(
+                safe_cex_candle_cache::calendar::split_time_range(
+                    arg(&args, 0).to_number()?,
+                    arg(&args, 1).to_number()?,
+                    arg(&args, 2).to_number()?,
+                )
+                .iter()
+                .map(super::value::from_json)
+                .collect(),
+            ))
+        }),
+    );
     // utils/virtualClock: the one clock the signed clients also read.
     let start_clock = clock.clone();
     let start_rt = rt.clone();
@@ -99,6 +187,14 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
         super::value::from_json(&crate::types::ENDPOINTS),
     );
     for (key, value) in [
+        (
+            "HYROTRADER_SIMULATOR_URL",
+            &*crate::types::HYROTRADER_SIMULATOR_URL,
+        ),
+        (
+            "HYROTRADER_SIMULATOR_WS_URL",
+            &*crate::types::HYROTRADER_SIMULATOR_WS_URL,
+        ),
         ("INTERVAL", &*crate::types::INTERVAL),
         ("ORDER_SIDE", &*crate::types::ORDER_SIDE),
         ("POSITION_SIDE", &*crate::types::POSITION_SIDE),

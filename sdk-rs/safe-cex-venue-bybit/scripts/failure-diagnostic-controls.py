@@ -14,8 +14,6 @@ controls=[
  ('field','if !value.is_null() {','if value.is_null() {','DIAGNOSTIC native error field'),
  ('request-error','Value::String("bybit_markets_startup".into())','Value::String("changed".into())','DIAGNOSTIC native request tags'),
  ('leverage','code == 110043.','code == 110044.','DIAGNOSTIC native leverage'),
- ('hyro-error','name: "Error",','name: "Changed",','DIAGNOSTIC native rejected name'),
- ('duplicate','text.contains("duplicate")','text.contains("different")','DIAGNOSTIC native duplicate'),
  ('request-default','retry_count.unwrap_or(0.)','retry_count.unwrap_or(1.)','DIAGNOSTIC native request default tags'),
 ]
 if '--default-only' in sys.argv: controls=[control for control in controls if control[0]=='request-default']

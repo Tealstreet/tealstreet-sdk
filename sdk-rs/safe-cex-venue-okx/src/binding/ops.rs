@@ -21,7 +21,7 @@ use safe_cex_exchange::{
     exchange::ExchangeSettings,
     js_runtime::{
         base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory},
-        promise::await_js,
+        promise::{all, await_js},
         scope::{Scope, ScopeShared, bound_member, scope_of},
         value::{Js, Thrown, arg, from_typed, to_json},
     },
@@ -300,20 +300,13 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
             }
             call_js(&sum, args)
         }),
-        // p-iteration `map(array, async fn)`: every callback starts, results keep order.
-        parallel_map: Rc::new(move |map, v, f| {
-            let started: Result<Vec<ReadAwait<Js, Thrown>>, Thrown> =
-                items(&v).map(|xs| xs.into_iter().map(|x| f(x)).collect());
-            let _ = map;
-            let rt = rt.clone();
-            Box::pin(async move {
-                let mut out = vec![];
-                for fut in started? {
-                    out.push(fut.await?);
-                }
-                let _ = &rt;
-                Ok(Js::array(out))
-            })
+        // p-iteration starts every async callback before awaiting the group.
+        parallel_map: Rc::new(move |_, v, f| {
+            let started = items(&v).map(|xs| {
+                let values = xs.into_iter().map(|x| rt.spawn(f(x))).collect();
+                Js::Promise(all(&rt.exchange_runtime(), values))
+            });
+            Box::pin(async move { await_js(started?).await })
         }),
         some: Rc::new(|v, f| {
             for x in items(&v)? {
@@ -451,17 +444,7 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
                 optional(v, "message")
             }
         }),
-        parallel_map: Rc::new(|_, v, f| {
-            let started: Result<Vec<_>, Thrown> =
-                items(&v).map(|xs| xs.into_iter().map(|x| f(x)).collect());
-            Box::pin(async move {
-                let mut out = vec![];
-                for fut in started? {
-                    out.push(fut.await?);
-                }
-                Ok(Js::array(out))
-            })
-        }),
+        parallel_map: m.parallel_map.clone(),
         // mapOkxPositionHistory(row, { account, toBase, resolveSymbol, resolveSettleCurrency })
         map_position: Rc::new(move |mapper, row, market, account| {
             let this = to_base.this.clone();

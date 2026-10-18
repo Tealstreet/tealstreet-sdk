@@ -9,14 +9,27 @@ use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{OptionTerms, Order, OrderStatus, Position, PositionOption};
 use std::rc::Rc;
 
-/// Store mutators take the entity (`updateTicker(ticker, ...)`); its `id` is the key.
-fn id_of(target: &Js) -> Result<String, Thrown> {
-    Ok(if target.is_object() {
-        target.get("id")?
+// Source findIndex/Map lookups compare to the native model's string id without coercion.
+fn strict_id_of(target: &Js) -> Result<Option<String>, Thrown> {
+    Ok(match target.get("id")? {
+        Js::String(id) => String::from_utf16(&id).ok(),
+        _ => None,
+    })
+}
+
+// Object-key Store lookups use property keys, rather than strict id equality.
+fn property_id_of(target: &Js) -> Result<Option<String>, Thrown> {
+    let id = target.get("id")?;
+    // ToPropertyKey first uses the string hint, then preserves Symbol keys.
+    let id = if matches!(id, Js::Object(_) | Js::Function(_)) {
+        id.ordinary_to_primitive(["toString", "valueOf"])?
     } else {
-        target.clone()
+        id
+    };
+    if matches!(id, Js::SymbolIterator) {
+        return Ok(None);
     }
-    .to_display())
+    Ok(String::from_utf16(&id.to_js_string()?).ok())
 }
 
 fn mutation(e: safe_cex_store::StoreMutationError) -> Thrown {
@@ -26,8 +39,9 @@ fn mutation(e: safe_cex_store::StoreMutationError) -> Thrown {
 fn ids(value: &Js) -> Result<Vec<String>, Thrown> {
     let mut out = vec![];
     for v in value.array_values().unwrap_or_default() {
-        let id = if v.is_object() { v.get("id")? } else { v };
-        out.push(id.to_display());
+        if let Some(id) = property_id_of(&v)? {
+            out.push(id);
+        }
     }
     Ok(out)
 }
@@ -47,16 +61,22 @@ fn patch(value: &Js) -> Result<ModelPatch, Thrown> {
     }
     let fields = Js::object(vec![]);
     let mut numbers = vec![];
+    let mut undefined = vec![];
     for (key, value) in value.own_entries()? {
         let field = String::from_utf16_lossy(&key);
         // `info` is explicitly opaque JSON, rather than a typed model number.
-        if field != "info" && matches!(value, Js::Number(_)) {
+        if value.is_undefined() {
+            undefined.push(field);
+        } else if field != "info" && matches!(value, Js::Number(_)) {
             numbers.push((field, to_typed::<f64>(&value)?));
         } else {
             fields.define_key(&key, value)?;
         }
     }
     let mut changes = ModelPatch::from(json_patch(&fields)?);
+    for key in undefined {
+        changes.set_undefined(key);
+    }
     for (key, value) in numbers {
         changes.set_number(key, value);
     }
@@ -73,6 +93,14 @@ fn option_patch<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
     let mut changes = patch(&fields)?;
     if !option.is_undefined() {
         changes.set_native("option", to_typed::<T>(&option)?);
+    }
+    Ok(changes)
+}
+
+fn position_patch(value: &Js) -> Result<ModelPatch, Thrown> {
+    let mut changes = option_patch::<PositionOption>(value)?;
+    if value.has_own("option") && value.get("option")?.is_undefined() {
+        changes.set_undefined("option");
     }
     Ok(changes)
 }
@@ -159,22 +187,52 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updatePosition",
         Rc::new(|st, a| {
-            st.update_position(
-                &id_of(&arg(&a, 0))?,
-                &option_patch::<PositionOption>(&arg(&a, 1))?,
-            )
-            .map_err(mutation)?;
+            if st.positions().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.update_position(&id, &position_patch(&arg(&a, 1))?)
+                .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
     method(
         "updatePositions",
         Rc::new(|st, a| {
-            let mut updates = vec![];
-            for pair in arg(&a, 0).array_values().unwrap_or_default() {
-                let (position, changes) = (pair.get("0")?, pair.get("1")?);
-                updates.push((id_of(&position)?, option_patch::<PositionOption>(&changes)?));
+            let pairs = arg(&a, 0).array_values().unwrap_or_default();
+            let positions = st.positions().to_vec();
+            if pairs.is_empty() || positions.is_empty() {
+                return Ok(Js::Undefined);
             }
+            let indexed = pairs.len() > 1 && positions.len() > 1;
+            // Keep every selector row: removing unmatched keys could change
+            // the core Store's index mode and duplicate-ID selection.
+            let mut selected = vec![];
+            for pair in pairs {
+                let (position, changes) = (pair.get("0")?, pair.get("1")?);
+                let id = if indexed {
+                    property_id_of(&position)?
+                } else {
+                    strict_id_of(&position)?
+                };
+                selected.push((id, changes));
+            }
+            let mut updates = vec![];
+            for (id, changes) in selected {
+                let patch = if id
+                    .as_ref()
+                    .is_some_and(|id| positions.iter().any(|position| &position.id == id))
+                {
+                    position_patch(&changes)?
+                } else {
+                    // Source updateInArray never reads changes for a missing row.
+                    ModelPatch::default()
+                };
+                updates.push((id, patch));
+            }
+            drop(positions);
             st.update_positions(&updates).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
@@ -223,7 +281,13 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateOrder",
         Rc::new(|st, a| {
-            st.update_order(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
+            if st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.update_order(&id, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
@@ -231,9 +295,31 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateOrderStatus",
         Rc::new(|st, a| {
+            if st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
             let status: OrderStatus = to_typed(&arg(&a, 1))?;
-            st.update_order_status(&id_of(&arg(&a, 0))?, status)
-                .map_err(mutation)?;
+            st.update_order_status(&id, status).map_err(mutation)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    method(
+        "markOrdersTerminal",
+        Rc::new(|st, a| {
+            let orders = arg(&a, 0)
+                .array_values()
+                .ok_or_else(|| Thrown::type_error("orders.forEach is not a function"))?;
+            let mut keys = vec![];
+            for order in orders {
+                keys.push(to_typed::<String>(&order.get("id")?)?);
+            }
+            let status: OrderStatus = to_typed(&arg(&a, 1))?;
+            let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+            // Remember IDs even before any matching order reaches the Store.
+            st.mark_orders_terminal(&refs, status).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
@@ -272,14 +358,24 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "removeOrder",
         Rc::new(|st, a| {
-            st.remove_order(&id_of(&arg(&a, 0))?).map_err(mutation)?;
+            if st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.remove_order(&id).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
     method(
         "removeOrders",
         Rc::new(|st, a| {
-            let ids = ids(&arg(&a, 0))?;
+            let orders = arg(&a, 0);
+            if orders.array_values().is_some_and(|rows| rows.is_empty()) || st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let ids = ids(&orders)?;
             let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
             st.remove_orders(&refs).map_err(mutation)?;
             Ok(Js::Undefined)
@@ -288,7 +384,10 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateTicker",
         Rc::new(|st, a| {
-            st.update_ticker(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
+            let Some(id) = property_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.update_ticker(&id, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
@@ -296,11 +395,11 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateMarket",
         Rc::new(|st, a| {
-            st.update_market(
-                &id_of(&arg(&a, 0))?,
-                &option_patch::<OptionTerms>(&arg(&a, 1))?,
-            )
-            .map_err(mutation)?;
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.update_market(&id, &option_patch::<OptionTerms>(&arg(&a, 1))?)
+                .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );

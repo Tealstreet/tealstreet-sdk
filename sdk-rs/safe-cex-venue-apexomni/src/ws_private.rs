@@ -202,7 +202,11 @@ impl ApexOmniPrivateWebsocket {
         }
         self.host.track_last_received()?;
         self.host.diagnostic_receive(raw)?;
-        let json = J::from(safe_cex_transport::how::json_parse(raw));
+        let json = J::from(
+            safe_cex_transport::how::json_parse(raw)
+                .into_value()
+                .map_err(|error| ExchangeError::new(error.to_string()))?,
+        );
         if get(&json, "success") == &J::Bool(false) && truthy(get(&json, "ret_msg")) {
             self.parent.base.log(
                 &format!(
@@ -248,23 +252,7 @@ impl ApexOmniPrivateWebsocket {
             object([("op", J::String("ping".into()))]),
             true,
         )?;
-        if let Some(timer) = self.host.ping_timeout() {
-            self.host.clear_timeout(timer)?;
-        }
-        let weak = Rc::downgrade(self);
-        let timer = self.host.set_timeout(
-            5000,
-            Rc::new(move || {
-                let owner = weak.upgrade();
-                Box::pin(async move {
-                    owner
-                        .ok_or_else(|| failure("private socket owner released".into()))?
-                        .ping()
-                })
-            }),
-        )?;
-        self.host.set_ping_timeout(Some(timer))?;
-        Ok(())
+        self.host.schedule_ping(5000)
     }
     // ts: ApexOmniPrivateWebsocket.handleWsAccountsV2Topic
     pub fn handle_ws_accounts_v2_topic(self: &Rc<Self>, json: &J) -> Result<(), ExchangeError> {
@@ -406,23 +394,28 @@ impl ApexOmniPrivateWebsocket {
                 let order = &orders[0];
                 self.parent.base.emit(
                     "fill",
-                    crate::exchange::fields(&object([
-                        ("id", J::String(order.id.clone())),
+                    safe_cex_exchange::js_runtime::value::Js::object(vec![
+                        (
+                            "id",
+                            safe_cex_exchange::js_runtime::value::Js::str(&order.id),
+                        ),
                         (
                             "side",
-                            J::String(
-                                if order.side == safe_cex_types::OrderSide::Buy {
-                                    "buy"
-                                } else {
-                                    "sell"
-                                }
-                                .into(),
-                            ),
+                            safe_cex_exchange::js_runtime::value::from_typed(&order.side)?,
                         ),
-                        ("symbol", J::String(order.symbol.clone())),
-                        ("price", J::Number(price)),
-                        ("amount", J::Number(amount)),
-                    ]))?,
+                        (
+                            "symbol",
+                            safe_cex_exchange::js_runtime::value::Js::str(&order.symbol),
+                        ),
+                        (
+                            "price",
+                            safe_cex_exchange::js_runtime::value::Js::Number(price),
+                        ),
+                        (
+                            "amount",
+                            safe_cex_exchange::js_runtime::value::Js::Number(amount),
+                        ),
+                    ]),
                 )?;
             }
             if filled || canceled {
@@ -455,7 +448,7 @@ impl ApexOmniPrivateWebsocket {
                     let closed = orders
                         .into_iter()
                         .map(|mut order| {
-                            order.status = OrderStatus::Closed;
+                            order.status = safe_cex_types::ModelField::Value(OrderStatus::Closed);
                             order
                         })
                         .collect();
@@ -481,7 +474,13 @@ impl ApexOmniPrivateWebsocket {
     pub fn handle_position_topic(self: &Rc<Self>, data: &J) -> Result<(), ExchangeError> {
         let mut updates = Vec::new();
         for row in crate::data::array(data).map_err(failure)? {
-            if let Some(position) = self.parent.map_position(row)? {
+            // TS binds the mapper to this socket, whose receiver has no `log`.
+            // Preserve the mapper's evaluation order before the missing log call.
+            if let Some(position) = self.parent.map_position_with_log(row, |_| {
+                let mut error = failure("this.log is not a function".into());
+                error.name = "TypeError".into();
+                Err(error)
+            })? {
                 let serde_json::Value::Object(fields) =
                     serde_json::to_value(&position).map_err(|e| failure(e.to_string()))?
                 else {
@@ -498,13 +497,13 @@ impl ApexOmniPrivateWebsocket {
                 ] {
                     patch.set_number(key, value);
                 }
-                if let Some(v) = position.realized_pnl {
+                if let Some(v) = position.realized_pnl.into_value() {
                     patch.set_number("realizedPnl", v);
                 }
-                if let Some(v) = position.last_update {
+                if let Some(v) = position.last_update.into_value() {
                     patch.set_number("lastUpdate", v);
                 }
-                updates.push((position.id, patch));
+                updates.push((Some(position.id), patch));
             }
         }
         self.parent

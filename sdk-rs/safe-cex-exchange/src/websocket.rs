@@ -93,10 +93,18 @@ pub struct PreparedWebSocket {
 pub trait WsProtocol {
     fn dispose(&self) {}
 
+    fn reconnect(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        socket.reconnect_base()
+    }
+
     fn recovers_after_offline(&self) -> bool {
         true
     }
 
+    /// Source receive timers dispatch the instance's checkLastReceived override.
+    fn check_last_received(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        socket.check_last_received()
+    }
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         Err(ExchangeError::new("Not implemented"))
     }
@@ -584,6 +592,22 @@ struct SocketState {
     next_task: u64,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SocketTimeout {
+    Ping,
+    PongMiss,
+    Receive,
+}
+impl From<SocketTimeout> for Timer {
+    fn from(timer: SocketTimeout) -> Self {
+        match timer {
+            SocketTimeout::Ping => Self::Ping,
+            SocketTimeout::PongMiss => Self::PongMiss,
+            SocketTimeout::Receive => Self::Receive,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Timer {
     Ping,
     PongMiss,
@@ -668,6 +692,7 @@ pub struct BaseWebSocket {
     pub treat_any_message_as_pong: Cell<bool>,
     pub direct_fallback: RefCell<WsDirectFallback>,
     connect_disabled: Cell<bool>,
+    grouped_listener_dispatch: Cell<bool>,
     before_close: RefCell<Option<Rc<dyn Fn()>>>,
 }
 impl BaseWebSocket {
@@ -693,6 +718,7 @@ impl BaseWebSocket {
             treat_any_message_as_pong: Cell::new(false),
             direct_fallback: RefCell::new(WsDirectFallback::new(2)),
             connect_disabled: Cell::new(false),
+            grouped_listener_dispatch: Cell::new(false),
             before_close: RefCell::new(None),
         })
     }
@@ -710,6 +736,9 @@ impl BaseWebSocket {
     }
     pub fn is_disposed(&self) -> bool {
         self.parent.is_disposed()
+    }
+    pub(crate) fn grouped_listener_dispatch(&self) -> bool {
+        self.grouped_listener_dispatch.get()
     }
     pub fn is_recovery_complete(&self) -> bool {
         self.protocol.recovery_complete()
@@ -746,6 +775,20 @@ impl BaseWebSocket {
     /// Writes the ping time a venue recorded itself (`this.pingAt = performance.now()`).
     pub fn set_ping_at(&self, at: f64) {
         self.state.borrow_mut().ping_at = at;
+    }
+    /// Replaces the heartbeat deadline shared with pong and close handling.
+    pub fn schedule_ping(self: &Rc<Self>, delay_ms: u64) {
+        self.schedule(Timer::Ping, delay_ms as f64);
+    }
+    /// Identity of the currently owned timeout, shared with source field handles.
+    pub(crate) fn timeout_id(&self, timer: SocketTimeout) -> Option<u64> {
+        self.state.borrow().timer_ids.get(&timer.into()).copied()
+    }
+    /// A stale source handle cannot cancel a replacement in the same slot.
+    pub(crate) fn cancel_timeout(&self, timer: SocketTimeout, id: u64) {
+        if self.timeout_id(timer) == Some(id) {
+            self.cancel(timer.into());
+        }
     }
     pub fn handle_pong_event(self: &Rc<Self>, next_ping_time: u64) -> Result<(), ExchangeError> {
         self.record_message_handler_stats("pong")?;
@@ -1268,6 +1311,7 @@ impl BaseWebSocket {
             relay,
             reconnecting,
         } = connection;
+        self.grouped_listener_dispatch.set(reconnecting);
         // The core has already activated a dormant wrapper; do not nest another one.
         if reconnecting && descriptor.options.start_closed == Some(true) {
             descriptor.options.start_closed = Some(false);
@@ -2100,6 +2144,9 @@ impl BaseWebSocket {
         }
     }
     pub fn reconnect(self: &Rc<Self>) -> Result<(), ExchangeError> {
+        self.protocol.reconnect(self)
+    }
+    pub(crate) fn reconnect_base(self: &Rc<Self>) -> Result<(), ExchangeError> {
         self.parent.log(
             "Explicit reconnect call from ping pong miss or online status change",
             LogSeverity::Info,
@@ -2255,7 +2302,7 @@ impl BaseWebSocket {
             (s.last_received, s.ping_sent)
         };
         let diff = now - received;
-        let received_at = iso_timestamp(received);
+        let received_at = iso_timestamp(received)?;
         let stale = self
             .get_watchdog_stale_threshold_ms()
             .unwrap_or(WS_RECONNECT_THRESHOLD_MS);
@@ -2495,7 +2542,7 @@ impl BaseWebSocket {
                             }
                             Timer::Receive => {
                                 if socket.state.borrow().last_received != 0.0 {
-                                    socket.check_last_received()?;
+                                    socket.protocol.check_last_received(&socket)?;
                                     socket.parent.sync_socket_health_to_store()?;
                                     socket.schedule(Timer::Receive, 1000.0);
                                 }
@@ -2537,33 +2584,12 @@ pub struct WsHealth {
     pub reconnect_count: usize,
 }
 
-fn iso_timestamp(milliseconds: f64) -> String {
-    let milliseconds = milliseconds.trunc() as i64;
-    let days = milliseconds.div_euclid(86_400_000);
-    let time = milliseconds.rem_euclid(86_400_000);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let mut year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_offset = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_offset + 2) / 5 + 1;
-    let month = month_offset + if month_offset < 10 { 3 } else { -9 };
-    year += i64::from(month <= 2);
-    let year = if (0..=9999).contains(&year) {
-        format!("{year:04}")
-    } else {
-        format!("{year:+07}")
-    };
-    format!(
-        "{year}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        time / 3_600_000,
-        time / 60_000 % 60,
-        time / 1000 % 60,
-        time % 1000
-    )
+fn iso_timestamp(milliseconds: f64) -> Result<String, ExchangeError> {
+    safe_cex_num::js_date_to_iso_string(milliseconds).map_err(|error| {
+        let mut value = ExchangeError::new(error.message);
+        value.name = error.name.into();
+        value
+    })
 }
 fn stringify(data: &Value) -> String {
     match data {
@@ -4330,7 +4356,7 @@ mod tests {
             let (socket, parent, runtime, _) = fixture();
             let mut expected = ExchangeError::new("resync log listener failed");
             expected.name = "TypeError".into();
-            expected.code = Some(json!("E_LISTENER"));
+            expected.code = Some(crate::js_runtime::value::Js::str("E_LISTENER"));
             *parent.log_error.borrow_mut() = Some(expected.clone());
             parent.snapshot_failure.set(true);
             parent.snapshot_gate.set(false);
@@ -5254,9 +5280,12 @@ mod tests {
     }
     #[test]
     fn watchdog_log_timestamp_matches_js_iso_dates() {
-        assert_eq!(iso_timestamp(0.0), "1970-01-01T00:00:00.000Z");
-        assert_eq!(iso_timestamp(-1.0), "1969-12-31T23:59:59.999Z");
-        assert_eq!(iso_timestamp(951782400123.0), "2000-02-29T00:00:00.123Z");
+        assert_eq!(iso_timestamp(0.0).unwrap(), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso_timestamp(-1.0).unwrap(), "1969-12-31T23:59:59.999Z");
+        assert_eq!(
+            iso_timestamp(951782400123.0).unwrap(),
+            "2000-02-29T00:00:00.123Z"
+        );
     }
     #[test]
     fn review_managed_reconnect_can_synchronously_dispose() {

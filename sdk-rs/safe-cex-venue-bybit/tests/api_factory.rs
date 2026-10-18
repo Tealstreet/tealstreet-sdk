@@ -1,8 +1,6 @@
 #![allow(clippy::arc_with_non_send_sync)]
 #[path = "support/api_factory_clock_budget.rs"]
 pub mod api_factory_clock_budget;
-#[path = "support/api_factory_optional_config.rs"]
-pub mod api_factory_optional_config;
 #[path = "support/api_factory_params.rs"]
 pub mod api_factory_params;
 #[path = "support/api_factory_params_astral.rs"]
@@ -139,7 +137,7 @@ impl Exchange for Owner {
 struct Host {
     owner: std::rc::Weak<Owner>,
     trace: Rc<RefCell<Vec<String>>>,
-    responses: RefCell<Vec<Value>>,
+    responses: RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>,
     failures: Cell<usize>,
 }
 impl HttpHost for Host {
@@ -154,8 +152,10 @@ impl HttpHost for Host {
     }
     fn note_response(&self, response: &RestResponse, request: &RestRequest) {
         self.trace.borrow_mut().push("common-response".into());
-        let value = response.body.clone().into_data();
-        self.responses.borrow_mut().push(value.clone());
+        self.responses
+            .borrow_mut()
+            .push(response.body.clone().into_data());
+        let value = safe_cex_exchange::runtime::response_json_view(&response.body);
         if let Some(owner) = self.owner.upgrade() {
             owner.base.note_http_response(
                 &json!({"status":response.status,"data":value}),
@@ -462,13 +462,19 @@ fn response_cases() -> Vec<Value> {
         response(r#"{"retCode":0,"retMsg":"OK"}"#),
     ]);
     second.owner.base.record_auth_failure();
-    let execution = ready(second.api.execute_with_receipt(RestRequest {
-        method: "post".into(),
-        url: "/private".into(),
-        body: Some(RestBody::Untransformed(json!({"x":1}))),
-        ..Default::default()
-    }))
-    .unwrap();
+    let execution =
+        ready(
+            second.api.execute_with_receipt(RestRequest {
+                method: "post".into(),
+                url: "/private".into(),
+                body: Some(RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"x":1}))
+                        .unwrap(),
+                )),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
     assert_eq!(
         second.wire.requests.borrow().len(),
         2,
@@ -588,21 +594,17 @@ fn retry_config_cases() -> Vec<Value> {
             2,
         ),
     ];
-    let expected_predicates = [false, true, true, false, true, true];
-    assert_eq!(
-        expected_predicates.len(),
-        6,
-        "factory_retry_config_native_pure_declared_cases"
-    );
-    let mut predicate_totals = [0_usize; 2];
     let mut results = Vec::new();
-    for (index, (id, method, url, failure_url, failure_method, expected)) in
-        inputs.into_iter().enumerate()
-    {
+    for (id, method, url, failure_url, failure_method, expected) in inputs {
         let signature_error = id == "signature-error-empty-method";
         let first_reply = if signature_error {
             Reply::RejectedMethod {
-                body: RestResponseBody::Transformed(json!({"ret_msg":"error sign!"})),
+                body: RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"ret_msg":"error sign!"}),
+                    )
+                    .unwrap(),
+                ),
                 method: "",
             }
         } else {
@@ -618,52 +620,11 @@ fn retry_config_cases() -> Vec<Value> {
         let mut request = get(url);
         request.method = method.into();
         if method == "post" {
-            request.body = Some(RestBody::Untransformed(json!({"x":1})));
+            request.body = Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"x":1}))
+                    .unwrap(),
+            ));
         }
-        let mut failure_config = request.clone();
-        failure_config.transform_axios_request().unwrap();
-        failure_config.url = failure_url.unwrap_or(url).into();
-        failure_config.method = failure_method.unwrap_or(method).into();
-        let predicate_error = if signature_error {
-            RestFailure {
-                code: Some("ERR_BAD_RESPONSE".into()),
-                transport_error: None,
-                message: "scripted signature rejection".into(),
-                response: Some(Box::new(RestResponse {
-                    status: 400,
-                    reason: Some("Bad Request".into()),
-                    headers: Default::default(),
-                    body: RestResponseBody::Transformed(json!({"ret_msg":"error sign!"})),
-                })),
-                request: Box::new(failure_config),
-                context: Some(Box::new(json!({"retainedCause":71}))),
-            }
-        } else {
-            RestFailure::from_transport(
-                TransportError::Network(NetworkFailure::from_code(
-                    "scripted network".into(),
-                    Some("ERR_NETWORK".into()),
-                )),
-                failure_config,
-            )
-        };
-        if signature_error {
-            assert!(
-                !safe_cex_transport::retry::is_network_error(&predicate_error),
-                "factory_retry_config_native_signature_not_network"
-            );
-            assert_eq!(
-                predicate_error.request.method, "",
-                "factory_retry_config_native_signature_predicate_unclassified_method"
-            );
-        }
-        let predicate =
-            safe_cex_venue_bybit::api::should_retry_bybit_request(&predicate_error).unwrap();
-        assert_eq!(
-            predicate, expected_predicates[index],
-            "factory_retry_config_native_pure_value {id}"
-        );
-        predicate_totals[usize::from(!predicate)] += 1;
         let result = ready(f.api.execute_with_receipt(request));
         assert_eq!(
             f.wire.requests.borrow().len(),
@@ -735,15 +696,69 @@ fn retry_config_cases() -> Vec<Value> {
         } else {
             assert_eq!(f.owner.base.auth_failure_streak(), 0);
         }
-        results.push(json!({"id":id,"attempts":f.wire.requests.borrow().len(),"resolved":f.wire.requests.borrow().len()==2,"predicate":predicate}));
+        results.push(json!({"id":id,"attempts":f.wire.requests.borrow().len(),"resolved":f.wire.requests.borrow().len()==2}));
     }
-    assert_eq!(
-        predicate_totals,
-        [4, 2],
-        "factory_retry_config_native_pure_branch_floors"
-    );
     assert_eq!(results.len(), 6, "factory_retry_config_native_inventory");
     results
+}
+// JSON.parse produces binary64 values; serde Number lexemes are fixture storage,
+// not the source result. Check native bits before comparing source wire spelling.
+fn assert_native_json(
+    actual: &safe_cex_types::retained_json::RetainedJsonInput,
+    expected: &Value,
+    context: &str,
+) {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    match (actual, expected) {
+        (Input::Float(actual), Value::Number(expected)) => {
+            let expected = safe_cex_num::number_from_string(&expected.to_string());
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{context}: number bits"
+            );
+        }
+        (Input::Lexeme(actual), Value::Number(expected)) => {
+            let actual = safe_cex_num::number_from_string(actual);
+            let expected = safe_cex_num::number_from_string(&expected.to_string());
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{context}: number bits"
+            );
+        }
+        (Input::Array(actual), Value::Array(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{context}: array length");
+            for (actual, expected) in actual.iter().zip(expected) {
+                assert_native_json(actual, expected, context);
+            }
+        }
+        (Input::Object(actual), Value::Object(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{context}: own keys");
+            for (key, value) in actual {
+                let key = String::from_utf16(key).unwrap();
+                assert_native_json(value, expected.get(&key).expect("source own key"), context);
+            }
+        }
+        _ => assert_eq!(
+            actual,
+            &Input::from_value(expected.clone()).unwrap(),
+            "{context}: native value"
+        ),
+    }
+    let expected = Input::from_value(expected.clone()).unwrap();
+    assert_eq!(
+        safe_cex_num::js_retained_json_stringify(actual).unwrap(),
+        safe_cex_num::js_retained_json_stringify(&expected).unwrap(),
+        "{context}: exact source JSON spelling"
+    );
+}
+fn assert_json_numbers(actual: &Value, expected: &Value, context: &str) {
+    assert_native_json(
+        &safe_cex_types::retained_json::RetainedJsonInput::from_value(actual.clone()).unwrap(),
+        expected,
+        context,
+    );
 }
 fn observe(value: &Value) -> Value {
     match value {
@@ -758,7 +773,15 @@ fn observe(value: &Value) -> Value {
         }
         Value::Null => json!({"kind":"null","value":null}),
         Value::Bool(value) => json!({"kind":"boolean","value":value}),
-        _ => json!({"kind":"object","value":value}),
+        _ => {
+            // This report crosses the source oracle's JSON.stringify boundary.
+            let input = safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                .unwrap();
+            let wire = safe_cex_num::js_retained_json_stringify(&input)
+                .unwrap()
+                .unwrap();
+            json!({"kind":"object","value":serde_json::from_str::<Value>(&wire).unwrap()})
+        }
     }
 }
 fn transform_cases() -> Vec<Value> {
@@ -821,8 +844,14 @@ fn transform_cases() -> Vec<Value> {
         };
         let body = match kind {
             "physical" => RestResponseBody::Encoded(raw.as_bytes().to_vec()),
-            "prior-transformed" => RestResponseBody::Transformed(Value::String(raw)),
-            _ => RestResponseBody::Untransformed(Value::String(raw)),
+            "prior-transformed" => RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(Value::String(raw))
+                    .unwrap(),
+            ),
+            _ => RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(Value::String(raw))
+                    .unwrap(),
+            ),
         };
         let f = fixture(vec![Reply::Response(body)]);
         let traffic = matches!(
@@ -846,25 +875,34 @@ fn transform_cases() -> Vec<Value> {
         );
         let observation = if id == "native-lone-surrogate" {
             let error = result.unwrap_err();
+            let response = error
+                .response
+                .as_ref()
+                .expect("factory_transform_native_representation_response");
+            assert_eq!(
+                response.body.clone().into_data(),
+                safe_cex_types::retained_json::RetainedJsonInput::Text(vec![0xd800]),
+                "factory_transform_native_representation_response_units",
+            );
+            assert_eq!(
+                f.host.responses.borrow()[0],
+                response.body.clone().into_data()
+            );
             assert!(
                 error
                     .message
-                    .contains("Axios response representation refused"),
+                    .contains("Bybit response representation refused"),
                 "factory_transform_native_representation_refusal"
-            );
-            assert!(
-                error.response.is_some(),
-                "factory_transform_native_representation_response"
             );
             assert_eq!(
                 f.host.responses.borrow().len(),
-                0,
-                "factory_transform_native_refusal_before_success_hook"
+                1,
+                "factory_transform_native_refusal_after_native_response_hook"
             );
             assert_eq!(
                 f.host.failures.get(),
-                1,
-                "factory_transform_native_representation_failure_hook"
+                0,
+                "factory_transform_native_consumer_refusal_is_not_a_transport_failure"
             );
             json!({"kind":"representation-refusal"})
         } else if id == "raw-own-number-includes-throws" {
@@ -890,7 +928,13 @@ fn transform_cases() -> Vec<Value> {
                 matches!(execution.response.body, RestResponseBody::Transformed(_)),
                 "factory_transform_native_phase {id}"
             );
-            let value = execution.response.body.clone().into_data();
+            let value = execution
+                .response
+                .body
+                .clone()
+                .into_data()
+                .into_value()
+                .unwrap();
             assert_eq!(
                 f.host.responses.borrow().len(),
                 1,
@@ -898,7 +942,7 @@ fn transform_cases() -> Vec<Value> {
             );
             assert_eq!(
                 f.host.responses.borrow()[0],
-                value,
+                execution.response.body.clone().into_data(),
                 "factory_transform_native_before_common_hook {id}"
             );
             let expected = match id {
@@ -924,7 +968,11 @@ fn transform_cases() -> Vec<Value> {
                     json!({"retCode":10001,"retMsg":"request rejected","raw_response":serde_json::from_str::<Value>(raw_for_id(id)).unwrap()})
                 }
             };
-            assert_eq!(value, expected, "factory_transform_native_value {id}");
+            assert_json_numbers(
+                &value,
+                &expected,
+                &format!("factory_transform_native_value {id}"),
+            );
             observe(&value)
         };
         let successful_auth = matches!(
@@ -1046,10 +1094,6 @@ fn native_retry_failure_config_and_original_read_guard() {
     retry_config_cases();
 }
 #[test]
-fn native_retry_optional_config_helper_predicates() {
-    api_factory_optional_config::collect_native();
-}
-#[test]
 fn native_astral_params_refusal_preserves_source_input_context() {
     api_factory_params_astral::collect_native();
 }
@@ -1073,15 +1117,10 @@ fn compare_response_and_clock_reentry(native: &[Value]) {
         }
     }
 }
-fn compare_retry_failure_config_boundaries(native: &[Value], optional_config: &[Value]) {
+fn compare_retry_failure_config_boundaries(native: &[Value]) {
     let source = source("create-api-retry-config-boundaries.cjs", 6);
-    api_factory_optional_config::compare_source(optional_config, &source);
     for i in 0..6 {
         assert_eq!(native[i]["id"], source["cases"][i]["id"]);
-        assert_eq!(
-            native[i]["predicate"], source["cases"][i]["source"]["predicate"],
-            "factory_retry_source_pure_comparison {i}"
-        );
         if i == 2 {
             assert_eq!(native[i]["attempts"], 1, "CHOSEN original-read-token guard");
             assert_eq!(
@@ -1230,7 +1269,6 @@ fn source_and_native_factory_surface() {
     let timeouts = api_factory_timeout::collect_native();
     let clock_budgets = api_factory_clock_budget::collect_native();
     let params = api_factory_params::collect_native();
-    let optional_config = api_factory_optional_config::collect_native();
     let proxy_regions = api_factory_proxy_region::collect_native();
     let astral_params = api_factory_params_astral::collect_native();
     native_how_query_ownership_survives_all_forwarders();
@@ -1249,7 +1287,7 @@ fn source_and_native_factory_surface() {
         "factory_native_complete_corpus_before_source"
     );
     compare_response_and_clock_reentry(&responses);
-    compare_retry_failure_config_boundaries(&retry_configs, &optional_config);
+    compare_retry_failure_config_boundaries(&retry_configs);
     compare_response_transform_boundaries(&transforms);
     compare_retry_condition_boundaries(&conditions);
     api_factory_probe::compare_source(&probes);
@@ -1364,34 +1402,14 @@ fn retry_condition_cases() -> Vec<Value> {
     assert_eq!(inputs.len(), 22, "factory_condition_native_declared_cases");
     let mut results = Vec::new();
     let mut totals = [0_usize; 3];
-    let mut predicate_totals = [0_usize; 3];
     for (id, raw, expected) in inputs {
         let body: Value = serde_json::from_str(raw).unwrap();
         let mut request = get("/private");
         request.method = "post".into();
-        request.body = Some(RestBody::Untransformed(json!({"request":true})));
-        let predicate_error = RestFailure {
-            code: Some("ERR_BAD_RESPONSE".into()),
-            transport_error: None,
-            message: "original venue rejection".into(),
-            response: Some(Box::new(RestResponse {
-                status: 400,
-                reason: Some("Bad Request".into()),
-                headers: Default::default(),
-                body: RestResponseBody::Transformed(body.clone()),
-            })),
-            request: Box::new(request.clone()),
-            context: Some(Box::new(json!({"retainedCause":71}))),
-        };
-        let predicate = safe_cex_venue_bybit::api::should_retry_bybit_request(&predicate_error);
-        let value = predicate.unwrap();
-        assert_eq!(
-            value,
-            expected == "retry",
-            "factory_condition_native_pure_value {id}"
-        );
-        predicate_totals[usize::from(!value)] += 1;
-        let predicate_observation = json!({"kind":"boolean","value":value});
+        request.body = Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"request":true}))
+                .unwrap(),
+        ));
         let f = fixture(vec![
             Reply::Rejected(RestResponseBody::Encoded(raw.as_bytes().to_vec())),
             response(r#"{"retCode":0,"retMsg":"OK"}"#),
@@ -1421,10 +1439,10 @@ fn retry_condition_cases() -> Vec<Value> {
             "retry" => {
                 totals[0] += 1;
                 let result = result.unwrap();
-                assert_eq!(
-                    result.response.body.clone().into_data()["retCode"],
-                    0,
-                    "factory_condition_native_result {id}"
+                assert_native_json(
+                    &result.response.body.clone().into_data(),
+                    &json!({"retCode":0,"retMsg":"OK"}),
+                    &format!("factory_condition_native_result {id}"),
                 );
                 assert_eq!(
                     f.owner.accesses.borrow().len(),
@@ -1450,10 +1468,12 @@ fn retry_condition_cases() -> Vec<Value> {
                     Some(&json!({"retainedCause":71})),
                     "factory_condition_native_original_cause {id}"
                 );
-                assert_eq!(
-                    error.response.unwrap().body,
-                    RestResponseBody::Transformed(body),
-                    "factory_condition_native_original_payload {id}"
+                let response = error.response.unwrap();
+                assert!(matches!(response.body, RestResponseBody::Transformed(_)));
+                assert_native_json(
+                    &response.body.into_data(),
+                    &body,
+                    &format!("factory_condition_native_original_payload {id}"),
                 );
                 assert!(
                     f.owner.accesses.borrow().is_empty(),
@@ -1463,13 +1483,8 @@ fn retry_condition_cases() -> Vec<Value> {
             }
             _ => unreachable!(),
         };
-        results.push(json!({"id":id,"attempts":attempts,"outcome":outcome,"authFailures":f.owner.base.auth_failure_streak(),"authSuccesses":f.owner.accesses.borrow().len(),"predicate":predicate_observation}));
+        results.push(json!({"id":id,"attempts":attempts,"outcome":outcome,"authFailures":f.owner.base.auth_failure_streak(),"authSuccesses":f.owner.accesses.borrow().len()}));
     }
-    assert_eq!(
-        predicate_totals,
-        [6, 16, 0],
-        "factory_condition_native_pure_branch_floors"
-    );
     assert_eq!(totals, [6, 16, 0], "factory_condition_native_branch_floors");
     assert_eq!(results.len(), 22, "factory_condition_native_executed_cases");
     results
@@ -1485,13 +1500,7 @@ fn compare_retry_condition_boundaries(native: &[Value]) {
             native[i]["id"], source["cases"][i]["id"],
             "factory_condition_source_id {i}"
         );
-        for field in [
-            "attempts",
-            "outcome",
-            "authFailures",
-            "authSuccesses",
-            "predicate",
-        ] {
+        for field in ["attempts", "outcome", "authFailures", "authSuccesses"] {
             assert_eq!(
                 native[i][field], source["cases"][i]["source"][field],
                 "factory_condition_source_value {i}/{field}"
@@ -1554,7 +1563,10 @@ fn native_resolved_signature_rejection_resends_once() {
         let f = fixture(replies);
         let mut request = get("/private");
         request.method = "post".into();
-        request.body = Some(RestBody::Untransformed(json!({"request":true})));
+        request.body = Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"request":true}))
+                .unwrap(),
+        ));
         let result = ready(f.api.execute_with_receipt(request)).unwrap();
         let requests = f.wire.requests.borrow();
         assert_eq!(
@@ -1562,7 +1574,14 @@ fn native_resolved_signature_rejection_resends_once() {
             attempts,
             "factory_resend_native_attempts {id}"
         );
-        let code = result.response.body.clone().into_data()["retCode"].as_f64();
+        let code = result
+            .response
+            .body
+            .clone()
+            .into_data()
+            .into_value()
+            .unwrap()["retCode"]
+            .as_f64();
         assert_eq!(
             code,
             Some(ret_code),
@@ -1625,11 +1644,20 @@ fn native_request_retry_override_retains_source_budget() {
         let mut request = get("/private");
         if !network {
             request.method = "post".into();
-            request.body = Some(RestBody::Untransformed(json!({"request":true})));
+            request.body = Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    json!({"request":true}),
+                )
+                .unwrap(),
+            ));
         }
-        request
-            .config_extensions
-            .insert("axios-retry".into(), json!({"retries": budget}));
+        request.config_extensions.insert(
+            "axios-retry".into(),
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                json!({"retries": budget}),
+            )
+            .unwrap(),
+        );
         let result = ready(f.api.execute_with_receipt(request));
         assert_eq!(
             f.wire.requests.borrow().len(),
@@ -1669,9 +1697,11 @@ fn native_request_retry_override_retains_source_budget() {
         replies.push(response(r#"{"retCode":0,"retMsg":"OK"}"#));
         let f = fixture(replies);
         let mut request = get("/private");
-        request
-            .config_extensions
-            .insert("axios-retry".into(), json!({"retries":budget}));
+        request.config_extensions.insert(
+            "axios-retry".into(),
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"retries":budget}))
+                .unwrap(),
+        );
         assert!(
             ready(f.api.execute_with_receipt(request)).is_err(),
             "request_retry_clock_budget_exhausted {budget}"

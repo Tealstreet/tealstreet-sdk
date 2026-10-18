@@ -2585,6 +2585,311 @@
         "chaserAttempts": 1,
         "chaserMaxAttempts": 1
       }
+    },
+    "nativeObservation": {
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"id\":decoded.id,\"amountBits\":decoded.amount.to_bits().to_string(),\"priceBits\":decoded.price.value().map(|value| value.to_bits().to_string()),\"priceAbsent\":decoded.price.is_absent(),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"reduceOnlyAbsent\":decoded.reduce_only.is_absent(),\"reduceOnlyUndefined\":decoded.reduce_only.is_undefined(),\"reduceOnly\":decoded.reduce_only.value().copied(),\"statusOpen\":matches!(decoded.status,crate::ModelField::Value(crate::OrderStatus::Open))}), Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "nativeFields": [
+        "id",
+        "amountBits",
+        "priceBits",
+        "priceAbsent",
+        "typeAbsent",
+        "typeLimit",
+        "sideBuy",
+        "statusOpen",
+        "reduceOnlyAbsent",
+        "reduceOnlyUndefined",
+        "reduceOnly"
+      ],
+      "cases": [
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "left-order",
+              "symbol": "BTCUSD",
+              "amount": 7,
+              "filled": 2,
+              "remaining": 5,
+              "reduceOnly": false,
+              "lastUpdate": 1700000000000
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
+          }
+        },
+        {
+          "input": {
+            "id": "right-order",
+            "symbol": "BTCUSD",
+            "amount": 13,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "price": 31.25,
+            "type": "limit",
+            "side": "buy",
+            "status": "open",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "right-order",
+            "priceAbsent": false,
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "statusOpen": true,
+            "amountBits": "4623507967449235456",
+            "priceBits": "4629489310704336896",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "right-order",
+              "symbol": "BTCUSD",
+              "amount": 13,
+              "filled": 2,
+              "remaining": 5,
+              "reduceOnly": false,
+              "price": 31.25,
+              "type": "limit",
+              "side": "buy",
+              "status": "open",
+              "lastUpdate": 1700000000000
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "right-order",
+            "priceAbsent": false,
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "statusOpen": true,
+            "amountBits": "4623507967449235456",
+            "priceBits": "4629489310704336896",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "type": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "side": "unknown",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "price": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": null
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": true,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": true
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": "true",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": 1,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::OrderBook": {
@@ -2658,6 +2963,147 @@
       "positionSize": 1,
       "orderLineText": "sample",
       "fee": 1
+    },
+    "nativeObservation": {
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"orderPnlBits\":decoded.order_pnl.to_bits().to_string(),\"positionSizeBits\":decoded.position_size.to_bits().to_string(),\"sideAbsent\":decoded.order_line_pos_side.is_absent(),\"sideShort\":matches!(decoded.order_line_pos_side,crate::ModelField::Value(crate::PositionSide::Short)),\"feeBits\":decoded.fee.map(|value| value.to_bits().to_string()),\"text\":decoded.order_line_text}), Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "nativeFields": [
+        "orderPnlBits",
+        "positionSizeBits",
+        "sideAbsent",
+        "sideShort",
+        "feeBits",
+        "text"
+      ],
+      "cases": [
+        {
+          "input": {
+            "orderPnl": -3,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": 13
+          },
+          "output": {
+            "ok": true,
+            "sideAbsent": true,
+            "sideShort": false,
+            "text": null,
+            "orderPnlBits": "13837309855095848960",
+            "positionSizeBits": "4623507967449235456",
+            "feeBits": null
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "orderPnl": -3,
+              "totalRealizedPnl": 7,
+              "rollingUnrealizedPnl": 11,
+              "positionSize": 13
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "sideAbsent": true,
+            "sideShort": false,
+            "text": null,
+            "orderPnlBits": "13837309855095848960",
+            "positionSizeBits": "4623507967449235456",
+            "feeBits": null
+          }
+        },
+        {
+          "input": {
+            "orderPnl": 29,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": -17,
+            "orderLinePosSide": "short",
+            "fee": 0.25,
+            "orderLineText": "right-risk"
+          },
+          "output": {
+            "ok": true,
+            "sideAbsent": false,
+            "sideShort": true,
+            "text": "right-risk",
+            "orderPnlBits": "4628855992006737920",
+            "positionSizeBits": "13848850329140985856",
+            "feeBits": "4598175219545276416"
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "orderPnl": 29,
+              "totalRealizedPnl": 7,
+              "rollingUnrealizedPnl": 11,
+              "positionSize": -17,
+              "orderLinePosSide": "short",
+              "fee": 0.25,
+              "orderLineText": "right-risk"
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "sideAbsent": false,
+            "sideShort": true,
+            "text": "right-risk",
+            "orderPnlBits": "4628855992006737920",
+            "positionSizeBits": "13848850329140985856",
+            "feeBits": "4598175219545276416"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "orderPnl": -3,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": 13,
+            "orderLinePosSide": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "orderPnl": -3,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": 13,
+            "orderLinePosSide": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "orderPnl": -3,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": 13,
+            "fee": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::OrderSide": {
@@ -2768,6 +3214,185 @@
         "unrealizedPnlNative": 1
       },
       "lastUpdate": 1
+    },
+    "nativeObservation": {
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"id\":decoded.id,\"contractsBits\":decoded.contracts.to_bits().to_string(),\"sideAbsent\":decoded.side.is_absent(),\"sideLong\":matches!(decoded.side,crate::ModelField::Value(crate::PositionSide::Long)),\"marginAbsent\":decoded.margin_type.is_absent(),\"marginCross\":matches!(decoded.margin_type,crate::ModelField::Value(crate::MarginType::Cross)),\"realizedPnlBits\":decoded.realized_pnl.value().map(|value| value.to_bits().to_string()),\"realizedPnlAbsent\":decoded.realized_pnl.is_absent()}), Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "nativeFields": [
+        "id",
+        "contractsBits",
+        "sideAbsent",
+        "sideLong",
+        "marginAbsent",
+        "marginCross",
+        "realizedPnlBits",
+        "realizedPnlAbsent"
+      ],
+      "cases": [
+        {
+          "input": {
+            "id": "left-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 2,
+            "liquidationPrice": 9
+          },
+          "output": {
+            "ok": true,
+            "id": "left-position",
+            "sideAbsent": true,
+            "sideLong": false,
+            "marginAbsent": true,
+            "marginCross": false,
+            "realizedPnlAbsent": true,
+            "contractsBits": "4611686018427387904",
+            "realizedPnlBits": null
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "left-position",
+              "symbol": "BTCUSD",
+              "entryPrice": 11,
+              "notional": 17,
+              "leverage": 3,
+              "unrealizedPnl": -5,
+              "contracts": 2,
+              "liquidationPrice": 9
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "left-position",
+            "sideAbsent": true,
+            "sideLong": false,
+            "marginAbsent": true,
+            "marginCross": false,
+            "realizedPnlAbsent": true,
+            "contractsBits": "4611686018427387904",
+            "realizedPnlBits": null
+          }
+        },
+        {
+          "input": {
+            "id": "right-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 19,
+            "liquidationPrice": 9,
+            "side": "long",
+            "marginType": "cross",
+            "realizedPnl": -7.5
+          },
+          "output": {
+            "ok": true,
+            "id": "right-position",
+            "sideAbsent": false,
+            "sideLong": true,
+            "marginAbsent": false,
+            "marginCross": true,
+            "realizedPnlAbsent": false,
+            "contractsBits": "4626041242239631360",
+            "realizedPnlBits": "13843502304583483392"
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "right-position",
+              "symbol": "BTCUSD",
+              "entryPrice": 11,
+              "notional": 17,
+              "leverage": 3,
+              "unrealizedPnl": -5,
+              "contracts": 19,
+              "liquidationPrice": 9,
+              "side": "long",
+              "marginType": "cross",
+              "realizedPnl": -7.5
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "right-position",
+            "sideAbsent": false,
+            "sideLong": true,
+            "marginAbsent": false,
+            "marginCross": true,
+            "realizedPnlAbsent": false,
+            "contractsBits": "4626041242239631360",
+            "realizedPnlBits": "13843502304583483392"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 2,
+            "liquidationPrice": 9,
+            "side": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 2,
+            "liquidationPrice": 9,
+            "marginType": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 2,
+            "liquidationPrice": 9,
+            "realizedPnl": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::PositionExtra": {
@@ -23023,7 +23648,7 @@
     },
     "category": "decoder",
     "evidence": "Calls the actual raw-node parser and observes RetainedJsonInput variants/lexemes before projection. Object fixtures respect its validated-RawValue caller precondition; no arbitrary trailing-text rejection claim. Independently authored finite native-output expectations; compilation and discriminating controls are pending.",
-    "call": "{fn project(native:&super::RetainedJsonInput)->serde_json::Value {\nmatch native {\nsuper::RetainedJsonInput::Null=>serde_json::json!({\"kind\":\"null\"}),\nsuper::RetainedJsonInput::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nsuper::RetainedJsonInput::Text(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nsuper::RetainedJsonInput::Lexeme(value)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":value}),\nsuper::RetainedJsonInput::Float(value)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),\nsuper::RetainedJsonInput::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nsuper::RetainedJsonInput::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nmatch $type($value[\"raw\"].as_str().expect(\"authored raw JSON\"),$value[\"depth\"].as_u64().expect(\"authored depth\") as usize){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
+    "call": "{fn project(native:&super::RetainedJsonInput)->serde_json::Value {\nmatch native {\nsuper::RetainedJsonInput::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),super::RetainedJsonInput::Null=>serde_json::json!({\"kind\":\"null\"}),\nsuper::RetainedJsonInput::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nsuper::RetainedJsonInput::Text(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nsuper::RetainedJsonInput::Lexeme(value)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":value}),\nsuper::RetainedJsonInput::Float(value)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),\nsuper::RetainedJsonInput::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nsuper::RetainedJsonInput::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nmatch $type($value[\"raw\"].as_str().expect(\"authored raw JSON\"),$value[\"depth\"].as_u64().expect(\"authored depth\") as usize){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
     "cases": [
       {
         "input": {
@@ -23075,14 +23700,18 @@
             "kind": "object",
             "entries": [
               [
-                "x",
+                [
+                  120
+                ],
                 {
                   "kind": "lexeme",
                   "value": "23"
                 }
               ],
               [
-                "a",
+                [
+                  97
+                ],
                 {
                   "kind": "bool",
                   "value": true
@@ -23103,10 +23732,45 @@
             "kind": "object",
             "entries": [
               [
-                "$serde_json::private::Number",
+                [
+                  36,
+                  115,
+                  101,
+                  114,
+                  100,
+                  101,
+                  95,
+                  106,
+                  115,
+                  111,
+                  110,
+                  58,
+                  58,
+                  112,
+                  114,
+                  105,
+                  118,
+                  97,
+                  116,
+                  101,
+                  58,
+                  58,
+                  78,
+                  117,
+                  109,
+                  98,
+                  101,
+                  114
+                ],
                 {
                   "kind": "text",
-                  "value": "1e400"
+                  "value": [
+                    49,
+                    101,
+                    52,
+                    48,
+                    48
+                  ]
                 }
               ]
             ]
@@ -23129,7 +23793,9 @@
               },
               {
                 "kind": "text",
-                "value": "x"
+                "value": [
+                  120
+                ]
               },
               {
                 "kind": "null"
@@ -23242,7 +23908,7 @@
     },
     "category": "decoder",
     "evidence": "Consumes an explicitly authored native Value and observes capture variants without calling into_value or the reverse parser. Independently authored finite native-output expectations; compilation and discriminating controls are pending.",
-    "call": "{fn project(native:&super::RetainedJsonInput)->serde_json::Value {\nmatch native {\nsuper::RetainedJsonInput::Null=>serde_json::json!({\"kind\":\"null\"}),\nsuper::RetainedJsonInput::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nsuper::RetainedJsonInput::Text(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nsuper::RetainedJsonInput::Lexeme(value)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":value}),\nsuper::RetainedJsonInput::Float(value)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),\nsuper::RetainedJsonInput::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nsuper::RetainedJsonInput::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nlet input:serde_json::Value=serde_json::from_str($value[\"raw\"].as_str().expect(\"authored Value JSON\")).expect(\"valid fixture JSON\");match $type(input,$value[\"depth\"].as_u64().expect(\"authored depth\") as usize){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
+    "call": "{fn project(native:&super::RetainedJsonInput)->serde_json::Value {\nmatch native {\nsuper::RetainedJsonInput::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),super::RetainedJsonInput::Null=>serde_json::json!({\"kind\":\"null\"}),\nsuper::RetainedJsonInput::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nsuper::RetainedJsonInput::Text(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nsuper::RetainedJsonInput::Lexeme(value)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":value}),\nsuper::RetainedJsonInput::Float(value)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),\nsuper::RetainedJsonInput::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nsuper::RetainedJsonInput::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nlet input:serde_json::Value=serde_json::from_str($value[\"raw\"].as_str().expect(\"authored Value JSON\")).expect(\"valid fixture JSON\");match $type(input,$value[\"depth\"].as_u64().expect(\"authored depth\") as usize){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
     "cases": [
       {
         "input": {
@@ -23255,7 +23921,9 @@
             "kind": "object",
             "entries": [
               [
-                "z",
+                [
+                  122
+                ],
                 {
                   "kind": "array",
                   "elements": [
@@ -23271,7 +23939,9 @@
                 }
               ],
               [
-                "a",
+                [
+                  97
+                ],
                 {
                   "kind": "bool",
                   "value": true
@@ -23290,7 +23960,13 @@
           "ok": true,
           "value": {
             "kind": "text",
-            "value": "1e400"
+            "value": [
+              49,
+              101,
+              52,
+              48,
+              48
+            ]
           }
         }
       },
@@ -23793,7 +24469,7 @@
     },
     "category": "decoder",
     "evidence": "Constructs actual retained enum variants independently of capture and consumes the production projection, observing every authored member. General valid JSON in a public Lexeme is intentionally observed; no numeric-only validation is invented. Independently authored finite native-output expectations; compilation and discriminating controls are pending.",
-    "call": "{fn project(native:&serde_json::Value)->serde_json::Value {\nmatch native {\nserde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),\nserde_json::Value::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nserde_json::Value::String(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nserde_json::Value::Number(value)=>{let bits=value.to_string().parse::<f64>().expect(\"native numeric spelling\").to_bits();serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",bits),\"i64\":value.as_i64().map(|value|value.to_string()),\"u64\":value.as_u64().map(|value|value.to_string())})},\nserde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nserde_json::Value::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nlet input=match $value.as_str().expect(\"authored retained variant\") {\n\"array\"=>super::RetainedJsonInput::Array(vec![super::RetainedJsonInput::Lexeme(\"11\".into()),super::RetainedJsonInput::Lexeme(\"23\".into())]),\n\"object\"=>super::RetainedJsonInput::Object(vec![(\"first\".into(),super::RetainedJsonInput::Lexeme(\"11\".into())),(\"second\".into(),super::RetainedJsonInput::Lexeme(\"23\".into()))]),\n\"text\"=>super::RetainedJsonInput::Text(\"unchanged\".into()),\n\"bool\"=>super::RetainedJsonInput::Bool(true),\n\"null\"=>super::RetainedJsonInput::Null,\n\"positive-infinity\"=>super::RetainedJsonInput::Float(f64::INFINITY),\n\"negative-infinity\"=>super::RetainedJsonInput::Float(f64::NEG_INFINITY),\n\"nan\"=>super::RetainedJsonInput::Float(f64::NAN),\n\"bad-json-lexeme\"=>super::RetainedJsonInput::Lexeme(\"not JSON\".into()),\n\"boolean-json-lexeme\"=>super::RetainedJsonInput::Lexeme(\"true\".into()),\n_=>panic!(\"unknown authored retained variant\"),\n};match $type(input){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
+    "call": "{fn project(native:&serde_json::Value)->serde_json::Value {\nmatch native {\nserde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),\nserde_json::Value::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nserde_json::Value::String(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nserde_json::Value::Number(value)=>{let bits=value.to_string().parse::<f64>().expect(\"native numeric spelling\").to_bits();serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",bits),\"i64\":value.as_i64().map(|value|value.to_string()),\"u64\":value.as_u64().map(|value|value.to_string())})},\nserde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nserde_json::Value::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nlet input=match $value.as_str().expect(\"authored retained variant\") {\n\"array\"=>super::RetainedJsonInput::Array(vec![super::RetainedJsonInput::Lexeme(\"11\".into()),super::RetainedJsonInput::Lexeme(\"23\".into())]),\n\"object\"=>super::RetainedJsonInput::Object(vec![(\"first\".encode_utf16().collect(),super::RetainedJsonInput::Lexeme(\"11\".into())),(\"second\".encode_utf16().collect(),super::RetainedJsonInput::Lexeme(\"23\".into()))]),\n\"text\"=>super::RetainedJsonInput::Text(\"unchanged\".encode_utf16().collect()),\n\"bool\"=>super::RetainedJsonInput::Bool(true),\n\"null\"=>super::RetainedJsonInput::Null,\n\"positive-infinity\"=>super::RetainedJsonInput::Float(f64::INFINITY),\n\"negative-infinity\"=>super::RetainedJsonInput::Float(f64::NEG_INFINITY),\n\"nan\"=>super::RetainedJsonInput::Float(f64::NAN),\n\"bad-json-lexeme\"=>super::RetainedJsonInput::Lexeme(\"not JSON\".into()),\n\"boolean-json-lexeme\"=>super::RetainedJsonInput::Lexeme(\"true\".into()),\n_=>panic!(\"unknown authored retained variant\"),\n};match $type(input){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
     "cases": [
       {
         "input": "array",
@@ -24152,7 +24828,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_unit; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_unit::<serde_json::Error>(helper) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_unit::<serde_json::Error>(helper) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": null,
@@ -24249,7 +24925,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_bool; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_bool::<serde_json::Error>(helper,$value.as_bool().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_bool::<serde_json::Error>(helper,$value.as_bool().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": false,
@@ -24362,7 +25038,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_str; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_str::<serde_json::Error>(helper,$value.as_str().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_str::<serde_json::Error>(helper,$value.as_str().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "11",
@@ -24370,7 +25046,10 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "11"
+                "value": [
+                  49,
+                  49
+                ]
               }
             }
           },
@@ -24380,7 +25059,16 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "{\"x\":23}"
+                "value": [
+                  123,
+                  34,
+                  120,
+                  34,
+                  58,
+                  50,
+                  51,
+                  125
+                ]
               }
             }
           }
@@ -24472,7 +25160,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_string; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_string::<serde_json::Error>(helper,$value.as_str().unwrap().to_owned()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_string::<serde_json::Error>(helper,$value.as_str().unwrap().to_owned()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "11",
@@ -24480,7 +25168,10 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "11"
+                "value": [
+                  49,
+                  49
+                ]
               }
             }
           },
@@ -24490,7 +25181,16 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "{\"x\":23}"
+                "value": [
+                  123,
+                  34,
+                  120,
+                  34,
+                  58,
+                  50,
+                  51,
+                  125
+                ]
               }
             }
           }
@@ -24579,7 +25279,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_i64; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_i64::<serde_json::Error>(helper,$value.as_i64().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_i64::<serde_json::Error>(helper,$value.as_i64().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": -11,
@@ -24686,7 +25386,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_u64; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_u64::<serde_json::Error>(helper,$value.as_str().unwrap().parse::<u64>().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_u64::<serde_json::Error>(helper,$value.as_str().unwrap().parse::<u64>().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "11",
@@ -24793,7 +25493,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_f64; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_f64::<serde_json::Error>(helper,$value.as_str().unwrap().parse::<f64>().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_f64::<serde_json::Error>(helper,$value.as_str().unwrap().parse::<f64>().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "-0",
@@ -24919,7 +25619,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_seq; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_seq(helper,serde::de::value::SeqDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().clone().into_iter())) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_seq(helper,serde::de::value::SeqDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().clone().into_iter())) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": [
@@ -24960,7 +25660,10 @@
                   },
                   {
                     "kind": "text",
-                    "value": "11"
+                    "value": [
+                      49,
+                      49
+                    ]
                   },
                   {
                     "kind": "null"
@@ -25073,7 +25776,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_map; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].clone())))) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].clone())))) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": [
@@ -25092,14 +25795,18 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "z",
+                    [
+                      122
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "11"
                     }
                   ],
                   [
-                    "a",
+                    [
+                      97
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "23"
@@ -25126,14 +25833,27 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "text",
+                    [
+                      116,
+                      101,
+                      120,
+                      116
+                    ],
                     {
                       "kind": "text",
-                      "value": "11"
+                      "value": [
+                        49,
+                        49
+                      ]
                     }
                   ],
                   [
-                    "bool",
+                    [
+                      98,
+                      111,
+                      111,
+                      108
+                    ],
                     {
                       "kind": "bool",
                       "value": false
@@ -25397,7 +26117,7 @@
         },
         "input": "observed",
         "reason": "Direct actual capture-token MapAccess; rejects missing/wrong/extra token entries.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::Capture; let entries=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].as_str().unwrap().to_owned())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::Capture; let entries=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].as_str().unwrap().to_owned())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": [
@@ -25427,14 +26147,18 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "z",
+                    [
+                      122
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "11"
                     }
                   ],
                   [
-                    "a",
+                    [
+                      97
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "23"
@@ -25580,7 +26304,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Capture newtype visitor receives Value then calls deserialize_any(BufferVisitor); unlike RetainedJsonInput::from_value this reaches BufferVisitor.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::Capture; serde::de::Visitor::visit_newtype_struct(helper,$value.clone()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::Capture; serde::de::Visitor::visit_newtype_struct(helper,$value.clone()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "11",
@@ -25588,7 +26312,10 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "11"
+                "value": [
+                  49,
+                  49
+                ]
               }
             }
           },
@@ -25615,7 +26342,9 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "z",
+                    [
+                      122
+                    ],
                     {
                       "kind": "array",
                       "items": [
@@ -25635,266 +26364,6 @@
             }
           }
         ]
-      }
-    ]
-  },
-  "safe_cex_types::retained_json::ObjectVisitor": {
-    "shape": "observed",
-    "category": "decoder",
-    "evidence": "Actual private compiler-owned decoder helper; direct UFCS execution on this owner with independently authored native outputs. Bounded cases, not universal generic proof.",
-    "entrypoints": [
-      {
-        "api": {
-          "kind": "trait",
-          "trait": "serde_core::de::Visitor",
-          "name": "visit_map",
-          "signature": {
-            "inputs": [
-              [
-                "self",
-                {
-                  "generic": "Self"
-                }
-              ],
-              [
-                "map",
-                {
-                  "generic": "A"
-                }
-              ]
-            ],
-            "output": {
-              "resolved_path": {
-                "path": "core::result::Result",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "qualified_path": {
-                            "name": "Value",
-                            "args": null,
-                            "self_type": {
-                              "generic": "Self"
-                            },
-                            "trait": {
-                              "path": "",
-                              "args": null
-                            }
-                          }
-                        }
-                      },
-                      {
-                        "type": {
-                          "qualified_path": {
-                            "name": "Error",
-                            "args": null,
-                            "self_type": {
-                              "generic": "A"
-                            },
-                            "trait": {
-                              "path": "",
-                              "args": null
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
-                  }
-                }
-              }
-            },
-            "is_c_variadic": false
-          },
-          "generics": {
-            "params": [
-              {
-                "name": "A",
-                "kind": {
-                  "type": {
-                    "bounds": [
-                      {
-                        "trait_bound": {
-                          "trait": {
-                            "path": "serde_core::de::MapAccess",
-                            "args": {
-                              "angle_bracketed": {
-                                "args": [
-                                  {
-                                    "lifetime": "'de"
-                                  }
-                                ],
-                                "constraints": []
-                              }
-                            }
-                          },
-                          "generic_params": [],
-                          "modifier": "none"
-                        }
-                      }
-                    ],
-                    "default": null,
-                    "is_synthetic": false
-                  }
-                }
-              }
-            ],
-            "where_predicates": []
-          }
-        },
-        "input": "observed",
-        "reason": "Direct actual raw-entry visitor; RawValue deserializers preserve raw numeric spelling and duplicate replacement.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::ObjectVisitor(0); let owned: Vec<(String,Box<serde_json::value::RawValue>)>=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),serde_json::value::RawValue::from_string(p[1].as_str().unwrap().to_owned()).unwrap())).collect(); let entries=owned.iter().map(|(k,v)|(k.as_str(),v.as_ref())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&super::RetainedJsonInput::Object(decoded))}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
-        "cases": [
-          {
-            "input": [
-              [
-                "z",
-                "-0.0"
-              ],
-              [
-                "a",
-                "1e400"
-              ]
-            ],
-            "output": {
-              "ok": true,
-              "native": {
-                "kind": "object",
-                "entries": [
-                  [
-                    "z",
-                    {
-                      "kind": "lexeme",
-                      "value": "-0.0"
-                    }
-                  ],
-                  [
-                    "a",
-                    {
-                      "kind": "lexeme",
-                      "value": "1e400"
-                    }
-                  ]
-                ]
-              }
-            }
-          },
-          {
-            "input": [
-              [
-                "a",
-                "11"
-              ],
-              [
-                "b",
-                "23"
-              ],
-              [
-                "a",
-                "37"
-              ]
-            ],
-            "output": {
-              "ok": true,
-              "native": {
-                "kind": "object",
-                "entries": [
-                  [
-                    "a",
-                    {
-                      "kind": "lexeme",
-                      "value": "37"
-                    }
-                  ],
-                  [
-                    "b",
-                    {
-                      "kind": "lexeme",
-                      "value": "23"
-                    }
-                  ]
-                ]
-              }
-            }
-          }
-        ]
-      }
-    ],
-    "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::ObjectVisitor(0); let owned: Vec<(String,Box<serde_json::value::RawValue>)>=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),serde_json::value::RawValue::from_string(p[1].as_str().unwrap().to_owned()).unwrap())).collect(); let entries=owned.iter().map(|(k,v)|(k.as_str(),v.as_ref())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&super::RetainedJsonInput::Object(decoded))}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
-    "cases": [
-      {
-        "input": [
-          [
-            "z",
-            "-0.0"
-          ],
-          [
-            "a",
-            "1e400"
-          ]
-        ],
-        "output": {
-          "ok": true,
-          "native": {
-            "kind": "object",
-            "entries": [
-              [
-                "z",
-                {
-                  "kind": "lexeme",
-                  "value": "-0.0"
-                }
-              ],
-              [
-                "a",
-                {
-                  "kind": "lexeme",
-                  "value": "1e400"
-                }
-              ]
-            ]
-          }
-        }
-      },
-      {
-        "input": [
-          [
-            "a",
-            "11"
-          ],
-          [
-            "b",
-            "23"
-          ],
-          [
-            "a",
-            "37"
-          ]
-        ],
-        "output": {
-          "ok": true,
-          "native": {
-            "kind": "object",
-            "entries": [
-              [
-                "a",
-                {
-                  "kind": "lexeme",
-                  "value": "37"
-                }
-              ],
-              [
-                "b",
-                {
-                  "kind": "lexeme",
-                  "value": "23"
-                }
-              ]
-            ]
-          }
-        }
       }
     ]
   },
@@ -26838,6 +27307,169 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "parse_json",
+          "signature": {
+            "inputs": [
+              [
+                "text",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "primitive": "u16"
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::error::Error",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the canonical UTF-16 parser before typed projection; independently observe every key, both rows and native binary64 bits.",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()) { Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "cases": [
+          {
+            "input": "[-0,1e400,\"\\ud800\"]",
+            "output": {
+              "ok": true,
+              "kind": "array",
+              "native": {
+                "kind": "array",
+                "items": [
+                  {
+                    "kind": "float",
+                    "bits": "8000000000000000"
+                  },
+                  {
+                    "kind": "float",
+                    "bits": "7ff0000000000000"
+                  },
+                  {
+                    "kind": "text",
+                    "value": [
+                      55296
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "input": "{\"label\":\"tp \\ud800\",\"rows\":[1,2],\"\\udfff\":\"other\"}",
+            "output": {
+              "ok": true,
+              "kind": "object",
+              "native": {
+                "kind": "object",
+                "entries": [
+                  [
+                    [
+                      108,
+                      97,
+                      98,
+                      101,
+                      108
+                    ],
+                    {
+                      "kind": "text",
+                      "value": [
+                        116,
+                        112,
+                        32,
+                        55296
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      114,
+                      111,
+                      119,
+                      115
+                    ],
+                    {
+                      "kind": "array",
+                      "items": [
+                        {
+                          "kind": "float",
+                          "bits": "3ff0000000000000"
+                        },
+                        {
+                          "kind": "float",
+                          "bits": "4000000000000000"
+                        }
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      57343
+                    ],
+                    {
+                      "kind": "text",
+                      "value": [
+                        111,
+                        116,
+                        104,
+                        101,
+                        114
+                      ]
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          {
+            "input": "[1,]",
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": "{\"a\":1,\"a\":}",
+            "output": {
+              "ok": false
+            }
+          }
+        ],
+        "nativeFields": [
+          "kind",
+          "native"
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "from_value",
           "signature": {
             "inputs": [
@@ -26881,7 +27513,7 @@
         },
         "input": "observed",
         "reason": "Execute actual Value-to-retained constructor; inspect native variants.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type::from_value($value.clone()) { Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type::from_value($value.clone()) { Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": null,
@@ -26910,7 +27542,10 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "11"
+                "value": [
+                  49,
+                  49
+                ]
               },
               "kind": "text"
             }
@@ -26960,14 +27595,18 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "z",
+                    [
+                      122
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "11"
                     }
                   ],
                   [
-                    "a",
+                    [
+                      97
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "23"
@@ -27030,7 +27669,7 @@
         },
         "input": "observed",
         "reason": "Construct actual native RetainedJsonInput values directly, then execute projection. No decode/reencode roundtrip.",
-        "call": "{ let decoded:$type=match $value[\"kind\"].as_str().unwrap() { \"lexeme\"=>$type::Lexeme($value[\"text\"].as_str().unwrap().to_owned()),\"array\"=>$type::Array(vec![$type::Lexeme($value[\"first\"].as_str().unwrap().to_owned()),$type::Text($value[\"second\"].as_str().unwrap().to_owned())]),_=>panic!(\"unclassified fixture\") };match decoded.into_value(){Ok(native)=>{let kind=match &native {serde_json::Value::Null=>\"null\",serde_json::Value::Bool(_)=>\"bool\",serde_json::Value::Number(_)=>\"number\",serde_json::Value::String(_)=>\"string\",serde_json::Value::Array(_)=>\"array\",serde_json::Value::Object(_)=>\"object\"};serde_json::json!({\"ok\":true,\"kind\":kind,\"value\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+        "call": "{ let decoded:$type=match $value[\"kind\"].as_str().unwrap() { \"lexeme\"=>$type::Lexeme($value[\"text\"].as_str().unwrap().to_owned()),\"array\"=>$type::Array(vec![$type::Lexeme($value[\"first\"].as_str().unwrap().to_owned()),$type::Text($value[\"second\"].as_str().unwrap().encode_utf16().collect())]),_=>panic!(\"unclassified fixture\") };match decoded.into_value(){Ok(native)=>{let kind=match &native {serde_json::Value::Null=>\"null\",serde_json::Value::Bool(_)=>\"bool\",serde_json::Value::Number(_)=>\"number\",serde_json::Value::String(_)=>\"string\",serde_json::Value::Array(_)=>\"array\",serde_json::Value::Object(_)=>\"object\"};serde_json::json!({\"ok\":true,\"kind\":kind,\"value\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
         "cases": [
           {
             "input": {
@@ -27066,7 +27705,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match serde_json::from_value::<$type>($value.clone()) {Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match serde_json::from_value::<$type>($value.clone()) {Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
       "cases": [
         {
           "input": null,
@@ -27095,7 +27734,10 @@
             "ok": true,
             "native": {
               "kind": "text",
-              "value": "11"
+              "value": [
+                49,
+                49
+              ]
             },
             "kind": "text"
           }
@@ -27145,14 +27787,18 @@
               "kind": "object",
               "entries": [
                 [
-                  "z",
+                  [
+                    122
+                  ],
                   {
                     "kind": "lexeme",
                     "value": "11"
                   }
                 ],
                 [
-                  "a",
+                  [
+                    97
+                  ],
                   {
                     "kind": "lexeme",
                     "value": "23"
@@ -46083,5 +46729,2844 @@
         }
       }
     ]
+  },
+  "safe_cex_types::retained_json::parser::parse": {
+    "api": {
+      "kind": "function",
+      "name": "parse",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "lexical",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "initial_depth",
+            {
+              "primitive": "usize"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Canonical iterative JSON grammar shared by native binary64 parsing and lexical typed capture; directly observe UTF-16 keys/text, both rows, signed zero, overflow, invalid syntax and starting-depth refusal. Bounded native/default observations; actual runtime/HTTP and compiled corruption controls remain separate executed witnesses.",
+    "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type(&$value[\"text\"].as_str().unwrap().encode_utf16().collect::<Vec<_>>(), $value[\"lexical\"].as_bool().unwrap(), $value[\"depth\"].as_u64().unwrap() as usize) { Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "text": "[-0,1e400,\"\\ud800\"]",
+          "lexical": false,
+          "depth": 0
+        },
+        "output": {
+          "ok": true,
+          "kind": "array",
+          "native": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "float",
+                "bits": "8000000000000000"
+              },
+              {
+                "kind": "float",
+                "bits": "7ff0000000000000"
+              },
+              {
+                "kind": "text",
+                "value": [
+                  55296
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "text": "{\"label\":\"tp \\ud800\",\"rows\":[1,2],\"\\udfff\":\"other\"}",
+          "lexical": false,
+          "depth": 0
+        },
+        "output": {
+          "ok": true,
+          "kind": "object",
+          "native": {
+            "kind": "object",
+            "entries": [
+              [
+                [
+                  108,
+                  97,
+                  98,
+                  101,
+                  108
+                ],
+                {
+                  "kind": "text",
+                  "value": [
+                    116,
+                    112,
+                    32,
+                    55296
+                  ]
+                }
+              ],
+              [
+                [
+                  114,
+                  111,
+                  119,
+                  115
+                ],
+                {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "float",
+                      "bits": "3ff0000000000000"
+                    },
+                    {
+                      "kind": "float",
+                      "bits": "4000000000000000"
+                    }
+                  ]
+                }
+              ],
+              [
+                [
+                  57343
+                ],
+                {
+                  "kind": "text",
+                  "value": [
+                    111,
+                    116,
+                    104,
+                    101,
+                    114
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "text": "[1,]",
+          "lexical": false,
+          "depth": 0
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "text": "{\"a\":1,\"a\":}",
+          "lexical": false,
+          "depth": 0
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "text": "[-0]",
+          "lexical": true,
+          "depth": 0
+        },
+        "output": {
+          "ok": true,
+          "kind": "array",
+          "native": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "lexeme",
+                "value": "-0"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "text": "[1]",
+          "lexical": true,
+          "depth": 127
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_types::model_field::ModelField": {
+    "shape": "union",
+    "instantiation": "ModelField<f64>",
+    "monomorphization": "Fixed f64 payload: ordinary JSON numbers, native unit Undefined, and default Absent. Other T payload languages are not inferred from this witness.",
+    "evidence": "Actual ModelField::deserialize and its nested generic FieldVisitor run through production Serde JSON and UnitDeserializer; native presence and binary64 bits are observed before projection. Typed operations are not alternate raw parsers.",
+    "positive": [
+      1.25,
+      -0.0,
+      0,
+      3000000000
+    ],
+    "negative": [
+      null,
+      true,
+      "1.25",
+      [],
+      {},
+      {
+        "Value": 1.25
+      }
+    ],
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_absent",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_undefined",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "into_property",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_mut",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": true,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "into_value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "T"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_ref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_field_ref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_types::model_field::ModelField",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_some",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_none",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "T"
+                                }
+                              ],
+                              "output": {
+                                "generic": "U"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "U"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "and_then",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "T"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::option::Option",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "U"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "U"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "unwrap",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "expect",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "message",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "The str argument is only the panic diagnostic; real typed Value inputs return their native Number bits.",
+        "call": "{ let decoded: $type = <$type>::from($value[\"value\"].as_f64().unwrap()); let absent=decoded.is_absent(); let number=decoded.expect($value[\"message\"].as_str().unwrap()); serde_json::json!({\"ok\":true,\"absent\":absent,\"numberBits\":format!(\"{:016x}\",number.to_bits())}) }",
+        "nativeFields": [
+          "absent",
+          "numberBits"
+        ],
+        "cases": [
+          {
+            "input": {
+              "value": 1.25,
+              "message": "left diagnostic"
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "numberBits": "3ff4000000000000"
+            }
+          },
+          {
+            "input": {
+              "value": -0.0,
+              "message": "right diagnostic"
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "numberBits": "8000000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "unwrap_or",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "default",
+                {
+                  "generic": "T"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "unwrap_or_else",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "generic": "T"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "unwrap_or_default",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_some_and",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "T"
+                                }
+                              ],
+                              "output": {
+                                "primitive": "bool"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "filter",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "generic": "T"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "primitive": "bool"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "ok_or_else",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "generic": "E"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "T"
+                        }
+                      },
+                      {
+                        "type": {
+                          "generic": "E"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get_or_insert_with",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "generic": "T"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "generic": "T"
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "take",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "or",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "other",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::convert::Into",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "generic": "Self"
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "or_else",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "generic": "V"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_deref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "qualified_path": {
+                                "name": "Target",
+                                "args": null,
+                                "self_type": {
+                                  "generic": "T"
+                                },
+                                "trait": {
+                                  "path": "",
+                                  "args": null
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "serialize_field",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "state",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "S"
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "S"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "The static name is an outbound serializer field label, never raw decoder input. Actual serde_json SerializeStruct is executed while native presence and Number bits are read directly before serialization.",
+        "call": "{ let decoded: Result<$type, serde_json::Error> = match $value[\"mode\"].as_str() { Some(\"unit\") => <$type as serde::Deserialize>::deserialize(serde::de::value::UnitDeserializer::<serde_json::Error>::new()), Some(\"default\") => Ok(<$type as Default>::default()), _ => serde_json::from_value($value[\"value\"].clone()) }; let decoded=decoded.unwrap(); let absent=decoded.is_absent(); let undefined=decoded.is_undefined(); let bits=decoded.value().map(|number|format!(\"{:016x}\",number.to_bits())); let mut output=serde::Serializer::serialize_struct(serde_json::value::Serializer,\"ModelRecord\",1).unwrap(); decoded.serialize_field(&mut output,\"field\").unwrap(); let output=serde::ser::SerializeStruct::end(output).unwrap(); serde_json::json!({\"ok\":true,\"absent\":absent,\"undefined\":undefined,\"numberBits\":bits,\"own\":output.as_object().unwrap().contains_key(\"field\")}) }",
+        "nativeFields": [
+          "absent",
+          "undefined",
+          "numberBits",
+          "own"
+        ],
+        "cases": [
+          {
+            "input": {
+              "mode": "json",
+              "value": 1.25
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "undefined": false,
+              "numberBits": "3ff4000000000000",
+              "own": true
+            }
+          },
+          {
+            "input": {
+              "mode": "json",
+              "value": -0.0
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "undefined": false,
+              "numberBits": "8000000000000000",
+              "own": true
+            }
+          },
+          {
+            "input": {
+              "mode": "unit"
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "undefined": true,
+              "numberBits": null,
+              "own": false
+            }
+          },
+          {
+            "input": {
+              "mode": "default"
+            },
+            "output": {
+              "ok": true,
+              "absent": true,
+              "undefined": false,
+              "numberBits": null,
+              "own": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "to_number",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "f64"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "generic": "T"
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "core::option::Option",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "generic": "T"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let decoded: Result<$type, serde_json::Error> = match $value[\"mode\"].as_str() { Some(\"unit\") => <$type as serde::Deserialize>::deserialize(serde::de::value::UnitDeserializer::<serde_json::Error>::new()), Some(\"default\") => Ok(<$type as Default>::default()), _ => serde_json::from_value($value[\"value\"].clone()) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"absent\":decoded.is_absent(),\"undefined\":decoded.is_undefined(),\"numberBits\":decoded.value().map(|number|format!(\"{:016x}\",number.to_bits()))}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "absent",
+        "undefined",
+        "numberBits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "mode": "json",
+            "value": 1.25
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "numberBits": "3ff4000000000000"
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": -0.0
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "numberBits": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "mode": "unit"
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": true,
+            "numberBits": null
+          }
+        },
+        {
+          "input": {
+            "mode": "default"
+          },
+          "output": {
+            "ok": true,
+            "absent": true,
+            "undefined": false,
+            "numberBits": null
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": true
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": "1.25"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": []
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": {}
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": {
+              "Value": 1.25
+            }
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::model_field::deserialize_info": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_info",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::model_field::ModelField",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production deserialize_info delegates through ModelField<RetainedJsonInput>, preserving native unit undefined and present JSON null while projecting accepted JSON payloads. Read native ModelField state and its actual payload directly.",
+    "call": "{ let decoded=if $value[\"mode\"].as_str()==Some(\"unit\") { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded)=>serde_json::json!({\"ok\":true,\"absent\":decoded.is_absent(),\"undefined\":decoded.is_undefined(),\"payload\":decoded.value().cloned()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "mode": "json",
+          "value": {
+            "left": 7,
+            "right": 19
+          }
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": {
+            "left": 7,
+            "right": 19
+          }
+        }
+      },
+      {
+        "input": {
+          "mode": "json",
+          "value": [
+            11,
+            23
+          ]
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": [
+            11,
+            23
+          ]
+        }
+      },
+      {
+        "input": {
+          "mode": "json",
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": null
+        }
+      },
+      {
+        "input": {
+          "mode": "json",
+          "value": "kept"
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": "kept"
+        }
+      },
+      {
+        "input": {
+          "mode": "json",
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": false
+        }
+      },
+      {
+        "input": {
+          "mode": "unit"
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": true,
+          "payload": null
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let decoded=if $value[\"mode\"].as_str()==Some(\"unit\") { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded)=>serde_json::json!({\"ok\":true,\"absent\":decoded.is_absent(),\"undefined\":decoded.is_undefined(),\"payload\":decoded.value().cloned()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "absent",
+        "undefined",
+        "payload"
+      ],
+      "cases": [
+        {
+          "input": {
+            "mode": "json",
+            "value": {
+              "left": 7,
+              "right": 19
+            }
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": {
+              "left": 7,
+              "right": 19
+            }
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": [
+              11,
+              23
+            ]
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": [
+              11,
+              23
+            ]
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": null
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": null
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": "kept"
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": "kept"
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": false
+          }
+        },
+        {
+          "input": {
+            "mode": "unit"
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": true,
+            "payload": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::prepared_order::PreparedOrderOpts": {
+    "shape": "union",
+    "evidence": "Actual prepared amendment decoder and private wire companion; fixed ordinary JSON corpus and independent native field identities, not a public placement or arbitrary generic claim.",
+    "instantiation": "PreparedOrderOpts<String, f64, crate::ModelField<bool>>",
+    "positive": [
+      {
+        "symbol": "left",
+        "amount": 7
+      },
+      {
+        "symbol": "right",
+        "amount": 13,
+        "type": "limit",
+        "side": "buy",
+        "price": 31.25,
+        "triggerPrice": 47.5,
+        "reduceOnly": true,
+        "clientOrderId": "client-right"
+      }
+    ],
+    "negative": [
+      [],
+      null,
+      {
+        "symbol": "left"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "type": null
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "side": "unknown"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "price": null
+      }
+    ],
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_types::PlaceOrderOpts",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::PlaceOrderOpts",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnlyAbsent\":decoded.reduce_only.is_absent(),\"reduceOnlyUndefined\":decoded.reduce_only.is_undefined(),\"reduceOnly\":decoded.reduce_only.value().copied(),\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "symbol",
+        "amountBits",
+        "priceBits",
+        "typeAbsent",
+        "typeLimit",
+        "sideBuy",
+        "triggerPrice",
+        "reduceOnly",
+        "clientOrderId",
+        "reduceOnlyAbsent",
+        "reduceOnlyUndefined"
+      ],
+      "cases": [
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "right",
+            "amount": 13,
+            "type": "limit",
+            "side": "buy",
+            "price": 31.25,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "right",
+            "amountBits": "402a000000000000",
+            "priceBits": "403f400000000000",
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "type": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "side": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "price": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": false
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": false,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": true
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": true,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": "true"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": 1
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::prepared_order::PreparedWire": {
+    "shape": "union",
+    "evidence": "Actual prepared amendment decoder and private wire companion; fixed ordinary JSON corpus and independent native field identities, not a public placement or arbitrary generic claim.",
+    "positive": [
+      {
+        "symbol": "left",
+        "amount": 7
+      },
+      {
+        "symbol": "right",
+        "amount": 13,
+        "type": "limit",
+        "side": "buy",
+        "price": 31.25,
+        "triggerPrice": 47.5,
+        "reduceOnly": true,
+        "clientOrderId": "client-right"
+      }
+    ],
+    "negative": [
+      [],
+      null,
+      {
+        "symbol": "left"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "type": null
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "side": "unknown"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "price": null
+      }
+    ],
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnlyAbsent\":decoded.reduce_only.is_absent(),\"reduceOnlyUndefined\":decoded.reduce_only.is_undefined(),\"reduceOnly\":decoded.reduce_only.value().copied(),\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "symbol",
+        "amountBits",
+        "priceBits",
+        "typeAbsent",
+        "typeLimit",
+        "sideBuy",
+        "triggerPrice",
+        "reduceOnly",
+        "clientOrderId",
+        "reduceOnlyAbsent",
+        "reduceOnlyUndefined"
+      ],
+      "cases": [
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "right",
+            "amount": 13,
+            "type": "limit",
+            "side": "buy",
+            "price": 31.25,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "right",
+            "amountBits": "402a000000000000",
+            "priceBits": "403f400000000000",
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "type": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "side": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "price": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": false
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": false,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": true
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": true,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": "true"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": 1
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::prepared_order::deserialize_optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_optional",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual private optional-field decoder at f64; UnitDeserializer retains its None branch and explicit JSON null is refused.",
+    "call": "{ let decoded: Result<Option<f64>, serde_json::Error> = if $value[\"unit\"].as_bool() == Some(true) { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"present\":decoded.is_some(),\"numberBits\":decoded.map(|n|format!(\"{:016x}\",n.to_bits()))}),Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "value": 1.25
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "numberBits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 13
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "numberBits": "402a000000000000"
+        }
+      },
+      {
+        "input": {
+          "unit": true
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "numberBits": null
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": "1.25"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": []
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let decoded: Result<Option<f64>, serde_json::Error> = if $value[\"unit\"].as_bool() == Some(true) { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"present\":decoded.is_some(),\"numberBits\":decoded.map(|n|format!(\"{:016x}\",n.to_bits()))}),Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "present",
+        "numberBits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "value": 1.25
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "numberBits": "3ff4000000000000"
+          }
+        },
+        {
+          "input": {
+            "value": 13
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "numberBits": "402a000000000000"
+          }
+        },
+        {
+          "input": {
+            "unit": true
+          },
+          "output": {
+            "ok": true,
+            "present": false,
+            "numberBits": null
+          }
+        },
+        {
+          "input": {
+            "value": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": true
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": "1.25"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": []
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": {}
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }

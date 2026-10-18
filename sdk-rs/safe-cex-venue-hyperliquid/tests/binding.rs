@@ -637,7 +637,7 @@ fn set_leverage_and_margin_type_post_update_leverage() {
 #[test]
 fn schedule_cancel_arms_and_clears() {
     let f = started();
-    let at = 1_700_000_000_000.0 + 60_000.0;
+    let at = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms() + 60_000.0;
     f.host
         .block_on(f.exchange.schedule_cancel(Some(Some(at))))
         .unwrap_or_else(|e| panic!("{e:?}"));
@@ -741,4 +741,893 @@ fn fractional_host_clock_still_produces_integer_date_now_signing_nonces() {
     let body = last_body(&f, "exchange:scheduleCancel");
     assert_eq!(body["nonce"].as_f64(), Some(1_700_000_000_000.0));
     assert!(body["signature"]["r"].is_string());
+}
+
+fn production_trigger_opts(amount: f64) -> safe_cex_types::PlaceOrderOpts {
+    serde_json::from_value(json!({"symbol":"BTC-PERP","type":"stop_market","side":"sell", "amount":amount,"price":59000,"reduceOnly":true})).unwrap()
+}
+
+#[test]
+fn production_import_position_tpsl_posts_signed_zero_size_trigger() {
+    let f = started();
+    let ids = f
+        .host
+        .block_on(
+            f.exchange
+                .base()
+                .place_order(&*f.exchange, production_trigger_opts(0.0)),
+        )
+        .expect("production position TP/SL must resolve its helpers");
+    assert_eq!(ids, ["777"]);
+    let body = last_body(&f, "exchange:order");
+    assert_eq!(body["action"]["grouping"], "positionTpsl");
+    assert_eq!(body["action"]["orders"][0]["s"], "0");
+    assert_eq!(
+        body["action"]["orders"][0]["t"]["trigger"]["triggerPx"],
+        "59000"
+    );
+    assert_eq!(body["action"]["orders"][0]["t"]["trigger"]["tpsl"], "sl");
+    assert!(body["signature"]["r"].is_string());
+}
+
+#[test]
+fn production_import_partial_tpsl_posts_its_amount_with_normal_grouping() {
+    let f = started();
+    let ids = f
+        .host
+        .block_on(
+            f.exchange
+                .base()
+                .place_order(&*f.exchange, production_trigger_opts(0.01)),
+        )
+        .expect("production partial TP/SL must resolve its helpers");
+    assert_eq!(ids, ["777"]);
+    let body = last_body(&f, "exchange:order");
+    assert_eq!(body["action"]["grouping"], "na");
+    assert_eq!(body["action"]["orders"][0]["s"], "0.01");
+    assert!(body["signature"]["r"].is_string());
+}
+
+#[test]
+fn production_import_waiting_tpsl_returns_empty_ids_and_schedules_refresh() {
+    let f = started();
+    for (name, response) in &mut *f.routes.routes.borrow_mut() {
+        if name == "exchange:order" {
+            *response = json!({"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}});
+        }
+    }
+    let before = f.routes.count("info:frontendOpenOrders");
+    let result = f.host.block_on(
+        f.exchange
+            .base()
+            .place_order(&*f.exchange, production_trigger_opts(0.0)),
+    );
+    assert_eq!(
+        f.routes.count("exchange:order"),
+        1,
+        "the waiting trigger is already posted before its response is interpreted"
+    );
+    let ids = result.expect("an already-live waiting trigger must not become a ReferenceError");
+    assert!(ids.is_empty());
+    let after_return = f.routes.count("info:frontendOpenOrders");
+    assert!(after_return >= before);
+    f.host.advance(500.0);
+    assert_eq!(
+        f.routes.count("info:frontendOpenOrders"),
+        after_return + 1,
+        "waiting TP/SL schedules the actual order refresh"
+    );
+}
+
+fn production_batch_opts() -> Vec<safe_cex_types::PlaceOrderOpts> {
+    [json!({"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.01,"price":60000,"clientOrderId":"0x11111111111111111111111111111111"}), json!({"symbol":"BTC-PERP","type":"limit","side":"sell","amount":0.02,"price":62000,"clientOrderId":"0x22222222222222222222222222222222"})].into_iter().map(|v|serde_json::from_value(v).unwrap()).collect()
+}
+
+#[test]
+fn production_import_place_orders_posts_and_flattens_both_results_in_order() {
+    let f = started();
+    let ids = f
+        .host
+        .block_on(
+            f.exchange
+                .base()
+                .place_orders(&*f.exchange, production_batch_opts()),
+        )
+        .expect("production placeOrders must resolve mapSeries");
+    assert_eq!(ids, ["777", "777"]);
+    let requests = f.routes.requests.borrow();
+    let orders = requests
+        .iter()
+        .filter(|(r, _)| r == "exchange:order")
+        .map(|(_, b)| b)
+        .collect::<Vec<_>>();
+    assert_eq!(orders.len(), 2);
+    for (index, (amount, price, cloid)) in [
+        ("0.01", "60000", "0x11111111111111111111111111111111"),
+        ("0.02", "62000", "0x22222222222222222222222222222222"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let wire = &orders[index]["action"]["orders"][0];
+        assert_eq!(wire["s"], amount);
+        assert_eq!(wire["p"], price);
+        assert_eq!(wire["c"], cloid);
+        assert!(orders[index]["signature"]["r"].is_string());
+    }
+}
+
+#[test]
+fn production_import_place_orders_stops_after_the_first_venue_failure() {
+    let f = started();
+    for (name, response) in &mut *f.routes.routes.borrow_mut() {
+        if name == "exchange:order" {
+            *response = json!({"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"first batch denied"}]}}});
+        }
+    }
+    let error = f
+        .host
+        .block_on(
+            f.exchange
+                .base()
+                .place_orders(&*f.exchange, production_batch_opts()),
+        )
+        .unwrap_err();
+    assert!(
+        error.message.contains("first batch denied"),
+        "original venue error must survive: {error:?}"
+    );
+    assert_eq!(
+        f.routes.count("exchange:order"),
+        1,
+        "serial placement must not start the second order after first rejection"
+    );
+}
+
+#[test]
+fn production_import_live_fills_emit_each_fill_update_later_positions_and_refresh_hip3() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let f = started();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    f.exchange.base().on(
+        "fill",
+        Rc::new(move |_, event| {
+            let event = safe_cex_exchange::js_runtime::value::to_json(event).unwrap();
+            observed.borrow_mut().push(event.clone());
+            Ok(())
+        }),
+    );
+    let wires = f.host.sockets.borrow().clone();
+    assert_eq!(wires.len(), 2);
+    for wire in &wires {
+        wire.push(WsEvent::Open);
+    }
+    f.host.settle();
+    let private = wires
+        .iter()
+        .find(|wire| {
+            wire.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text)
+                    .is_ok_and(|v| v["subscription"]["type"] == "userFills")
+            })
+        })
+        .expect("production private socket subscribes to userFills");
+    let fill = |coin: &str, size: &str, start: &str, tid: u64| json!({"coin":coin,"px":"60000","sz":size,"side":"B","time":1700000000000u64+tid,"startPosition":start,"dir":"Open Long","closedPnl":"0","hash":format!("fill-{tid}"),"oid":tid+1000,"crossed":false,"fee":"0","tid":tid});
+    let frame = json!({"channel":"userFills","data":{"isSnapshot":false,"user":MASTER,"fills":[fill("BTC","0.1","0",101),fill("BTC","0.2","0.1",102),fill("xyz:BTC","0.05","0",103)]}}).to_string();
+    private.push(WsEvent::Message(SocketFrame::Text(frame.clone())));
+    f.host.settle();
+    assert_eq!(
+        events.borrow().len(),
+        3,
+        "every live fill must reach the actual BaseExchange emitter"
+    );
+    for (i, event) in events.borrow().iter().enumerate() {
+        assert_eq!(event["id"], (101 + i).to_string());
+        assert_eq!(event["orderId"], (1101 + i).to_string());
+        assert_eq!(event["side"], "buy");
+    }
+    let positions = f.exchange.base().store.positions();
+    let position = positions
+        .iter()
+        .find(|p| p.symbol == "BTC-PERP" && p.side == safe_cex_types::PositionSide::Long)
+        .expect("optimistic core position");
+    assert!(
+        (position.contracts - 0.3).abs() < 1e-12,
+        "later fills must update positions: {position:?}"
+    );
+    drop(positions);
+    private.push(WsEvent::Message(SocketFrame::Text(frame)));
+    f.host.settle();
+    assert_eq!(
+        events.borrow().len(),
+        3,
+        "shared cache deduplicates notification replay"
+    );
+    assert!(
+        !f.routes
+            .requests
+            .borrow()
+            .iter()
+            .any(|(r, b)| r == "info:clearinghouseState" && b["dex"] == "xyz")
+    );
+    // The debounce starts the request; the shared limiter still owns its pacing.
+    f.host.advance(350.0);
+    f.host.advance(5000.0);
+    assert!(
+        f.routes
+            .requests
+            .borrow()
+            .iter()
+            .any(|(r, b)| r == "info:clearinghouseState" && b["dex"] == "xyz"),
+        "HIP-3 fill scheduling must survive the whole frame: console={:?} reports={:?} requests={:?}",
+        f.host.console.borrow(),
+        f.host.reports.borrow(),
+        f.routes.requests.borrow()
+    );
+}
+
+fn seam_started() -> Fixture {
+    let f = started();
+    // Join the startup's actual coalesced order read before seeding assertions.
+    f.host.block_on(f.exchange.fetch_orders(None)).unwrap();
+    f.host.settle();
+    f
+}
+fn seam_order() -> safe_cex_types::Order {
+    serde_json::from_value(json!({"id":"777","status":"open","symbol":"BTC-PERP","type":"stop_market","side":"sell","price":59000,"amount":0.01,"filled":0,"remaining":0.01,"reduceOnly":true,"lastUpdate":1700000000000u64})).unwrap()
+}
+fn seam_route(f: &Fixture, route: &str, response: Value) {
+    let mut routes = f.routes.routes.borrow_mut();
+    if let Some((_, value)) = routes.iter_mut().find(|(name, _)| name == route) {
+        *value = response;
+    } else {
+        routes.push((route.into(), response));
+    }
+}
+fn seam_fill() -> Value {
+    json!({"coin":"BTC","tid":901,"oid":777,"time":1699999999000u64,"side":"A","px":"62000","sz":"0.25","fee":"2","feeToken":"USDC","closedPnl":"125","dir":"Close Long","startPosition":"0.25","crossed":true,"hash":"authored-history-fill"})
+}
+fn seam_core_state() -> Value {
+    json!({"marginSummary":{"accountValue":"2400","totalNtlPos":"15000","totalRawUsd":"2400","totalMarginUsed":"60"},"crossMarginSummary":{"accountValue":"2400","totalNtlPos":"15000","totalRawUsd":"2400","totalMarginUsed":"60"},"withdrawable":"2340","crossMaintenanceMarginUsed":"30","time":1700000000100u64,"assetPositions":[{"type":"oneWay","position":{"coin":"BTC","szi":"0.25","entryPx":"60000","positionValue":"15000","unrealizedPnl":"125","returnOnEquity":"0.1","marginUsed":"60","liquidationPx":null,"maxLeverage":40,"leverage":{"type":"cross","value":5},"cumFunding":{"allTime":"0","sinceOpen":"0","sinceChange":"0"}}}]})
+}
+
+#[test]
+fn production_seam_terminal_cancel_removes_the_local_order_after_the_venue_miss() {
+    let f = seam_started();
+    let order = seam_order();
+    f.exchange
+        .base()
+        .store
+        .add_or_update_orders(vec![order.clone()])
+        .unwrap();
+    seam_route(
+        &f,
+        "exchange:cancel",
+        json!({"status":"ok","response":{"type":"cancel","data":{"statuses":[{"error":"Order was never placed, already canceled, or filled. asset=0"}]}}}),
+    );
+    let result = f.host.block_on(f.exchange.cancel_orders(vec![order]));
+    assert_eq!(f.routes.count("exchange:cancel"), 1);
+    result.expect("a terminal venue miss must resolve through the real production import");
+    assert!(
+        f.exchange
+            .base()
+            .store
+            .orders()
+            .iter()
+            .all(|o| o.id != "777"),
+        "successful terminal cancellation clears the actual Store"
+    );
+}
+
+#[test]
+fn production_seam_nonterminal_cancel_retains_the_original_error_and_order() {
+    let f = seam_started();
+    let order = seam_order();
+    f.exchange
+        .base()
+        .store
+        .add_or_update_orders(vec![order.clone()])
+        .unwrap();
+    seam_route(
+        &f,
+        "exchange:cancel",
+        json!({"status":"ok","response":{"type":"cancel","data":{"statuses":[{"error":"authored cancel rejection"}]}}}),
+    );
+    let error = f
+        .host
+        .block_on(f.exchange.cancel_orders(vec![order]))
+        .unwrap_err();
+    assert!(
+        error.message.contains("authored cancel rejection"),
+        "original error must survive classification: {error:?}"
+    );
+    assert!(
+        f.exchange
+            .base()
+            .store
+            .orders()
+            .iter()
+            .any(|o| o.id == "777")
+    );
+}
+
+#[test]
+fn production_seam_fetch_candles_reaches_the_venue_and_returns_native_values() {
+    let f = seam_started();
+    seam_route(
+        &f,
+        "info:candleSnapshot",
+        json!([{"t":1699999940000u64,"T":1700000000000u64,"o":"60000","h":"61000","l":"59000","c":"60500","v":"12.5"}]),
+    );
+    let options = serde_json::from_value(
+        json!({"symbol":"BTC-PERP","interval":"1m","limit":2,"to":1700000000000u64}),
+    )
+    .unwrap();
+    let candles = f.host.block_on(f.exchange.fetch_ohlcv(options)).unwrap();
+    assert_eq!(
+        candles.len(),
+        1,
+        "the shared empty default must not handle candles"
+    );
+    let candle = &candles[0];
+    assert_eq!(
+        (
+            candle.timestamp,
+            candle.open,
+            candle.high,
+            candle.low,
+            candle.close,
+            candle.volume
+        ),
+        (1699999940.0, 60000.0, 61000.0, 59000.0, 60500.0, 12.5)
+    );
+    let request = last_body(&f, "info:candleSnapshot");
+    assert_eq!(
+        request["req"],
+        json!({"coin":"BTC","interval":"1m","startTime":1699999880000u64,"endTime":1700000000000u64})
+    );
+}
+
+#[test]
+fn production_seam_lookup_uses_order_status_by_cloid_without_mutating_orders() {
+    use safe_cex_exchange::client_order_id::ClientOrderLookup;
+    let f = seam_started();
+    let id = "0x11111111111111111111111111111111";
+    seam_route(
+        &f,
+        "info:orderStatus",
+        json!({"status":"order","order":{"status":"filled","order":{"coin":"BTC","oid":777,"side":"B","limitPx":"60000","sz":"0","origSz":"0.25","timestamp":1699999999000u64,"orderType":"Limit","reduceOnly":false,"cloid":id}}}),
+    );
+    let before = f.routes.count("info:frontendOpenOrders");
+    let result = f
+        .host
+        .block_on(
+            f.exchange
+                .find_order_by_client_order_id("BTC-PERP".into(), id.into()),
+        )
+        .unwrap();
+    let ClientOrderLookup::Found(order) = result else {
+        panic!("production lookup must find the filled order via orderStatus")
+    };
+    assert_eq!(order.id, "777");
+    assert_eq!(order.status, safe_cex_types::OrderStatus::Closed);
+    assert_eq!(order.client_order_id.as_deref(), Some(id));
+    assert_eq!(
+        last_body(&f, "info:orderStatus"),
+        json!({"type":"orderStatus","user":MASTER,"oid":id})
+    );
+    assert_eq!(
+        f.routes.count("info:frontendOpenOrders"),
+        before,
+        "lookup must not refresh/mutate the open-order snapshot"
+    );
+    assert!(f.exchange.base().store.orders().is_empty());
+}
+
+#[test]
+fn production_seam_reconnect_snapshot_refreshes_core_positions_and_balance() {
+    let f = seam_started();
+    seam_route(&f, "info:clearinghouseState", seam_core_state());
+    let before = f.routes.count("info:clearinghouseState");
+    f.host
+        .block_on(f.exchange.fetch_and_set_private_snapshot(3))
+        .unwrap();
+    assert_eq!(
+        f.routes.count("info:clearinghouseState"),
+        before + 1,
+        "the real reconnect override fetches core state alongside orders"
+    );
+    let positions = f.exchange.base().store.positions();
+    let btc = positions
+        .iter()
+        .find(|p| p.symbol == "BTC-PERP" && p.side == safe_cex_types::PositionSide::Long)
+        .expect("core position");
+    assert_eq!(btc.contracts, 0.25);
+    assert_eq!(f.exchange.base().store.balance().total, 2275.0);
+    assert!(f.exchange.base().store.loaded().orders);
+}
+
+#[test]
+fn production_seam_historical_fills_reaches_the_native_execution_mapper() {
+    let f = seam_started();
+    seam_route(&f, "info:userFillsByTime", json!([seam_fill()]));
+    let options = serde_json::from_value(
+        json!({"symbol":"BTC-PERP","from":1699999900000u64,"to":1700000000000u64,"limit":10}),
+    )
+    .unwrap();
+    let fills = f
+        .host
+        .block_on(f.exchange.fetch_historical_fills(options))
+        .unwrap();
+    assert_eq!(
+        fills.len(),
+        1,
+        "actual execution rows must replace the empty default"
+    );
+    let fill = &fills[0];
+    assert_eq!(fill.id.as_deref(), Some("901"));
+    assert_eq!(fill.order_id.as_deref(), Some("777"));
+    assert_eq!(
+        (fill.price, fill.qty, fill.timestamp),
+        (62000.0, 0.25, 1699999999.0)
+    );
+    assert_eq!(fill.symbol, "BTC-PERP");
+    assert_eq!(fill.commission, Some(2.0));
+    assert_eq!(fill.side, safe_cex_types::OrderSide::Sell);
+    assert!(fill.position_side.is_none());
+    assert_eq!(last_body(&f, "info:userFillsByTime")["user"], MASTER);
+}
+
+#[test]
+fn production_seam_historical_orders_collapses_and_maps_real_venue_rows() {
+    let f = seam_started();
+    let row = |status: &str, remaining: &str, time: u64| json!({"order":{"coin":"BTC","oid":777,"timestamp":1699999998000u64,"side":"B","origSz":"0.25","sz":remaining,"orderType":"Limit","limitPx":"60000","reduceOnly":false,"cloid":"0x11111111111111111111111111111111"},"status":status,"statusTimestamp":time});
+    seam_route(
+        &f,
+        "info:historicalOrders",
+        json!([
+            row("open", "0.25", 1699999998000),
+            row("filled", "0", 1699999999000)
+        ]),
+    );
+    let options = serde_json::from_value(
+        json!({"symbol":"BTC-PERP","from":1699999990000u64,"to":1700000000000u64}),
+    )
+    .unwrap();
+    let orders = f
+        .host
+        .block_on(f.exchange.fetch_historical_orders(Some(options)))
+        .unwrap();
+    assert_eq!(
+        orders.len(),
+        1,
+        "collapse and mapping imports must both execute"
+    );
+    let order = &orders[0];
+    assert_eq!(order.id, "777");
+    assert_eq!(order.symbol, "BTC-PERP");
+    assert_eq!(order.status, safe_cex_types::OrderStatus::Closed);
+    assert_eq!(
+        (order.amount, order.filled, order.created_time),
+        (0.25, 0.25, 1699999998000.0)
+    );
+    assert_eq!(
+        last_body(&f, "info:historicalOrders"),
+        json!({"type":"historicalOrders","user":MASTER})
+    );
+}
+
+fn seam_income(f: &Fixture) {
+    seam_route(f, "info:userFillsByTime", json!([seam_fill()]));
+    seam_route(f, "info:userFunding", json!([]));
+}
+fn assert_seam_income(records: &[safe_cex_types::IncomeRecord]) {
+    assert_eq!(
+        records.len(),
+        2,
+        "the real fill produces both realized PnL and fee rows"
+    );
+    for (kind, income) in [("REALIZED_PNL", 125.0), ("COMMISSION", -2.0)] {
+        let row = records
+            .iter()
+            .find(|r| r.income_type == kind)
+            .expect("typed income row");
+        assert_eq!(row.symbol, "BTC-PERP");
+        assert_eq!(row.income, income);
+        assert_eq!(row.asset, "USDC");
+        assert_eq!(row.timestamp, 1699999999000.0);
+    }
+}
+#[test]
+fn production_seam_income_history_reaches_both_fill_income_rows() {
+    let f = seam_started();
+    seam_income(&f);
+    let options =
+        serde_json::from_value(json!({"startTime":1699999900000u64,"endTime":1700000000000u64}))
+            .unwrap();
+    let records = f
+        .host
+        .block_on(f.exchange.fetch_income_history(Some(options)))
+        .unwrap();
+    assert_seam_income(&records);
+    assert_eq!(
+        f.routes
+            .requests
+            .borrow()
+            .iter()
+            .find(|(route, _)| route == "info:userFillsByTime")
+            .unwrap()
+            .1["startTime"],
+        json!(1699999900000u64)
+    );
+}
+#[test]
+fn production_seam_income_range_reaches_the_same_actual_ledger() {
+    let f = seam_started();
+    seam_income(&f);
+    let records = f
+        .host
+        .block_on(f.exchange.fetch_income_history_range(
+            1699999900000.0,
+            1700000000000.0,
+            Some("REALIZED_PNL".into()),
+        ))
+        .unwrap();
+    // Maintained TS selects fills for every non-funding type, retaining both rows.
+    assert_seam_income(&records);
+    let requests = f.routes.requests.borrow();
+    let body = &requests
+        .iter()
+        .find(|(route, _)| route == "info:userFillsByTime")
+        .unwrap()
+        .1;
+    assert_eq!(body["startTime"], json!(1699999900000u64));
+    assert_eq!(body["endTime"], json!(1700000000000u64));
+}
+
+fn seam_socket(f: &Fixture, topic: &str) -> Rc<host::Wire> {
+    use safe_cex_exchange::websocket::WsEvent;
+    let wires = f.host.sockets.borrow().clone();
+    for wire in &wires {
+        wire.push(WsEvent::Open);
+    }
+    f.host.settle();
+    // Complete actual open/reconnect snapshots before injecting the witness frame.
+    f.host
+        .block_on(f.exchange.fetch_and_set_private_snapshot(1))
+        .unwrap();
+    wires
+        .into_iter()
+        .find(|wire| {
+            wire.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text)
+                    .is_ok_and(|v| v["subscription"]["type"] == topic)
+            })
+        })
+        .unwrap_or_else(|| panic!("production socket never subscribed to {topic}"))
+}
+fn seam_push(f: &Fixture, wire: &host::Wire, frame: Value) {
+    wire.push(safe_cex_exchange::websocket::WsEvent::Message(
+        safe_cex_transport::socket::SocketFrame::Text(frame.to_string()),
+    ));
+    f.host.settle();
+}
+fn seam_observe_fills(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
+    let values = Rc::new(RefCell::new(Vec::new()));
+    let observed = values.clone();
+    f.exchange.base().on(
+        "fill",
+        Rc::new(move |_, event| {
+            let event = safe_cex_exchange::js_runtime::value::to_json(event).unwrap();
+            observed.borrow_mut().push(event.clone());
+            Ok(())
+        }),
+    );
+    values
+}
+
+#[test]
+fn production_seam_public_listener_candles_deliver_and_cleanup() {
+    let f = seam_started();
+    let wire = seam_socket(&f, "fastAssetCtxs");
+    let values = Rc::new(RefCell::new(Vec::new()));
+    let seen = values.clone();
+    let options = serde_json::from_value(json!({"symbol":"BTC-PERP","interval":"1m"})).unwrap();
+    let cleanup = f
+        .exchange
+        .listen_ohlcv(
+            options,
+            Rc::new(move |candle| seen.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    assert!(
+        wire.sent
+            .borrow()
+            .iter()
+            .any(|text| serde_json::from_str::<Value>(text).is_ok_and(
+                |v| v["subscription"] == json!({"type":"candle","coin":"BTC","interval":"1m"})
+            )),
+        "actual candle subscription"
+    );
+    let frame = |time: u64| json!({"channel":"candle","data":[{"s":"BTC","i":"1m","t":time,"o":"60000","h":"61000","l":"59000","c":"60500","v":"12.5"}]});
+    seam_push(&f, &wire, frame(1700000000000));
+    assert_eq!(
+        values.borrow().len(),
+        1,
+        "real public candle must reach the native callback"
+    );
+    let candles = values.borrow();
+    assert_eq!(
+        (candles[0].timestamp, candles[0].close, candles[0].volume),
+        (1700000000.0, 60500.0, 12.5)
+    );
+    drop(candles);
+    let sends = wire.sent.borrow().len();
+    cleanup().unwrap();
+    seam_push(&f, &wire, frame(1700000060000));
+    assert_eq!(
+        values.borrow().len(),
+        1,
+        "cleanup removes the actual parser"
+    );
+    assert_eq!(
+        wire.sent.borrow().len(),
+        sends,
+        "source candle cleanup does not send unsubscribe"
+    );
+}
+
+#[test]
+fn production_seam_public_listener_books_deliver_and_cleanup() {
+    let f = seam_started();
+    let wire = seam_socket(&f, "fastAssetCtxs");
+    let values = Rc::new(RefCell::new(Vec::new()));
+    let seen = values.clone();
+    let cleanup = f
+        .exchange
+        .listen_order_book(
+            "BTC-PERP".into(),
+            Rc::new(move |book| seen.borrow_mut().push(book)),
+        )
+        .unwrap();
+    let frame = json!({"channel":"l2Book","data":{"coin":"BTC","levels":[[{"px":"60000","sz":"0.2"},{"px":"59900","sz":"0.3"}],[{"px":"60100","sz":"0.4"},{"px":"60200","sz":"0.5"}]]}});
+    seam_push(&f, &wire, frame.clone());
+    assert_eq!(
+        values.borrow().len(),
+        1,
+        "real public book must reach the native callback"
+    );
+    let books = values.borrow();
+    assert_eq!(
+        (
+            books[0].bids[0].price,
+            books[0].bids[0].amount,
+            books[0].asks[0].price,
+            books[0].asks[0].amount
+        ),
+        (60000.0, 0.2, 60100.0, 0.4)
+    );
+    drop(books);
+    cleanup().unwrap();
+    assert!(wire.sent.borrow().iter().any(|text| {
+        serde_json::from_str::<Value>(text).is_ok_and(|v| {
+            v["method"] == "unsubscribe"
+                && v["subscription"] == json!({"type":"l2Book","coin":"BTC"})
+        })
+    }));
+    seam_push(&f, &wire, frame);
+    assert_eq!(values.borrow().len(), 1);
+}
+
+#[test]
+fn production_seam_private_orders_frame_updates_the_store_without_a_fill() {
+    let f = seam_started();
+    let wire = seam_socket(&f, "orderUpdates");
+    let fills = seam_observe_fills(&f);
+    let cloid = "0x22222222222222222222222222222222";
+    seam_push(
+        &f,
+        &wire,
+        json!({"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":888,"side":"B","limitPx":"60010","sz":"0.4","origSz":"0.5","timestamp":1700000000100u64,"orderType":"Limit","reduceOnly":false,"cloid":cloid},"status":"open","statusTimestamp":1700000000100u64}]}),
+    );
+    let orders = f.exchange.base().store.orders();
+    let order = orders
+        .iter()
+        .find(|order| order.id == "888")
+        .expect("actual private order reaches Store");
+    assert_eq!(order.symbol, "BTC-PERP");
+    assert_eq!(order.side, safe_cex_types::OrderSide::Buy);
+    assert_eq!(order.r#type, safe_cex_types::OrderType::Limit);
+    assert_eq!(order.price, 60010.0);
+    assert_eq!(order.amount, 0.5);
+    assert!((order.filled - 0.1).abs() < 1e-12);
+    assert_eq!(order.remaining, 0.4);
+    assert_eq!(order.client_order_id.as_deref(), Some(cloid));
+    assert!(
+        fills.borrow().is_empty(),
+        "order state alone does not invent fill events"
+    );
+}
+
+#[test]
+fn production_seam_private_core_positions_frame_updates_the_store_without_a_fill() {
+    let f = seam_started();
+    let wire = seam_socket(&f, "clearinghouseState");
+    let fills = seam_observe_fills(&f);
+    seam_push(
+        &f,
+        &wire,
+        json!({"channel":"clearinghouseState","data":{"user":MASTER,"dex":"","clearinghouseState":seam_core_state()}}),
+    );
+    let positions = f.exchange.base().store.positions();
+    let position = positions
+        .iter()
+        .find(|p| p.symbol == "BTC-PERP" && p.side == safe_cex_types::PositionSide::Long)
+        .expect("actual core private position");
+    assert_eq!(
+        (
+            position.contracts,
+            position.entry_price,
+            position.unrealized_pnl,
+            position.leverage
+        ),
+        (0.25, 60000.0, 125.0, 5.0)
+    );
+    assert!(
+        fills.borrow().is_empty(),
+        "position snapshots do not invent fill events"
+    );
+}
+
+#[test]
+fn production_seam_private_core_balance_frame_updates_the_store_without_a_fill() {
+    let f = seam_started();
+    let wire = seam_socket(&f, "clearinghouseState");
+    let fills = seam_observe_fills(&f);
+    let mut state = seam_core_state();
+    state["assetPositions"] = json!([]);
+    for key in ["marginSummary", "crossMarginSummary"] {
+        state[key]["accountValue"] = json!("1375");
+        state[key]["totalMarginUsed"] = json!("25");
+    }
+    seam_push(
+        &f,
+        &wire,
+        json!({"channel":"clearinghouseState","data":{"user":MASTER,"dex":"","clearinghouseState":state}}),
+    );
+    let balance = f.exchange.base().store.balance();
+    assert_eq!(
+        (balance.total, balance.used, balance.free, balance.upnl),
+        (1375.0, 25.0, 1350.0, 0.0)
+    );
+    assert!(
+        fills.borrow().is_empty(),
+        "balance snapshots do not invent fill events"
+    );
+}
+
+#[test]
+fn production_reconcile_clears_undefined_tif_and_then_stops_rewriting() {
+    let f = seam_started();
+    let cloid = "0x11111111111111111111111111111111";
+    let mut seed = serde_json::to_value(seam_order()).unwrap();
+    seed["timeInForce"] =
+        serde_json::to_value(safe_cex_types::OrderTimeInForce::GoodTillCancel).unwrap();
+    f.exchange
+        .base()
+        .store
+        .add_order(serde_json::from_value(seed).unwrap())
+        .unwrap();
+    seam_route(
+        &f,
+        "info:frontendOpenOrders",
+        json!([{
+            "coin":"BTC", "oid":777, "side":"A", "limitPx":"60000", "sz":"0.01",
+            "origSz":"0.01", "timestamp":1700000000000u64, "orderType":"Limit",
+            "reduceOnly":false, "isTrigger":false, "tif":"Ioc", "cloid":cloid
+        }]),
+    );
+    let fetched = f.host.block_on(f.exchange.fetch_orders(None)).unwrap();
+    f.host.settle();
+    assert_eq!(fetched.len(), 1);
+    assert!(
+        fetched[0].time_in_force.is_undefined(),
+        "source mapper owns an undefined TIF"
+    );
+    {
+        let orders = f.exchange.base().store.orders();
+        let row = orders.iter().find(|row| row.id == "777").unwrap();
+        assert_eq!(
+            row.client_order_id.as_deref(),
+            Some(cloid),
+            "#465 restores the client order ID"
+        );
+        assert!(
+            row.time_in_force.is_undefined(),
+            "realm updateOrder must retain the mapper's own undefined TIF"
+        );
+    }
+    let revision = f.exchange.base().store.update_ids().orders;
+    f.host.block_on(f.exchange.fetch_orders(None)).unwrap();
+    f.host.settle();
+    assert_eq!(
+        f.exchange.base().store.update_ids().orders,
+        revision,
+        "an identical REST refresh must not rewrite the reconciled order"
+    );
+}
+
+#[test]
+fn native_nonfinite_order_size_reaches_the_signed_order_post() {
+    for (amount, expected) in [
+        (f64::NAN, "NaN"),
+        (f64::INFINITY, "Infinity"),
+        (f64::NEG_INFINITY, "-Infinity"),
+    ] {
+        let f = started();
+        let mut opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+            "symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.01,"price":60000
+        }))
+        .unwrap();
+        opts.amount = amount;
+        let result = f
+            .host
+            .block_on(f.exchange.base().place_order(&*f.exchange, opts));
+        assert!(
+            result.is_ok(),
+            "{expected} wire must reach the actual signed order request: {result:?}"
+        );
+        let body = last_body(&f, "exchange:order");
+        assert_eq!(body["action"]["orders"][0]["s"], expected);
+        assert_eq!(body["action"]["orders"][0]["p"], "60000");
+        assert_eq!(body["action"]["orders"][0]["b"], true);
+        assert_eq!(body["action"]["orders"][0]["a"], 0);
+        assert!(
+            body["signature"]["r"]
+                .as_str()
+                .is_some_and(|s| s.len() == 66)
+        );
+        assert_eq!(f.routes.count("exchange:order"), 1);
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("hyperliquid");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 24);
+    let f = started();
+    let wire = seam_socket(&f, "allMids");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.exchange.base().store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("hyperliquid")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            wire.push(WsEvent::Message(SocketFrame::Text(
+                frame.as_str().unwrap().into(),
+            )));
+            f.host.settle();
+        }
+        ticker_coercion::assert_native(&f.exchange.base().store.tickers(), case);
+    }
+    assert!(
+        f.host.reports.borrow().is_empty(),
+        "{:?}",
+        f.host.reports.borrow()
+    );
+    f.exchange.dispose().unwrap();
 }
