@@ -25,6 +25,9 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
         .into_iter()
         .map(|asset| {
             let (id, symbol) = match venue {
+                "bingx" => (format!("{asset}-USDT"), format!("{asset}USDT")),
+                "bitget" => (format!("{asset}-bitget-market"), format!("{asset}USDT")),
+                "grvt" => (format!("{asset}_USDT_Perp"), format!("{asset}_USDT_PERP")),
                 "polymarket" => (format!("{asset}-token"), format!("{asset}-Yes")),
                 "bitunix" => (format!("{asset}/USDT"), format!("{asset}USDT")),
                 "bitrue" => (format!("E-{asset}-USDT"), format!("E-{asset}-USDT")),

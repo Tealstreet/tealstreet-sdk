@@ -5,6 +5,12 @@ import sys
 
 root = Path(__file__).resolve().parents[3]
 cases = {
+    "bingx": ("public_stream.rs", "binding", '("mark", "fairPrice"),', '("mark", "indexPrice"),'),
+    "bitget": ("ticker.rs", "exchange_binding", '("bid", &["bidPr", "bidPrice", "bid"][..]),', '("bid", &["askPr", "askPrice", "ask"][..]),'),
+    "grvt-store": ("binding/public.rs", "exchange_binding", 'vec![Js::object(vec![("id", id.clone())]), patch],', 'vec![id.clone(), patch],'),
+    "grvt-candle": ("public_feeds.rs", "exchange_binding", 'last: Some(close),', 'last: Some(close + 1.0),'),
+    "grvt-mark": ("public_feeds.rs", "exchange_binding", 'changes.last = Some(mark);', 'changes.last = Some(mark + 1.0);'),
+    "grvt": ("public_feeds.rs", "exchange_binding", '("mp", "mark_price", &mut changes.mark),', '("ip", "index_price", &mut changes.mark),'),
     "polymarket-store": ("binding/socket.rs", "exchange_binding", 'Js::object(vec![("id", id.clone())]),', 'id.clone(),'),
     "polymarket": ("ws_dispatch.rs", "exchange_binding", 'let last = safe_cex_num::parse_float(&String::from_utf16_lossy(&price));', 'let last = safe_cex_num::parse_float(&String::from_utf16_lossy(&price)) + 1.0;'),
     "bitunix": ("sockets.rs", "native_identity", "patch.set_number(*k, *n);", "patch.set_number(*k, if n.is_nan() { 0.0 } else { *n });"),
@@ -26,7 +32,7 @@ selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
 for venue in selected:
     filename, target, before, after = cases[venue]
-    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket"}.get(venue, venue)
+    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket", "grvt-store": "grvt", "grvt-candle": "grvt", "grvt-mark": "grvt"}.get(venue, venue)
     test = {
         "binance": "production_ticker_coercion_",
         "kucoin": "production_ticker_coercion_futures_matches_constructed_typescript",
