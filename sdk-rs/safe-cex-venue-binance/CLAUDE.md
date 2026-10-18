@@ -677,6 +677,17 @@ The actual native ticker census in private_classes retains source comparisons fo
 all three families; its production field-routing control requires three compiled
 failures and exact-restored passes.
 
+The remaining five public stream aliases have a finite authenticated compiler
+runner, `scripts/public-stream-alias-contracts.mjs`. Failure, TickerFields,
+CallbackList and CoreInvoke are specific non-decoder capabilities; their native
+trait receipts do not claim callback execution. The constructed native ticker
+census and inverse socket topic/depth tests execute their live consumers.
+BinanceDepthUpdate remains a live map decoder. Its two native observations read
+all keys, nested values, row cardinality, UTF16 units and numeric bits. Run the
+runner with `--controls` to corrupt opaque-member retention and signed zero
+independently, require named native failures, then restore the exact contract.
+These five rows do not classify other function owners or feature combinations.
+
 Keep production imports explicit. The canonical accepted-set scanner must prove
 macro provenance across each source scope; wildcard imports can hide that proof
 even when the current business logic compiles. Import changes also require review
