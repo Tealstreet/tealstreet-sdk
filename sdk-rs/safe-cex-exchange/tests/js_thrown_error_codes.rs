@@ -53,3 +53,60 @@ fn throwing_code_getters_report_their_cause_without_recursing() {
     assert_eq!(error.name, "TypeError");
     assert_eq!(error.message, "code getter failed");
 }
+
+#[test]
+fn retained_callback_metadata_preserves_utf16_without_undoing_typed_edits() {
+    use safe_cex_exchange::js_runtime::value::{Js, OwnedJsValue, owned::OwnedCallbackError};
+    use safe_cex_transport::{
+        RestFailure, RestRequest, TransportError, provider::TransportErrorOrigin,
+    };
+
+    let original = OwnedJsValue::object([
+        ("name", OwnedJsValue::String(vec![0xd800])),
+        ("message", OwnedJsValue::String(vec![0xdc00])),
+    ]);
+    let mut failure = RestFailure::pre_transmit("callback rejected".into(), RestRequest::default());
+    failure.transport_error = Some(Box::new(TransportError::Rejected(
+        TransportErrorOrigin::new(OwnedCallbackError::new(original)),
+    )));
+    let error = ExchangeError::from(failure);
+    let thrown = Thrown::from(error.clone());
+    assert_eq!(
+        thrown.value.get("name").unwrap().as_str().unwrap().as_ref(),
+        &[0xd800]
+    );
+    assert_eq!(
+        thrown
+            .value
+            .get("message")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .as_ref(),
+        &[0xdc00]
+    );
+    assert!(matches!(&thrown.value, Js::Object(object) if object.class == "Error"));
+    assert_eq!(thrown.to_exchange_error(), error);
+
+    let mut edited = error;
+    edited.name = "TypeError".into();
+    edited.message = "venue supplied context".into();
+    let thrown = Thrown::from(edited.clone());
+    assert!(
+        thrown
+            .value
+            .get("name")
+            .unwrap()
+            .strict_equals(&Js::str("TypeError"))
+    );
+    assert!(
+        thrown
+            .value
+            .get("message")
+            .unwrap()
+            .strict_equals(&Js::str("venue supplied context"))
+    );
+    assert!(!thrown.value.has_own("name"));
+    assert!(thrown.value.own_keys().is_empty());
+    assert_eq!(thrown.to_exchange_error(), edited);
+}
