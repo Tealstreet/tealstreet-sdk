@@ -218,9 +218,36 @@ fn raw_owned_and_utf8_boundaries() {
     assert_eq!(ORACLE["utf8"].as_array().unwrap().len(), 3);
     for case in ORACLE["utf8"].as_array().unwrap() {
         assert_eq!(case["codeUnit"], 55296);
-        assert!(
-            serde_json::from_str::<JsNumberInput>(case["raw"].as_str().unwrap()).is_err(),
-            "raw_utf8_boundary"
+        let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        let method = case["method"].as_str().unwrap();
+        let session = || ready(Ok("token".into()));
+        let account = || ready(Ok("account-A".into()));
+        let request = |_| ready(Ok(input));
+        let report = |_: Value| -> Result<(), ExchangeError> {
+            panic!("raw UTF16 input must not report a failure")
+        };
+        let output = match method {
+            "fetchInstrumentsRaw" => run(fetch_instruments_raw(session, account, request, &report)),
+            "fetchInstrumentDetailsRaw" => run(fetch_instrument_details_raw(
+                session, account, request, &report,
+            )),
+            "fetchPortfolioRaw" => run(fetch_portfolio_raw(session, account, request, &report)),
+            _ => panic!("unknown raw read {method}"),
+        }
+        .unwrap()
+        .unwrap();
+        let field = match method {
+            "fetchInstrumentsRaw" => "instruments",
+            "fetchInstrumentDetailsRaw" => "instrumentDetails",
+            _ => "portfolios",
+        };
+        let retained: safe_cex_types::retained_json::RetainedJsonInput = output.decode().unwrap();
+        assert_eq!(
+            retained.get(field).unwrap().as_array().unwrap()[0]
+                .get("symbol")
+                .unwrap()
+                .as_text(),
+            Some([0xd800].as_slice())
         );
     }
 }

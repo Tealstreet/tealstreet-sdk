@@ -1,8 +1,15 @@
 //! Candle read orchestration; calendar formatting is supplied by the host.
-use crate::types::{CandleResponse, INTERVAL};
-use safe_cex_exchange::runtime::ExchangeError;
+use crate::types::INTERVAL;
+use safe_cex_exchange::{
+    js_runtime::{
+        ops,
+        value::{Js, Thrown, from_retained_input, to_typed},
+    },
+    runtime::ExchangeError,
+};
 use safe_cex_num::{
-    JsJsonValue as J, js_date_parse, js_json_stringify, js_truthy, numeric_ingress::JsNumberInput,
+    JsJsonValue as J, js_date_parse_utf16, js_json_stringify, js_time_clip, js_truthy,
+    numeric_ingress::JsNumberInput,
 };
 use safe_cex_transport::provider::{RestBody, RestRequest};
 use safe_cex_types::{Candle, OHLCVOptions};
@@ -68,23 +75,49 @@ where
                 ..RestRequest::default()
             })
             .await?;
-            // CHOSEN: shared declared response codec rejects malformed records.
-            let data: CandleResponse = input
-                .decode()
-                .map_err(|e| ExchangeError::new(e.to_string()))?;
-            let candles = data
-                .events
-                .iter()
-                .map(|raw| Candle {
-                    timestamp: js_date_parse(&raw.time, local_to_utc) / 1000.0,
-                    open: raw.open,
-                    high: raw.high,
-                    low: raw.low,
-                    close: raw.close,
-                    volume: raw.volume,
-                    last_side: None,
+            let data = from_retained_input(
+                input
+                    .decode::<safe_cex_types::retained_json::RetainedJsonInput>()
+                    .map_err(|e| ExchangeError::new(e.to_string()))?,
+            );
+            let events = data.get("events")?;
+            if events.is_nullish() {
+                events.get("map")?;
+            }
+            let events = events
+                .array_values()
+                .ok_or_else(|| Thrown::type_error("data.events.map is not a function"))?;
+            let mut fields = Vec::with_capacity(events.len());
+            for raw in events {
+                let date = ops::to_primitive(&raw.get("time")?)?;
+                let milliseconds = if let Js::String(text) = date {
+                    js_date_parse_utf16(&text, local_to_utc)
+                } else {
+                    js_time_clip(date.to_number()?)
+                };
+                fields.push((
+                    milliseconds / 1000.0,
+                    raw.get("open")?,
+                    raw.get("high")?,
+                    raw.get("low")?,
+                    raw.get("close")?,
+                    raw.get("volume")?,
+                ));
+            }
+            let candles = fields
+                .into_iter()
+                .map(|(timestamp, open, high, low, close, volume)| {
+                    Ok(Candle {
+                        timestamp,
+                        open: to_typed(&open)?,
+                        high: to_typed(&high)?,
+                        low: to_typed(&low)?,
+                        close: to_typed(&close)?,
+                        volume: to_typed(&volume)?,
+                        last_side: None,
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>, Thrown>>()?;
             Ok(candles)
         }
         .await;
