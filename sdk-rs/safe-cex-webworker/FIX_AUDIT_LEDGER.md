@@ -7,8 +7,8 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 
 | Row | Maintained source surface | Resolution | Evidence or next review |
 | --- | --- | --- | --- |
-| 2 | ChaserOrderManager#tryPlaceOrders | OPEN | Eager entry and cancellation ownership. |
-| 3 | ChaserOrderManager#emitComplete | OPEN | Native event and await order. |
+| 2 | ChaserOrderManager#tryPlaceOrders | FIX | Canonical eager continuation and await checkpoints; late-stop cancellation survives a dropped waiter. |
+| 3 | ChaserOrderManager#emitComplete | FIX | Canonical settlement and retained fill reconciliation after caller abandonment. |
 | 4 | chaserOrderManagerInstance | OPEN | Constructed module/receiver composition. |
 | 5 | TwapInstance.resume | FIX | Canonical Promise settlement; immediate prefix and rejection profiles below. |
 | 6 | TwapInstance.terminate | FIX | Same settlement boundary; synchronous cleanup and partial-commit order preserved. |
@@ -90,3 +90,30 @@ This closes the two timing findings, not the independent shared options/state
 representation review (rows 76/77). The native model still uses typed state
 snapshots and explicit timer/post capabilities; no arbitrary JS getter, mutable
 array alias or whole browser-worker startup equivalence is claimed here.
+
+## Chaser placement and completion: rows 2 and 3
+
+The maintained manager's async methods (tryPlaceOrders at line 214 and
+emitComplete at line 911) start immediately and continue independently of the
+caller's Promise. The native prefixes already ran during method entry, but the
+returned boxed future owned pending placement/reconciliation and could settle a
+ready result in the caller's first poll. Dropping it lost late-order cancellation
+or the completion event. Both operations now use the shared start_eager driver;
+ready typed leaves cross the canonical await checkpoint before post-await work.
+Typed order IDs and fill amounts remain native across that boundary.
+
+Four named regressions in tests/chaser_engine.rs fail against the exact compiled
+master body at 0f5dbb345e: two caller-settlement tests, a dropped placement waiter
+whose late order must be cancelled after STOP, and a dropped completion waiter
+whose pending fill must still reach its event. Eight maintained-source profiles
+execute the actual TS manager and instance against native ChaserEngine, manager,
+instance, DefaultStore and canonical scheduler; only venue I/O/timers are supplied.
+Native fill bits precede finite profile comparisons. The original retry ceilings,
+nonfinite sizing, ambiguous placement, cancellation and supervisor cases remain.
+An independently compiled removal of the await fences must fail the ready-source
+prefix checks even with the eager driver retained; restoring exact bytes recovers.
+
+This closes the assigned continuation/timing findings. It does not classify
+arbitrary JS error/receiver admission or the separately open manager, options,
+state and event representations (rows 4, 21-25 and 75). The helper-specific Store
+snapshot and optional-method capability boundaries keep their own manifest rows.
