@@ -66,6 +66,8 @@ pub trait WsRuntime: ExchangeRuntime {
     fn frame_receipts_enabled(&self) -> bool {
         false
     }
+    /// Retain replay counters independently of exchange-level socket grouping.
+    fn register_frame_receipts(&self, _receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>) {}
 }
 pub trait WsParent {
     fn name(&self) -> &str;
@@ -696,7 +698,7 @@ pub struct FrameDrainReceipt {
 
 pub struct BaseWebSocket {
     pub id: u64,
-    frame_receipts: RefCell<Vec<FrameDrainReceipt>>,
+    frame_receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>,
     identity: Rc<()>,
     parent: Rc<dyn WsParent>,
     runtime: Rc<dyn WsRuntime>,
@@ -721,9 +723,13 @@ impl BaseWebSocket {
         runtime: Rc<dyn WsRuntime>,
         protocol: Rc<dyn WsProtocol>,
     ) -> Rc<Self> {
+        let frame_receipts = Rc::default();
+        if runtime.frame_receipts_enabled() {
+            runtime.register_frame_receipts(Rc::clone(&frame_receipts));
+        }
         Rc::new(Self {
             id,
-            frame_receipts: RefCell::default(),
+            frame_receipts,
             identity: Rc::new(()),
             parent,
             runtime,
@@ -2931,6 +2937,7 @@ mod tests {
     #[derive(Default)]
     struct Runtime {
         now: Rc<Cell<f64>>,
+        frame_histories: RefCell<Vec<Rc<RefCell<Vec<FrameDrainReceipt>>>>>,
         jobs: RefCell<Vec<Job>>,
         inline_spawn: Cell<bool>,
         fail_sleep: Cell<bool>,
@@ -3051,6 +3058,9 @@ mod tests {
     impl WsRuntime for Runtime {
         fn frame_receipts_enabled(&self) -> bool {
             true
+        }
+        fn register_frame_receipts(&self, receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>) {
+            self.frame_histories.borrow_mut().push(receipts);
         }
         fn transport(&self) -> Arc<dyn TransportProvider> {
             if self.relaying.get() {
@@ -3893,6 +3903,11 @@ mod tests {
     #[test]
     fn frame_receipts_count_processed_messages_separately_for_each_dial() {
         let (socket, _, runtime, protocol) = fixture();
+        assert_eq!(runtime.frame_histories.borrow().len(), 1);
+        assert!(Rc::ptr_eq(
+            &runtime.frame_histories.borrow()[0],
+            &socket.frame_receipts
+        ));
         run(socket.create_websocket("wss://first".into(), vec![], None)).unwrap();
         runtime.pump();
         socket.on_message(&SocketFrame::Text("one".into())).unwrap();
@@ -3934,6 +3949,22 @@ mod tests {
             (receipts[1].close_consumed, receipts[1].close_processed),
             (1, 1)
         );
+        let weak = Rc::downgrade(&socket);
+        socket.dispose();
+        runtime.pump();
+        drop(socket);
+        assert!(
+            weak.upgrade().is_none(),
+            "replay counters retain no socket owner"
+        );
+        let history = runtime.frame_histories.borrow();
+        let retained = history[0].borrow();
+        assert_eq!(
+            retained.len(),
+            2,
+            "disposed dial histories remain observable"
+        );
+        assert_eq!((retained[1].processed, retained[1].errors), (2, 1));
     }
     #[test]
     fn disposal_cancels_native_event_consumer_without_host_wakeup() {
