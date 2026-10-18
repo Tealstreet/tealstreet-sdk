@@ -33200,7 +33200,7 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
     "observation": {
       "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ retained(&decoded.borrow()) },Err(_)=>serde_json::json!({\"error\":true})} }",
       "cases": [
@@ -33352,7 +33352,7 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
     "observation": {
       "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let rows=decoded.borrow();let values:Vec<_>=rows.iter().map(|row|retained(&row.borrow())).collect();serde_json::json!({\"length\":rows.len(),\"values\":values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
       "cases": [
@@ -33517,7 +33517,7 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
     "observation": {
       "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}}fn market(d:&safe_cex_types::Market)->serde_json::Value{let mut out=serde_json::Map::new();out.insert(\"id\".into(),serde_json::json!(d.id));out.insert(\"symbol\".into(),serde_json::json!(d.symbol));out.insert(\"prettySymbol\".into(),serde_json::json!(d.pretty_symbol));out.insert(\"base\".into(),serde_json::json!(d.base));out.insert(\"quote\".into(),serde_json::json!(d.quote));out.insert(\"active\".into(),serde_json::json!(d.active));out.insert(\"precision\".into(),serde_json::json!({\"amount\":bits(d.precision.amount),\"price\":bits(d.precision.price)}));out.insert(\"limits\".into(),serde_json::json!({\"amount\":{\"min\":bits(d.limits.amount.min),\"max\":bits(d.limits.amount.max)},\"leverage\":{\"min\":bits(d.limits.leverage.min),\"max\":bits(d.limits.leverage.max)},\"price\":d.limits.price.as_ref().map(|p|serde_json::json!({\"min\":bits(p.min)}))}));out.insert(\"option\".into(),d.option.as_ref().map(|p|serde_json::json!({\"underlying\":p.underlying,\"expiry\":bits(p.expiry),\"strike\":bits(p.strike),\"right\":p.right,\"style\":p.style,\"settlement\":p.settlement,\"premiumAsset\":p.premium_asset,\"settleAsset\":p.settle_asset})).unwrap_or(serde_json::Value::Null));out.insert(\"contractSize\".into(),d.contract_size.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"isExpiring\".into(),serde_json::json!(d.is_expiring));out.insert(\"isInverse\".into(),serde_json::json!(d.is_inverse));out.insert(\"isSpot\".into(),serde_json::json!(d.is_spot));out.insert(\"isPerpetual\".into(),serde_json::json!(d.is_perpetual));out.insert(\"isReadOnly\".into(),serde_json::json!(d.is_read_only));out.insert(\"info\".into(),d.info.as_ref().map(retained).unwrap_or(serde_json::Value::Null));out.insert(\"takerFee\".into(),d.taker_fee.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"makerFee\".into(),d.maker_fee.map(bits).unwrap_or(serde_json::Value::Null));serde_json::Value::Object(out)} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ market(&decoded.borrow()) },Err(_)=>serde_json::json!({\"error\":true})} }",
       "cases": [
@@ -33891,7 +33891,7 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
     "observation": {
       "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}}fn market(d:&safe_cex_types::Market)->serde_json::Value{let mut out=serde_json::Map::new();out.insert(\"id\".into(),serde_json::json!(d.id));out.insert(\"symbol\".into(),serde_json::json!(d.symbol));out.insert(\"prettySymbol\".into(),serde_json::json!(d.pretty_symbol));out.insert(\"base\".into(),serde_json::json!(d.base));out.insert(\"quote\".into(),serde_json::json!(d.quote));out.insert(\"active\".into(),serde_json::json!(d.active));out.insert(\"precision\".into(),serde_json::json!({\"amount\":bits(d.precision.amount),\"price\":bits(d.precision.price)}));out.insert(\"limits\".into(),serde_json::json!({\"amount\":{\"min\":bits(d.limits.amount.min),\"max\":bits(d.limits.amount.max)},\"leverage\":{\"min\":bits(d.limits.leverage.min),\"max\":bits(d.limits.leverage.max)},\"price\":d.limits.price.as_ref().map(|p|serde_json::json!({\"min\":bits(p.min)}))}));out.insert(\"option\".into(),d.option.as_ref().map(|p|serde_json::json!({\"underlying\":p.underlying,\"expiry\":bits(p.expiry),\"strike\":bits(p.strike),\"right\":p.right,\"style\":p.style,\"settlement\":p.settlement,\"premiumAsset\":p.premium_asset,\"settleAsset\":p.settle_asset})).unwrap_or(serde_json::Value::Null));out.insert(\"contractSize\".into(),d.contract_size.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"isExpiring\".into(),serde_json::json!(d.is_expiring));out.insert(\"isInverse\".into(),serde_json::json!(d.is_inverse));out.insert(\"isSpot\".into(),serde_json::json!(d.is_spot));out.insert(\"isPerpetual\".into(),serde_json::json!(d.is_perpetual));out.insert(\"isReadOnly\".into(),serde_json::json!(d.is_read_only));out.insert(\"info\".into(),d.info.as_ref().map(retained).unwrap_or(serde_json::Value::Null));out.insert(\"takerFee\".into(),d.taker_fee.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"makerFee\".into(),d.maker_fee.map(bits).unwrap_or(serde_json::Value::Null));serde_json::Value::Object(out)} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let rows=decoded.borrow();let values:Vec<_>=rows.iter().map(|row|market(&row.borrow())).collect();serde_json::json!({\"length\":rows.len(),\"values\":values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
       "cases": [
@@ -34263,7 +34263,7 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
     "observation": {
       "call": "{  match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let values=decoded.borrow();serde_json::json!({\"length\":values.len(),\"values\":*values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
       "cases": [
@@ -34436,7 +34436,7 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
     "observation": {
       "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let rows=decoded.borrow();let values:Vec<_>=rows.iter().map(|row|{let row=row.borrow();serde_json::json!({\"timestamp\":bits(row.timestamp),\"open\":bits(row.open),\"high\":bits(row.high),\"low\":bits(row.low),\"close\":bits(row.close),\"volume\":bits(row.volume),\"lastSide\":row.last_side})}).collect();serde_json::json!({\"length\":rows.len(),\"values\":values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
       "cases": [
@@ -34678,7 +34678,7 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
     "observation": {
       "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))} fn retained(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"undefined\":true}),I::Null=>serde_json::Value::Null,I::Bool(v)=>serde_json::json!(v),I::Text(v)=>serde_json::json!({\"units\":v}),I::Lexeme(v)=>serde_json::json!({\"bits\":bits(v.parse::<f64>().expect(\"native number\"))}),I::Float(v)=>serde_json::json!({\"bits\":bits(*v)}),I::Array(v)=>serde_json::Value::Array(v.iter().map(retained).collect()),I::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k,retained(v)])).collect())}}fn market(d:&safe_cex_types::Market)->serde_json::Value{let mut out=serde_json::Map::new();out.insert(\"id\".into(),serde_json::json!(d.id));out.insert(\"symbol\".into(),serde_json::json!(d.symbol));out.insert(\"prettySymbol\".into(),serde_json::json!(d.pretty_symbol));out.insert(\"base\".into(),serde_json::json!(d.base));out.insert(\"quote\".into(),serde_json::json!(d.quote));out.insert(\"active\".into(),serde_json::json!(d.active));out.insert(\"precision\".into(),serde_json::json!({\"amount\":bits(d.precision.amount),\"price\":bits(d.precision.price)}));out.insert(\"limits\".into(),serde_json::json!({\"amount\":{\"min\":bits(d.limits.amount.min),\"max\":bits(d.limits.amount.max)},\"leverage\":{\"min\":bits(d.limits.leverage.min),\"max\":bits(d.limits.leverage.max)},\"price\":d.limits.price.as_ref().map(|p|serde_json::json!({\"min\":bits(p.min)}))}));out.insert(\"option\".into(),d.option.as_ref().map(|p|serde_json::json!({\"underlying\":p.underlying,\"expiry\":bits(p.expiry),\"strike\":bits(p.strike),\"right\":p.right,\"style\":p.style,\"settlement\":p.settlement,\"premiumAsset\":p.premium_asset,\"settleAsset\":p.settle_asset})).unwrap_or(serde_json::Value::Null));out.insert(\"contractSize\".into(),d.contract_size.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"isExpiring\".into(),serde_json::json!(d.is_expiring));out.insert(\"isInverse\".into(),serde_json::json!(d.is_inverse));out.insert(\"isSpot\".into(),serde_json::json!(d.is_spot));out.insert(\"isPerpetual\".into(),serde_json::json!(d.is_perpetual));out.insert(\"isReadOnly\".into(),serde_json::json!(d.is_read_only));out.insert(\"info\".into(),d.info.as_ref().map(retained).unwrap_or(serde_json::Value::Null));out.insert(\"takerFee\".into(),d.taker_fee.map(bits).unwrap_or(serde_json::Value::Null));out.insert(\"makerFee\".into(),d.maker_fee.map(bits).unwrap_or(serde_json::Value::Null));serde_json::Value::Object(out)} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ let rows=decoded.borrow();let values:Vec<_>=rows.iter().map(|(key,row)|serde_json::json!([key,market(&row.borrow())])).collect();serde_json::json!({\"length\":rows.len(),\"values\":values}) },Err(_)=>serde_json::json!({\"error\":true})} }",
       "cases": [
@@ -34998,116 +34998,6 @@
       }
     ]
   },
-  "safe_cex_venue_coinbase::exchange_lifecycle::LifecycleTimer": {
-    "category": "decoder",
-    "shape": "json",
-    "target": {
-      "resolved_path": {
-        "path": "alloc::rc::Rc",
-        "args": {
-          "angle_bracketed": {
-            "args": [
-              {
-                "type": {
-                  "resolved_path": {
-                    "path": "core::cell::RefCell",
-                    "args": {
-                      "angle_bracketed": {
-                        "args": [
-                          {
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        ],
-                        "constraints": []
-                      }
-                    }
-                  }
-                }
-              }
-            ],
-            "constraints": []
-          }
-        }
-      }
-    },
-    "entrypoints": [],
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration.",
-    "observation": {
-      "call": "{ fn bits(v:f64)->serde_json::Value{serde_json::json!(format!(\"{:016x}\",v.to_bits()))}fn value(v:&serde_json::Value)->serde_json::Value{match v{serde_json::Value::Null=>serde_json::Value::Null,serde_json::Value::Bool(v)=>serde_json::json!(v),serde_json::Value::String(v)=>serde_json::json!({\"units\":v.encode_utf16().collect::<Vec<_>>()}),serde_json::Value::Number(v)=>serde_json::json!({\"bits\":bits(v.as_f64().expect(\"finite native JSON number\"))}),serde_json::Value::Array(v)=>serde_json::Value::Array(v.iter().map(value).collect()),serde_json::Value::Object(v)=>serde_json::Value::Array(v.iter().map(|(k,v)|serde_json::json!([k.encode_utf16().collect::<Vec<_>>(),value(v)])).collect())}} match serde_json::from_str::<$type>($value.as_str().expect(\"authored raw alias input\")){Ok(decoded)=>{ value(&decoded.borrow()) },Err(_)=>serde_json::json!({\"error\":true})} }",
-      "cases": [
-        {
-          "input": "null",
-          "output": null
-        },
-        {
-          "input": "false",
-          "output": false
-        },
-        {
-          "input": "-0.0",
-          "output": {
-            "bits": "8000000000000000"
-          }
-        },
-        {
-          "input": "\"🚀\"",
-          "output": {
-            "units": [
-              55357,
-              56960
-            ]
-          }
-        },
-        {
-          "input": "[]",
-          "output": []
-        },
-        {
-          "input": "{\"z\":[-0.0,true,null,\"🚀\"],\"a\":{\"x\":2}}",
-          "output": [
-            [
-              [
-                122
-              ],
-              [
-                {
-                  "bits": "8000000000000000"
-                },
-                true,
-                null,
-                {
-                  "units": [
-                    55357,
-                    56960
-                  ]
-                }
-              ]
-            ],
-            [
-              [
-                97
-              ],
-              [
-                [
-                  [
-                    120
-                  ],
-                  {
-                    "bits": "4000000000000000"
-                  }
-                ]
-              ]
-            ]
-          ]
-        }
-      ]
-    }
-  },
   "safe_cex_venue_coinbase::market_position_reads::ReadTickers": {
     "category": "non-decoder",
     "target": {
@@ -35173,7 +35063,7 @@
       }
     },
     "reason": "Shared mutable vector of native typed ticker rows with separately retained info roots; not a raw wire decoder. Native fields and the production frame adapter retain number bits.",
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
   },
   "safe_cex_venue_coinbase::market_position_reads::ReadPositions": {
     "category": "non-decoder",
@@ -35240,7 +35130,7 @@
       }
     },
     "reason": "Shared mutable vector of typed position rows and independent original-info handles; not a raw wire decoder. Native numeric fields and shared info mutation are directly observed.",
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
   },
   "safe_cex_venue_coinbase::public_market_reads::CatalogMarkets": {
     "category": "non-decoder",
@@ -35321,6 +35211,6 @@
       }
     },
     "reason": "Shared mutable catalog row/vector roots carrying typed Market fields and a separate original-item handle. CatalogMarket has no Deserialize implementation; native trait detection enforces that classification.",
-    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection and real constructed-class timer creation/cancellation. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
+    "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates this exact alias. Direct native observations inspect the qualified alias after one decode, preserving collection order/cardinality, retained metadata keys/units and numeric bits before JSON reporting. tests/support/data_alias_native.rs separately exercises the actual native Js codecs, shared mutable item/market/model roots, typed scalar projection. This finite alias cohort does not replace underlying model contracts, claim every market-data body, or assert original arbitrary Js graph identity. data-alias-controls.py independently changes native observations and real model projection, requires named compiled failures and exact restoration. Role receipts classify these three non-decoder capabilities; actual native library witnesses are separate from decoder receipts."
   }
 }
