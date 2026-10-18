@@ -2037,6 +2037,8 @@ all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
 
 
+BaseExchange socket-health publication constructs own undefined timestamp/close-code properties and passes them to the canonical Store partial merge. It never removes keys through a JSON read/replacement. Typed Store notifications and prepared payloads retain the same health field.
+
 Native replay receipts include raw ExchangeRuntime tasks as well as canonical
 Promise jobs. Unclassified spawn_local calls, finite work, unpolled tasks and
 awakened tasks block drain. Reviewed timer/socket reader tasks qualify as waiting
