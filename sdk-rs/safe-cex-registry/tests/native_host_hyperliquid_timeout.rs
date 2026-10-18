@@ -1,9 +1,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 mod support;
 
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_registry::{native_host::native_venue_host_with, rust_venues::rust_constructor};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{RestAdapter, RestFuture, RestRequest, RestResponse};
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};

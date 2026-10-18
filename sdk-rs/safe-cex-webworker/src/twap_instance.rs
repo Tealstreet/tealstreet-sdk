@@ -198,7 +198,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
                 let chaser = Rc::new(ChaserOrderInstance::new(
                     self.exchange.clone(),
                     Rc::new(RefCell::new(input)),
-                ));
+                )?);
                 let id = chaser.id().to_owned();
                 self.tracked_chaser_order_ids.borrow_mut().push(id.clone());
                 self.host.add_chaser(chaser)?;
@@ -210,7 +210,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
             }
             let limit = options.borrow().use_limit_orders;
             let price = if limit {
-                let tickers = self.exchange.base().store.tickers();
+                let tickers = self.exchange.base().store.tickers()?;
                 let current_options = self.options();
                 let o = current_options.borrow();
                 let ticker = tickers.iter().find(|t| t.symbol == o.active_market.symbol);

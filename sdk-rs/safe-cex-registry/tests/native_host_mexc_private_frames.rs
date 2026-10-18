@@ -26,7 +26,7 @@ async fn started() -> (support::Harness, Rc<Cell<bool>>) {
     }), json!({"key":"native-key","secret":support::SECRET,"extra":{"tickInterval":60_000}}),None,safe_cex_exchange::native::native_runtime()).await;
     h.exchange.start().await.expect("MEXC startup");
     assert_eq!(
-        h.store.markets().len(),
+        h.store.markets().unwrap().len(),
         1,
         "production market mapping loaded"
     );
@@ -66,11 +66,11 @@ fn native_mexc_order_frames_update_partial_fills_and_terminal_statuses() {
             json!({"channel":"push.personal.order","data":[order("ws-1",2,1.5),order("ws-2",1,0.0)]}),
         );
         support::eventually("MEXC private orders", || {
-            h.store.orders().iter().any(|o| o.id == "ws-1")
+            h.store.orders().unwrap().iter().any(|o| o.id == "ws-1")
         })
         .await;
         {
-            let orders = h.store.orders();
+            let orders = h.store.orders().unwrap();
             let first = orders.iter().find(|o| o.id == "ws-1").unwrap();
             assert_eq!(
                 (first.amount, first.filled, first.remaining),
@@ -90,11 +90,12 @@ fn native_mexc_order_frames_update_partial_fills_and_terminal_statuses() {
         support::eventually("MEXC terminal orders", || {
             h.store
                 .orders()
+                .unwrap()
                 .iter()
                 .any(|o| o.id == "ws-1" && o.status == OrderStatus::Closed)
         })
         .await;
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         assert_eq!(
             orders.iter().find(|o| o.id == "ws-2").unwrap().status,
             OrderStatus::Canceled
@@ -147,11 +148,12 @@ fn native_mexc_position_frame_updates_the_production_store() {
         support::eventually("MEXC private position", || {
             h.store
                 .positions()
+                .unwrap()
                 .iter()
                 .any(|p| p.side == PositionSide::Short && p.contracts == 1.5)
         })
         .await;
-        let positions = h.store.positions();
+        let positions = h.store.positions().unwrap();
         let short = positions
             .iter()
             .find(|p| p.side == PositionSide::Short)
@@ -177,7 +179,7 @@ fn native_mexc_position_frame_updates_the_production_store() {
 fn native_mexc_asset_frame_refreshes_balance_from_the_production_endpoint() {
     support::run_local(async {
         let (h, revised) = started().await;
-        assert_eq!(h.store.balance().total, 123.0);
+        assert_eq!(h.store.balance().unwrap().total, 123.0);
         let before = h
             .seen
             .borrow()
@@ -187,10 +189,10 @@ fn native_mexc_asset_frame_refreshes_balance_from_the_production_endpoint() {
         revised.set(true);
         push(&h, json!({"channel":"push.personal.asset","data":{}}));
         support::eventually("MEXC debounced balance", || {
-            h.store.balance().total == 200.0
+            h.store.balance().unwrap().total == 200.0
         })
         .await;
-        let balance = h.store.balance();
+        let balance = h.store.balance().unwrap();
         assert_eq!(
             (balance.free, balance.used, balance.upnl),
             (140.0, 60.0, 7.0)

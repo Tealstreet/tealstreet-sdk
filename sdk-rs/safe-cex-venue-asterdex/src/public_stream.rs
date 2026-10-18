@@ -310,7 +310,7 @@ impl PublicStream {
         patch: ModelPatch,
     ) -> Result<Option<Ticker>, ExchangeError> {
         let store = self.parent.store();
-        let old = store.tickers_by_symbol().get(symbol).cloned();
+        let old = store.tickers_by_symbol()?.get(symbol).cloned();
         let Some(old) = old else {
             return Ok(None);
         };
@@ -357,7 +357,7 @@ impl PublicStream {
 
     pub fn handle_ticker_update(&self, data: &Value) -> Result<(), ExchangeError> {
         let store = self.parent.store();
-        let tickers = store.tickers().to_vec();
+        let tickers = store.tickers()?.to_vec();
         let entries: Vec<_> = tickers.iter().map(|t| (t.symbol.as_str(), t)).collect();
         let Some(update) = ws_helpers::public_ticker_update(data, &entries).map_err(coerce)? else {
             return Ok(());
@@ -380,7 +380,7 @@ impl PublicStream {
     }
     pub fn handle_mark_price_update(&self, data: &Value) -> Result<(), ExchangeError> {
         let store = self.parent.store();
-        let tickers = store.tickers().to_vec();
+        let tickers = store.tickers()?.to_vec();
         let entries: Vec<_> = tickers.iter().map(|t| (t.symbol.as_str(), t)).collect();
         let Some(update) = ws_helpers::public_mark_price_update(data, &entries).map_err(coerce)?
         else {

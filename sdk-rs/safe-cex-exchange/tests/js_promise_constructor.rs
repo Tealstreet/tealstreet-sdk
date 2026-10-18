@@ -25,7 +25,7 @@ fn run<F: Future<Output = ()>>(body: impl FnOnce(Scope<()>) -> F) {
         let shared = Rc::new(ScopeShared::new(
             runtime,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));

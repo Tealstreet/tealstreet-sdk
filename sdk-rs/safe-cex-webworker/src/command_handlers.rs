@@ -113,7 +113,7 @@ impl<H: CommandHandlerHost> ChaserOrderHandler<H> {
                 let instance = Rc::new(ChaserOrderInstance::new(
                     self.context.exchange(),
                     Rc::new(RefCell::new(options)),
-                ));
+                )?);
                 self.context.ctx.add_chaser(instance)?;
             }
             StoreWorkerOp::ChaserTerminate => self.context.ctx.remove_chaser(id(payload)?)?,
@@ -125,7 +125,10 @@ impl<H: CommandHandlerHost> ChaserOrderHandler<H> {
         }
         Ok(())
     }
-    pub fn buffer_until_markets_loaded(&self, payload: StoreWorkerPayload) -> bool {
+    pub fn buffer_until_markets_loaded(
+        &self,
+        payload: StoreWorkerPayload,
+    ) -> Result<bool, ExchangeError> {
         self.base.buffer_until_markets_loaded(payload)
     }
     pub fn dispose(&self) {
@@ -270,7 +273,10 @@ impl<H: CommandHandlerHost> TwapHandler<H> {
         }
         Ok(())
     }
-    pub fn buffer_until_markets_loaded(&self, payload: StoreWorkerPayload) -> bool {
+    pub fn buffer_until_markets_loaded(
+        &self,
+        payload: StoreWorkerPayload,
+    ) -> Result<bool, ExchangeError> {
         self.base.buffer_until_markets_loaded(payload)
     }
     pub fn dispose(&self) {
@@ -351,7 +357,10 @@ impl<H: CommandHandlerHost> UiStateHandler<H> {
         }
         Ok(())
     }
-    pub fn buffer_until_markets_loaded(&self, payload: StoreWorkerPayload) -> bool {
+    pub fn buffer_until_markets_loaded(
+        &self,
+        payload: StoreWorkerPayload,
+    ) -> Result<bool, ExchangeError> {
         self.base.buffer_until_markets_loaded(payload)
     }
     pub fn dispose(&self) {

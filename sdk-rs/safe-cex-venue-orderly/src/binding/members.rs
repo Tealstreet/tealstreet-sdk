@@ -71,14 +71,14 @@ pub(super) fn invoke(
             &text(&arg(0))?,
             &margin_cache(&receiver)?,
             host.rt()?.base().store.as_ref(),
-        ))?)),
+        )?)?)),
         "resolveMarginTypeForOrder" => Some(v(from_typed(
             &crate::margin::resolve_margin_type_for_order(
                 &to_typed(&arg(0))?,
                 &margin_cache(&receiver)?,
                 host.rt()?.base().store.as_ref(),
             )
-            .map_err(|e| Thrown::error("Error", &e))?,
+            .map_err(Thrown::from)?,
         )?)),
         "createOrderlyPositionId" => Some(v(Js::str(&crate::margin::create_orderly_position_id(
             &text(&arg(0))?,

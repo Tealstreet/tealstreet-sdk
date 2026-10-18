@@ -3,7 +3,7 @@ use safe_cex::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use std::{future::Future, pin::Pin, rc::Rc};
 struct QuietRuntime;
@@ -60,11 +60,11 @@ fn real_default_store_satisfies_the_exchange_core_constructor() {
         Rc::new(QuietRuntime),
         ExchangeSettings::default(),
     );
-    assert!(core.store.markets().is_empty());
+    assert!(core.store.markets().unwrap().is_empty());
     core.store
         .set_setting("isHedged", true)
         .expect("fixture setting notification must succeed");
-    assert!(production.options().is_hedged);
+    assert!(production.options().unwrap().is_hedged);
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn factory_constructs_real_exchange_while_clock_source_is_pending() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     exchange.store.set_setting("isHedged", true).unwrap();
     assert!(
-        store.options().is_hedged,
+        store.options().unwrap().is_hedged,
         "factory must retain the production Store"
     );
     assert_eq!(factory.clock.get_current_time_ms(), 1000.0);

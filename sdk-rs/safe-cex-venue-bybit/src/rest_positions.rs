@@ -142,6 +142,7 @@ pub(crate) async fn fetch_inverse_positions<G, GF, C, D, N, E>(
     mut log: impl FnMut(String),
 ) -> Result<Vec<safe_cex_types::Position>, E>
 where
+    E: From<safe_cex_types::StoreReadError>,
     G: FnMut(&'static str, Value) -> GF,
     GF: Future<Output = Result<Value, E>>,
     C: FnMut(&str) -> Result<String, E>,
@@ -182,6 +183,7 @@ pub(crate) async fn fetch_inverse_position_mappings<G, GF, C, D, N, E>(
     mut log: impl FnMut(String),
 ) -> Result<Vec<crate::inverse_position::PositionMapping>, E>
 where
+    E: From<safe_cex_types::StoreReadError>,
     G: FnMut(&'static str, Value) -> GF,
     GF: Future<Output = Result<Value, E>>,
     C: FnMut(&str) -> Result<String, E>,
@@ -203,7 +205,12 @@ where
                 &mut now,
                 &mut log,
             )
-            .map_err(|message| error("TypeError", message))
+            .map_err(|cause| match cause {
+                crate::inverse_position::PositionMappingError::Source(message) => {
+                    error("TypeError", message)
+                }
+                crate::inverse_position::PositionMappingError::Store(cause) => E::from(cause),
+            })
         },
         emit,
         &error,
@@ -247,6 +254,7 @@ pub(crate) async fn fetch_all_inverse_positions<G, GF, C, D, N, E>(
     log: impl FnMut(String),
 ) -> Result<Vec<safe_cex_types::Position>, E>
 where
+    E: From<safe_cex_types::StoreReadError>,
     G: FnMut(&'static str, Value) -> GF,
     GF: Future<Output = Result<Value, E>>,
     C: FnMut(&str) -> Result<String, E>,
@@ -286,6 +294,7 @@ async fn fetch_inverse_position_fanout<G, GF, C, D, N, E>(
     mut log: impl FnMut(String),
 ) -> Result<Vec<safe_cex_types::Position>, E>
 where
+    E: From<safe_cex_types::StoreReadError>,
     G: FnMut(&'static str, Value) -> GF,
     GF: Future<Output = Result<Value, E>>,
     C: FnMut(&str) -> Result<String, E>,

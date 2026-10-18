@@ -211,7 +211,7 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
         Ok(orders) => Ok(orders),
         Err(error) => {
             trace(&error)?;
-            Ok(store.orders().to_vec())
+            Ok(store.orders()?.to_vec())
         }
     }
 }

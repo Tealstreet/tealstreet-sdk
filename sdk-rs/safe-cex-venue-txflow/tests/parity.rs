@@ -1,9 +1,9 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     http::{HttpClientOptions, HttpFailure, HttpFuture, HttpHost},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody, TransportRegistry,
 };

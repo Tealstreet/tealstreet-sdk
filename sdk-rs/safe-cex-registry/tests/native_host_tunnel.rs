@@ -84,7 +84,7 @@ async fn source_factory_tunnel(name: safe_cex_types::ExchangeName, mut options: 
         "{name:?} uses its source adapter variant"
     );
     assert_eq!(
-        h.store.request_stats().unwrap().other,
+        h.store.request_stats().unwrap().unwrap().other,
         tunnel.seen.borrow().len() as f64,
         "{name:?} records every actual tunnel 404 on its owning Store"
     );
@@ -403,7 +403,7 @@ fn phemex_rest_runs_over_the_tealstreet_tunnel_with_signed_account_query() {
             (0.003, 0.25)
         );
         assert!(
-            h.store.markets().is_empty(),
+            h.store.markets().unwrap().is_empty(),
             "fetchMarkets is pure over tunnel"
         );
         let account = h
@@ -532,7 +532,10 @@ fn okx_family_signed_rest_uses_the_authenticated_bigint_tunnel() {
                 1,
                 "one private validation read for {name:?}"
             );
-            assert_eq!(h.store.request_stats().unwrap().ok, requests.len() as f64);
+            assert_eq!(
+                h.store.request_stats().unwrap().unwrap().ok,
+                requests.len() as f64
+            );
             let request = &requests[0];
             assert_eq!(
                 request.path,
@@ -685,7 +688,7 @@ fn native_factory_correlation_reads_only_primitive_metadata() {
             let owner = Rc::new(BaseExchange::new(
                 safe_cex_types::ExchangeName::Woo,
                 serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
-                Rc::new(safe_cex_store::store::DefaultStore::new()),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                 runtime.clone(),
                 ExchangeSettings::default(),
             ));

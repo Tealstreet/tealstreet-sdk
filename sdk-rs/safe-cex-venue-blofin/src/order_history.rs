@@ -85,8 +85,8 @@ fn mapped<T: Copy>(table: &[(&str, T)], key: &str, fallback: T) -> Result<T, JsC
 
 pub fn map_blofin_historical_order(
     row: &HistoryInput,
-    mut resolve_symbol: impl FnMut(&str) -> Option<String>,
-) -> Result<Option<HistoricalOrder>, JsCoercionError> {
+    mut resolve_symbol: impl FnMut(&str) -> Result<Option<String>, safe_cex_types::StoreReadError>,
+) -> Result<Option<HistoricalOrder>, crate::reads::MappingError> {
     let id = text(row.field("orderId")?.as_ref(), "")?;
     let inst_id = text(row.field("instId")?.as_ref(), "")?;
     let created_time = parse_int(&text(row.field("createTime")?.as_ref(), "0")?, Some(10));
@@ -98,7 +98,7 @@ pub fn map_blofin_historical_order(
         return Ok(None);
     }
     let position_side = text(row.field("positionSide")?.as_ref(), "")?.to_lowercase();
-    let symbol = resolve_symbol(&inst_id)
+    let symbol = resolve_symbol(&inst_id)?
         .filter(|s| !s.is_empty())
         .unwrap_or(inst_id);
     let order_type = mapped(
