@@ -5461,3 +5461,7 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
     owner.dispose().unwrap();
     assert!(runtime.reported.borrow().is_empty());
 }
+
+#[cfg(feature = "native")]
+#[path = "support/public_listener_aliases.rs"]
+mod public_listener_aliases;

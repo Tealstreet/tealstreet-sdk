@@ -1389,10 +1389,7 @@ impl ListenerHost for NativeListenerOperations {
         }
         .map(|(_, path)| *path)
         .ok_or_else(|| failure("generated ORDERBOOK endpoint"))?;
-        let args = record([(
-            "params",
-            record([("symbol", string(symbol)), ("limit", number(limit))]),
-        )]);
+        let args = record([("symbol", string(symbol)), ("limit", number(limit))]);
         Ok(Box::pin(run_request(
             imports,
             client,

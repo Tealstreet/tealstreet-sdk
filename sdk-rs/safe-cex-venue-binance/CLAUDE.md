@@ -679,3 +679,16 @@ clone before a real socket frame and cleanup; the native private-clone witness
 holds a listen-key request, drops the original settlement and observes both
 clones before invoking a cloned reconnect arrow. These reviews do not classify
 raw-input decoders or widen accepted representations.
+
+The seven `public_listeners` aliases have a finite compiler-authenticated review
+in `scripts/public-listener-alias-contracts.mjs`. `Book` is an actual map decoder,
+with native per-level binary64 observations and Rc identity; the six callable,
+future and sequence-state capabilities retain their individual role reviews.
+`tests/support/public_listener_aliases.rs` constructs the real native dependencies
+for Futures/PM/Spot. It advances the virtual timer before subscription, holds
+terminal snapshot HTTP while two frames buffer, checks the exact endpoint and
+flat query, then checks one retained book through live updates and cleanup.
+`NativeListenerOperations::get_snapshot` passes raw query fields to `run_request`:
+the latter installs GET args into config.params, so callers must not wrap again.
+Separate compiled semantic controls require named native failures and exact
+source restoration for every reviewed alias.
