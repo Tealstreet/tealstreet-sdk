@@ -120,8 +120,10 @@ impl Exchange for ApexOmniExchange {
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
         Box::pin(async move {
             let value = self.inner.get_account().await?;
-            serde_json::from_value(crate::exchange::fields(&value)?)
-                .map_err(|e| ExchangeError::new(e.to_string()))
+            safe_cex_exchange::js_runtime::value::to_typed(
+                &safe_cex_exchange::js_runtime::value::from_retained_input(value),
+            )
+            .map_err(super::hosts::error)
         })
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {

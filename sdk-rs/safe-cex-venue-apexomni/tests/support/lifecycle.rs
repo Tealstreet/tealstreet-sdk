@@ -298,7 +298,7 @@ fn run_lifecycle(name: &str) {
                     tickers: Some(Store::tickers(old.as_ref()).to_vec()),
                     positions: Some(Store::positions(old.as_ref()).to_vec()),
                     balance: Some(Store::balance(old.as_ref()).clone()),
-                    zk_link_config: Some(json!({"id":"old","l2Key":"old-key"})),
+                    zk_link_config: Some(json!({"id":"old","l2Key":"old-key"}).into()),
                     ..Default::default()
                 },
                 false,

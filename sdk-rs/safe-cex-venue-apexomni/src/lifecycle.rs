@@ -1,7 +1,7 @@
 //! Lifecycle bodies use shared Store state and host-owned imported capabilities.
 use crate::{
     data,
-    exchange::{ApexOmniExchange, ApexRequest, failure, float, numeric},
+    exchange::{ApexOmniExchange, ApexRequest, failure},
     zklink_host::{SdkInitialization, ZkLinkHost},
 };
 use safe_cex_exchange::{
@@ -327,6 +327,7 @@ impl ApexOmniExchange {
         let response = self
             .request("get", "/v3/klines", J::Object(params), J::Undefined, false)
             .await?;
+        use crate::response::{self as data, float, numeric};
         let rows = data::get(data::get(&response, "data"), &opts.symbol);
         if !data::truthy(rows) {
             self.host.console(
@@ -336,11 +337,11 @@ impl ApexOmniExchange {
             )?;
             return Ok(Vec::new());
         }
-        let rows = if let J::Array(rows) = rows {
+        let rows = if let safe_cex_types::retained_json::RetainedJsonInput::Array(rows) = rows {
             rows
         } else {
             let map = data::property(rows, "map")?;
-            if matches!(map, J::Undefined | J::Null) {
+            if map.is_nullish() {
                 return Ok(Vec::new());
             }
             let mut error = failure("data?.data?.[opts.symbol].map is not a function".into());
