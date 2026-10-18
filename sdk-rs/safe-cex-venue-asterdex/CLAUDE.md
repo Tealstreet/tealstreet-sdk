@@ -68,6 +68,10 @@ retain the separate obligations of lexical ordinary `Wire` decoders.
 `RECORD_CONTRACT_REVIEW.md` records twenty ordinary wire record contracts,
 184 native fields, 707 shape/field observations and a complete-array control.
 
+`DECODER_CONTRACT_REVIEW.md` reviews eleven remaining wire/workflow decoders,
+their direct native fields, per-field TS runtime null behavior, and the measured
+workflow object-shape and flattened numeric-ingress repairs.
+
 `ENUM_CONTRACT_REVIEW.md` records eleven string/position-mode enum contracts,
 their 173 raw-text/native observations and grouped String-frontdoor control.
 
