@@ -196,3 +196,6 @@ mod socket_tests;
 
 #[cfg(test)]
 mod spot_limiter_tests;
+
+#[cfg(test)]
+mod table_hook_tests;

@@ -1,3 +1,4 @@
+use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{JsJsonValue, js_own_keys};
 use safe_cex_types::Candle;
 use safe_cex_venue_bitunix::ohlcv_subscription::*;
@@ -51,7 +52,7 @@ struct Host {
     raw_time: Value,
 }
 impl Host {
-    fn note(&mut self, name: &str, args: Vec<Value>) -> Result<(), String> {
+    fn note(&mut self, name: &str, args: Vec<Value>) -> Result<(), ExchangeError> {
         let mut event = vec![json!(name)];
         event.extend(args);
         let event = json!(event);
@@ -62,7 +63,7 @@ impl Host {
         );
         self.events.push(event);
         if self.row["fixture"]["fail"] == name {
-            Err(format!("{name} failed"))
+            Err(ExchangeError::new(format!("{name} failed")))
         } else {
             Ok(())
         }
@@ -89,18 +90,18 @@ impl OhlcvHost<usize> for Host {
         self.allocated += 1;
         id
     }
-    fn connected(&mut self) -> Result<bool, String> {
+    fn connected(&mut self) -> Result<bool, ExchangeError> {
         self.note("connected", vec![json!(self.connected)])?;
         Ok(self.connected)
     }
-    fn handlers(&mut self, handler: &str) -> Result<Vec<usize>, String> {
+    fn handlers(&mut self, handler: &str) -> Result<Vec<usize>, ExchangeError> {
         self.note(
             "handlers",
             vec![text(handler), Self::handler_obs(&self.handlers)],
         )?;
         Ok(self.handlers.clone().unwrap_or_default())
     }
-    fn set_handlers(&mut self, handler: &str, handlers: Vec<usize>) -> Result<(), String> {
+    fn set_handlers(&mut self, handler: &str, handlers: Vec<usize>) -> Result<(), ExchangeError> {
         self.note(
             "setHandlers",
             vec![text(handler), Self::handler_obs(&Some(handlers.clone()))],
@@ -108,37 +109,37 @@ impl OhlcvHost<usize> for Host {
         self.handlers = Some(handlers);
         Ok(())
     }
-    fn topic_count(&mut self, topic: &str) -> Result<f64, String> {
+    fn topic_count(&mut self, topic: &str) -> Result<f64, ExchangeError> {
         self.note(
             "count",
             vec![text(topic), self.count.map_or_else(undefined, bits)],
         )?;
         Ok(self.count.unwrap_or(f64::NAN))
     }
-    fn set_topic_count(&mut self, topic: &str, count: f64) -> Result<(), String> {
+    fn set_topic_count(&mut self, topic: &str, count: f64) -> Result<(), ExchangeError> {
         self.note("setCount", vec![text(topic), bits(count)])?;
         self.count = Some(count);
         Ok(())
     }
-    fn send(&mut self, frame: &JsJsonValue) -> Result<(), String> {
+    fn send(&mut self, frame: &JsJsonValue) -> Result<(), ExchangeError> {
         self.note("send", vec![obs(frame)])
     }
-    fn wait(&mut self, delay: f64) -> Result<(), String> {
+    fn wait(&mut self, delay: f64) -> Result<(), ExchangeError> {
         self.note("wait", vec![bits(delay)])?;
         self.waits += 1;
         Ok(())
     }
-    fn cleanup_stats(&mut self, handler: &str) -> Result<(), String> {
+    fn cleanup_stats(&mut self, handler: &str) -> Result<(), ExchangeError> {
         self.note("cleanup", vec![text(handler)])
     }
-    fn ticker(&mut self, symbol: &str) -> Result<Option<Rc<()>>, String> {
+    fn ticker(&mut self, symbol: &str) -> Result<Option<Rc<()>>, ExchangeError> {
         self.note("find", vec![text(symbol)])?;
         Ok(
             (self.row["fixture"]["ticker"] != false && self.original_symbol == symbol)
                 .then(|| Rc::new(())),
         )
     }
-    fn update_last(&mut self, ticker: Rc<()>, last: f64) -> Result<(), String> {
+    fn update_last(&mut self, ticker: Rc<()>, last: f64) -> Result<(), ExchangeError> {
         assert_eq!(
             Rc::strong_count(&ticker),
             1,
@@ -148,7 +149,7 @@ impl OhlcvHost<usize> for Host {
         self.last = Some(last);
         Ok(())
     }
-    fn call(&mut self, callback: &usize, candle: Candle) -> Result<(), String> {
+    fn call(&mut self, callback: &usize, candle: Candle) -> Result<(), ExchangeError> {
         let mut expected = self.row["sourceCandles"][self.callback_count].clone();
         let expected_time = self.row["nativeTimestamps"][self.callback_count].clone();
         self.callback_count += 1;
@@ -264,11 +265,11 @@ fn actual_typescript_ohlcv_subscription() {
                     _ => panic!("unknown witness action"),
                 }
             }
-            Ok::<_, String>(())
+            Ok::<_, ExchangeError>(())
         })();
         if let Some(boundary) = f["boundary"].as_str() {
             assert_eq!(
-                result.as_ref().unwrap_err(),
+                result.as_ref().unwrap_err().message,
                 boundary,
                 "CANDLE native malformed boundary"
             );
@@ -280,7 +281,7 @@ fn actual_typescript_ohlcv_subscription() {
         } else {
             let result = match result {
                 Ok(()) => json!({"ok":true}),
-                Err(e) => json!({"error":{"error":["Error",e]}}),
+                Err(e) => json!({"error":{"error":["Error",e.message]}}),
             };
             assert_eq!(result, row["result"], "CANDLE native result");
         }

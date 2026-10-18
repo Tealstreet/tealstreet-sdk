@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::js_number_string;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{StoreSubscriberError, Ticker};
 use safe_cex_venue_bitget::ticker::{TickerHandlerError, handle_ticker_topic};
 use serde_json::{Value, json};
@@ -127,7 +128,7 @@ fn check(oracle: &Value) {
                 );
             }
             if case["mode"] == "prototype-write" {
-                let rows = Store::tickers(&store);
+                let rows = Store::tickers(&store).unwrap();
                 assert_eq!(rows.len(), 2, "TICKER native prototype witness row floor");
                 assert_eq!(
                     rows[0].last.to_bits(),
@@ -147,7 +148,7 @@ fn check(oracle: &Value) {
                     json!({"name":e.name(),"message":e.to_string()})
                 }
             };
-            let actual = snapshot(&store.tickers());
+            let actual = snapshot(&store.tickers().unwrap());
             let expected_notifications: Vec<_> = case["events"]
                 .as_array()
                 .unwrap()
@@ -416,7 +417,7 @@ fn ticker_notification_preserves_second_subscriber_identity() {
         "ticker second subscriber stops fanout and batch"
     );
     assert_eq!(
-        store.tickers()[0].last.to_bits(),
+        store.tickers().unwrap()[0].last.to_bits(),
         7.0_f64.to_bits(),
         "ticker second subscriber sees committed first row"
     );

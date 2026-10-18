@@ -48,7 +48,7 @@ fn binance_futures_runs_on_the_native_host_over_local_http_and_websocket() {
         })
         .await;
         assert!(
-            store.loaded().markets && store.loaded().tickers,
+            store.loaded().unwrap().markets && store.loaded().unwrap().tickers,
             "start loaded public state"
         );
         assert!(
@@ -105,12 +105,13 @@ fn binance_futures_runs_on_the_native_host_over_local_http_and_websocket() {
             .clone();
         private.send(event.to_string()).unwrap();
         eventually("private ORDER_TRADE_UPDATE reached the store", || {
-            store.orders().iter().any(|o| o.id == "555")
+            store.orders().unwrap().iter().any(|o| o.id == "555")
         })
         .await;
 
         let streamed = store
             .orders()
+            .unwrap()
             .iter()
             .find(|o| o.id == "555")
             .cloned()

@@ -225,8 +225,8 @@ impl TickHost for Host {
     fn balance_truthy(&self, balance: &Batch) -> bool {
         balance.truthy
     }
-    fn loaded(&self) -> StoreDataLoaded {
-        self.loaded.borrow().clone()
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError> {
+        Ok(self.loaded.borrow().clone())
     }
     fn update(&self, update: TickUpdate<Batch, Batch, Batch>) -> Result<(), ExchangeError> {
         match update {

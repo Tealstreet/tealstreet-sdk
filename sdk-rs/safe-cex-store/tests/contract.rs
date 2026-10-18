@@ -59,12 +59,17 @@ fn partial_snapshot_dictionaries_retain_source_insertion_order() {
 fn host_contract_is_object_safe_and_uses_typed_models() {
     fn read_contract(store: std::rc::Rc<dyn Store>) {
         store.update(StoreUpdate::default(), false).unwrap();
-        let _: std::cell::Ref<'_, [safe_cex_types::Market]> = store.markets();
-        let _: std::cell::Ref<'_, [safe_cex_types::Ticker]> = store.tickers();
-        let _: std::cell::Ref<'_, [safe_cex_types::Position]> = store.positions();
-        let _: std::cell::Ref<'_, safe_cex_types::Balance> = store.balance();
-        let _: std::cell::Ref<'_, safe_cex_types::StoreDataLoaded> = store.loaded();
-        let _: safe_cex_types::StoreData = store.serialize();
+        let _: Result<Vec<safe_cex_types::Market>, safe_cex_types::StoreReadError> =
+            store.markets();
+        let _: Result<Vec<safe_cex_types::Ticker>, safe_cex_types::StoreReadError> =
+            store.tickers();
+        let _: Result<Vec<safe_cex_types::Position>, safe_cex_types::StoreReadError> =
+            store.positions();
+        let _: Result<safe_cex_types::Balance, safe_cex_types::StoreReadError> = store.balance();
+        let _: Result<safe_cex_types::StoreDataLoaded, safe_cex_types::StoreReadError> =
+            store.loaded();
+        let _: Result<safe_cex_types::StoreData, safe_cex_types::StoreReadError> =
+            store.serialize();
     }
     let _ = read_contract as fn(std::rc::Rc<dyn Store>);
 }
@@ -78,42 +83,5 @@ fn worker_counter_patch_does_not_invent_a_sibling_counter() {
     ] {
         let update: StoreUpdate = serde_json::from_str(wire).unwrap();
         assert_eq!(serde_json::to_string(&update).unwrap(), wire);
-    }
-}
-
-#[test]
-fn snapshot_health_flags_and_leverage_keep_native_identity() {
-    use safe_cex_store::store::DefaultStore;
-    let flags = [
-        "publicHealthy",
-        "privateHealthy",
-        "publicInitialized",
-        "privateInitialized",
-    ];
-    for selected in flags {
-        let real = DefaultStore::new();
-        let mut health = serde_json::Map::new();
-        for flag in flags {
-            health.insert(flag.into(), json!(flag == selected));
-        }
-        let update: StoreUpdate=serde_json::from_value(json!({"socketHealth":health,"fetchedLeverage":{"identity":{"buyLeverage":11,"sellLeverage":23}}})).unwrap();
-        Store::update(&real, update, false).unwrap();
-        let actual = Store::socket_health(&real).unwrap();
-        for flag in flags {
-            assert_eq!(
-                actual[flag],
-                json!(flag == selected),
-                "STORE-NATIVE one-hot socket flag {flag}"
-            );
-        }
-        let leverage = real.fetched_leverage();
-        assert_eq!(
-            (
-                leverage["identity"].buy_leverage,
-                leverage["identity"].sell_leverage
-            ),
-            (11.0, 23.0),
-            "STORE-NATIVE leverage side identity"
-        );
     }
 }

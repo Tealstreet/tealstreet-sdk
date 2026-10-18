@@ -131,7 +131,7 @@ fn run_envelopes(method: &str, expected_count: usize) {
             &format!("{label} native operation order"),
         );
         native::check_fields(
-            &native::retained(store.zk_link_config().as_deref().unwrap()),
+            &native::retained(store.zk_link_config().unwrap().as_ref().unwrap()),
             &row["zk"],
             &format!("{label} native config unchanged"),
         );

@@ -141,7 +141,7 @@ impl PrivateRepairs {
                 if version == repairs.parent.position_state_version() {
                     repairs.owner.log("AsterDEX position repair completed successfully", "debug")?;
                     repairs.owner.store.add_or_update_positions_full(positions)?;
-                    let mut loaded = repairs.owner.store.loaded().clone();
+                    let mut loaded = repairs.owner.store.loaded()?.clone();
                     loaded.positions = true;
                     repairs.owner.store.update(safe_cex_store::StoreUpdate { loaded: Some(loaded), ..Default::default() }, false)?;
                 } else {
@@ -261,7 +261,7 @@ impl PrivateRepairs {
                     repairs
                         .owner
                         .log("AsterDEX order reconcile completed successfully", "debug")?;
-                    let mut loaded = repairs.owner.store.loaded().clone();
+                    let mut loaded = repairs.owner.store.loaded()?.clone();
                     loaded.orders = true;
                     repairs.owner.store.update(
                         safe_cex_store::StoreUpdate {

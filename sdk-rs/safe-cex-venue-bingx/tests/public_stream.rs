@@ -1,9 +1,10 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_bingx::{
     data_reads::{BingxDataReads, ReadTransport},
@@ -404,7 +405,14 @@ fn public_stream_matches_actual_typescript() {
             "BINGX-PUBLIC callbacks {variant}"
         );
         assert_eq!(
-            json!(store.tickers().iter().map(ticker).collect::<Vec<_>>()),
+            json!(
+                store
+                    .tickers()
+                    .unwrap()
+                    .iter()
+                    .map(ticker)
+                    .collect::<Vec<_>>()
+            ),
             c["tickers"],
             "BINGX-PUBLIC native ticker bits {variant}"
         );
@@ -596,9 +604,9 @@ fn ticker_write_failure_preserves_original_cause() {
         e.response_json_view(),
         Some(json!({"data":{"msg":"subscriber denied"}}))
     );
-    assert_eq!(store.tickers()[0].last, 13.5);
+    assert_eq!(store.tickers().unwrap()[0].last, 13.5);
     assert_eq!(
-        store.tickers()[0].mark,
+        store.tickers().unwrap()[0].mark,
         13.25,
         "BINGX-PUBLIC partial first write before rejection"
     );

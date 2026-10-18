@@ -53,11 +53,19 @@ impl MarketPositionHost for Host {
         self.trace.borrow_mut().push(json!({"kind":"supported"}));
         Promise::resolved(self.supported.clone())
     }
-    fn markets(&self) -> ReadMarkets {
+    fn markets(
+        &self,
+    ) -> std::result::Result<
+        Rc<RefCell<Vec<Rc<RefCell<safe_cex_types::Market>>>>>,
+        Rc<PortfolioThrown>,
+    > {
         self.trace.borrow_mut().push(json!({"kind":"markets"}));
-        self.markets.clone()
+        Ok(self.markets.clone())
     }
-    fn market_by_id(&self, id: &str) -> Option<ReadMarket> {
+    fn market_by_id(
+        &self,
+        id: &str,
+    ) -> std::result::Result<Option<Rc<RefCell<safe_cex_types::Market>>>, Rc<PortfolioThrown>> {
         self.trace
             .borrow_mut()
             .push(json!({"kind":"market","id":id}));
@@ -65,24 +73,35 @@ impl MarketPositionHost for Host {
         if let Some(hook) = hook {
             hook(id);
         }
-        self.markets
+        Ok(self
+            .markets
             .borrow()
             .iter()
             // last match wins, as the source's lookup does.
             .rfind(|m| m.borrow().id == id)
-            .cloned()
+            .cloned())
     }
-    fn cached_tickers(&self) -> ReadTickers {
+    fn cached_tickers(
+        &self,
+    ) -> std::result::Result<
+        Rc<RefCell<Vec<Rc<safe_cex_venue_coinbase::market_position_reads::ReadTicker>>>>,
+        Rc<PortfolioThrown>,
+    > {
         self.trace
             .borrow_mut()
             .push(json!({"kind":"cachedTickers"}));
-        self.tickers.clone()
+        Ok(self.tickers.clone())
     }
-    fn cached_positions(&self) -> ReadPositions {
+    fn cached_positions(
+        &self,
+    ) -> std::result::Result<
+        Rc<RefCell<Vec<Rc<safe_cex_venue_coinbase::market_position_reads::ReadPosition>>>>,
+        Rc<PortfolioThrown>,
+    > {
         self.trace
             .borrow_mut()
             .push(json!({"kind":"cachedPositions"}));
-        self.positions.clone()
+        Ok(self.positions.clone())
     }
     fn emit_and_log_error(&self, args: &[Option<Value>]) -> Result<(), PortfolioFailure> {
         self.emits.borrow_mut().push(args.to_vec());

@@ -14,12 +14,19 @@ fn type_error(message: &'static str) -> JsCoercionError {
 pub fn parse_balance<'a>(
     data: Option<&Value>,
     stored_balance: &'a Balance,
-    mut warn: impl FnMut(&str),
+    warn: impl FnMut(&str),
 ) -> Result<Cow<'a, Balance>, JsCoercionError> {
     if !js_truthy(data) {
         return Ok(Cow::Borrowed(stored_balance));
     }
-    let data = data.expect("truthy data is present");
+    parse_present_balance(data.expect("truthy data is present"), warn).map(Cow::Owned)
+}
+
+/// The source's truthy-response branch does not read the stored balance.
+pub fn parse_present_balance(
+    data: &Value,
+    mut warn: impl FnMut(&str),
+) -> Result<Balance, JsCoercionError> {
     let inner = match data.get("data") {
         None => {
             return Err(type_error(
@@ -128,5 +135,5 @@ pub fn parse_balance<'a>(
             .collect(),
     );
     balance.info = Some(data.clone().into());
-    Ok(Cow::Owned(balance))
+    Ok(balance)
 }

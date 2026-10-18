@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str, js_from_value_ref};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::provider::RestBody;
 use safe_cex_types::{Market, Ticker};
 use safe_cex_venue_breakoutprop::quotes::*;
@@ -189,7 +190,7 @@ fn actual_quote_reads() {
                 fetch_tickers_for_symbols(symbols, session, account, request, &store, &logger)
             };
             let output = if method == "fetchTickers" {
-                let future = fetch_tickers(&store, fetch);
+                let future = fetch_tickers(&store, fetch).unwrap();
                 assert_eq!(
                     *trace.borrow(),
                     vec![json!("session")],
@@ -223,7 +224,7 @@ fn actual_quote_reads() {
             if method == "fetchMarkets" {
                 assert_eq!(
                     result.unwrap(),
-                    Value::Array(store.markets().iter().map(market).collect()),
+                    Value::Array(store.markets().unwrap().iter().map(market).collect()),
                     "closed market symbol uses source mapping catch"
                 );
                 assert_eq!(
@@ -324,7 +325,7 @@ fn quote_drop_boundary() {
             if index == 1 {
                 drop(make(vec![]));
             } else {
-                drop(fetch_tickers(&store, make));
+                drop(fetch_tickers(&store, make).unwrap());
             }
         }
         assert_eq!(polls.get(), 0, "QUOTES-DROP unpolled {method}");
@@ -388,7 +389,7 @@ fn quotes_owned_info_boundary() {
             let mut rows = if index == 1 {
                 run(fetch(vec![]))
             } else {
-                run(fetch_tickers(&store, fetch))
+                run(fetch_tickers(&store, fetch).unwrap())
             }
             .unwrap()
             .unwrap();
@@ -475,8 +476,8 @@ fn quotes_deferred_owned_fallback() {
         let report = |_| Ok(());
         let mut cx = Context::from_waker(Waker::noop());
         let update = || {
-            let markets = Store::markets(&store)[..1].to_vec();
-            let tickers = Store::tickers(&store)[..1].to_vec();
+            let markets = Store::markets(&store).unwrap()[..1].to_vec();
+            let tickers = Store::tickers(&store).unwrap()[..1].to_vec();
             Store::update(
                 &store,
                 StoreUpdate {
@@ -516,7 +517,7 @@ fn quotes_deferred_owned_fallback() {
             );
             output.push(output[0].clone());
             assert_eq!(
-                Store::markets(&store).len(),
+                Store::markets(&store).unwrap().len(),
                 1,
                 "QUOTES-OWNED market fallback"
             );
@@ -542,7 +543,7 @@ fn quotes_deferred_owned_fallback() {
             let mut future = Box::pin(if index == 1 {
                 make(vec![])
             } else {
-                fetch_tickers(&store, make)
+                fetch_tickers(&store, make).unwrap()
             });
             assert!(future.as_mut().poll(&mut cx).is_pending());
             update();
@@ -557,7 +558,7 @@ fn quotes_deferred_owned_fallback() {
             );
             output.push(output[0].clone());
             assert_eq!(
-                Store::tickers(&store).len(),
+                Store::tickers(&store).unwrap().len(),
                 1,
                 "QUOTES-OWNED ticker fallback"
             );
@@ -622,7 +623,7 @@ fn quotes_pending_drop_releases_child() {
                 let mut future = Box::pin(if method == 1 {
                     make(vec![])
                 } else {
-                    fetch_tickers(&store, make)
+                    fetch_tickers(&store, make).unwrap()
                 });
                 if poll {
                     assert!(future.as_mut().poll(&mut cx).is_pending());
@@ -724,7 +725,7 @@ fn quotes_consumed_fields_match_source() {
             )
         };
         let result = if method == "fetchTickers" {
-            run(fetch_tickers(&store, fetch))
+            run(fetch_tickers(&store, fetch).unwrap())
         } else {
             run(fetch(vec!["A".into(), "B".into()]))
         };

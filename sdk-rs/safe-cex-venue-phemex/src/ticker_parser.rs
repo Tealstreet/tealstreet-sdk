@@ -28,7 +28,7 @@ pub fn parse_tickers(
 ) -> Result<Vec<Ticker>, ExchangeError> {
     let result = data.and_then(|value| value.get("result"));
     if !js_truthy(data) || !js_truthy(result) {
-        return Ok(store.tickers().to_vec());
+        return Ok(store.tickers()?.to_vec());
     }
     let rows = result
         .and_then(Value::as_array)
@@ -46,7 +46,7 @@ pub fn parse_tickers(
             Some(Value::String(value)) => crate::utilities::format_symbol_in(Some(value)),
             _ => return Err(type_error("symbol?.toUpperCase is not a function")),
         };
-        let markets = store.markets_by_symbol();
+        let markets = store.markets_by_symbol()?;
         let Some(market) = markets.get(&symbol) else {
             continue;
         };

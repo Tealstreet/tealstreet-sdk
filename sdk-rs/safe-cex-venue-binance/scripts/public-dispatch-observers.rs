@@ -6,7 +6,11 @@ use crate::{
     ticker_capture::{Capture, Dictionary, Target},
 };
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::{
+    js_runtime::value::{to_json, to_typed_preserving_undefined},
+    native_store::DefaultStore,
+};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Ticker, retained_json::RetainedJsonInput as Input};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
@@ -51,7 +55,10 @@ fn ticker(row: &Ticker) -> Value {
     })
 }
 
-pub fn lookup(input: &Value, resolve: fn(&Dictionary, &str) -> Option<Target>) -> Value {
+pub fn lookup(
+    input: &Value,
+    resolve: fn(&Dictionary, &str) -> Result<Option<Target>, ExchangeError>,
+) -> Value {
     let store = Rc::new(DefaultStore::new());
     let mut row: Ticker = serde_json::from_value(input["ticker"].clone()).unwrap();
     row.info = Some(Input::Object(vec![
@@ -74,17 +81,21 @@ pub fn lookup(input: &Value, resolve: fn(&Dictionary, &str) -> Option<Target>) -
     )
     .unwrap();
     let typed_store: Rc<dyn Store> = store;
-    let capture = Capture::new(typed_store.clone());
-    let dictionary = capture.dictionary();
-    let keys = dictionary.borrow().keys().cloned().collect::<Vec<_>>();
+    let capture = Capture::new(typed_store.clone()).unwrap();
+    let dictionary = capture.dictionary().unwrap();
+    let keys = dictionary
+        .own_keys()
+        .iter()
+        .map(|key| String::from_utf16(key).unwrap())
+        .collect::<Vec<_>>();
     let key = input["key"].as_str().unwrap();
-    match resolve(&dictionary, key) {
-        Some(Target::Row(row)) => json!({
-            "kind":"row","keys":keys,"sameRow":Rc::ptr_eq(&row,dictionary.borrow().get(key).unwrap()),
-            "belongsToStore":capture.belongs_to(&typed_store),"ticker":ticker(&row.borrow()),
+    match resolve(&dictionary, key).unwrap() {
+        Some(Target(row)) if dictionary.has_own(key) => json!({
+            "kind":"row","keys":keys,"sameRow":row.same_reference(&dictionary.get(key).unwrap()),
+            "belongsToStore":capture.belongs_to(&typed_store),"ticker":ticker(&to_typed_preserving_undefined(&row).unwrap()),
         }),
-        Some(target @ Target::StockInherited) => {
-            json!({"kind":"inherited","keys":keys,"id":target.id()})
+        Some(Target(row)) => {
+            json!({"kind":"inherited","keys":keys,"id":to_json(&row.get("id").unwrap()).unwrap()})
         }
         None => json!({"kind":"missing","keys":keys}),
     }

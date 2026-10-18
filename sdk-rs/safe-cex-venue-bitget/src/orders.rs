@@ -368,7 +368,7 @@ pub fn map_order(
 pub fn map_inverse_order(
     input: Option<&Input>,
     api_product_type: &str,
-    mut market_is_inverse: impl FnMut(&str) -> Option<bool>,
+    mut market_is_inverse: impl FnMut(&str) -> Result<Option<bool>, ExchangeError>,
     mut now: impl FnMut() -> f64,
 ) -> Result<Vec<Order>, ExchangeError> {
     let o = input.filter(|v| !v.is_nullish()).ok_or_else(|| {
@@ -428,7 +428,7 @@ pub fn map_inverse_order(
         .unwrap_or(&zero);
     let remaining_native =
         safe_cex_num::subtract(float(Some(raw_amount))?, float(Some(raw_filled))?);
-    let market = market_is_inverse(&symbol);
+    let market = market_is_inverse(&symbol)?;
     let remaining = if market == Some(true) && price > 0.0 {
         safe_cex_num::math_round(remaining_native / price * 1e8) / 1e8
     } else {

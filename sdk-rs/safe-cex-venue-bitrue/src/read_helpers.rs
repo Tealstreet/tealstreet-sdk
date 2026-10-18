@@ -60,7 +60,7 @@ pub fn resolve_trade_qty(
     store: &dyn safe_cex_store::Store,
     symbol: &str,
     parsed_price: f64,
-) -> Result<f64, JsCoercionError> {
+) -> Result<f64, safe_cex_exchange::runtime::ExchangeError> {
     let zero = Value::from(0);
     let raw_qty = js_number(Some(
         entry.get("qty").filter(|v| !v.is_null()).unwrap_or(&zero),
@@ -71,7 +71,7 @@ pub fn resolve_trade_qty(
             .filter(|v| !v.is_null())
             .unwrap_or(&zero),
     ))?;
-    let markets = store.markets_by_symbol();
+    let markets = store.markets_by_symbol()?;
     let multiplier = markets
         .get(symbol)
         .and_then(|market| market.info.as_ref())
@@ -193,7 +193,7 @@ pub fn set_market_max_leverage(
     if !max_leverage.is_finite() || max_leverage <= 0.0 {
         return Ok(());
     }
-    let selected = store.markets_by_symbol().get(symbol).cloned();
+    let selected = store.markets_by_symbol()?.get(symbol).cloned();
     let Some(market) = selected else {
         if matches!(
             safe_cex_num::js_table_lookup::<&str, ()>(&[], symbol),

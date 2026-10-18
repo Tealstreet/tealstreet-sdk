@@ -138,7 +138,7 @@ impl Realm {
                 } else {
                     out.push(b'{' as u16);
                     let mut first = true;
-                    for key in self.own_keys(&value, true) {
+                    for key in self.own_keys(&value, true)? {
                         let item = self.get(&value, &key)?;
                         let mut piece = vec![];
                         if !self.write_json(&item, &mut piece, stack, false)? {

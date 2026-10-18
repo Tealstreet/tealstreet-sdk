@@ -37,7 +37,7 @@ fn cryptocom_registry_constructs_native_inputs_and_reads_markets_over_http() {
         assert_eq!(markets[0].precision.amount, 0.0001);
         assert_eq!(markets[0].precision.price, 0.5);
         assert!(
-            h.store.markets().is_empty(),
+            h.store.markets().unwrap().is_empty(),
             "fetchMarkets stays pure through registry construction"
         );
         assert!(

@@ -102,7 +102,7 @@ fn binance_pm_runs_on_the_native_host_over_local_http_and_websocket() {
             peers.borrow().iter().any(|p| p.path.contains("lk-pm"))
         })
         .await;
-        assert!(store.loaded().markets && store.loaded().tickers);
+        assert!(store.loaded().unwrap().markets && store.loaded().unwrap().tickers);
         let ids = exchange
             .base()
             .place_order(exchange.as_ref(), limit_buy())
@@ -173,7 +173,7 @@ fn binance_spot_runs_on_the_native_host_over_local_http_and_websocket() {
             .start()
             .await
             .expect("Spot start over HTTP and WebSocket");
-        assert!(store.loaded().markets && store.loaded().tickers);
+        assert!(store.loaded().unwrap().markets && store.loaded().unwrap().tickers);
         eventually(
             "Spot private socket sent its signed user-data subscription",
             || received.borrow().iter().any(|f| f.contains("signature")),

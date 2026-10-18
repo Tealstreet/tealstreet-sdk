@@ -1,4 +1,5 @@
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::StoreSubscriberError;
 use safe_cex_venue_mexc::{
     utils::{normalize_market, normalize_ticker},
@@ -181,7 +182,7 @@ fn mexc_public_ticker_handler_patches_only_source_fields() {
         "data":{"lastPrice":"12","bid1":"11","ask1":"13","fairPrice":"12.5","indexPrice":"12.25","riseFallRate":"0.1","holdVol":"2","fundingRate":"0.001","fundingTime":1700000000000_i64,"volume24":"3","amount24":"36"}
     });
     assert!(handle_ticker_frame(&store, &frame, &local_to_utc).unwrap());
-    let tickers = store.tickers_by_symbol();
+    let tickers = store.tickers_by_symbol().unwrap();
     let ticker = &tickers["BTCUSDT"];
     assert_eq!(ticker.last, 12.0);
     assert_eq!(ticker.bid, 11.0);
@@ -429,7 +430,7 @@ fn mexc_private_order_handler_matches_source_order_and_rejection_hook() {
         String::from_utf8_lossy(&output.stderr)
     );
     let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     assert_eq!(orders.len(), 1);
     assert_eq!(orders[0].id, "123");
     assert_eq!(orders[0].status, safe_cex_types::OrderStatus::Canceled);
@@ -669,7 +670,7 @@ fn mexc_private_plan_and_stop_handlers_preserve_seen_and_cancel_shields() {
         .map(|value| value.as_str().unwrap().to_owned())
         .collect();
     assert_eq!(*seen.borrow(), expected_seen);
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let mut actual_ids: Vec<_> = orders.iter().map(|order| order.id.clone()).collect();
     actual_ids.sort();
     let mut expected_ids: Vec<_> = expected["orders"]
@@ -742,7 +743,7 @@ fn mexc_private_position_handler_matches_normalized_fields() {
         String::from_utf8_lossy(&output.stderr)
     );
     let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let positions = store.positions();
+    let positions = store.positions().unwrap();
     assert_eq!(positions.len(), 1);
     let actual = &positions[0];
     assert_eq!(actual.id, expected["id"].as_str().unwrap());
@@ -826,7 +827,7 @@ fn mexc_websocket_store_notifications_propagate_after_commit() {
         [0],
         "ticker failure retains Store-local subscriber identity"
     );
-    assert_eq!(store.tickers_by_symbol()["BTCUSDT"].bid, 11.0);
+    assert_eq!(store.tickers_by_symbol().unwrap()["BTCUSDT"].bid, 11.0);
     assert_eq!(*calls.borrow(), ["first"]);
 
     let position_store = DefaultStore::new();
@@ -867,7 +868,7 @@ fn mexc_websocket_store_notifications_propagate_after_commit() {
         [0],
         "position failure retains Store-local subscriber identity"
     );
-    assert_eq!(position_store.positions().len(), 1);
+    assert_eq!(position_store.positions().unwrap().len(), 1);
     assert_eq!(*position_calls.borrow(), ["first"]);
 }
 

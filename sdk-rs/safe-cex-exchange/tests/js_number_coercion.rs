@@ -20,7 +20,7 @@ fn native_number_conversion_matches_node_numeric_hint_order() {
         let runtime = native_runtime();
         let http = client::rest_http_host(runtime.clone(), Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
         let shared = Rc::new(ScopeShared::new(runtime, http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()), Js::object(vec![]), ()));
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()), Js::object(vec![]), ()));
         globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
 
         let output = std::process::Command::new("node").args(["-e", r#"

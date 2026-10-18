@@ -232,6 +232,13 @@ impl From<ExchangeError> for safe_cex_types::StoreSubscriberError {
         Self::new(error.message.clone()).with_cause(Rc::new(error))
     }
 }
+impl From<safe_cex_types::StoreReadError> for ExchangeError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        let mut result = Self::new(error.to_string());
+        result.origin = Some(ExchangeErrorOrigin::new(error));
+        result
+    }
+}
 impl From<safe_cex_store::StoreMutationError> for ExchangeError {
     fn from(error: safe_cex_store::StoreMutationError) -> Self {
         // Store's opaque cause retains the original listener error across the
@@ -276,7 +283,18 @@ impl From<safe_cex_transport::RestFailure> for ExchangeError {
                 .error()
                 .downcast_ref::<crate::js_runtime::value::owned::OwnedCallbackError>()
         {
-            crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error()
+            let mut projected =
+                crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error();
+            projected.is_axios_error = matches!(
+                cause.value().get("isAxiosError"),
+                Some(crate::js_runtime::value::OwnedJsValue::Bool(true))
+            );
+            if let Some(crate::js_runtime::value::OwnedJsValue::String(units)) =
+                cause.value().get("stack")
+            {
+                projected.stack = Some(String::from_utf16_lossy(units));
+            }
+            projected
         } else {
             let mut projected = Self::new(error.message.clone());
             if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =

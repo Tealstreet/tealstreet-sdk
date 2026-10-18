@@ -83,6 +83,7 @@ fn native_mexc_rest_and_private_login_use_the_server_synced_clock() {
             .base()
             .store
             .orders()
+            .unwrap()
             .iter()
             .find(|order| order.id == "9007001")
             .expect("production optimistic order")
