@@ -13,6 +13,10 @@ boundary. This audit changes no production behavior, heap implementation or
 shared guard. The standalone portable adapter continues to expose typed Rust
 results; it is not an executable JavaScript exception object.
 
+The observations cover this class declaration and its reconciliation consumer.
+They do not establish general Realm equivalence, engine-specific stack text or
+host source locations; the shared Realm replacement remains a separate lane.
+
 `binding::order_error_audit` constructs the real `HyperliquidExchange` with the
 shared native test runtime and its production imports and class methods. Four
 constructor profiles compare name, message and display UTF-16 units, both
