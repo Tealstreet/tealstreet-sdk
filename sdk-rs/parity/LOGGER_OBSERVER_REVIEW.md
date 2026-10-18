@@ -34,3 +34,44 @@ master and the compiled #1011 failure snapshot. Existing source cases, request,
 Store, retry, notification and native numeric assertions remain intact. The
 repair changes no production body or accepted-set policy, so no producer or
 receiver source pin requires refresh.
+
+## Parity workflow sweep
+
+On master `36e6581b5f`, the Aster account-fetch observer still joined the two
+console arguments into its logical message field. The same defect remained in
+the repair runtime (listen-key refresh and position repairs) and subscription
+runtime (order execution and private-stream comparisons). Five named tests
+compiled and failed with the extra severity suffix, including the private-stream
+UTF-16 cutoff assertion, before the observer repair.
+
+These three observers now share `tests/support/log_observer.rs`. Each logical
+log requires exactly two arguments and checks the native severity against the
+recorded channel before rendering only the message. All four source severities
+are covered; the exact shared error-report prefixes and trace channel keep their
+complete console rendering. No suffix matching or source expectation changes
+are involved. All seven consuming test targets pass (36 tests), retaining every
+source case, request, timer, Store effect and native-value assertion.
+
+The sweep followed every venue-oracle script used by the parity job in
+`.github/workflows/rust.yml`, its registry/store/types/facade/worker steps, and
+all 92 `live_*.rs`/`live-*.rs` paths, including support modules. This was a source
+review of observers and their consumers, with execution scoped to the changed
+targets rather than a local run of the whole workflow.
+
+| Workflow consumers | Observation reviewed |
+| --- | --- |
+| Aster account, repair and subscription targets | Logical log pairs repaired; seven consuming targets pass |
+| Aster clock lifecycle | Direct console messages; unchanged source/native test passes |
+| Aster exchange runtime | Full console text, with existing strict-Ticker severity expectation |
+| Apex/MEXC | Existing guarded logical log pairs from the first repair |
+| Coinbase/Crypto.com/KuCoin | Full console diagnostics; direct method-table log captures keep separate native arguments |
+| Binance | Original console arguments retained alongside rendered diagnostics; logical callbacks capture arguments directly |
+| Lighter | Direct log-operation argument vectors; console/error sinks keep full rendering |
+| Bybit | Console sinks include severity; logical operation logs remain native values |
+| WOO | Direct log callbacks; history/page error sinks observe full reporter output |
+| Registry/store/types/facade/worker | Forwarded console arguments, direct operation captures or diagnostic error counts; no joined-message logical pair comparison |
+| Other live-test paths | No additional joined-console observer used as a logical message/severity pair |
+
+The previously repaired BingX/Phemex/Polymarket sinks and the remaining venue
+test-runtime console sinks were also reviewed. Full console text remains full
+console text. The sweep found no further instance requiring an observer change.
