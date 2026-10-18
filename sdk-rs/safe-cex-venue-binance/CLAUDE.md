@@ -913,3 +913,11 @@ output fields and number bits are observed before serialization; do not broaden
 this to arbitrary JS graphs or generic T. The companion
 `scripts/exchange-bridge-controls.py` requires independent compiled named failures
 and exact byte restoration for all three bridges.
+
+The four native assembly context contracts (`ExchangeOwner`, `Context`,
+`RestContext`, `emit_json`) require the production native host. Read
+`EXCHANGE_NATIVE_CONTEXT_REVIEW.md` for their finite observations, typed handle
+and Order boundaries, and compiled controls. The canonical driver delegates
+these requiredFeatures rows to native; a default native-gated receipt is not
+execution. Keep the real NativeImports/client/Store path and actual raw console
+and reporter arguments; do not substitute a parallel venue/receiver implementation.
