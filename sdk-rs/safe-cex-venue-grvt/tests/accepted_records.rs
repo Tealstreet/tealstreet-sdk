@@ -17,6 +17,10 @@ fn check<T: DeserializeOwned + NativeIdentity>(name: &str, observe: impl Fn(T) -
         let raw = input.to_string();
         let value: T = serde_json::from_str(&raw).unwrap();
         value.assert_native(input, name);
+        value.assert_retained(
+            &safe_cex_types::retained_json::RetainedJsonInput::from(input.clone()),
+            name,
+        );
         assert_eq!(
             observe(value),
             row["nativeOutputs"][index],
@@ -24,6 +28,10 @@ fn check<T: DeserializeOwned + NativeIdentity>(name: &str, observe: impl Fn(T) -
         );
         let value: T = serde_json::from_value(input.clone()).unwrap();
         value.assert_native(input, name);
+        value.assert_retained(
+            &safe_cex_types::retained_json::RetainedJsonInput::from(input.clone()),
+            name,
+        );
         assert_eq!(
             observe(value),
             row["nativeOutputs"][index],
@@ -31,6 +39,10 @@ fn check<T: DeserializeOwned + NativeIdentity>(name: &str, observe: impl Fn(T) -
         );
         let value = <T as Deserialize>::deserialize(input).unwrap();
         value.assert_native(input, name);
+        value.assert_retained(
+            &safe_cex_types::retained_json::RetainedJsonInput::from(input.clone()),
+            name,
+        );
         assert_eq!(
             observe(value),
             row["nativeOutputs"][index],
@@ -40,6 +52,10 @@ fn check<T: DeserializeOwned + NativeIdentity>(name: &str, observe: impl Fn(T) -
         let value = <T as Deserialize>::deserialize(&mut decoder).unwrap();
         decoder.end().unwrap();
         value.assert_native(input, name);
+        value.assert_retained(
+            &safe_cex_types::retained_json::RetainedJsonInput::from(input.clone()),
+            name,
+        );
         assert_eq!(
             observe(value),
             row["nativeOutputs"][index],
