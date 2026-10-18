@@ -274,7 +274,8 @@
     "candidateToTsCpu": 3.94825133618353,
     "candidateToTsWall": 3.172029468374997,
     "targetCpuWithinTwoTimesTs": false,
-    "targetWallWithinTwoTimesTs": false
+    "targetWallWithinTwoTimesTs": false,
+    "identicalSerializedNativeOutput": true
   },
   "reports": [
     {

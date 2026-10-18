@@ -101,3 +101,13 @@ node sdk-rs/scripts/live-diff/facade-throughput.mjs \
 Earlier unoptimized development runs measured about 182 seconds before caching
 and 90 seconds after caching. Those values are diagnostic only. They are not
 combined with the release statistics or used for the release target.
+
+## Integration checks
+
+The final normal master merge preserves the cache and existing notification
+origin recovery. The merged tree passes canonical Store 19, notification 11,
+native throttle delivery 1 and SDK production wiring 2 tests. The all-features
+cancellation inventory passes six checks with its explicit discovery exporter
+ignored. The complete parity index passes 7,563 rows / 16,345 public Rust items.
+Workspace formatting, 376 CI wiring checks, four stream-runner checks and Node
+syntax checks for the three timing files also pass.
