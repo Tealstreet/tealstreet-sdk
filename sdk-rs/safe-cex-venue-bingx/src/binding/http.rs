@@ -19,7 +19,7 @@ use safe_cex_transport::{
     signature_rejection::{IsSignatureRejection, SignatureRetry, signature_rejected_response},
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -67,7 +67,9 @@ impl ReadTransport for Transport {
             }
             if let Some(body) = request.body {
                 let data = match body {
-                    RestBody::Untransformed(v) => from_json(&v),
+                    RestBody::Untransformed(v) => {
+                        safe_cex_exchange::js_runtime::value::from_retained_input(v)
+                    }
                     other => Js::str(&String::from_utf8_lossy(
                         &other
                             .wire_bytes()
@@ -101,7 +103,9 @@ impl ReadTransport for Transport {
                         }
                         let body = config.get("data")?;
                         if !body.is_nullish() {
-                            next.body = Some(RestBody::Untransformed(to_json(&body)?));
+                            next.body = Some(RestBody::Untransformed(
+                                safe_cex_exchange::js_runtime::value::to_retained_input(&body)?,
+                            ));
                         }
                         let next = api.prepare(next).map_err(Thrown::from)?;
                         config.define(
@@ -111,7 +115,9 @@ impl ReadTransport for Transport {
                         config.define(
                             "data",
                             match next.body {
-                                Some(RestBody::Untransformed(v)) => from_json(&v),
+                                Some(RestBody::Untransformed(v)) => {
+                                    safe_cex_exchange::js_runtime::value::from_retained_input(v)
+                                }
                                 _ => Js::Undefined,
                             },
                         )?;
@@ -143,13 +149,9 @@ impl ReadTransport for Transport {
                         );
                         if let Some(response) = response {
                             let raw = response.get("data").map_err(error)?;
-                            let data = if raw.is_string() {
-                                safe_cex_transport::how::big_int_as_string_json_parse(
-                                    &raw.to_display(),
-                                )
-                            } else {
-                                to_json(&raw).map_err(error)?
-                            };
+                            let data =
+                                safe_cex_exchange::js_runtime::value::to_retained_input(&raw)
+                                    .map_err(error)?;
                             failure.response = Some(Box::new(safe_cex_transport::RestResponse {
                                 status: response
                                     .get("status")
@@ -167,7 +169,7 @@ impl ReadTransport for Transport {
                             .clone()
                             .expect("factory configures signature retry");
                         if signature_rejected_response(&failure, &retry, &predicate)
-                            .map_err(|e| ExchangeError::new(e.to_string()))?
+                            .map_err(ExchangeError::from)?
                         {
                             continue;
                         }
@@ -176,11 +178,7 @@ impl ReadTransport for Transport {
                 }
             };
             let data = response.get("data").map_err(error)?;
-            let value = if data.is_string() {
-                safe_cex_transport::how::big_int_as_string_json_parse(&data.to_display())
-            } else {
-                to_json(&data).map_err(error)?
-            };
+            let value = to_json(&data).map_err(error)?;
             serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))
         })
     }
@@ -259,7 +257,20 @@ impl ApiHost for Host {
             Js::object(vec![
                 ("baseURL", Js::str(&defaults.base_url)),
                 ("timeout", Js::Number(defaults.timeout)),
-                ("responseType", Js::str("text")),
+                (
+                    "transformResponse",
+                    Js::function("bigIntAsStringJsonParse", |_, args| {
+                        let value = arg(&args, 0);
+                        if !value.is_string() {
+                            return Ok(value);
+                        }
+                        Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+                            safe_cex_transport::how::big_int_as_string_json_parse(
+                                &value.to_display(),
+                            ),
+                        ))
+                    }),
+                ),
                 (
                     "headers",
                     Js::object(
@@ -281,7 +292,7 @@ impl ApiHost for Host {
                 ),
             ]),
             &from_typed(options).map_err(error)?,
-            ExchangeName::Bingx,
+            base,
         )
         .map_err(error)?;
         client
@@ -363,7 +374,9 @@ impl ApiHost for Host {
                     status: s as u16,
                     reason: None,
                     headers: Default::default(),
-                    body: safe_cex_transport::RestResponseBody::Untransformed(Value::Null),
+                    body: safe_cex_transport::RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::Null,
+                    ),
                 })
             });
             Ok(Js::Bool(
@@ -397,11 +410,45 @@ impl ApiHost for Host {
         )
         .map_err(error)
     }
-    fn serialize(&self, params: &Value) -> Result<String, ExchangeError> {
+    fn serialize(
+        &self,
+        params: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<String, ExchangeError> {
         self.scope
             .globals
             .get("qs")
-            .and_then(|q| q.call_method("stringify", vec![from_json(params)]))
+            .and_then(|q| {
+                let collator = safe_cex_num::JsRootCollator::try_new()
+                    .map_err(|e| Thrown::error(e.name, e.message))?;
+                let sort = Js::function("localeCompare", move |_, args| {
+                    let left =
+                        String::from_utf16(&arg(&args, 0).to_js_string()?).map_err(|_| {
+                            Thrown::error(
+                                "RepresentationError",
+                                "query key is outside the shared string boundary",
+                            )
+                        })?;
+                    let right =
+                        String::from_utf16(&arg(&args, 1).to_js_string()?).map_err(|_| {
+                            Thrown::error(
+                                "RepresentationError",
+                                "query key is outside the shared string boundary",
+                            )
+                        })?;
+                    Ok(Js::Number(match collator.compare(&left, &right) {
+                        std::cmp::Ordering::Less => -1.0,
+                        std::cmp::Ordering::Equal => 0.0,
+                        std::cmp::Ordering::Greater => 1.0,
+                    }))
+                });
+                q.call_method(
+                    "stringify",
+                    vec![
+                        safe_cex_exchange::js_runtime::value::from_retained_input(params.clone()),
+                        Js::object(vec![("arrayFormat", Js::str("repeat")), ("sort", sort)]),
+                    ],
+                )
+            })
             .map(|s| s.to_display())
             .map_err(error)
     }
@@ -413,6 +460,6 @@ impl ApiHost for Host {
             .map_err(error)
     }
     fn now_ms(&self) -> f64 {
-        self.scope.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
 }

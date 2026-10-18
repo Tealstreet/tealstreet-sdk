@@ -1,6 +1,6 @@
 # Crypto.com control-flow contract batch
 
-This reviews twenty original native/default census owners individually. Their
+This reviews fifteen original native/default census owners individually. Their
 complete Rust bodies and corresponding TypeScript caller roles were read. Each
 constructs outbound values, selects/awaits native continuations, accesses supplied
 properties or reports errors. The fresh proposal report at master
@@ -13,10 +13,6 @@ contract shard. Existing source boundaries remain those in
 
 | Owner within safe_cex_venue_cryptocom | Reviewed role | Native witness |
 | --- | --- | --- |
-| account_admin::begin_admin | Eager request construction/dispatch | account_admin: endpoint/parameters, eager order and synchronous failures |
-| account_admin::finish_admin | Await continuation/void completion | account_admin: held/released futures, original rejection and reporting |
-| account_admin::log_and_rethrow | Error reporting/propagation | account_admin: original error, UTF16 diagnostic, severity and abrupt order |
-| account_admin::optional_chain | Optional property access | account_admin: nullish short circuit, original fields/errors and getter order |
 | order_writes::log | Diagnostic rendering/dispatch | order_writes: native log message/severity and reporting failures |
 | order_writes::rethrow | Error propagation | order_writes: original error, mandatory logging and replacement error |
 | order_writes::caught | Synchronous-error continuation selection | order_writes: eager logging and original future/error |
@@ -32,23 +28,20 @@ contract shard. Existing source boundaries remain those in
 | rest_reads::zero_position | Outbound position assembly | rest_reads: all native fields/default bits, original IDs/enums and construction order |
 | class_mappings::imported | Imported property access | Direct imported_native_contract: receiver/child/error identity and order |
 | class_admin::optional | Optional property-access adapter | Direct optional_native_contract: nullish/falsey distinction, child/error identity |
-| account_envelopes::equal | Strict captured-primitive comparison | Direct equal_native_contract: 22 fixed UTF16/literal comparisons |
 
-Sixteen account_admin/order_writes/rest_reads helpers execute through the
+Twelve order_writes/rest_reads helpers execute through the
 actual unchanged public native caller bodies in the existing source-comparison
-targets. Those targets independently admit 93, 91 and 68 scenarios respectively,
+targets. Those targets independently admit 91 and 68 scenarios respectively,
 assert native fields, numeric bits, original references/errors and effects, and
 execute complete unchanged actual TypeScript methods. Each selected private body
 also has an individual corruption control. Composition is explicit here: these
-sixteen witnesses are not new direct private-function tests.
+twelve witnesses are not new direct private-function tests.
 
-The four direct witnesses call their actual private bodies with concrete shared
+The three direct witnesses call their actual private bodies with concrete shared
 Js/Thrown carriers or literal UTF16 units. Imported access checks global-before-
 field resolution, original enum receiver/child/error identity, missing properties
 and abrupt order. Optional access distinguishes nullish from falsey non-nullish
-carriers and preserves original getter failures. Equality uses 22 independently
-authored cases including empty/NUL, Unicode pairs, normalization-distinct strings,
-lone surrogates and unequal lengths, with a separate executed-count assertion.
+carriers and preserves original getter failures.
 The parser-dispatch witness resolves a supplied native function before the
 field accessor, checks its original input and undefined receiver, observes -0,
 Infinity and NaN results, and preserves original failures at global lookup,
@@ -66,8 +59,7 @@ These roles grant no downstream admission permission. In particular, parsed
 dispatches a supplied parser; its grammar/coercion remains separate. finish
 forwards an opaque order ID into an outbound array, and zero_position constructs
 an outbound record; neither validates an incoming wire schema. The switch
-conversion class_mappings::member and account-envelope decoder bodies remain
-separate reviews. Generic host/Clone behavior, aliases and construction records
+conversion class_mappings::member remains a separate review. Generic host/Clone behavior, aliases and construction records
 are not exempted.
 
 Run sequentially from sdk-rs, with the actual TypeScript compiler environment:
@@ -75,14 +67,14 @@ Run sequentially from sdk-rs, with the actual TypeScript compiler environment:
 ```sh
 cargo test --locked --jobs 1 -p safe-cex-venue-cryptocom --lib accepted_control_flow
 cargo test --locked --jobs 1 -p safe-cex-venue-cryptocom --lib accepted_helpers
-cargo test --locked --jobs 1 -p safe-cex-venue-cryptocom --test account_admin --test order_writes --test rest_reads
+cargo test --locked --jobs 1 -p safe-cex-venue-cryptocom --test order_writes --test rest_reads
 python3 safe-cex-venue-cryptocom/scripts/control-flow-controls.py
 node safe-cex-venue-cryptocom/scripts/control-flow-contracts.mjs
 ```
 
-The control runner requires twenty distinct body corruptions and five truncated
-fixture walks (comparison, parser dispatch, optional nullish/falsey inputs and
-imported abrupt stages) to compile, fail their named
+The control runner requires fifteen distinct body corruptions and four truncated
+fixture walks (parser dispatch, optional nullish/falsey inputs and imported
+abrupt stages) to compile, fail their named
 native assertion with exit
 101, restore exact bytes and pass again. The result-array mutation fully reads
 the original ID before constructing an empty array. Compiler errors do not count,
@@ -100,3 +92,9 @@ non-decoder classifications, with zero runtime decoder probes. Compiler receipts
 remain separate from actual native evidence and compiling body controls. Other
 original/new owners, aliases, construction, locals, features and WASM contract
 execution remain separate obligations. No full-package completion is claimed.
+
+The test-only `account_admin.rs` and `account_envelopes.rs` modules had no
+production caller and were removed with their owners (wave2-vacuous-tests). The
+validation paragraphs above record the larger batch as it passed before that
+removal; the selector, control runner and contract shard now hold the fifteen
+owners in the table.

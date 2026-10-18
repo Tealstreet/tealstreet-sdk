@@ -469,18 +469,18 @@ note = ""
 [[symbol]]
 ts = "DefaultStore.addOrUpdateOrder"
 kind = "field-fn"
-layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::add_or_update_order"
+layer = "adapted"
+rs = [ "safe-cex-store/src/store.rs::DefaultStore::add_or_update_order", "safe-cex-store/src/store.rs::merge_order" ]
 status = "ported"
-note = ""
+note = "Adapted split helper safe-cex-store/src/store.rs::merge_order applies the shared typed property overlay. ModelField overlay preserves absent properties and overwrites own undefined across all 15 Order fields. The production facade order_model_merge target compares 270 actual-source cases and checks native nonfinite/signed-zero bits before serialization."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdateOrders"
 kind = "field-fn"
-layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::add_or_update_orders"
+layer = "adapted"
+rs = [ "safe-cex-store/src/store.rs::DefaultStore::add_or_update_orders", "safe-cex-store/src/store.rs::merge_order" ]
 status = "divergent"
-note = "CHOSEN ts-bug: deliberately preserve source duplicate-ID lookup asymmetry, not normalize it: indexed lookup chooses LAST existing duplicate only when incoming surviving orders > 1 AND existing stored orders > 1; otherwise linear lookup chooses FIRST. A uniform lookup could remove the defect but would change which order is updated. bucket_witnesses executes the actual DefaultStore for all four threshold combinations and asserts native prices."
+note = "Adapted split helper safe-cex-store/src/store.rs::merge_order applies the shared typed property overlay. CHOSEN ts-bug: deliberately preserve source duplicate-ID lookup asymmetry, not normalize it: indexed lookup chooses LAST existing duplicate only when incoming surviving orders > 1 AND existing stored orders > 1; otherwise linear lookup chooses FIRST. A uniform lookup could remove the defect but would change which order is updated. bucket_witnesses executes the actual DefaultStore for all four threshold combinations and asserts native prices. ModelField overlay preserves absent properties and overwrites own undefined; order_model_merge compares both upsert methods against 270 actual-source cases across all 15 carried fields."
 
 [[symbol]]
 ts = "DefaultStore.updatePosition"

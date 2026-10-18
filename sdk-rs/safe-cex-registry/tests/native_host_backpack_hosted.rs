@@ -160,10 +160,15 @@ fn backpack_secretless_private_auth_preserves_actual_source_failure_and_log() {
         .unwrap();
         let errors = Rc::new(RefCell::new(vec![]));
         let capture = errors.clone();
-        venue.base.on(
+        venue.base.on_args(
             "error",
             Rc::new(move |_, value| {
-                capture.borrow_mut().push(value.clone());
+                capture.borrow_mut().push(
+                    safe_cex_exchange::js_runtime::value::to_json(
+                        &safe_cex_exchange::js_runtime::value::Js::array(value.to_vec()),
+                    )
+                    .unwrap(),
+                );
                 Ok(())
             }),
         );

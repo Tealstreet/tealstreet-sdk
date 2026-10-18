@@ -643,9 +643,8 @@ fn api_product_type(rt: &Rt) -> Result<String, Thrown> {
 fn map_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
     let product = api_product_type(rt)?;
     let input = json_arg(&arg(&args, 0))?;
-    let clock = rt.clone();
     from_typed(&orders::map_order(input.as_ref(), &product, || {
-        clock.now()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     })?)
 }
 
@@ -653,7 +652,6 @@ fn map_inverse_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
     let product = api_product_type(rt)?;
     let input = json_arg(&arg(&args, 0))?;
     let store = rt.shared.store.clone();
-    let clock = rt.clone();
     let mapped = orders::map_inverse_order(
         input.as_ref(),
         &product,
@@ -663,7 +661,7 @@ fn map_inverse_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
                 .get(symbol)
                 .and_then(|m| m.is_inverse)
         },
-        || clock.now(),
+        || safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
     )?;
     from_typed(&mapped)
 }

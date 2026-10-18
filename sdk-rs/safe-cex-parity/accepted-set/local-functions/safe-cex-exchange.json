@@ -1,12 +1,22 @@
 {
   "safe-cex-exchange/src/js_runtime/base_exchange.rs::LOCAL_FUNCTION:deliver": {
     "category": "non-decoder",
-    "reason": "Reviewed external_provider_object::deliver: serializes an already typed Candle/orderbook callback value with from_typed and invokes the existing native callback. The source string labels exception context; it is not parsed or used to decode a model. Callback exceptions are forwarded to report_exception. This is outbound listener delivery, not an ingress decoder.",
-    "sourceSha256": "be2fb9f5f1e5aeac3575f3c0200739d02c297eba13f5fc8b8411de1bd1c9db8b"
+    "reason": "Reviewed external_provider_object::deliver: serializes an already typed Candle/orderbook callback value with from_typed and invokes the existing native callback. The source string labels exception context; it is not parsed or used to decode a model. Callback exceptions are forwarded to report_exception. This is outbound listener delivery, not an ingress decoder. Whole-file pin reviewed after the native emitter, listener-removal and worker-RPC changes; both provider helper bodies remain byte-identical to master. Reviewed async facade preparation moved into its existing Promise bodies; both provider helper bodies are unchanged.",
+    "sourceSha256": "83c4abe5ceb2121fc16b923043a73ba8ae2cf623706e64c3cb030679e78f4349"
   },
   "safe-cex-exchange/src/js_runtime/base_exchange.rs::LOCAL_FUNCTION:unsubscribe": {
     "category": "non-decoder",
-    "reason": "Reviewed external_provider_object::unsubscribe: wraps an existing ListenerCleanup in a single-consumption RefCell slot and exposes a zero-argument native function. Invoking it takes the existing cleanup and forwards its result; it accepts no serialized model input and constructs no decoded domain value.",
-    "sourceSha256": "be2fb9f5f1e5aeac3575f3c0200739d02c297eba13f5fc8b8411de1bd1c9db8b"
+    "reason": "Reviewed external_provider_object::unsubscribe: wraps an existing ListenerCleanup in a single-consumption RefCell slot and exposes a zero-argument native function. Invoking it takes the existing cleanup and forwards its result; it accepts no serialized model input and constructs no decoded domain value. Whole-file pin reviewed after the native emitter, listener-removal and worker-RPC changes; both provider helper bodies remain byte-identical to master. Reviewed async facade preparation moved into its existing Promise bodies; both provider helper bodies are unchanged.",
+    "sourceSha256": "83c4abe5ceb2121fc16b923043a73ba8ae2cf623706e64c3cb030679e78f4349"
+  },
+  "safe-cex-exchange/src/http.rs::LOCAL_FUNCTION:same": {
+    "category": "non-decoder",
+    "reason": "Recursive receipt body identity comparison of already retained values, including bitwise native floats and ordered keys; selects whether to restore this codec projection without constructing or admitting a model. Reviewed proxy diagnostic repair: physical response bytes use the shared Axios transform for classification/logging only, while native data and the original failure remain unchanged. The nested receipt identity comparator body is unchanged.",
+    "sourceSha256": "9ebadc098a88ab14c15dff8d3842fe0bc45a6a91d3a82ed2474baac0de4619d4"
+  },
+  "safe-cex-exchange/src/runtime.rs::LOCAL_FUNCTION:utf8_view": {
+    "category": "non-decoder",
+    "reason": "Explicit lossy legacy Error JSON output view; normalizes native string units only for the legacy view while the original RestFailure retains the authoritative native body. The real error origin regression asserts both profiles and origin identity. Physical response bytes receive the existing JSON.parse view before string-unit normalization; native string responses are not parsed a second time. The encoded error-origin witness preserves invalid bytes and checks parsed valid JSON.",
+    "sourceSha256": "d99baf293f400ad45c22a8cb83854991673795c2973abab8bda8e82ba110fe1f"
   }
 }

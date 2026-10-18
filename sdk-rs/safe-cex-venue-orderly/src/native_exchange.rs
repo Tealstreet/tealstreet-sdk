@@ -167,6 +167,9 @@ impl Exchange for OrderlyExchange {
     ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
+    fn set_all_leverage(&self, leverage: f64) -> ExchangeFuture<'_, ()> {
+        self.unit("setAllLeverage", args![leverage])
+    }
     fn set_leverage(
         &self,
         symbol: String,
@@ -187,6 +190,12 @@ impl Exchange for OrderlyExchange {
     }
     fn update_order(&self, opts: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
         self.invoke("updateOrder", args!(opts))
+    }
+    fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
+        self.unit("cancelAllOrders", vec![])
+    }
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        self.unit("cancelSymbolOrders", args![symbol])
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
         self.unit("cancelOrders", args!(orders))

@@ -12,8 +12,8 @@ use safe_cex_num::{
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::RestAdapter;
 use safe_cex_types::{
-    FetchedLeverage, MarginType, Order, OrderStatus, OrderTimeInForce, OrderType, PlaceOrderOpts,
-    Position, PositionMode,
+    FetchedLeverage, MarginType, Order, OrderStatus, OrderTimeInForce, OrderType, Position,
+    PositionMode, PreparedOrderOpts,
 };
 use serde_json::{Value, json};
 use std::{
@@ -24,16 +24,17 @@ use std::{
 
 type HostFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, ServiceError<E>>> + 'a>>;
 type NormalFormatter<'a, E> =
-    Box<dyn Fn(PlaceOrderOpts) -> HostFuture<'a, Vec<OrderPayload>, E> + 'a>;
-type AlgoFormatter<'a, E> = Box<dyn Fn(PlaceOrderOpts) -> HostFuture<'a, OrderPayload, E> + 'a>;
+    Box<dyn Fn(PreparedOrderOpts) -> HostFuture<'a, Vec<OrderPayload>, E> + 'a>;
+type AlgoFormatter<'a, E> = Box<dyn Fn(PreparedOrderOpts) -> HostFuture<'a, OrderPayload, E> + 'a>;
 type TriggerFormatter<'a, E> =
-    Box<dyn Fn(PlaceOrderOpts, Option<UtilityInput>) -> HostFuture<'a, OrderPayload, E> + 'a>;
-type Placement<'a, E> = Box<dyn Fn(PlaceOrderOpts) -> HostFuture<'a, Vec<Option<Value>>, E> + 'a>;
+    Box<dyn Fn(PreparedOrderOpts, Option<UtilityInput>) -> HostFuture<'a, OrderPayload, E> + 'a>;
+type Placement<'a, E> =
+    Box<dyn Fn(PreparedOrderOpts) -> HostFuture<'a, Vec<Option<Value>>, E> + 'a>;
 type MarginReader<'a, E> = Box<dyn Fn(Option<String>, bool) -> HostFuture<'a, MarginType, E> + 'a>;
 type ModeReader<'a, E> = Box<dyn Fn() -> HostFuture<'a, PositionMode, E> + 'a>;
 type PositionsReader<'a, E> = Box<dyn Fn(Vec<String>) -> HostFuture<'a, Vec<Position>, E> + 'a>;
-type ClientGuard<'a, E> = Box<dyn Fn(&PlaceOrderOpts) -> Result<(), ServiceError<E>> + 'a>;
-type BatchGuard<'a, E> = Box<dyn Fn(&[PlaceOrderOpts]) -> Result<(), ServiceError<E>> + 'a>;
+type ClientGuard<'a, E> = Box<dyn Fn(&PreparedOrderOpts) -> Result<(), ServiceError<E>> + 'a>;
+type BatchGuard<'a, E> = Box<dyn Fn(&[PreparedOrderOpts]) -> Result<(), ServiceError<E>> + 'a>;
 /// Supply the already ported formatters/mode readers, caller-ID policy and scheduler.
 /// Arguments and results are owned snapshots, not executable objects or JS aliases.
 pub struct WriteHost<'a, E> {
@@ -282,7 +283,7 @@ fn size_zero<E>(payloads: &[OrderPayload]) -> Result<bool, ServiceError<E>> {
     Ok(false)
 }
 pub async fn place_order<E>(
-    opts: &PlaceOrderOpts,
+    opts: &PreparedOrderOpts,
     xhr: &dyn RestAdapter,
     host: &WriteHost<'_, E>,
 ) -> Result<Vec<Option<Value>>, ServiceError<E>> {
@@ -292,7 +293,7 @@ pub async fn place_order<E>(
         let id = crate::order_services::place_trigger_order(&payload, xhr, host.service).await?;
         return Ok(vec![Some(Value::String(id))]);
     }
-    if algo(opts.r#type) {
+    if opts.r#type.is_some_and(algo) {
         let payload = (host.format_algo_order)(opts.clone()).await?;
         return place_algo_order_batch(&[payload], xhr, host.service).await;
     }
@@ -310,7 +311,7 @@ pub async fn place_order<E>(
         .collect())
 }
 pub async fn place_orders<E>(
-    opts: &[PlaceOrderOpts],
+    opts: &[PreparedOrderOpts],
     xhr: &dyn RestAdapter,
     host: &WriteHost<'_, E>,
 ) -> Result<Vec<Option<Value>>, ServiceError<E>> {
@@ -318,7 +319,8 @@ pub async fn place_orders<E>(
     let (triggers, rest): (Vec<_>, Vec<_>) = opts
         .iter()
         .partition(|o| o.r#type == OrderType::Conditional);
-    let (algos, normals): (Vec<_>, Vec<_>) = rest.into_iter().partition(|o| algo(o.r#type));
+    let (algos, normals): (Vec<_>, Vec<_>) =
+        rest.into_iter().partition(|o| o.r#type.is_some_and(algo));
     pair(
         (host.get_position_mode)(),
         (host.get_margin_type)(None, false),
@@ -403,7 +405,10 @@ async fn cancel_batches<E: std::fmt::Display>(
     host: &WriteHost<'_, E>,
 ) -> Result<(), ServiceError<E>> {
     let mut payloads = Vec::new();
-    for order in orders.iter().filter(|o| algo(o.r#type) == is_algo) {
+    for order in orders
+        .iter()
+        .filter(|o| o.r#type.is_some_and(algo) == is_algo)
+    {
         let market = store.markets_by_symbol().get(&order.symbol).cloned();
         let Some(market) = market else { continue };
         payloads.push(if is_algo {
@@ -454,8 +459,11 @@ async fn cancel_batches<E: std::fmt::Display>(
                                 .remove_orders(&ids.iter().map(String::as_str).collect::<Vec<_>>())
                                 .map_err(ServiceError::Store)?;
                         }
-                    } else if let Some(id) = id.and_then(Value::as_str) {
-                        store.remove_orders(&[id]).map_err(ServiceError::Store)?;
+                    } else {
+                        // DefaultStore.removeOrders builds an object-key lookup, unlike
+                        // the protective path's strict root-ID comparison above.
+                        let key = js_string(id).map_err(ServiceError::Coercion)?;
+                        store.remove_orders(&[&key]).map_err(ServiceError::Store)?;
                     }
                 } else {
                     failures.push(row);
@@ -545,28 +553,28 @@ pub async fn cancel_trigger_orders<E: std::fmt::Display>(
     }
     Ok(())
 }
-fn from_order(order: &Order) -> PlaceOrderOpts {
-    PlaceOrderOpts {
+fn from_order(order: &Order) -> PreparedOrderOpts {
+    PreparedOrderOpts {
         symbol: order.symbol.clone(),
-        r#type: order.r#type,
-        side: order.side,
+        r#type: order.r#type.into_property(),
+        side: order.side.into_property(),
         amount: order
             .extra
             .as_ref()
             .and_then(|e| e.remaining_native)
             .unwrap_or(order.amount),
-        price: Some(order.price),
+        price: order.price.into_value(),
         trigger_price: None,
-        stop_loss: order.stop_loss,
-        take_profit: order.take_profit,
-        reduce_only: Some(order.reduce_only),
-        time_in_force: order.time_in_force,
-        trigger_type: order.trigger_type,
-        tp_trigger_type: order.tp_trigger_type,
-        sl_trigger_type: order.sl_trigger_type,
+        stop_loss: (order.stop_loss).into_value(),
+        take_profit: (order.take_profit).into_value(),
+        reduce_only: order.reduce_only.into_property(),
+        time_in_force: (order.time_in_force).into_value(),
+        trigger_type: (order.trigger_type).into_value(),
+        tp_trigger_type: (order.tp_trigger_type).into_value(),
+        sl_trigger_type: (order.sl_trigger_type).into_value(),
         client_order_id: None,
         max_slippage_pct: None,
-        close: order.close,
+        close: (order.close).into_value(),
         implied_volatility: None,
     }
 }
@@ -627,7 +635,8 @@ pub async fn cancel_orders<E: std::fmt::Display>(
     let (triggers, rest): (Vec<_>, Vec<_>) = normalized
         .into_iter()
         .partition(|o| o.r#type == OrderType::Conditional);
-    let (algos, normals): (Vec<_>, Vec<_>) = rest.into_iter().partition(|o| algo(o.r#type));
+    let (algos, normals): (Vec<_>, Vec<_>) =
+        rest.into_iter().partition(|o| o.r#type.is_some_and(algo));
     if !normals.is_empty() {
         cancel_normal_orders(&normals, store, xhr, host).await?;
     }
@@ -640,7 +649,7 @@ pub async fn cancel_orders<E: std::fmt::Display>(
     if let Some(order) = preserve {
         let mut replacement = from_order(&order);
         replacement.amount = 0.0;
-        replacement.reduce_only = Some(true);
+        replacement.reduce_only = true.into();
         replacement.time_in_force = None;
         replacement.trigger_type = None;
         replacement.stop_loss = None;
@@ -797,7 +806,7 @@ pub async fn set_leverage<E>(
     Ok(())
 }
 /// Update owns only the fields that change; source-spread unknown properties are
-/// excluded by the shared typed Order/PlaceOrderOpts boundary.
+/// excluded by the shared typed Order/PreparedOrderOpts boundary.
 pub async fn update_order<E: std::fmt::Display>(
     order: &Order,
     update: &UtilityInput,
@@ -835,12 +844,12 @@ pub async fn update_order<E: std::fmt::Display>(
         let price =
             js_number(raw.and_then(|r| r.get("orderPrice"))).map_err(ServiceError::Coercion)?;
         opts.price = (price.is_finite() && price > 0.0).then_some(price);
-        opts.trigger_price = Some(if object.contains_key("price") {
-            js_number(object.get("price")).map_err(ServiceError::Coercion)?
+        opts.trigger_price = if object.contains_key("price") {
+            Some(js_number(object.get("price")).map_err(ServiceError::Coercion)?)
         } else {
-            order.price
-        });
-        opts.reduce_only = Some(false);
+            order.price.into_value()
+        };
+        opts.reduce_only = false.into();
         opts.time_in_force = Some(OrderTimeInForce::GoodTillCancel);
         let attached = raw
             .and_then(|r| r.get("attachAlgoOrders"))
@@ -898,37 +907,37 @@ pub async fn update_order<E: std::fmt::Display>(
         let sl = related.iter().find(|o| o.id.ends_with("__stop_loss"));
         let tp = related.iter().find(|o| o.id.ends_with("__take_profit"));
         if let Some(parent) = parent.filter(|o| o.status == OrderStatus::Open) {
-            opts.r#type = parent.r#type;
-            opts.side = parent.side;
+            opts.r#type = parent.r#type.into_property();
+            opts.side = parent.side.into_property();
             opts.amount = parent
                 .extra
                 .as_ref()
                 .and_then(|e| e.remaining_native)
                 .unwrap_or(parent.amount);
-            opts.price = Some(parent.price);
-            opts.reduce_only = Some(parent.reduce_only);
+            opts.price = parent.price.into_value();
+            opts.reduce_only = parent.reduce_only.into_property();
         } else {
             opts.price = None;
             if order.id.ends_with("__take_profit") {
-                opts.r#type = OrderType::TakeProfit;
+                opts.r#type = OrderType::TakeProfit.into();
             } else if order.id.ends_with("__stop_loss") {
-                opts.r#type = OrderType::StopLoss;
+                opts.r#type = OrderType::StopLoss.into();
             }
         }
         if let Some(sl) = sl {
-            if truth_number(sl.price) {
-                opts.stop_loss = Some(sl.price);
+            if truth_number((sl.price).to_number()) {
+                opts.stop_loss = Some((sl.price).to_number());
             }
             if sl.sl_trigger_type.is_some() {
-                opts.sl_trigger_type = sl.sl_trigger_type;
+                opts.sl_trigger_type = (sl.sl_trigger_type).into_value();
             }
         }
         if let Some(tp) = tp {
-            if truth_number(tp.price) {
-                opts.take_profit = Some(tp.price);
+            if truth_number((tp.price).to_number()) {
+                opts.take_profit = Some((tp.price).to_number());
             }
             if tp.tp_trigger_type.is_some() {
-                opts.tp_trigger_type = tp.tp_trigger_type;
+                opts.tp_trigger_type = (tp.tp_trigger_type).into_value();
             }
         }
         if let Some(price) = price {

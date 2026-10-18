@@ -454,24 +454,25 @@ fn fake_position(
     safe_cex_types::Position {
         id: safe_cex_types::model_utils::create_position_id(&market.symbol, Some(side), Some(mode)),
         symbol: market.symbol.clone(),
-        side,
+        side: side.into(),
         entry_price: 0.0,
         notional: 0.0,
         leverage,
-        margin_type: Some(margin),
-        position_mode: Some(mode),
+        margin_type: (Some(margin)).into(),
+        position_mode: (Some(mode)).into(),
         unrealized_pnl: 0.0,
-        realized_pnl: Some(0.0),
+        realized_pnl: (Some(0.0)).into(),
         contracts: 0.0,
         liquidation_price: 0.0,
-        margin_size: Some(0.0),
-        info: Some(Value::Object(Map::new())),
-        extra: Some(safe_cex_types::PositionExtra {
+        margin_size: (Some(0.0)).into(),
+        info: (Some(Value::Object(Map::new()))).into(),
+        extra: (Some(safe_cex_types::PositionExtra {
             contracts_native: Some(0.0),
             unrealized_pnl_native: Some(0.0),
-        }),
-        last_update: Some(0.0),
-        option: None,
+        }))
+        .into(),
+        last_update: (Some(0.0)).into(),
+        option: (None).into(),
     }
 }
 
@@ -691,20 +692,21 @@ pub fn normalize_position(
     Ok(Some(safe_cex_types::Position {
         id: safe_cex_types::model_utils::create_position_id(&symbol, Some(side), Some(mode)),
         symbol,
-        side,
+        side: side.into(),
         entry_price,
         notional,
         leverage,
-        margin_type: Some(normalize_margin_type(pick(
+        margin_type: (Some(normalize_margin_type(pick(
             raw,
             &["openType", "marginType"],
-        ))?),
-        position_mode: Some(mode),
+        ))?))
+        .into(),
+        position_mode: (Some(mode)).into(),
         unrealized_pnl,
-        realized_pnl: Some(to_number(pick(raw, &["realised", "realizedPnl"]), None)?),
+        realized_pnl: (Some(to_number(pick(raw, &["realised", "realizedPnl"]), None)?)).into(),
         contracts,
         liquidation_price: to_number(pick(raw, &["liquidatePrice", "liquidationPrice"]), None)?,
-        margin_size: Some(to_number(
+        margin_size: (Some(to_number(
             pick(raw, &["im", "margin", "positionMargin"]),
             Some(
                 if notional != 0.0 && !notional.is_nan() && leverage != 0.0 && !leverage.is_nan() {
@@ -713,44 +715,47 @@ pub fn normalize_position(
                     0.0
                 },
             ),
-        )?),
-        info: Some(Value::Object(raw.clone())),
-        extra: Some(safe_cex_types::PositionExtra {
+        )?))
+        .into(),
+        info: (Some(Value::Object(raw.clone()))).into(),
+        extra: (Some(safe_cex_types::PositionExtra {
             contracts_native: Some(to_number(volume, None)?),
             unrealized_pnl_native: Some(unrealized_pnl),
-        }),
-        last_update: Some(normalize_timestamp_to_ms(
+        }))
+        .into(),
+        last_update: (Some(normalize_timestamp_to_ms(
             pick(raw, &["updateTime", "modifyTime", "createTime"]),
             local_to_utc,
-        )?),
-        option: None,
+        )?))
+        .into(),
+        option: (None).into(),
     }))
 }
 
 fn empty_order(id: String, symbol: String, side: OrderSide) -> safe_cex_types::Order {
     safe_cex_types::Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id,
-        parent_id: None,
-        status: OrderStatus::Open,
+        parent_id: (None).into(),
+        status: safe_cex_types::ModelField::Value(OrderStatus::Open),
         symbol,
-        r#type: OrderType::Limit,
-        side,
-        price: 0.0,
+        r#type: safe_cex_types::ModelField::Value(OrderType::Limit),
+        side: side.into(),
+        price: (0.0).into(),
         amount: 0.0,
         filled: 0.0,
         remaining: 0.0,
-        reduce_only: false,
-        close: None,
-        info: None,
-        time_in_force: Some(safe_cex_types::OrderTimeInForce::GoodTillCancel),
+        reduce_only: false.into(),
+        close: (None).into(),
+        info: (None).into(),
+        time_in_force: (Some(safe_cex_types::OrderTimeInForce::GoodTillCancel)).into(),
         last_update: 0.0,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
     }
 }
 fn order_extra(remaining: f64, filled: Option<f64>) -> safe_cex_types::OrderExtra {
@@ -798,26 +803,32 @@ pub fn normalize_order(
     let price = to_number(pick(raw, &["price", "orderPrice"]), None)?;
     let trigger_price = to_number(pick(raw, &["triggerPrice", "stopPrice"]), None)?;
     let mut order = empty_order(id, symbol, side_info.side);
-    order.status = status;
-    order.r#type = order_type;
-    order.price = if price != 0.0 { price } else { trigger_price };
+    order.status = (status).into();
+    order.r#type = (order_type).into();
+    order.price = if price != 0.0 {
+        (price).into()
+    } else {
+        (trigger_price).into()
+    };
     order.amount = amount;
     order.filled = filled;
     order.remaining = math_max(amount - filled, 0.0);
-    order.reduce_only = js_truthy(raw.get("reduceOnly")) || side_info.reduce_only;
-    order.time_in_force = Some(
+    order.reduce_only = (js_truthy(raw.get("reduceOnly")) || side_info.reduce_only).into();
+    order.time_in_force = (Some(
         numeric_table(&crate::types::ORDER_TIME_IN_FORCE, type_code)?
             .unwrap_or(safe_cex_types::OrderTimeInForce::GoodTillCancel),
-    );
+    ))
+    .into();
     order.last_update = normalize_timestamp_to_ms(
         pick(raw, &["updateTime", "modifyTime", "createTime"]),
         local_to_utc,
     )?;
-    order.info = Some(Value::Object(raw.clone()));
-    order.extra = Some(order_extra(
+    order.info = (Some(Value::Object(raw.clone()))).into();
+    order.extra = (Some(order_extra(
         math_max(amount_native - filled_native, 0.0),
         Some(filled_native),
-    ));
+    )))
+    .into();
     Ok(Some(order))
 }
 
@@ -841,18 +852,18 @@ pub fn normalize_plan_order(
     let status = normalize_trigger_order_status(raw)?;
     let price = to_number(pick(raw, &["triggerPrice", "stopPrice", "price"]), None)?;
     let mut order = empty_order(id, symbol, side_info.side);
-    order.status = status;
-    order.r#type = normalize_plan_order_type(raw, side_info.side)?;
-    order.price = price;
+    order.status = (status).into();
+    order.r#type = (normalize_plan_order_type(raw, side_info.side)?).into();
+    order.price = (price).into();
     order.amount = amount;
     order.remaining = amount;
-    order.reduce_only = js_truthy(raw.get("reduceOnly")) || side_info.reduce_only;
+    order.reduce_only = (js_truthy(raw.get("reduceOnly")) || side_info.reduce_only).into();
     order.last_update =
         normalize_timestamp_to_ms(pick(raw, &["updateTime", "createTime"]), local_to_utc)?;
     let mut info = raw.clone();
     info.insert("__mexcPlanOrder".into(), Value::Bool(true));
-    order.info = Some(Value::Object(info));
-    order.extra = Some(order_extra(to_number(volume, None)?, None));
+    order.info = (Some(Value::Object(info))).into();
+    order.extra = (Some(order_extra(to_number(volume, None)?, None))).into();
     Ok(Some(order))
 }
 
@@ -899,21 +910,22 @@ pub fn normalize_stop_order(
             OrderSide::Buy
         },
     );
-    order.status = normalize_trigger_order_status(raw)?;
-    order.r#type = order_type;
-    order.price = price;
+    order.status = (normalize_trigger_order_status(raw)?).into();
+    order.r#type = (order_type).into();
+    order.price = (price).into();
     order.amount = amount;
     order.remaining = amount;
-    order.reduce_only = true;
+    order.reduce_only = true.into();
     order.last_update =
         normalize_timestamp_to_ms(pick(raw, &["updateTime", "createTime"]), local_to_utc)?;
     let mut info = raw.clone();
     info.insert("__mexcStopOrder".into(), Value::Bool(true));
-    order.info = Some(Value::Object(info));
-    order.extra = Some(order_extra(
+    order.info = (Some(Value::Object(info))).into();
+    order.extra = (Some(order_extra(
         if full_position { 0.0 } else { native_amount },
         None,
-    ));
+    )))
+    .into();
     Ok(Some(order))
 }
 

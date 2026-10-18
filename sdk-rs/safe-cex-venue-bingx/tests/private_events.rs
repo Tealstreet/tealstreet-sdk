@@ -1,3 +1,6 @@
+#[path = "support/oracle_clock.rs"]
+mod oracle_clock;
+
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -72,20 +75,20 @@ fn sorted(v: &Value) -> Value {
     }
 }
 fn order(v: &Order) -> Value {
-    let mut out = json!({"id":v.id,"status":v.status,"symbol":v.symbol,"type":v.r#type,"side":v.side,"price":number(v.price),"amount":number(v.amount),"filled":number(v.filled),"remaining":number(v.remaining),"reduceOnly":v.reduce_only,"lastUpdate":number(v.last_update)});
-    if let Some(b) = v.close {
+    let mut out = json!({"id":v.id,"status":v.status,"symbol":v.symbol,"type":v.r#type,"side":v.side,"price":number((v.price).to_number()),"amount":number(v.amount),"filled":number(v.filled),"remaining":number(v.remaining),"reduceOnly":v.reduce_only,"lastUpdate":number(v.last_update)});
+    if let Some(b) = v.close.into_value() {
         out["close"] = json!(b);
     }
-    if let Some(t) = v.time_in_force {
+    if let Some(t) = v.time_in_force.into_value() {
         out["timeInForce"] = json!(t);
     }
-    if let Some(t) = v.tp_trigger_type {
+    if let Some(t) = v.tp_trigger_type.into_value() {
         out["tpTriggerType"] = json!(t);
     }
-    if let Some(t) = v.sl_trigger_type {
+    if let Some(t) = v.sl_trigger_type.into_value() {
         out["slTriggerType"] = json!(t);
     }
-    if let Some(info) = &v.info {
+    if let Some(info) = v.info.as_ref() {
         out["info"] = observe(info);
     }
     assert!(
@@ -100,16 +103,16 @@ fn order(v: &Order) -> Value {
 }
 fn position(v: &Position) -> Value {
     let mut out = json!({"id":v.id,"symbol":v.symbol,"side":v.side,"entryPrice":number(v.entry_price),"notional":number(v.notional),"leverage":number(v.leverage),"unrealizedPnl":number(v.unrealized_pnl),"contracts":number(v.contracts),"liquidationPrice":number(v.liquidation_price)});
-    if let Some(m) = v.margin_type {
+    if let Some(m) = v.margin_type.into_value() {
         out["marginType"] = json!(m);
     }
-    if let Some(m) = v.position_mode {
+    if let Some(m) = v.position_mode.into_value() {
         out["positionMode"] = json!(m);
     }
-    if let Some(n) = v.margin_size {
+    if let Some(n) = v.margin_size.into_value() {
         out["marginSize"] = number(n);
     }
-    if let Some(info) = &v.info {
+    if let Some(info) = v.info.as_ref() {
         out["info"] = observe(info);
     }
     assert!(
@@ -317,8 +320,9 @@ fn run(c: &Value) {
                 json!({"o":input["wireOrder"]})
             }]
         });
+    let clock = oracle_clock::ClockWindow::start();
     let result: Result<Value, ExchangeError> = match method {
-        "mapOrder" => map_order(&input["wireOrder"], &store.orders(), 1234.0)
+        "mapOrder" => map_order(&input["wireOrder"], &store.orders(), 5678.0)
             .map(|o| o.as_ref().map_or(json!({"undefined":true}), order)),
         "normalizeSymbol" => v
             .normalize_symbol(Some(&input["symbol"]))
@@ -359,6 +363,11 @@ fn run(c: &Value) {
         _ => unreachable!(),
     };
     host.drain();
+    let clock = clock.finish();
+    let mut native_orders = json!(store.orders().iter().map(order).collect::<Vec<_>>());
+    if method != "mapOrder" {
+        clock.normalize_orders(&mut native_orders, &c["orders"]);
+    }
     let output = match result {
         Ok(v) => json!({"ok":v}),
         Err(e) => json!({"error":{"name":e.name,"message":e.message}}),
@@ -379,8 +388,7 @@ fn run(c: &Value) {
         "BINGX-PRIVATE fill payloads {method} variant {variant}"
     );
     assert_eq!(
-        json!(store.orders().iter().map(order).collect::<Vec<_>>()),
-        c["orders"],
+        native_orders, c["orders"],
         "BINGX-PRIVATE native orders {method} variant {variant}"
     );
     let positions = json!(store.positions().iter().map(position).collect::<Vec<_>>());

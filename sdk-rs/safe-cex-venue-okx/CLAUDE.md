@@ -132,8 +132,53 @@ and new-market topic spreads consumed only two groups, and dedupe colon joins
 replaced lone UTF-16 surrogates. The dispatcher consumes all supplied iterables
 in order and appends colon-separated strings as UTF-16. A production Exchange
 regression loads distinct normal/OCO/trailing/conditional/trigger orders and
-checks all five groups reach symbol cancellation. Four permanent controls in
-`tests/production_intrinsic_controls.py` restore each broken behavior and require
-a named compiled failure followed by an exact source restoration and passing
-case. The API/history and other private harnesses remain separate migration work;
-this slice does not claim their intrinsic coverage.
+checks all five groups reach symbol cancellation.
+
+The createAPI error interceptor's `formatOkxApiErrorMessage` needed `is-array` and
+`string`, absent from the production table, so every non-"0" OKX response threw
+"unknown OKX intrinsic is-array" with no `response`; `template-concat` also joined
+only two parts. Income paging likewise lacked `add`. `tests/exchange_binding.rs`
+drives rejected setLeverage/placeOrder and a non-empty bills page through the
+real binding. Nine permanent controls in `tests/production_intrinsic_controls.py`
+restore each broken behavior and require a named compiled failure followed by an
+exact source restoration and passing case. `tests/history_stream_api.rs` still
+supplies its own fake intrinsics; it is not evidence for the production table.
+
+The real binding's private orders, positions and account frame tests use actual
+socket dispatch, Store and event emitter. Terminal orders commit Closed/Canceled
+before the final fill, emit the exact source fill object once per execution, and
+retain terminal memory against stale REST snapshots. The JS Store bridge delegates
+to the existing native operation rather than implementing another terminal map.
+`tests/terminal_store_controls.py` faults the bridge registration, terminal-memory
+delegation, empty-Store handling, subscriber-error propagation and typed ID
+admission, requiring named compiled failures and exact restoration.
+
+The concrete parallel-map host starts every callback with the shared eager promise
+runtime and joins already-started promises. Market/leverage and order-read bodies
+share that implementation. The real EU binding holds a SWAP response and verifies
+FUTURES starts before it completes for both normal and algorithmic orders, matching
+the actual TypeScript members with the installed p-iteration dependency.
+
+Mapper collaborators use a fallible callback ABI. The installed native globals
+preserve each original `Thrown` value and stop at the first failed conversion,
+symbol resolver or settle-currency resolver. The typed pure callers lift successful
+values into `Result` without changing their oracle assertions. Six source probes
+and six installed-global probes pin opaque error identity; a constructed Exchange
+history read pins one conversion, one error event and no returned rows. The
+seven native regressions fail on the previous swallowing implementation.
+
+The production networkErrorOnRead import applies the installed axios-retry
+cancellation/timeout exclusions and is-retry-allowed DNS/TLS denial set. Native
+response/code guards preserve source truthiness and repeated property reads;
+code membership compares UTF-16 directly, without invoking conversion hooks.
+The actual constructed HTTP witness compares36 GET profiles and one write guard
+with the maintained wrapper and installed dependencies. All30 denial-set codes
+and ERR_CANCELED stop after one attempt; allowed socket errors still retry.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` covers 88 cases / 264 frames per global/EU live/demo constructor across all five ticker/valuation channels. Only the first row of each source channel frame is applied.
+It drives the production constructor/socket protocol and actual DefaultStore,
+checking native number bits against maintained TS classes and DefaultStore.
+Independent null, string, NaN-producing, object, overflow, signed-zero and false
+inputs accompany distinct good rows, with finite Store resets before every case.
+The shared `ticker-native-controls.py` compiles live field-publication faults,
+requires named native failures, restores exact bytes and requires passing tests.

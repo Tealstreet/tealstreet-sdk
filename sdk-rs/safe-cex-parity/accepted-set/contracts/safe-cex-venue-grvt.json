@@ -4691,7 +4691,7 @@
       }
     },
     "category": "decoder",
-    "evidence": "Numeric text decoder for the actual typed &str API. Source parseFloat prefixes, finite-input refusal and Math.round scaling determine admitted output; native results are observed by IEEE754 bits before JSON can normalize negative zero or infinity. These independently authored inputs include parse-prefix zero, signed zero, a half-unit and multiplication overflow after a finite parse. Live source builder-helpers tests supply the wider source comparison. Selected production observations pass on native and wasm; whole-crate source/alias discovery remains separate.",
+    "evidence": "Numeric text decoder for the actual typed &str API. Source parseFloat prefixes, finite-input refusal and Math.round scaling determine admitted output; native results are observed by IEEE754 bits before JSON can normalize negative zero or infinity. These independently authored inputs include parse-prefix zero, signed zero, positive and negative half-units and multiplication overflow after a finite parse. Live source builder-helpers tests supply the wider source comparison. Selected production observations pass on native and wasm; whole-crate source/alias discovery remains separate.",
     "call": "{match $type($value.as_str().expect(\"reviewed text input\")){Ok(d)=>serde_json::json!({\"bits\":format!(\"{:016x}\",d.to_bits())}),Err(e)=>serde_json::json!({\"error\":e})}}",
     "cases": [
       {
@@ -4704,6 +4704,24 @@
         "input": "-0",
         "output": {
           "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "-0.00015",
+        "output": {
+          "bits": "bff0000000000000"
+        }
+      },
+      {
+        "input": "-0.00005",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "-0.00025",
+        "output": {
+          "bits": "c000000000000000"
         }
       },
       {
@@ -7468,7 +7486,7 @@
     },
     "category": "decoder",
     "evidence": "Reviewed twelve exact own interval mappings and source ordinary-object inherited values; only missing entries choose one minute. Observations match each native interval variant and inherited ProtoMember identity before output projection. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
-    "call": "{match $type($value.as_str().unwrap()){safe_cex_num::TableHit::Mapped(d)=>serde_json::json!({\"mapped\":match d{crate::types::GrvtCandlestickInterval::Ci1M=>\"Ci1M\",crate::types::GrvtCandlestickInterval::Ci3M=>\"Ci3M\",crate::types::GrvtCandlestickInterval::Ci5M=>\"Ci5M\",crate::types::GrvtCandlestickInterval::Ci15M=>\"Ci15M\",crate::types::GrvtCandlestickInterval::Ci30M=>\"Ci30M\",crate::types::GrvtCandlestickInterval::Ci1H=>\"Ci1H\",crate::types::GrvtCandlestickInterval::Ci2H=>\"Ci2H\",crate::types::GrvtCandlestickInterval::Ci4H=>\"Ci4H\",crate::types::GrvtCandlestickInterval::Ci6H=>\"Ci6H\",crate::types::GrvtCandlestickInterval::Ci12H=>\"Ci12H\",crate::types::GrvtCandlestickInterval::Ci1D=>\"Ci1D\",crate::types::GrvtCandlestickInterval::Ci1W=>\"Ci1W\",crate::types::GrvtCandlestickInterval::Ci8H=>\"Ci8H\",crate::types::GrvtCandlestickInterval::Ci3D=>\"Ci3D\",crate::types::GrvtCandlestickInterval::Ci5D=>\"Ci5D\",crate::types::GrvtCandlestickInterval::Ci2W=>\"Ci2W\",crate::types::GrvtCandlestickInterval::Ci3W=>\"Ci3W\",crate::types::GrvtCandlestickInterval::Ci4W=>\"Ci4W\"}}),safe_cex_num::TableHit::Inherited(d)=>serde_json::json!({\"inherited\":match d{safe_cex_num::ProtoMember::ToString=>\"toString\",safe_cex_num::ProtoMember::Prototype=>\"prototype\",_=>panic!(\"unreviewed inherited test value\")}}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"missing\":true})}}",
+    "call": "{match $type($value.as_str().unwrap()){safe_cex_num::TableHit::Mapped(d)=>serde_json::json!({\"mapped\":match d{crate::types::GrvtCandlestickInterval::Ci1M=>\"Ci1M\",crate::types::GrvtCandlestickInterval::Ci3M=>\"Ci3M\",crate::types::GrvtCandlestickInterval::Ci5M=>\"Ci5M\",crate::types::GrvtCandlestickInterval::Ci15M=>\"Ci15M\",crate::types::GrvtCandlestickInterval::Ci30M=>\"Ci30M\",crate::types::GrvtCandlestickInterval::Ci1H=>\"Ci1H\",crate::types::GrvtCandlestickInterval::Ci2H=>\"Ci2H\",crate::types::GrvtCandlestickInterval::Ci4H=>\"Ci4H\",crate::types::GrvtCandlestickInterval::Ci6H=>\"Ci6H\",crate::types::GrvtCandlestickInterval::Ci12H=>\"Ci12H\",crate::types::GrvtCandlestickInterval::Ci1D=>\"Ci1D\",crate::types::GrvtCandlestickInterval::Ci1W=>\"Ci1W\",crate::types::GrvtCandlestickInterval::Ci8H=>\"Ci8H\",crate::types::GrvtCandlestickInterval::Ci3D=>\"Ci3D\",crate::types::GrvtCandlestickInterval::Ci5D=>\"Ci5D\",crate::types::GrvtCandlestickInterval::Ci2W=>\"Ci2W\",crate::types::GrvtCandlestickInterval::Ci3W=>\"Ci3W\",crate::types::GrvtCandlestickInterval::Ci4W=>\"Ci4W\"}}),safe_cex_num::TableHit::Inherited(d)=>serde_json::json!({\"inherited\":match d{safe_cex_num::ProtoMember::ToString=>\"toString\",safe_cex_num::ProtoMember::Prototype=>\"prototype\",safe_cex_num::ProtoMember::Constructor=>\"constructor\",safe_cex_num::ProtoMember::DefineGetter=>\"__defineGetter__\",safe_cex_num::ProtoMember::DefineSetter=>\"__defineSetter__\",safe_cex_num::ProtoMember::HasOwnProperty=>\"hasOwnProperty\",safe_cex_num::ProtoMember::LookupGetter=>\"__lookupGetter__\",safe_cex_num::ProtoMember::LookupSetter=>\"__lookupSetter__\",safe_cex_num::ProtoMember::IsPrototypeOf=>\"isPrototypeOf\",safe_cex_num::ProtoMember::PropertyIsEnumerable=>\"propertyIsEnumerable\",safe_cex_num::ProtoMember::ValueOf=>\"valueOf\",safe_cex_num::ProtoMember::ToLocaleString=>\"toLocaleString\"}}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"missing\":true})}}",
     "cases": [
       {
         "input": "1m",
@@ -7570,6 +7588,66 @@
         "input": "__proto__",
         "output": {
           "inherited": "prototype"
+        }
+      },
+      {
+        "input": "constructor",
+        "output": {
+          "inherited": "constructor"
+        }
+      },
+      {
+        "input": "__defineGetter__",
+        "output": {
+          "inherited": "__defineGetter__"
+        }
+      },
+      {
+        "input": "__defineSetter__",
+        "output": {
+          "inherited": "__defineSetter__"
+        }
+      },
+      {
+        "input": "hasOwnProperty",
+        "output": {
+          "inherited": "hasOwnProperty"
+        }
+      },
+      {
+        "input": "__lookupGetter__",
+        "output": {
+          "inherited": "__lookupGetter__"
+        }
+      },
+      {
+        "input": "__lookupSetter__",
+        "output": {
+          "inherited": "__lookupSetter__"
+        }
+      },
+      {
+        "input": "isPrototypeOf",
+        "output": {
+          "inherited": "isPrototypeOf"
+        }
+      },
+      {
+        "input": "propertyIsEnumerable",
+        "output": {
+          "inherited": "propertyIsEnumerable"
+        }
+      },
+      {
+        "input": "valueOf",
+        "output": {
+          "inherited": "valueOf"
+        }
+      },
+      {
+        "input": "toLocaleString",
+        "output": {
+          "inherited": "toLocaleString"
         }
       }
     ]
@@ -7739,6 +7817,21 @@
       },
       {
         "input": "{\"ih\":\"0x1\",\"bd\":\"1\",\"qd\":2}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
+      },
+      {
+        "input": "{\"ih\":\"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"bd\":3,\"qd\":3}",
+        "output": {
+          "hash": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "base": "4008000000000000",
+          "quote": "4008000000000000",
+          "borrowed": true
+        }
+      },
+      {
+        "input": "{\"ih\":\"0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"bd\":3,\"qd\":3}",
         "output": {
           "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
         }
@@ -24705,7 +24798,7 @@
       }
     },
     "category": "decoder",
-    "evidence": "Reviewed complete maintained fetchMarkets:744-795 over configured transformed response.data. Post is eager; rows map before fetched logging and source catch. An earlier native representation refusal cannot hide a later null-row source error, while an isolated representation refusal occurs after successful fetched logging. Native fields/Number bits, response and logger origin identity and every effect phase are independently observed. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage.",
+    "evidence": "Reviewed complete maintained fetchMarkets:744-795 over configured transformed response.data. Post is eager; rows map before fetched logging and source catch. An earlier native representation refusal cannot hide a later null-row source error, while an isolated representation refusal now reports the exact row/asset values at Warning after successful fetched logging and omits that row only. This is the expressly approved strict-field/per-row divergence from TS, which retains malformed base/quote. Native fields/Number bits, response and logger origin identity and every effect phase are independently observed. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage.",
     "call": "{ #[allow(dead_code)] mod fixture {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_store_harness.rs\"));} let events=fixture::events();let remote=fixture::error(\"RemoteError\",\"request failed\");let logger=fixture::error(\"LogError\",\"log failed\");let remote_origin=remote.origin.clone();let logger_origin=logger.origin.clone();let data=$value[\"data\"].clone();let failed=$value[\"fail\"].as_bool().unwrap();let post_events=events.clone();let future=$type(move |url,body|{fixture::push(&post_events,serde_json::json!([\"post\",url,body]));async move{fixture::push(&post_events,serde_json::json!([\"response\"]));if failed{Err(remote)}else{Ok(data)}}},fixture::log_with(events.clone(),if $value[\"log_fail\"].as_bool().unwrap(){Some(1)}else{None},logger));let before=fixture::observed(&events);let result=match fixture::ready(future){Ok(rows)=>serde_json::json!({\"ok\":true,\"markets\":rows.iter().map(fixture::view_market).collect::<Vec<_>>()}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":fixture::view_error(&error),\"same_remote\":error.origin.is_some()&&error.origin==remote_origin,\"same_logger\":error.origin.is_some()&&error.origin==logger_origin})};serde_json::json!({\"before\":before,\"events\":fixture::observed(&events),\"result\":result}) }",
     "cases": [
       {
@@ -25025,22 +25118,16 @@
               "log",
               "Fetched 1 GRVT markets",
               "debug"
+            ],
+            [
+              "log",
+              "Refused GRVT market row 0 id=\"x\": base=false quote=\"USD\": GRVT market base and quote must be strings for the shared Market model",
+              "warning"
             ]
           ],
           "result": {
-            "ok": false,
-            "error": {
-              "name": "RepresentationError",
-              "message": "GRVT market base and quote must be strings for the shared Market model",
-              "code": null,
-              "response": null,
-              "stack": null,
-              "origin": false,
-              "subscriber": false,
-              "subscriber_ids": 0
-            },
-            "same_remote": false,
-            "same_logger": false
+            "ok": true,
+            "markets": []
           }
         }
       },
@@ -25290,6 +25377,151 @@
             },
             "same_remote": false,
             "same_logger": true
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "r": [
+              {
+                "i": "btc_usdt_Perp",
+                "k": "PERPETUAL",
+                "b": "BTC",
+                "q": "USDT",
+                "ms": "0.01",
+                "ts": "0.2",
+                "mp": "9",
+                "ih": "0x11",
+                "bd": 3,
+                "qd": 6
+              },
+              {
+                "i": "bad_asset",
+                "b": false,
+                "q": "USD"
+              },
+              {
+                "i": "eth_usdt",
+                "k": "FUTURE",
+                "b": "ETH",
+                "q": "USD",
+                "ms": "",
+                "ts": false,
+                "mp": 0,
+                "mxs": "7.5",
+                "ia": false,
+                "ih": null
+              }
+            ]
+          },
+          "fail": false,
+          "log_fail": false
+        },
+        "output": {
+          "before": [
+            [
+              "post",
+              "/lite/v1/all_instruments",
+              {}
+            ]
+          ],
+          "events": [
+            [
+              "post",
+              "/lite/v1/all_instruments",
+              {}
+            ],
+            [
+              "response"
+            ],
+            [
+              "log",
+              "Fetched 3 GRVT markets",
+              "debug"
+            ],
+            [
+              "log",
+              "Refused GRVT market row 1 id=\"bad_asset\": base=false quote=\"USD\": GRVT market base and quote must be strings for the shared Market model",
+              "warning"
+            ]
+          ],
+          "result": {
+            "ok": true,
+            "markets": [
+              {
+                "id": "btc_usdt_Perp",
+                "symbol": "BTC_USDT_PERP",
+                "base": "BTC",
+                "quote": "USDT",
+                "active": true,
+                "pretty": null,
+                "precision": [
+                  "3f847ae147ae147b",
+                  "3fc999999999999a"
+                ],
+                "amount": [
+                  "3f847ae147ae147b",
+                  "4022000000000000"
+                ],
+                "leverage": [
+                  "3ff0000000000000",
+                  "4059000000000000"
+                ],
+                "price_limits": false,
+                "flags": [
+                  false,
+                  true,
+                  null,
+                  null,
+                  null
+                ],
+                "contract_size": null,
+                "option": false,
+                "taker": null,
+                "maker": null,
+                "info": {
+                  "ih": "0x11",
+                  "bd": 3,
+                  "qd": 6
+                }
+              },
+              {
+                "id": "eth_usdt",
+                "symbol": "ETH_USDT",
+                "base": "ETH",
+                "quote": "USD",
+                "active": false,
+                "pretty": null,
+                "precision": [
+                  "3f50624dd2f1a9fc",
+                  "3fb999999999999a"
+                ],
+                "amount": [
+                  "3f50624dd2f1a9fc",
+                  "401e000000000000"
+                ],
+                "leverage": [
+                  "3ff0000000000000",
+                  "4059000000000000"
+                ],
+                "price_limits": false,
+                "flags": [
+                  false,
+                  false,
+                  null,
+                  null,
+                  null
+                ],
+                "contract_size": null,
+                "option": false,
+                "taker": null,
+                "maker": null,
+                "info": {
+                  "ih": null
+                }
+              }
+            ]
           }
         }
       }

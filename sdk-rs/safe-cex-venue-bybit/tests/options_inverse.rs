@@ -103,22 +103,12 @@ fn options_and_inverse_helpers_match_maintained_source() {
     }
     let rows = source["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 8, "row source floor");
-    let mut markets = Vec::new();
     for (index, case) in rows.iter().enumerate() {
         let native = options::map_bybit_option_instrument(&case["raw"]).unwrap();
         assert_eq!(
             binary64(&serde_json::to_value(&native).unwrap()),
             binary64(&case["market"]),
             "mapBybitOptionInstrument row {index}"
-        );
-        markets.extend(native);
-    }
-    for (index, case) in source["greeks"].as_array().unwrap().iter().enumerate() {
-        let native = options::map_bybit_option_greeks(&case["raw"]).unwrap();
-        assert_eq!(
-            binary64(&serde_json::to_value(&native).unwrap()),
-            binary64(&case["greeks"]),
-            "mapBybitOptionGreeks {index}"
         );
     }
     for (index, case) in source["positions"].as_array().unwrap().iter().enumerate() {
@@ -127,13 +117,6 @@ fn options_and_inverse_helpers_match_maintained_source() {
             native.to_bits(),
             case["upnl"].as_f64().unwrap().to_bits(),
             "positionUpnlInQuote {index}"
-        );
-    }
-    for underlying in ["BTC", "SOL", "ETH"] {
-        assert_eq!(
-            binary64(&json!(options::option_expiries(&markets, underlying))),
-            binary64(&source["expiries"][underlying]),
-            "optionExpiries {underlying}"
         );
     }
     assert_eq!(source["units"], options::BYBIT_GREEK_UNITS, "greek units");

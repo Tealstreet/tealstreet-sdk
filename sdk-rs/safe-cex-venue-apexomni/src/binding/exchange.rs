@@ -114,6 +114,9 @@ impl Exchange for ApexOmniExchange {
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.inner.start())
     }
+    fn fetch_and_set_private_snapshot(&self, _tries: u32) -> ExchangeFuture<'_, ()> {
+        Box::pin(self.inner.fetch_and_set_private_snapshot())
+    }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
         Box::pin(async move {
             let value = self.inner.get_account().await?;
@@ -124,7 +127,7 @@ impl Exchange for ApexOmniExchange {
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
         Box::pin(async move {
             Ok(ValidateAccountResult {
-                error: self.inner.validate_account().await?.into(),
+                error: self.inner.validate_account().await?,
                 balance: None,
             })
         })

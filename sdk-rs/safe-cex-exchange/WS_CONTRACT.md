@@ -95,3 +95,15 @@ operation. Cancel a topic handle before replacing it; cancellation removes its
 registration and captured callback before the host's next scheduler turn. A
 handle's Drop is intentionally inert. Socket disposal closes this owner before
 host I/O closes, so no protocol dispose hook or venue registry is required.
+
+JS socket `pingTimeoutId`, `pongMissTimeoutId` and `lastReceivedTimer` read the
+actual native timer slots. Their Timeout objects use the same identity profile
+as Scope timers; `clearTimeout` cancels the exact owned native deadline through
+the socket context. Each slot retains one native handle, separate from its
+assignable source field value. Replacement identities prevent stale handles from
+cancelling newer work. Source close cleanup therefore stops heartbeat and
+receive work even when the venue does not delegate to the base close handler.
+
+An offline-to-online transition runs each registered socket’s offline recovery.
+That path clears native retry backoff, failure pauses and close/reconnect counters,
+then runs a pending reconnect immediately. Repeated online notifications do nothing.

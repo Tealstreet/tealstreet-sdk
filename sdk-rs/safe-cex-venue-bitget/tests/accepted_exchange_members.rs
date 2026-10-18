@@ -80,7 +80,7 @@ fn accepted_fetch_orders() {
                     ),
                 )
                 .unwrap();
-            serde_json::json!({"length":rows.len(),"id":rows[0].id,"symbol":rows[0].symbol,"amountBits":format!("{:016x}",rows[0].amount.to_bits()),"priceBits":format!("{:016x}",rows[0].price.to_bits())})
+            serde_json::json!({"length":rows.len(),"id":rows[0].id,"symbol":rows[0].symbol,"amountBits":format!("{:016x}",rows[0].amount.to_bits()),"priceBits":format!("{:016x}",rows[0].price.to_number().to_bits())})
         };
         let expected:serde_json::Value=serde_json::from_str(r#"{"length":1,"id":"native-a","symbol":"BTCUSDT","amountBits":"4000000000000000","priceBits":"4059600000000000"}"#).unwrap();
         assert_eq!(actual, expected);
@@ -106,7 +106,7 @@ fn accepted_fetch_orders() {
                     ),
                 )
                 .unwrap();
-            serde_json::json!({"length":rows.len(),"id":rows[0].id,"symbol":rows[0].symbol,"amountBits":format!("{:016x}",rows[0].amount.to_bits()),"priceBits":format!("{:016x}",rows[0].price.to_bits())})
+            serde_json::json!({"length":rows.len(),"id":rows[0].id,"symbol":rows[0].symbol,"amountBits":format!("{:016x}",rows[0].amount.to_bits()),"priceBits":format!("{:016x}",rows[0].price.to_number().to_bits())})
         };
         let expected:serde_json::Value=serde_json::from_str(r#"{"length":1,"id":"native-b","symbol":"ETHUSDT","amountBits":"4008000000000000","priceBits":"4069500000000000"}"#).unwrap();
         assert_eq!(actual, expected);

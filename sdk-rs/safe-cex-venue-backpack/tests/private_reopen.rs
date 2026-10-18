@@ -46,11 +46,13 @@ impl PrivateFixture {
         runtime.now.set(1_000.0);
         wire.bodies.lock().unwrap().insert(
             "/api/v1/position".into(),
-            RestResponseBody::Untransformed(json!([])),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([])).unwrap(),
+            ),
         );
         wire.bodies.lock().unwrap().insert(
             "/api/v1/capital/collateral".into(),
-            RestResponseBody::Untransformed(json!({"netEquity":"25","netEquityAvailable":"18","netEquityLocked":"7","pnlUnrealized":"3"})),
+            RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"netEquity":"25","netEquityAvailable":"18","netEquityLocked":"7","pnlUnrealized":"3"})).unwrap()),
         );
         let socket = Rc::new(private_socket::Socket::default());
         socket.events.borrow_mut().push_back(WsEvent::Open);
@@ -118,6 +120,7 @@ fn private_fill_frame_emits_fill_and_updates_order() {
     f.owner.base.on(
         "fill",
         Rc::new(move |_, fill| {
+            let fill = safe_cex_exchange::js_runtime::value::to_json(fill).unwrap();
             capture.borrow_mut().push(fill.clone());
             Ok(())
         }),
@@ -193,10 +196,12 @@ fn private_reopen_refreshes_orders_without_starting_another_polling_loop() {
         ),
         ("/api/v1/orders", json!([])),
     ] {
-        wire.bodies
-            .lock()
-            .unwrap()
-            .insert(path.into(), RestResponseBody::Untransformed(body));
+        wire.bodies.lock().unwrap().insert(
+            path.into(),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+            ),
+        );
     }
     // Start the single source tick chain that normal private startup owns.
     drive(&runtime, owner.tick()).unwrap();
@@ -240,5 +245,38 @@ fn private_reopen_refreshes_orders_without_starting_another_polling_loop() {
         runtime.errors.borrow().is_empty(),
         "{:?}",
         runtime.errors.borrow()
+    );
+}
+
+#[test]
+fn synced_clock_reaches_real_private_authentication() {
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    struct ResetClock;
+    impl Drop for ResetClock {
+        fn drop(&mut self) {
+            VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)());
+        }
+    }
+    let _reset = ResetClock;
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + 40_000.0);
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
+    let f = PrivateFixture::new();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
+    let frame: serde_json::Value = f
+        .socket
+        .sent
+        .borrow()
+        .iter()
+        .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
+        .find(|s| s["method"] == "SUBSCRIBE")
+        .unwrap();
+    let timestamp = frame["signature"][2]
+        .as_str()
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert!(
+        (before..=after).contains(&timestamp),
+        "real private auth timestamp {timestamp} outside synced {before}..={after}"
     );
 }

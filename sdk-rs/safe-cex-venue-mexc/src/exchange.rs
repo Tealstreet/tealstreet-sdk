@@ -51,6 +51,7 @@ pub struct MexcExchange {
     capabilities: ExchangeCapabilities,
     xhr: Rc<dyn RestAdapter>,
     local_to_utc: Rc<dyn Fn(f64) -> f64>,
+    current_time_ms: Rc<dyn Fn() -> f64>,
     placed: RefCell<BTreeMap<String, f64>>,
     canceled: RefCell<BTreeMap<String, f64>>,
     rejected: RefCell<BTreeMap<String, f64>>,
@@ -74,7 +75,8 @@ fn parse_response_json(body: &RestResponseBody) -> Result<Value, serde_json::Err
                 serde_json::from_slice::<ConsumeArrays>(bytes).map(|value| value.0)
             }
             RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-                serde_json::from_value::<ConsumeArrays>(value.clone()).map(|value| value.0)
+                serde_json::from_value::<ConsumeArrays>(value.clone().into_value()?)
+                    .map(|value| value.0)
             }
         };
     }
@@ -424,6 +426,7 @@ impl MexcExchange {
             external,
             xhr,
             local_to_utc: local_to_utc.clone(),
+            current_time_ms: sockets.current_time_ms.clone(),
             capabilities: Self::capabilities_table(),
             placed: RefCell::default(),
             canceled: RefCell::default(),
@@ -470,7 +473,7 @@ impl MexcExchange {
                 let found = crate::exchange_helpers::is_recently_canceled_stop_like_order_id(
                     &mut parent.canceled.borrow_mut(),
                     id,
-                    &|| parent.base.runtime.now_ms(),
+                    &|| (parent.current_time_ms)(),
                 );
                 Ok(found)
             }),
@@ -481,6 +484,7 @@ impl MexcExchange {
             sockets.runtime,
             handlers,
             sockets.remote_account_name,
+            sockets.current_time_ms,
         );
         exchange.base.set_socket(
             safe_cex_exchange::socket_lifecycle::SocketSlot::Private,
@@ -590,7 +594,9 @@ impl MexcExchange {
                             }
                         });
                     self.base.emit_and_log_error(
-                        ExchangeErrorInput::Raw(message.clone()),
+                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
+                            &message,
+                        )),
                         None,
                         None,
                     )?;
@@ -722,7 +728,7 @@ impl MexcExchange {
                 &mut self.canceled.borrow_mut(),
                 &mut self.placed.borrow_mut(),
                 &accepted_stop_like_cancels,
-                &|| self.base.runtime.now_ms(),
+                &|| (self.current_time_ms)(),
             );
             let ids: Vec<_> = orders.iter().map(|order| order.id.as_str()).collect();
             self.base
@@ -744,7 +750,10 @@ impl MexcExchange {
         let request = RestRequest {
             method: "post".into(),
             url: url.into(),
-            body: Some(safe_cex_transport::RestBody::Untransformed(body)),
+            body: Some(safe_cex_transport::RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
+                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+            )),
             ..Default::default()
         };
         let response = self
@@ -763,14 +772,14 @@ impl MexcExchange {
     pub fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         Box::pin(async move {
             let interval = match options.interval {
-                safe_cex_types::Timeframe::M1 => "Min1",
-                safe_cex_types::Timeframe::M5 => "Min5",
-                safe_cex_types::Timeframe::M15 => "Min15",
-                safe_cex_types::Timeframe::M30 => "Min30",
-                safe_cex_types::Timeframe::H1 => "Min60",
-                safe_cex_types::Timeframe::H4 => "Hour4",
-                safe_cex_types::Timeframe::D1 => "Day1",
-                safe_cex_types::Timeframe::W1 => "Week1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1) => "Min1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M5) => "Min5",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M15) => "Min15",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M30) => "Min30",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H1) => "Min60",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H4) => "Hour4",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::D1) => "Day1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::W1) => "Week1",
                 unsupported => {
                     let literal = serde_json::to_value(unsupported)
                         .ok()
@@ -1082,8 +1091,13 @@ impl MexcExchange {
             match result {
                 Ok(positions) => Ok(positions),
                 Err(message) => {
-                    self.base
-                        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)?;
+                    self.base.emit_and_log_error(
+                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
+                            &message,
+                        )),
+                        None,
+                        None,
+                    )?;
                     let positions = self.base.store.positions();
                     Ok(match symbols {
                         Some(symbols) => positions
@@ -1189,7 +1203,7 @@ impl MexcExchange {
                 for market in self.base.store.markets().iter() {
                     if let Some(raw) = rows.get(&market.id) {
                         tickers.push(
-                            normalize_ticker(raw, market, &|value| value)
+                            normalize_ticker(raw, market, self.local_to_utc.as_ref())
                                 .map_err(|error| error.message.to_string())?,
                         );
                     }
@@ -1201,8 +1215,13 @@ impl MexcExchange {
             match result {
                 Ok(tickers) => Ok(tickers),
                 Err(message) => {
-                    self.base
-                        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)?;
+                    self.base.emit_and_log_error(
+                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
+                            &message,
+                        )),
+                        None,
+                        None,
+                    )?;
                     Ok(self.base.store.tickers().to_vec())
                 }
             }
@@ -1327,8 +1346,13 @@ impl MexcExchange {
             match result {
                 Ok(markets) => Ok(markets),
                 Err(message) => {
-                    self.base
-                        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)?;
+                    self.base.emit_and_log_error(
+                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
+                            &message,
+                        )),
+                        None,
+                        None,
+                    )?;
                     Ok(self.base.store.markets().to_vec())
                 }
             }
@@ -1347,7 +1371,7 @@ impl MexcExchange {
         let clean_id = order_id.split("__").next().unwrap_or_default();
         self.rejected
             .borrow_mut()
-            .insert(clean_id.to_owned(), self.base.runtime.now_ms());
+            .insert(clean_id.to_owned(), (self.current_time_ms)());
 
         if self
             .base
@@ -1405,14 +1429,19 @@ impl MexcExchange {
         Box::pin(async move {
             let market = self.base.store.markets_by_symbol().get(&symbol).cloned();
             let config = self.symbol_settings.borrow().get(&symbol).cloned();
-            let positions = self.base.store.positions().to_vec();
-            let config = derive_symbol_config(
-                &symbol,
-                &positions,
-                config.as_ref(),
-                *self.account_position_mode.borrow(),
-            )
-            .map_err(|error| ExchangeError::new(error.message))?;
+            let config = match config {
+                Some(config) => config,
+                None => {
+                    let positions = self.base.store.positions().to_vec();
+                    derive_symbol_config(
+                        &symbol,
+                        &positions,
+                        None,
+                        *self.account_position_mode.borrow(),
+                    )
+                    .map_err(|error| ExchangeError::new(error.message))?
+                }
+            };
 
             if let Some(market) = market.filter(|_| !self.base.is_public_data_only(self)) {
                 let request = RestRequest {
@@ -1615,7 +1644,7 @@ impl MexcExchange {
                     ("PLAN_ORDER_LIST", "plan orders", true),
                     ("STOP_ORDER_LIST", "position TP/SL orders", false),
                 ] {
-                    let now = self.base.runtime.now_ms();
+                    let now = (self.current_time_ms)();
                     let mut params = json!({"start_time":now - 89.0*24.0*60.0*60.0*1000.0,"end_time":now,"page_num":1,"page_size":100});
                     if let Some(symbol) = &venue {
                         params["symbol"] = json!(symbol);
@@ -1648,7 +1677,7 @@ impl MexcExchange {
             Ok(filter_recently_canceled_stop_like_orders(
                 &mut self.canceled.borrow_mut(),
                 &unique_orders(orders),
-                &|| self.base.runtime.now_ms(),
+                &|| (self.current_time_ms)(),
             ))
         })
     }
@@ -1820,7 +1849,7 @@ impl MexcExchange {
                             && !is_recently_canceled_stop_like_order(
                                 &mut self.canceled.borrow_mut(),
                                 o,
-                                &|| self.base.runtime.now_ms(),
+                                &|| (self.current_time_ms)(),
                             )
                     })
                     .cloned()
@@ -1836,12 +1865,12 @@ impl MexcExchange {
                         && !is_recently_canceled_stop_like_order(
                             &mut self.canceled.borrow_mut(),
                             o,
-                            &|| self.base.runtime.now_ms(),
+                            &|| (self.current_time_ms)(),
                         )
                         && is_recently_placed_stop_like_order(
                             &mut self.placed.borrow_mut(),
                             o,
-                            &|| self.base.runtime.now_ms(),
+                            &|| (self.current_time_ms)(),
                         )
                 })
                 .cloned()
@@ -1857,7 +1886,7 @@ impl MexcExchange {
             && !is_recently_canceled_stop_like_order(
                 &mut self.canceled.borrow_mut(),
                 order,
-                &|| self.base.runtime.now_ms(),
+                &|| (self.current_time_ms)(),
             )
     }
     // ts: MexcExchange.shouldPreserveRecentRegularOrder
@@ -1874,7 +1903,7 @@ impl MexcExchange {
             || is_recently_rejected_regular_order(
                 &mut self.rejected.borrow_mut(),
                 &order.id,
-                &|| self.base.runtime.now_ms(),
+                &|| (self.current_time_ms)(),
             )
         {
             return false;
@@ -1884,7 +1913,7 @@ impl MexcExchange {
         } else {
             0.0
         };
-        last != 0.0 && self.base.runtime.now_ms() - last <= 15000.0
+        last != 0.0 && (self.current_time_ms)() - last <= 15000.0
     }
 }
 

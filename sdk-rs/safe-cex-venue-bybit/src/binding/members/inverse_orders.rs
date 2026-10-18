@@ -99,30 +99,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(Js::Undefined)
     })?;
     method(rt, "recordRecentlyPlacedOrder", |rt, a| {
-        let order = arg(&a, 0);
-        if order.get("type")?.strict_equals(&Js::str("market")) {
-            return Ok(Js::Undefined);
-        }
-        let now = rt
-            .global("virtualClock.getCurrentTimeMs")?
-            .call(Js::Undefined, vec![])?;
-        rt.this.get("recentlyPlacedOrders")?.call_method(
-            "set",
-            vec![
-                order.get("id")?,
-                Js::object(vec![("placedAt", now), ("order", order.clone())]),
-            ],
-        )?;
-        if rt
-            .this
-            .call_method("shouldUseLocalRestOrderLifecycleFallback", vec![])?
-            .truthy()
-        {
-            rt.this
-                .get("store")?
-                .call_method("addOrUpdateOrders", vec![Js::array(vec![order])])?;
-        }
-        Ok(Js::Undefined)
+        super::lifecycle::record_variant_recently_placed_order(&rt, arg(&a, 0))
     })?;
     method(rt, "applyLocalOrderUpdateAfterRestWrite", |rt, a| {
         if !rt

@@ -194,17 +194,29 @@ for (const { row, declaration } of roots) {
 }
 
 const rustHealth = sourceText(new URL('sdk-rs/safe-cex-venue-coinbase/src/private_health.rs', root));
-for (const name of [
-  'mark_private_user_stream_message_received',
-  'mark_private_user_stream_degraded',
-  'mark_private_user_stream_auth_failed',
+for (const [name, error] of [
+  ['mark_private_user_stream_message_received', 'StoreMutationError'],
+  ['mark_private_user_stream_degraded', 'PortfolioFailure'],
+  ['mark_private_user_stream_auth_failed', 'PortfolioFailure'],
 ]) {
+  const body = rustHealth.split(`pub fn ${name}(`)[1]?.split(/\n    pub fn /)[0];
+  assert(body, `${name} must retain its health implementation`);
   assert.match(
-    rustHealth,
-    new RegExp(`pub fn ${name}\\([\\s\\S]*?\\)\\s*->\\s*Result<\\(\\), StoreMutationError>`),
+    body,
+    new RegExp(`^[\\s\\S]*?\\n    \\)\\s*->\\s*Result<\\(\\), ${error}>`),
     `${name} must expose the fallible Store contract`,
   );
+  if (error === 'PortfolioFailure') {
+    for (const callback of ['log', 'emit_warning']) {
+      assert.match(body, new RegExp(`${callback}: impl FnMut\\([^\\n]*\\) -> Result<\\(\\), PortfolioFailure>`),
+        `${name} must retain fallible ${callback} capability`);
+    }
+  }
 }
+assert.match(rustHealth, /update_socket_health\(&update\)\s*\.map_err\(\|error\| Rc::new\(PortfolioThrown::from\(error\)\)\)\?;/,
+  'health native origin bridge retains StoreMutationError');
+assert.match(rustHealth, /log\(reason, "warning"\)\?;/, 'health log failure must propagate');
+assert.match(rustHealth, /emit_warning\(reason\)\?;/, 'health warning failure must propagate');
 const rustPrivateSnapshot = sourceText(new URL('sdk-rs/safe-cex-venue-coinbase/src/private_order_snapshot.rs', root));
 assert.match(
   rustPrivateSnapshot,
@@ -212,6 +224,8 @@ assert.match(
   'apply_order_snapshot_batch must expose the fallible Store contract',
 );
 const rustNativeFailure = sourceText(new URL('sdk-rs/safe-cex-venue-coinbase/src/portfolios_balances.rs', root));
+assert.match(rustNativeFailure, /pub type PortfolioFailure = Rc<PortfolioThrown>;/,
+  'health and snapshot failures retain the native PortfolioThrown carrier');
 assert.match(
   rustNativeFailure,
   /impl From<safe_cex_store::StoreMutationError> for PortfolioThrown[\s\S]*?store_mutation: Some\(error\)/,

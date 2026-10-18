@@ -69,25 +69,47 @@ fn emit<H: Host>(h: &H, owner: H::Value, error: H::Error) -> Result<(), H::Error
     h.apply(emit, vec![normalized])?;
     Ok(())
 }
+/// Closed set of lexical callbacks created by this module and selected by the native host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Callback {
+    RecoveryLink,
+    ReconciliationLink,
+    ExistingOrder,
+    CancelChild,
+    AcceptedOrder,
+}
+impl Callback {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "recovery-link" => Some(Self::RecoveryLink),
+            "reconciliation-link" => Some(Self::ReconciliationLink),
+            "existing-order" => Some(Self::ExistingOrder),
+            "cancel-child" => Some(Self::CancelChild),
+            "accepted-order" => Some(Self::AcceptedOrder),
+            _ => None,
+        }
+    }
+}
+
 pub fn dispatch<H: Host>(
     h: &H,
     owner: &H::Value,
-    code: &str,
+    code: Callback,
     captures: &[H::Value],
     args: Vec<H::Value>,
 ) -> Result<H::Value, H::Error> {
     let value = args.first().cloned().unwrap_or_else(|| h.undefined());
     match code {
-        "recovery-link" => Ok(h.boolean(h.equal(
+        Callback::RecoveryLink => Ok(h.boolean(h.equal(
             &h.get(&h.get(&value, "payload")?, "orderLinkId")?,
             &h.get(&captures[0], "orderLinkId")?,
         ))),
-        "reconciliation-link" => Ok(h.boolean(h.equal(
+        Callback::ReconciliationLink => Ok(h.boolean(h.equal(
             &h.get(&value, "orderLinkId")?,
             &h.get(&captures[0], "orderLinkId")?,
         ))),
-        "existing-order" => Ok(h.boolean(h.equal(&h.get(&value, "id")?, &captures[0]))),
-        "cancel-child" => {
+        Callback::ExistingOrder => Ok(h.boolean(h.equal(&h.get(&value, "id")?, &captures[0]))),
+        Callback::CancelChild => {
             let id = h.get(&value, "id")?;
             let left = concat(
                 h,
@@ -102,7 +124,7 @@ pub fn dispatch<H: Host>(
             )?;
             Ok(h.boolean(h.equal(&h.get(&value, "id")?, &right)))
         }
-        "accepted-order" => {
+        Callback::AcceptedOrder => {
             h.set(&value, "recorded", h.boolean(true))?;
             let id = h.get(&h.get(&h.get(&value, "data")?, "result")?, "orderId")?;
             if h.truthy(&h.get(owner, "isDisposed")?)
@@ -147,7 +169,6 @@ pub fn dispatch<H: Host>(
             }
             Ok(h.undefined())
         }
-        _ => h.intrinsic("unknown callback", vec![h.literal(code)]),
     }
 }
 pub fn observe_orders<H: Host>(

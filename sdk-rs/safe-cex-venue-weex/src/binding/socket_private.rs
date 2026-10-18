@@ -12,7 +12,7 @@ fn auth(h: &Host) -> Result<Js, Thrown> {
     let headers = control::create_auth_headers(
         &mut h.clone(),
         &control::WeexAuthHeaderRuntime {
-            time_ms: |h| Ok(h.0.now()),
+            time_ms: |_| Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()),
             credential: |h, key| parent(h)?.get("options")?.get(key),
             string: |_, s| Js::utf16(s),
             sign: |_, secret, message| {
@@ -238,10 +238,6 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
             WeexRefreshKind::Positions => {
                 call_unit(h, "store.addOrUpdatePositionsFull", std::vec![value])
             }
-        },
-        report_refresh_error: |h, _, error| {
-            h.0.report(error, "WEEX private refresh");
-            Ok(())
         },
         base_dispose,
     }

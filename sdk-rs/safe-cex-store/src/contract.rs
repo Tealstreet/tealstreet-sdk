@@ -256,7 +256,12 @@ pub trait Store {
         id: &str,
         changes: &dyn PatchSource,
     ) -> Result<(), StoreMutationError>;
-    fn update_positions(&self, updates: &[(String, ModelPatch)]) -> Result<(), StoreMutationError>;
+    /// None retains an unmatched selector row so adaptive batch indexing keeps
+    /// the original update count; it never matches a native string ID.
+    fn update_positions(
+        &self,
+        updates: &[(Option<String>, ModelPatch)],
+    ) -> Result<(), StoreMutationError>;
     fn add_or_update_position(&self, position: Position) -> Result<(), StoreMutationError>;
     fn add_or_update_positions(&self, positions: Vec<Position>) -> Result<(), StoreMutationError>;
     fn add_or_update_positions_full(

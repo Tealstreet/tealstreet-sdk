@@ -14,12 +14,11 @@ use safe_cex_exchange::js_runtime::{
     promise::await_js,
     scope::scope_of,
     sockets,
-    value::{Js, Thrown, arg, from_json, to_json},
+    value::{Js, Thrown, arg, from_json, to_json, to_typed},
 };
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
-    sync::Arc,
 };
 
 fn scope(weak: &Weak<Shared>) -> Result<Rt, Thrown> {
@@ -74,13 +73,6 @@ fn strings(values: &[&str]) -> Js {
 /// The SigningValue the native signer reads; the request keeps the caller's params.
 fn signing_params(params: &Js) -> Result<SigningValue, Thrown> {
     Ok(SigningValue::from_value(to_json(params)?))
-}
-
-fn clock(rt: &Rt) -> safe_cex_store::virtual_clock::VirtualClock {
-    let now = rt.now();
-    let mut clock = safe_cex_store::virtual_clock::VirtualClock::default();
-    clock.now = Arc::new(move || now);
-    clock
 }
 
 struct ErrorHost<'a> {
@@ -539,11 +531,9 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     );
 
     // cryptocom.signing.ts
-    let w = weak.clone();
     def(
         "generateAuthenticatedRequest",
-        Js::function("generateAuthenticatedRequest", move |_, a| {
-            let rt = scope(&w)?;
+        Js::function("generateAuthenticatedRequest", |_, a| {
             let params = arg(&a, 1);
             let nonce = arg(&a, 4);
             let nonce = if nonce.is_nullish() {
@@ -557,7 +547,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 &text(&arg(&a, 2))?,
                 &text(&arg(&a, 3))?,
                 nonce,
-                &clock(&rt),
+                &safe_cex_store::virtual_clock::VIRTUAL_CLOCK,
             )
             .map_err(|e| Thrown::error("Error", &e.message))?;
             Ok(Js::object(vec![
@@ -570,15 +560,13 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
             ]))
         }),
     );
-    let w = weak.clone();
     def(
         "generateWsAuthMessage",
-        Js::function("generateWsAuthMessage", move |_, a| {
-            let rt = scope(&w)?;
+        Js::function("generateWsAuthMessage", |_, a| {
             let message = signing::generate_ws_auth_message(
                 &text(&arg(&a, 0))?,
                 &text(&arg(&a, 1))?,
-                &clock(&rt),
+                &safe_cex_store::virtual_clock::VIRTUAL_CLOCK,
             )
             .map_err(|e| Thrown::error("Error", &e.message))?;
             Ok(Js::object(vec![
@@ -597,7 +585,14 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         "safeCexAxiosCreate",
         Js::function("safeCexAxiosCreate", move |_, a| {
             let rt = scope(&w)?;
-            with_rejected_handlers(&rt, client::create(rt.shared.http.clone(), arg(&a, 0)))
+            let xhr = client::factory::create(
+                rt.shared.http.clone(),
+                rt.shared.runtime.transport().as_ref(),
+                arg(&a, 0),
+                &arg(&a, 1),
+                rt.base(),
+            )?;
+            with_rejected_handlers(&rt, xhr)
         }),
     );
     def(
@@ -635,13 +630,20 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
             )))
         }),
     );
+    let w = weak.clone();
     def(
         "installTransportAdapter",
-        Js::function("installTransportAdapter", |_, _| {
-            Err(Thrown::error(
-                "Error",
-                "Tealstreet tunnel transport is not available in the Rust Crypto.com binding",
-            ))
+        Js::function("installTransportAdapter", move |_, a| {
+            let rt = scope(&w)?;
+            client::factory::install_transport_adapter(
+                rt.shared.http.clone(),
+                rt.shared.runtime.transport().as_ref(),
+                &arg(&a, 0),
+                &arg(&a, 1),
+                to_typed(&arg(&a, 2))?,
+                safe_cex_transport::RestAdapterVariant::Default,
+            )?;
+            Ok(Js::Undefined)
         }),
     );
 

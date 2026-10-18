@@ -267,7 +267,8 @@ pub fn sign_ws_auth(request: &WsAuthRequest, secret: &str) -> WsAuthResponse {
 
 // Node-compatible Buffer decoding; browser equivalence is bounded to ASCII secrets.
 // Malformed non-ASCII input differs in TS browser/Node hosts (see VERIFICATION.md).
-fn node_base64_decode(input: &str) -> Vec<u8> {
+/// Decode using Node Buffer base64 rules, including ignored characters and trailing bits.
+pub fn node_base64_decode(input: &str) -> Vec<u8> {
     let mut output = Vec::new();
     let mut accumulator = 0u32;
     let mut bits = 0u32;

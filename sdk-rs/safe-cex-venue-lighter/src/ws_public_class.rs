@@ -1584,9 +1584,8 @@ pub trait PublicSocketContexts {
     -> Rc<IngressOps<AccountValue, TransactionSigningError>>;
     /// Live `parent.store.tickers` read projected to typed tickers.
     fn store_tickers(&self, owner: AccountValue) -> SigningResult<Vec<safe_cex_types::Ticker>>;
-    /// JSON projection of a REST payload; None for `undefined`.
-    fn json_value(&self, value: &AccountValue) -> SigningResult<Option<serde_json::Value>>;
-    fn rebuild_json(&self, value: &serde_json::Value) -> SigningResult<AccountValue>;
+    fn parse_rest_order_book_levels(&self, value: &AccountValue) -> SigningResult<AccountValue>;
+    fn parse_rest_ticker_items(&self, value: &AccountValue) -> SigningResult<AccountValue>;
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PublicMethodMetadata {
@@ -1916,26 +1915,7 @@ impl PublicMethod {
                     )?,
                 ))
             }
-            ParseRestOrderBookLevels => {
-                let payload = contexts.json_value(&a(0))?;
-                match ws_public::parse_rest_order_book_levels(payload.as_ref()) {
-                    None => undefined,
-                    Some(levels) => {
-                        let h = contexts.socket(owner);
-                        let bids: Vec<_> = levels
-                            .bids
-                            .iter()
-                            .map(|v| contexts.rebuild_json(v))
-                            .collect::<SigningResult<_>>()?;
-                        let asks: Vec<_> = levels
-                            .asks
-                            .iter()
-                            .map(|v| contexts.rebuild_json(v))
-                            .collect::<SigningResult<_>>()?;
-                        h.literal(&[("bids", h.array(&bids)?), ("asks", h.array(&asks)?)])
-                    }
-                }
-            }
+            ParseRestOrderBookLevels => contexts.parse_rest_order_book_levels(&a(0)),
             FetchAndEmitOrderBookFromRest => {
                 let h = contexts.socket(owner);
                 let promise =
@@ -1980,14 +1960,7 @@ impl PublicMethod {
                 )?;
                 undefined
             }
-            ParseRestTickerItems => {
-                let payload = contexts.json_value(&a(0))?;
-                let items: Vec<_> = ws_public::parse_rest_ticker_items(payload.as_ref())
-                    .into_iter()
-                    .map(|v| contexts.rebuild_json(v))
-                    .collect::<SigningResult<_>>()?;
-                contexts.socket(owner).array(&items)
-            }
+            ParseRestTickerItems => contexts.parse_rest_ticker_items(&a(0)),
             FetchAndApplyTickerFallback => {
                 let h = contexts.socket(owner);
                 let promise = fetch_and_apply_ticker_fallback(h.clone());

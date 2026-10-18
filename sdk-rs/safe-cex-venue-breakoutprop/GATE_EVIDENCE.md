@@ -754,3 +754,71 @@ The serialized post-split parity command exits zero: 7,459 rows and 17,204 publi
 Rust items, with zero invention/status findings. Native all-targets clippy, wasm32
 library clippy, formatting and the 76-test venue suite pass. No accepted-set
 completion is claimed while the named shared and inherited-method reviews remain.
+
+
+# Native trait candle reads and polling listeners
+
+The constructed production-host tests in `tests/binding.rs` expose the actual
+Exchange trait defaults: four regressions fail before installing the hooks.
+The repaired native hooks dispatch candle reads through the existing
+`candles::fetch_ohlcv` orchestration and attach listeners to the actual polling
+container. Two distinct candle rows are inspected natively, independently of the
+ignored request limit. Request body/auth, original HTTP rejection metadata,
+polling ticks and cleanup-handler removal are checked at the real host boundary.
+An additional invalid-date test checks the original RangeError and absence of a
+marketdata POST. Login and account discovery retain their source ordering.
+
+`scripts/stream-binding-controls.py` compiles five independent production faults:
+removing the trait hooks, disabling both cleanup closures, returning zero candle
+rows, returning only one row, and bypassing shared Date TimeClip. Every fault
+fails its named runtime assertion with exit101; exact byte restoration passes
+all five binding regressions. The TimeClip fault also fails the actual JavaScript
+ISO comparison, and restoration passes that separate target.
+
+The canonical ISO formatter moved from websocket diagnostics into
+`safe-cex-num::js_date_to_iso_string`; the websocket wrapper delegates to it.
+`safe-cex-num/tests/date_iso.rs` compares exactly1,044 raw-bit inputs and completed
+outputs with actual `new Date(value).toISOString()`, including extended years,
+nonfinite values, signed zero, fractional milliseconds and both TimeClip edges.
+Only four whole-websocket-file cancellation dependency hashes change after
+review of the formatter move. Future creator bodies and cleanup guards retain
+their existing ownership. The all-features cancellation target passes all seven
+tests including explicit discovery export, with211 creators and no open findings;
+the override target passes8 tests and binding scanner25 tests. Scoped invention
+checks pass54 BreakoutProp rows/136 public items and233 num rows/193 public items.
+These counts describe the inspected native scope, not universal runtime parity.
+
+
+## Session auth queue and retry ordering
+
+Three `auth_pipeline_` tests in binding.rs compiled against master 5cce34378f
+and failed at the actual stale-token request outcome: queued invalidation sent a
+request instead of rejecting, while queued replacement and network retry both
+sent `DXAPI token` instead of `DXAPI replacement`. The native ProductionHost,
+Axios interceptor/limiter/retry implementation and real exchange session state
+run unchanged; only terminal HTTP and the deterministic timer are supplied.
+
+After moving auth into the native request interceptor, all three pass. A fourth
+control preserves overflow URL params and an untouched native Infinity field.
+Replacing retained parameter capture with JSON projection compiles and fails
+at the terminal `/users/{username}` request; exact source restoration passes all
+four. Existing 401 recovery, HTTP metadata, source order payload and the API
+source comparison pass, as does strict Clippy for both touched test targets.
+The all-features cancellation inventory passes six tests; override inventory,
+parity (7459 rows) and TS extractor check pass without unrelated pin changes.
+
+## Money-path amendment caller-ID guard
+
+`binding::amendment_preserves_caller_id_and_refuses_replacement_after_cancellation`
+drives the public constructed exchange through actual session/account/client I/O.
+Four maintained-source cases use actual updateOrder/placeOrder and BaseExchange
+resolveCallerClientOrderId/rejectPreflight bodies. Absent and own-undefined IDs
+cancel then replace; nonempty and empty IDs cancel then emit one refusal with no
+replacement POST. The original runtime body compiles/fails with Ok(["placed"])
+versus the required refusal; exact final bytes restored and the test passes.
+
+Final normal-master refresh through52d945d9ac: binding55 +polling_lifecycle10,
+native/Wasm all-target strict Clippy, all-features cancellation6/1export-ignore,
+override7/1live-TS-ignore, binding gate25, parity7459/16581 and extractor0 pass.
+Logs: /tmp/breakout-amendment-caller-{red,native,control-red,control-restored,
+native-clippy,wasm-clippy,inventories,parity,extract}.log.

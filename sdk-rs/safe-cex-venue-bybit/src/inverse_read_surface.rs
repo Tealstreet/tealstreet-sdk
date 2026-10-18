@@ -37,13 +37,31 @@ fn spread<H: Host>(h: &H, value: H::Value) -> Result<Vec<H::Value>, H::Error> {
         out.push(h.get(&result, "value")?);
     }
 }
-pub fn dispatch<H: Host>(h: &H, code: &str, args: Vec<H::Value>) -> Result<H::Value, H::Error> {
+/// Closed set of lexical callbacks created by this module and selected by the native host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Callback {
+    InversePnl,
+    InverseCoin,
+    InverseNullMarket,
+}
+impl Callback {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "inverse-pnl" => Some(Self::InversePnl),
+            "inverse-coin" => Some(Self::InverseCoin),
+            "inverse-null-market" => Some(Self::InverseNullMarket),
+            _ => None,
+        }
+    }
+}
+
+pub fn dispatch<H: Host>(h: &H, code: Callback, args: Vec<H::Value>) -> Result<H::Value, H::Error> {
     match code {
-        "inverse-pnl" => h.intrinsic(
+        Callback::InversePnl => h.intrinsic(
             "addition",
             vec![args[0].clone(), h.get(&args[1], "unrealizedPnl")?],
         ),
-        "inverse-coin" => {
+        Callback::InverseCoin => {
             let prev = args[0].clone();
             let coin = &args[1];
             let key = h.intrinsic("property key", vec![h.get(coin, "coin")?])?;
@@ -55,8 +73,9 @@ pub fn dispatch<H: Host>(h: &H, code: &str, args: Vec<H::Value>) -> Result<H::Va
             h.intrinsic("computed assignment", vec![prev.clone(), key, next])?;
             Ok(prev)
         }
-        "inverse-null-market" => Ok(h.boolean(h.equal(&args[0], &h.intrinsic("null", vec![])?))),
-        _ => h.intrinsic("unknown callback", vec![h.literal(code)]),
+        Callback::InverseNullMarket => {
+            Ok(h.boolean(h.equal(&args[0], &h.intrinsic("null", vec![])?)))
+        }
     }
 }
 pub fn cached_api_key_info<H: Host>(h: &H, owner: &H::Value) -> Result<H::Value, H::Error> {

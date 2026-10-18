@@ -380,6 +380,69 @@ fn place_order_signs_an_attributed_create_order() {
     assert_eq!(ids, vec![info["ClientOrderIndex"].to_string()]);
 }
 
+fn assert_rejected_placement(code: i64, message: &str, expected: &str) {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    loaded(&h);
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(method, path, _)| method != "POST" || path != SEND_TX);
+    h.http
+        .ok("POST", SEND_TX, json!({"code": code, "message": message}));
+    let error = h
+        .drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({}))),
+        ))
+        .expect_err("venue rejected the real signed transaction");
+    assert_eq!(
+        h.http.calls(SEND_TX).len(),
+        1,
+        "one signed transaction reached the venue"
+    );
+    assert_eq!(
+        error.message, expected,
+        "production order rejection retains source guidance"
+    );
+    assert!(
+        h.runtime
+            .reports
+            .borrow()
+            .iter()
+            .any(|report| report.contains(expected)),
+        "normalized venue rejection reaches the real error reporter: {:?}",
+        h.runtime.reports.borrow()
+    );
+}
+
+#[test]
+fn partner_tier_rejection_keeps_source_guidance() {
+    assert_rejected_placement(
+        21520,
+        "venue tier refused",
+        "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.",
+    );
+}
+
+#[test]
+fn partner_approval_rejection_keeps_source_guidance() {
+    assert_rejected_placement(
+        21149,
+        "venue approval refused",
+        "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.",
+    );
+}
+
+#[test]
+fn ordinary_order_rejection_keeps_source_message() {
+    assert_rejected_placement(
+        29999,
+        "venue rejected this order",
+        "venue rejected this order",
+    );
+}
+
 #[test]
 fn place_order_refuses_a_caller_client_order_id_before_any_request() {
     let h = harness(ExchangeName::Lighter, options(), lighter);
@@ -578,4 +641,626 @@ fn injected_entropy_repeats_the_signed_wire_payload() {
         first, second,
         "fixed clock, nonce and entropy reproduce the wire signature"
     );
+}
+
+fn trait_candles(http: &Http) {
+    lighter(http);
+    http.ok(
+        "GET",
+        "/api/v1/candles",
+        json!({"code":200,"c":[
+            {"t":1700000060000.0,"o":"103","h":"107","l":"102","c":"106","v":"11"},
+            {"t":1700000000000.0,"o":"101","h":"105","l":"100","c":"104","v":"7"}
+        ]}),
+    );
+    http.ok(
+        "GET",
+        "/api/v1/orderBookOrders",
+        json!({"code":200,
+        "bids":[{"price":"100","remaining_base_amount":"2","size":"2"}],
+        "asks":[{"price":"101","remaining_base_amount":"3","size":"3"}]}),
+    );
+}
+
+#[test]
+fn real_trait_candles_reach_rest_and_preserve_sorted_fields() {
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    loaded(&h);
+    let rows = h
+        .drive(
+            h.venue().fetch_ohlcv(
+                serde_json::from_value(json!({
+                    "symbol":"BTC","interval":"1m","from":1699999900000.0,"to":1700000100000.0
+                }))
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 2, "actual REST candles");
+    assert_eq!(rows[0].timestamp, 1700000000.0);
+    assert_eq!(
+        (
+            rows[0].open,
+            rows[0].high,
+            rows[0].low,
+            rows[0].close,
+            rows[0].volume
+        ),
+        (101.0, 105.0, 100.0, 104.0, 7.0)
+    );
+    assert_eq!((rows[1].timestamp, rows[1].close), (1700000060.0, 106.0));
+    let calls = h.http.calls("/api/v1/candles");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["market_id"].as_f64(), Some(1.0));
+    assert_eq!(calls[0].params["resolution"], json!("1m"));
+    assert_eq!(
+        calls[0].params["start_timestamp"].as_f64(),
+        Some(1699999900000.0)
+    );
+}
+
+#[test]
+fn real_trait_candles_refuse_unknown_market() {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    loaded(&h);
+    let error = h
+        .drive(h.venue().fetch_ohlcv(
+            serde_json::from_value(json!({"symbol":"UNKNOWN","interval":"1m"})).unwrap(),
+        ))
+        .expect_err("source rejects missing market");
+    assert!(
+        error
+            .message
+            .contains("Market not found for symbol: UNKNOWN"),
+        "{}",
+        error.message
+    );
+    assert!(h.http.calls("/api/v1/candles").is_empty());
+}
+
+#[test]
+fn real_trait_fills_reach_signed_history_and_keep_both_rows() {
+    let mut opts = options();
+    opts.key = "0x1111111111111111111111111111111111111111".into();
+    let h = harness(ExchangeName::Lighter, opts, |http| {
+        lighter(http);
+        http.ok("GET","/api/v1/accountInactiveOrders",json!({"code":200,"fills":[
+            {"market_id":1,"order_id":"open","side":"BUY","price":"100","size":"2","timestamp":1700000000,"fee":"0.1","feeAsset":"USDC"},
+            {"market_id":1,"order_id":"close","side":"SELL","price":"110","size":"3","timestamp":1700000060,"fee":"0.2","feeAsset":"USDC"}
+        ]}));
+    });
+    loaded(&h);
+    let rows = h
+        .drive(
+            h.venue().fetch_historical_fills(
+                serde_json::from_value(
+                    json!({"symbol":"BTC","from":1699999999.0,"to":1700000100.0,"limit":10}),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "actual authenticated fill collection; urls={:?}, logs={:?}, reports={:?}",
+        h.http.urls(),
+        h.runtime.logs.borrow(),
+        h.runtime.reports.borrow()
+    );
+    assert_eq!(rows[0].order_id.as_deref(), Some("close"));
+    assert_eq!(
+        (rows[0].timestamp, rows[0].price, rows[0].qty),
+        (1700000060.0, 110.0, 3.0)
+    );
+    assert_eq!(rows[0].side, OrderSide::Sell);
+    assert_eq!(rows[0].commission, Some(0.2));
+    assert_eq!(rows[1].order_id.as_deref(), Some("open"));
+    assert_eq!(rows[1].side, OrderSide::Buy);
+    let calls = h.http.calls("/api/v1/accountInactiveOrders");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["account_index"], json!("42"));
+    assert_eq!(calls[0].params["market_id"].as_f64(), Some(1.0));
+    assert!(
+        calls[0].params["auth"]
+            .as_str()
+            .unwrap()
+            .contains(&auth_token_prefix())
+    );
+}
+
+#[test]
+fn real_trait_private_snapshot_updates_positions_orders_and_balance() {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    loaded(&h);
+    h.drive(h.venue().fetch_and_set_private_snapshot(1))
+        .unwrap();
+    assert_eq!(
+        h.store.positions().len(),
+        1,
+        "venue snapshot loads positions"
+    );
+    assert_eq!(h.store.positions()[0].contracts, 0.5);
+    assert_eq!(h.store.orders().len(), 1);
+    assert_eq!(h.store.orders()[0].id, "777");
+    let state = h.store.loaded();
+    assert!(
+        state.positions && state.orders && state.balance,
+        "full venue snapshot flags"
+    );
+    assert_eq!(h.store.balance().free, 800.0);
+}
+
+#[test]
+fn real_trait_book_delivers_socket_changes_and_cleans_up() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let seen = Rc::new(RefCell::new(Vec::<OrderBook>::new()));
+    let sink = seen.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            "BTC".into(),
+            Rc::new(move |book| sink.borrow_mut().push(book)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(
+        socket
+            .subscriptions()
+            .contains(&json!({"type":"subscribe","channel":"order_book/1"})),
+        "actual subscription"
+    );
+    let frame = json!({"channel":"order_book:1","type":"update/order_book","order_book":{"bids":[{"price":"102","size":"4"}],"asks":[{"price":"103","size":"5"}]}});
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+    h.runtime.pump();
+    assert!(
+        seen.borrow().iter().any(|book| book
+            .bids
+            .iter()
+            .any(|level| level.price == 102.0 && level.amount == 4.0)),
+        "actual websocket book callback"
+    );
+    cleanup().unwrap();
+    let count = seen.borrow().len();
+    let mut after_cleanup = frame.clone();
+    after_cleanup["order_book"]["bids"][0]["price"] = json!("108");
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            after_cleanup.to_string(),
+        )));
+    h.runtime.advance(250.0);
+    assert_eq!(seen.borrow().len(), count, "cleanup removes actual parser");
+    assert!(
+        socket
+            .subscriptions()
+            .contains(&json!({"type":"unsubscribe","channel":"order_book/1"}))
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_trait_candle_listener_polls_deduplicates_and_cleans_up() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let seen = Rc::new(RefCell::new(Vec::<Candle>::new()));
+    let sink = seen.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTC","interval":"1m"})).unwrap(),
+            Rc::new(move |row| sink.borrow_mut().push(row)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    assert_eq!(seen.borrow().len(), 1, "initial real fallback candle");
+    assert_eq!(seen.borrow()[0].close, 106.0);
+    let calls = h.http.calls("/api/v1/candles").len();
+    h.runtime.advance(5000.0);
+    assert!(
+        h.http.calls("/api/v1/candles").len() > calls,
+        "actual repeated polling"
+    );
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "unchanged fallback candle is deduplicated"
+    );
+    cleanup().unwrap();
+    let calls = h.http.calls("/api/v1/candles").len();
+    h.runtime.advance(5000.0);
+    assert_eq!(
+        h.http.calls("/api/v1/candles").len(),
+        calls,
+        "cleanup stops actual polling"
+    );
+    assert_eq!(seen.borrow().len(), 1);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn offline_recovery_requests_account_reload_for_source_owned_sockets() {
+    let h = harness(ExchangeName::Lighter, options(), |_| {});
+    let sockets = h.venue().base().get_all_sockets();
+    assert_eq!(sockets.len(), 2, "both real source sockets are registered");
+    for socket in &sockets {
+        assert!(
+            !socket.recover_after_offline(true).unwrap(),
+            "the source socket requests an account reload"
+        );
+    }
+    assert!(
+        !h.venue().recover_after_offline().unwrap(),
+        "the production Exchange must expose the reload policy"
+    );
+    assert!(
+        h.runtime.sockets.borrow().is_empty(),
+        "recovery must not dial a second retry chain"
+    );
+    h.venue().dispose().unwrap();
+    assert!(
+        h.venue().recover_after_offline().unwrap(),
+        "disposed accounts do not request another reload"
+    );
+}
+
+#[test]
+fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_transport::socket::SocketFrame;
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let private = h.runtime.sockets.borrow()[1].1.clone();
+    private
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"type":"pong"}).to_string(),
+        )));
+    h.runtime.pump();
+    let core = h.venue().base().get_socket(SocketSlot::Private).unwrap();
+    assert_eq!(
+        core.last_message_timestamp(),
+        Some(h.runtime.now.get()),
+        "real private pong starts the native watchdog"
+    );
+    core.handle_pong_event(3217).unwrap();
+    h.runtime.pump();
+    private.closed.set(true);
+    private.events.borrow_mut().push_back(WsEvent::Close {
+        code: Some(1008),
+        reason: "rate limit exceeded".into(),
+    });
+    h.runtime.pump();
+    assert!(
+        h.runtime
+            .logs
+            .borrow()
+            .iter()
+            .any(|line| line.contains("closed (code 1008")),
+        "real source close handler ran"
+    );
+    h.runtime.completed_sleeps.borrow_mut().clear();
+    h.runtime.advance(5000.0);
+    let completed = h.runtime.completed_sleeps.borrow();
+    assert!(
+        !completed.contains(&3217),
+        "source close must cancel the actual native ping deadline: {completed:?}"
+    );
+    assert!(
+        !completed.contains(&1000),
+        "source close must cancel the actual native receive deadline: {completed:?}"
+    );
+    assert_eq!(
+        h.runtime.sockets.borrow().len(),
+        2,
+        "source rate-limit backoff owns the next dial"
+    );
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    drop(completed);
+    h.venue().dispose().unwrap();
+}
+
+fn private_account_frame_for_deployment(name: ExchangeName) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(name.clone(), options(), lighter);
+    assert_eq!(h.venue().base().name, name);
+    h.drive(h.venue().start()).unwrap();
+    // The source suppresses fills for five seconds after its real VirtualClock connect.
+    std::thread::sleep(std::time::Duration::from_millis(5100));
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            observed.borrow_mut().push(fill.clone());
+            Ok(())
+        }),
+    );
+    let socket = h.runtime.sockets.borrow()[1].1.clone();
+    let mut order = active_order();
+    order["order_index"] = json!(888);
+    order["client_order_index"] = json!(888);
+    let mut position = account()["accounts"][0]["positions"][0].clone();
+    position["position"] = json!("0.75");
+    let mut refreshed = account();
+    refreshed["accounts"][0]["available_balance"] = json!("645");
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != ACCOUNT);
+    h.http.ok("GET", ACCOUNT, refreshed);
+    socket.events.borrow_mut().push_back(WsEvent::Message(SocketFrame::Text(json!({
+        "channel":"account_all:42","type":"update/account_all",
+        "orders":{"1":[order]},"positions":{"1":[position]},
+        "trades":{"1":[{"trade_id":71,"order_id":888,"symbol":"BTC","side":"sell","price":"49000","size":"0.1","timestamp":h.runtime.now.get(),"ignored":"SURROGATE_FIELD"}]},
+        "account":{"collateral":"1000"}
+    }).to_string().replace("\"SURROGATE_FIELD\"", "\"\\ud800\""))));
+    h.runtime.pump();
+    assert!(
+        h.store.orders().iter().any(|order| order.id == "888"),
+        "private order goes through real venue mapper"
+    );
+    assert_eq!(
+        h.store.positions()[0].contracts,
+        0.75,
+        "private position uses real venue mapper and Store"
+    );
+    assert_eq!(
+        fills
+            .borrow()
+            .iter()
+            .map(safe_cex_exchange::js_runtime::value::to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("finite Lighter fill fixture"),
+        vec![json!({"id":"888","side":"buy","symbol":"BTC","price":49000.0,"amount":0.1})],
+        "private trade produces source fill payload"
+    );
+    assert_eq!(
+        h.store.balance().free,
+        800.0,
+        "balance refresh waits for the source throttle"
+    );
+    h.runtime.advance(500.0);
+    assert_eq!(
+        h.store.balance().free,
+        645.0,
+        "private account frame triggers real balance refresh"
+    );
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_fill_timestamp_types_match_the_maintained_handler() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, process::Command, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    h.drive(h.venue().start()).unwrap();
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/fill-timestamps-oracle.cjs"
+        ))
+        .arg(h.runtime.now.get().to_string())
+        .output()
+        .expect("maintained Lighter handler oracle");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 15);
+    // The production socket uses real VirtualClock time for its connect grace period.
+    std::thread::sleep(std::time::Duration::from_millis(5100));
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            observed.borrow_mut().push(fill.clone());
+            Ok(())
+        }),
+    );
+    let socket = h.runtime.sockets.borrow()[1].1.clone();
+    for case in cases {
+        fills.borrow_mut().clear();
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({
+                    "channel":"account_all:42", "type":"update/account_all",
+                    "data":{"fills":[{"orderId":case["label"], "side":"BUY", "symbol":"BTC",
+                        "price":"49000", "size":"0.1", "timestamp":case["timestamp"]}]}
+                })
+                .to_string(),
+            )));
+        h.runtime.pump();
+        let mut expected = case["expected"].as_array().unwrap().clone();
+        for fill in &mut expected {
+            for field in ["price", "amount"] {
+                fill[field] = json!(fill[field].as_f64().unwrap());
+            }
+        }
+        let actual = fills.borrow();
+        assert_eq!(actual.len(), expected.len(), "real private frame: {case}");
+        for (actual, expected) in actual.iter().zip(&expected) {
+            let fields = expected.as_object().expect("source fill object");
+            assert_eq!(actual.own_keys().len(), fields.len());
+            for (key, expected) in fields {
+                assert!(actual.has_own(key), "source fill key {key}: {case}");
+                let value = actual.get(key).unwrap();
+                match expected {
+                    Value::Number(number) => {
+                        let safe_cex_exchange::js_runtime::value::Js::Number(number_actual) = value
+                        else {
+                            panic!("native fill Number {key}: {case}");
+                        };
+                        assert_eq!(number_actual.to_bits(), number.as_f64().unwrap().to_bits());
+                    }
+                    Value::String(text) => assert!(
+                        value.strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(text))
+                    ),
+                    _ => panic!("unexpected source fill field {key}: {case}"),
+                }
+            }
+        }
+        assert_eq!(
+            actual
+                .iter()
+                .map(safe_cex_exchange::js_runtime::value::to_json)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            expected,
+            "real private frame: {case}"
+        );
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
+    for name in [ExchangeName::Lighter, ExchangeName::LighterRobinhood] {
+        private_account_frame_for_deployment(name);
+    }
+}
+
+#[test]
+fn attributed_placement_preserves_nonfinite_tier_alias_precedence() {
+    use std::process::Command;
+    let source = Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args(["-e", r#"
+const fs=require('node:fs'),vm=require('node:vm');
+const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
+const exports={};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('packages/safe-cex/src/exchanges/lighter/lighter.account-tier.ts','utf8'),
+ {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports});
+process.stdout.write(JSON.stringify(['1e400','-1e400','null'].map(raw=>{
+ const wire=`{"code":200,"user_tier_name":${raw},"user_tier":"standard"}`;
+ const tier=exports.extractLighterAccountTierFromPayload(JSON.parse(wire));
+ return {wire,allowed:!tier||exports.isLighterAccountTierEligibleForPartnerAttribution(tier)};
+})));
+"#]).output().expect("maintained account-tier module");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 3);
+    for case in cases {
+        let h = harness(ExchangeName::Lighter, options(), lighter);
+        loaded(&h);
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != LIMITS);
+        h.http.ok(
+            "GET",
+            LIMITS,
+            serde_json::from_str(case["wire"].as_str().unwrap()).unwrap(),
+        );
+        let result = h.drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({}))),
+        ));
+        assert_eq!(
+            result.is_ok(),
+            case["allowed"].as_bool().unwrap(),
+            "real placement: {case}; {result:?}"
+        );
+        assert_eq!(h.http.calls(LIMITS).len(), 1, "actual tier lookup");
+        if case["allowed"] == true {
+            let ids = result.unwrap();
+            assert_eq!(ids.len(), 1);
+            let txs = sent_txs(&h, 0);
+            assert_eq!(txs.len(), 1, "one real signed placement");
+            assert_signed_by_account(&txs[0].1);
+        } else {
+            assert_eq!(result.unwrap_err().message,
+                safe_cex_venue_lighter::account_tier::LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
+            assert!(
+                h.http.calls(SEND_TX).is_empty(),
+                "known Standard tier blocks transaction send"
+            );
+        }
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("lighter");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 1240);
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    let reports = h.runtime.reports.borrow().len();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("lighter")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert_eq!(
+        h.runtime.reports.borrow().len(),
+        reports,
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
 }

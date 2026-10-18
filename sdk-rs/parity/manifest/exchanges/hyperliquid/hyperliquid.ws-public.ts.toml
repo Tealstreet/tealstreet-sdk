@@ -1,14 +1,14 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.ws-public.ts"
-rust_files = [ "safe-cex-venue-hyperliquid/src/public_class.rs", "safe-cex-venue-hyperliquid/src/public_constructor.rs", "safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs", "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs", "safe-cex-venue-hyperliquid/src/ws_emission.rs", "safe-cex-venue-hyperliquid/src/ws_public.rs", "safe-cex-venue-hyperliquid/src/core_public_message.rs", "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs", "safe-cex-venue-hyperliquid/src/candle_listeners.rs", "safe-cex-venue-hyperliquid/src/core_book_listener.rs", "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs" ]
+rust_files = [ "safe-cex-venue-hyperliquid/src/public_class.rs", "safe-cex-venue-hyperliquid/src/public_constructor.rs", "safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs", "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs", "safe-cex-venue-hyperliquid/src/ws_emission.rs", "safe-cex-venue-hyperliquid/src/core_public_message.rs", "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs", "safe-cex-venue-hyperliquid/src/candle_listeners.rs", "safe-cex-venue-hyperliquid/src/core_book_listener.rs", "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs" ]
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket"
 kind = "class"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/public_class.rs::create_core_public_class", "safe-cex-venue-hyperliquid/src/public_class.rs::construct_core_public_class", "safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_arrow", "safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_dispose", "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket" ]
+rs = [ "safe-cex-venue-hyperliquid/src/public_class.rs::create_core_public_class", "safe-cex-venue-hyperliquid/src/public_class.rs::construct_core_public_class", "safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_arrow", "safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_dispose" ]
 status = "ported"
-note = "Behaviour finding repaired by actual native class allocation, prototype dispose and17 installed-arrow dispatcher entries, composing the existing constructor fields, ping/transport, frame routing, ticker updates, candle/book listeners and native subscription bodies. Primitive realm/class/function/collection/callee bindings remain explicit. Native constructed-state/capture/identity/subscription assertions precede seven actual-source cases through dispose. This bounds assembly evidence rather than proving all17 complete bodies or live-network operation. Rename targets: `safe-cex-venue-hyperliquid/src/public_class.rs::create_core_public_class`, `safe-cex-venue-hyperliquid/src/public_class.rs::construct_core_public_class`, `safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_arrow`, `safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_dispose`. Split member `safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket` - typed native public socket owner."
+note = "Behaviour finding repaired by actual native class allocation, prototype dispose and17 installed-arrow dispatcher entries, composing the existing constructor fields, ping/transport, frame routing, ticker updates, candle/book listeners and native subscription bodies. Primitive realm/class/function/collection/callee bindings remain explicit. Native constructed-state/capture/identity/subscription assertions precede seven actual-source cases through dispose. This bounds assembly evidence rather than proving all17 complete bodies or live-network operation. Rename targets: `safe-cex-venue-hyperliquid/src/public_class.rs::create_core_public_class`, `safe-cex-venue-hyperliquid/src/public_class.rs::construct_core_public_class`, `safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_arrow`, `safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_dispose`."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket.constructor"
@@ -62,33 +62,33 @@ note = "Source public websocket stopPingLoop algorithm in Rust with explicit ven
 ts = "HyperliquidPublicWebSocket.subscribePublicTopics"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_public_topics", "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::subscribe_public_topics" ]
+rs = [ "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_public_topics" ]
 status = "ported"
-note = "Behaviour finding repaired: installed native arrow sends fixed allMids then fastAssetCtxs through fresh sendWithDiagnostics calls, bypasses dedup, then invokes actual native user-topic enumeration. Both routines share the constructed topics and activeSubscriptions Set with sendSubscription/unsubscription. Repeated calls, candle/depth/BBO payloads, original sender failure and add-before-send retention have native assertions before source; source floor seven cases through dispose. Globals/JSON/Set/iterator/callee primitives remain host contracts. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_public_topics`. Split member `safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::subscribe_public_topics` - typed native topic loop over a fallible sender."
+note = "Behaviour finding repaired: installed native arrow sends fixed allMids then fastAssetCtxs through fresh sendWithDiagnostics calls, bypasses dedup, then invokes actual native user-topic enumeration. Both routines share the constructed topics and activeSubscriptions Set with sendSubscription/unsubscription. Repeated calls, candle/depth/BBO payloads, original sender failure and add-before-send retention have native assertions before source; source floor seven cases through dispose. Globals/JSON/Set/iterator/callee primitives remain host contracts. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_public_topics`."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket#sendSubscription"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::send_subscription", "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_send_subscription" ]
-status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias for the legacy prepared-value/snapshot adapter. Its UTF-8/prepared-data inputs exclude callable getter/toJSON/cycle behavior. The constructed raw class separately dispatches the actual native live-receiver body over its topics/Set and concrete sendWithDiagnostics arrow; the old missing-binding claim is stale documentation. Source ordering is add-before-envelope-send; duplicate return precedes the second stringify; send failure retains the Set insertion. Native class/effect tests establish those bindings, not a live browser/socket implementation. Targets: safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::send_subscription safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_send_subscription ."
+rs = [ "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_send_subscription" ]
+status = "ported"
+note = "The production raw class dispatches the canonical live-receiver body over its activeSubscriptions Set and concrete sendWithDiagnostics arrow. Source ordering is add-before-envelope-send; duplicate return precedes the second stringify; send failure retains the Set insertion. Existing constructed class/effect tests cover these effects; real production book/candle listeners retain socket subscription and cleanup witnesses. The unused prepared-value duplicate and its representation-only divergences were removed. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_send_subscription`."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket#sendUnsubscription"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::send_unsubscription", "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_send_unsubscription" ]
-status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias for the legacy prepared-value/snapshot adapter. Its UTF-8/prepared-data inputs exclude callable getter/toJSON/cycle behavior. The constructed raw class separately dispatches the actual native live-receiver body over its topics/Set and concrete sendWithDiagnostics arrow; the old missing-binding claim is stale documentation. Source ordering is delete callee is captured before stringify; deletion precedes envelope send even for an absent key. Native class/effect tests establish those bindings, not a live browser/socket implementation. Targets: safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::send_unsubscription safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_send_unsubscription ."
+rs = [ "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_send_unsubscription" ]
+status = "ported"
+note = "The production raw class dispatches the canonical live-receiver body. Source ordering captures the delete callee before stringify; deletion precedes envelope send even for an absent key. Existing constructed class/effect tests cover these effects; the real production book listener checks its unsubscribe frame and callback cleanup. The unused prepared-value duplicate was removed. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_send_unsubscription`."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket.subscribeUserTopics"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::subscribe_user_topics", "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_user_topics" ]
-status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias for the legacy prepared-value/snapshot adapter. Its UTF-8/prepared-data inputs exclude callable getter/toJSON/cycle behavior. The constructed raw class separately dispatches the actual native live-receiver body over its topics/Set and concrete sendWithDiagnostics arrow; the old missing-binding claim is stale documentation. Source ordering is Object.keys/flatten/split produces candle or l2Book then bbo; false sender returns do not stop enumeration. Native class/effect tests establish those bindings, not a live browser/socket implementation. Targets: safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::subscribe_user_topics safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_user_topics ."
+rs = [ "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_user_topics" ]
+status = "ported"
+note = "The production raw class dispatches canonical live topics/Set operations: Object.keys/flatten/split produces candle or l2Book then bbo, and false sender results do not stop enumeration. Existing constructed class/effect tests precede actual-source comparison; production book/candle listeners cover actual socket dispatch. The unused prepared-value duplicate was removed. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_user_topics`."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket.ping"

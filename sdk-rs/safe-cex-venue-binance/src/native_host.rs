@@ -30,7 +30,7 @@ use safe_cex_exchange::{
         safe_cex_axios_create_no_proxy,
     },
     income_paging::{IncomePageParams, IncomeRangeOptions, paginate_income_range},
-    native::{NativeHttpHost, nanoid},
+    native::{NativeHttpEvents, NativeHttpHost, nanoid},
     runtime::{
         ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeSigners, ExchangeTask, RemoteSigner,
     },
@@ -61,23 +61,31 @@ fn exchange_failure(error: ExchangeError) -> Failure {
 }
 /// JSON view of a native value; undefined members are omitted as JSON.stringify does.
 fn to_json(value: &EventValue) -> Result<Value, Failure> {
-    let Some(text) =
-        safe_cex_num::js_json_stringify(&native_json(value)).map_err(|e| failure(e.message))?
+    let Some(text) = safe_cex_num::js_json_stringify(&native_json(value))
+        .map_err(|e| exchange_failure(e.into()))?
     else {
         return Ok(Value::Null);
     };
     serde_json::from_str(&text).map_err(|e| failure(e.to_string()))
 }
 
+/// qs renders BigInt query leaves with String(), independently of JSON bodies.
+fn query_json(value: &EventValue) -> Result<Value, Failure> {
+    safe_cex_exchange::js_runtime::value::to_json(value)
+        .map_err(|error| exchange_failure(error.to_exchange_error()))
+}
+
 /// Production Binance dependencies over a native runtime and terminal HTTP adapter.
 /// `external` builds the externalPublicData provider for an exchange's base; the
 /// registry supplies it, since the providers live above the venue layer.
 /// `remote` is the account's hosted signer and its `accountName`, when it has one.
+/// `events` is the account's exchange emitter slot for HTTP proxy failures.
 pub fn native_dependencies(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
     external: ExternalFactory,
     remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+    events: NativeHttpEvents,
 ) -> ExchangeDependencies {
     let token = remote.as_ref().map(|(_, account)| match account {
         Some(account) => record([("accountName", string(account.clone()))]),
@@ -89,7 +97,7 @@ pub fn native_dependencies(
             remote_signer: remote.as_ref().map(|(signer, _)| signer.clone()),
             payload_signer: None,
         },
-        imports: native_imports(runtime, adapter, external, remote),
+        imports: native_imports(runtime, adapter, external, remote, events),
         remote_signer_token: token,
         payload_signer_token: None,
     }
@@ -147,6 +155,7 @@ fn native_imports(
     adapter: Arc<dyn RestAdapter>,
     external: ExternalFactory,
     remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+    events: NativeHttpEvents,
 ) -> Rc<NativeImports> {
     Rc::new_cyclic(|this| NativeImports {
         external,
@@ -156,7 +165,7 @@ fn native_imports(
         owner: Rc::new(RefCell::new(Weak::new())),
         public_client: RefCell::new(None),
         adapter,
-        host: Rc::new(NativeHttpHost),
+        host: Rc::new(NativeHttpHost { events }),
         registry: TransportRegistry::default(),
         clients: RefCell::new(vec![]),
         this: this.clone(),
@@ -281,11 +290,12 @@ async fn run_request(
             let rejected = signature
                 && !signature_retried
                 && match &error.response {
-                    Some(response) => is_binance_style_signature_rejection(&response_data(
-                        response,
-                        client.transform.get(),
-                    ))
-                    .map_err(|e| failure(e.message))?,
+                    Some(response) => is_binance_style_signature_rejection(
+                        &response_data(response, client.transform.get())
+                            .into_value()
+                            .map_err(|error| failure(error.to_string()))?,
+                    )
+                    .map_err(|error| exchange_failure(error.into()))?,
                     None => false,
                 };
             if network || rejected {
@@ -310,20 +320,11 @@ async fn dispatch(
     path: &'static str,
     args: Option<EventValue>,
 ) -> Result<(RestResponse, RestRequest), Dispatch> {
-    let mut request = RestRequest {
+    let request = RestRequest {
         method: method_name(method).into(),
         url: path.into(),
         ..Default::default()
     };
-    match (method, &args) {
-        (HttpMethod::Get | HttpMethod::Delete, Some(params)) if !params.nullish() => {
-            request.params = to_json(params).ok();
-        }
-        (HttpMethod::Post | HttpMethod::Put, Some(data)) if !data.nullish() => {
-            request.body = to_json(data).ok().map(RestBody::Untransformed);
-        }
-        _ => {}
-    }
     let raised: Rc<RefCell<Option<Failure>>> = Rc::new(RefCell::new(None));
     let http = client_http(client).map_err(|e| {
         Dispatch::Transport(
@@ -338,6 +339,18 @@ async fn dispatch(
             let original = request.clone();
             let outcome: Result<RestRequest, Failure> = async {
                 let mut config = config_value(&request)?;
+                // Request interceptors must observe the original arguments before
+                // signing moves data into params or JSON transformation can fail.
+                if let Some(value) = args.as_ref().filter(|value| !value.nullish()) {
+                    config.write(
+                        if matches!(method, HttpMethod::Get | HttpMethod::Delete) {
+                            "params"
+                        } else {
+                            "data"
+                        },
+                        value.clone(),
+                    );
+                }
                 let mut bindings = NativeRequestBindings;
                 // Axios runs request interceptors last-registered first.
                 for interceptor in interceptors.iter().rev() {
@@ -383,7 +396,10 @@ fn config_value(request: &RestRequest) -> Result<EventValue, Failure> {
     }
     if let Some(body) = &request.body {
         let data = body.untransformed().map_err(|e| failure(e.to_string()))?;
-        config.write("data", EventValue::from_json(data.clone()));
+        config.write(
+            "data",
+            safe_cex_exchange::js_runtime::value::from_retained_input(data.clone()),
+        );
     }
     Ok(config)
 }
@@ -412,13 +428,16 @@ fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestReque
     request.params = if params.nullish() {
         None
     } else {
-        Some(to_json(&params)?)
+        Some(query_json(&params)?)
     };
     let data = config.read("data")?;
     request.body = if matches!(data, EventValue::Undefined) {
         None
     } else {
-        Some(RestBody::Untransformed(to_json(&data)?))
+        Some(RestBody::Untransformed(
+            safe_cex_exchange::js_runtime::value::to_retained_input(&data)
+                .map_err(|error| exchange_failure(error.to_exchange_error()))?,
+        ))
     };
     let timeout = config.read("timeout")?;
     if !timeout.nullish() {
@@ -427,7 +446,10 @@ fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestReque
     request.skip_remote_signing = config.read("safeCexSkipRemoteSigning")?.truthy();
     Ok(request)
 }
-fn response_data(response: &RestResponse, transform: ResponseTransform) -> Value {
+fn response_data(
+    response: &RestResponse,
+    transform: ResponseTransform,
+) -> safe_cex_types::retained_json::RetainedJsonInput {
     let text = match &response.body {
         safe_cex_transport::RestResponseBody::Encoded(bytes) => {
             String::from_utf8_lossy(bytes).into_owned()
@@ -438,7 +460,9 @@ fn response_data(response: &RestResponse, transform: ResponseTransform) -> Value
     let trimmed = text.trim_start_matches('\u{feff}');
     // Axios keeps unparseable text as the string body.
     if serde_json::from_str::<serde::de::IgnoredAny>(trimmed).is_err() {
-        return Value::String(text);
+        return safe_cex_types::retained_json::RetainedJsonInput::Text(
+            text.encode_utf16().collect(),
+        );
     }
     match transform {
         ResponseTransform::BigInt => safe_cex_transport::how::big_int_as_string_json_parse(trimmed),
@@ -457,7 +481,9 @@ fn response_value(
     Ok(record([
         (
             "data",
-            EventValue::from_json(response_data(response, transform)),
+            safe_cex_exchange::js_runtime::value::from_retained_input(response_data(
+                response, transform,
+            )),
         ),
         ("status", number(response.status as f64)),
         (
@@ -473,13 +499,7 @@ fn error_value(error: &Failure) -> EventValue {
         ("message", string(&error.message)),
         ("name", string(&error.name)),
     ]);
-    value.write(
-        "code",
-        error
-            .code
-            .clone()
-            .map_or(EventValue::Undefined, EventValue::from_json),
-    );
+    value.write("code", error.code.clone().unwrap_or(EventValue::Undefined));
     value.write(
         "response",
         error
@@ -501,7 +521,11 @@ async fn respond(
         Err(Dispatch::Transport(error, raised)) => Err(raised.unwrap_or_else(|| {
             let mut projected: ExchangeError = error.clone().into();
             if let (Some(response), Some(view)) = (&error.response, projected.response.as_mut()) {
-                view["data"] = response_data(response, transform);
+                view["data"] = safe_cex_exchange::runtime::response_json_view(
+                    &safe_cex_transport::RestResponseBody::Transformed(response_data(
+                        response, transform,
+                    )),
+                );
             }
             Rc::new(projected)
         })),
@@ -561,7 +585,7 @@ fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<Even
         }) => {
             let mut error = ExchangeError::new(message);
             error.name = name.into();
-            error.code = to_json(&code).ok().filter(|v| !v.is_null());
+            error.code = (!code.is_undefined()).then_some(code);
             error.response = to_json(&response).ok().filter(|v| !v.is_null());
             Err(Rc::new(error))
         }
@@ -584,9 +608,6 @@ impl RequestBindings for NativeRequestBindings {
         name: EventValue,
         recv_window: EventValue,
     ) -> Result<ApiFuture, Failure> {
-        let Value::Object(map) = to_json(&config)? else {
-            return Err(failure("request config must be an object"));
-        };
         let text = |key: &str| -> Result<String, Failure> {
             let value = options.get(key)?;
             if value.nullish() {
@@ -601,6 +622,21 @@ impl RequestBindings for NativeRequestBindings {
             serde_json::from_value(Value::String(name.text()?))
                 .map_err(|e| failure(e.to_string()))?;
         let window = recv_window.number()?;
+        if remote
+            || key.is_empty()
+            || !safe_cex_crypto::can_sign_payload(&safe_cex_crypto::SigningOptions {
+                key: &key,
+                secret: &secret,
+                payload_signer: None,
+            })
+        {
+            return Ok(Box::pin(async move { Ok(config) }));
+        }
+        // A signed body becomes query fields; BigInt uses qs decimal spelling.
+        // Keep the original config untouched when signing is skipped.
+        let Value::Object(map) = query_json(&config)? else {
+            return Err(failure("request config must be an object"));
+        };
         Ok(Box::pin(async move {
             let signing = safe_cex_crypto::SigningOptions {
                 key: &key,
@@ -637,7 +673,7 @@ impl ResponseBindings for NativeResponseBindings {
     fn resend(&mut self, response: EventValue) -> Result<EventValue, Failure> {
         if self.resend_allowed
             && is_binance_style_signature_rejection(&to_json(&response.read("data")?)?)
-                .map_err(|e| failure(e.message))?
+                .map_err(|error| exchange_failure(error.into()))?
         {
             self.resend_requested = true;
             return Ok(EventValue::Bool(true));
@@ -999,7 +1035,7 @@ impl ExchangeImports for NativeImports {
         VIRTUAL_CLOCK.get_current_time_ms()
     }
     fn uuid(&self) -> String {
-        safe_cex_exchange::native::uuid_v4()
+        safe_cex_crypto::uuid::uuid().expect("operating system entropy is available")
     }
     fn dayjs(&self, value: Option<f64>) -> Result<f64, Failure> {
         Ok(value.unwrap_or_else(|| VIRTUAL_CLOCK.get_current_time_ms()))
@@ -1378,7 +1414,7 @@ impl ListenerHost for NativeListenerOperations {
             &mut sync.borrow_mut(),
             previous,
         )
-        .map_err(|e| failure(e.message))
+        .map_err(|error| exchange_failure(error.into()))
     }
     fn total(&self, book: Book) -> Result<(), Failure> {
         safe_cex_store::orderbook::calc_order_book_total(&mut book.borrow_mut());

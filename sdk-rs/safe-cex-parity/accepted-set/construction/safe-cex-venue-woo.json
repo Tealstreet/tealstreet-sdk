@@ -5,12 +5,6 @@
     ],
     "reason": "Reviewed legacy_metadata.rs::Shared<T,E>: both T:Clone and E:Clone are explicit type/impl bounds. Clone delegates to futures_util::future::Shared over the same boxed task, so polls observe one underlying completion and cloned Result payloads; it does not launch a second request. Nested Rc metadata payloads may remain shared, and no arbitrary-T/E or deep-independence claim is made See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
   },
-  "safe_cex_venue_woo::public_parity::ParityValue": {
-    "traits": [
-      "core::clone::Clone"
-    ],
-    "reason": "Reviewed public_parity.rs::ParityValue: Clone retains the exact Rc<JsJsonValue>. object_is explicitly preserves compound identity with Rc::ptr_eq, while primitive equality handles native number details. Values are immutable through this API; cloning creates no independent compound object or executable/prototype value and is not one-use validation authority See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
-  },
   "safe_cex_venue_woo::runtime_selector::WooV3RuntimeRouteTarget": {
     "traits": [
       "core::clone::Clone"

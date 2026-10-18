@@ -213,11 +213,17 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                 exchange.xhr = failure.clone();
                 let events = Rc::new(RefCell::new(Vec::<Value>::new()));
                 let observed = events.clone();
-                exchange.base.on(
+                exchange.base.on_args(
                     "error",
                     Rc::new(move |event, value| {
+                        let value: Vec<serde_json::Value> = value
+                            .iter()
+                            .map(|value| {
+                                safe_cex_exchange::js_runtime::value::to_json(value).unwrap()
+                            })
+                            .collect();
                         assert_eq!(event, "error", "native actual reporting event");
-                        observed.borrow_mut().push(value.clone());
+                        observed.borrow_mut().push(serde_json::json!(value));
                         Ok(())
                     }),
                 );
@@ -317,10 +323,10 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                 let mut reported = Value::Null;
                 let mut report = Value::Null;
                 if !coercion {
-                    assert_eq!(
-                        &events.borrow()[0][0],
+                    assert_source_tree(
                         format,
-                        "native raw formatted value {label}/{method}"
+                        &events.borrow()[0][0],
+                        &format!("native raw formatted value {label}/{method}"),
                     );
                     reported = if worker {
                         events.borrow()[0][1]["sentryData"]["error"].clone()
@@ -342,9 +348,10 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                             "native constructed string error message"
                         );
                     } else {
-                        assert_eq!(
-                            &reported, selected,
-                            "native raw host/worker value and type {label}/{method}"
+                        assert_source_tree(
+                            selected,
+                            &reported,
+                            &format!("native raw host/worker value and type {label}/{method}"),
                         );
                     }
                     report = if worker {
@@ -465,7 +472,9 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
             ));
             exchange.xhr = failure.clone();
             let mut original = ExchangeError::new("listener failed");
-            original.code = Some(json!("LISTENER"));
+            original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "LISTENER"
+            )));
             original.origin = Some(safe_cex_exchange::runtime::ExchangeErrorOrigin::new(
                 std::io::Error::other("listener origin"),
             ));
@@ -474,16 +483,21 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
             let first_calls = first.clone();
             let trace = runtime.trace.clone();
             let thrown = original.clone();
-            exchange.base.on(
+            exchange.base.on_args(
                 "error",
                 Rc::new(move |_, args| {
+                    let args: Vec<serde_json::Value> = args
+                        .iter()
+                        .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                        .collect();
                     first_calls.set(first_calls.get() + 1);
                     trace.borrow_mut().push("first".into());
                     assert_eq!(args[0], "7", "native decoded listener raw formatted value");
                     if worker {
-                        assert_eq!(
-                            args[1]["sentryData"]["error"], 7,
-                            "native worker raw report before listener"
+                        assert_source_tree(
+                            &json!(7),
+                            &args[1]["sentryData"]["error"],
+                            "native worker raw report before listener",
                         );
                     }
                     Err(thrown.clone())
@@ -546,7 +560,7 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
                 expected,
                 "native exact throwing-listener call order"
             );
-            observations.push(json!({"worker":worker,"method":method,"error":{"name":error.name,"message":error.message,"code":error.code},
+            observations.push(json!({"worker":worker,"method":method,"error":{"name":error.name,"message":error.message,"code":observed_error_code(&error.code)},
                 "trace":*runtime.trace.borrow(),"gets":failure.gets.get(),"positionReads":store.position_reads.get()}));
         }
     }
@@ -570,4 +584,12 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
     );
     let source: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_source_tree(&source, &Value::Array(observations), "listener");
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
+    })
 }

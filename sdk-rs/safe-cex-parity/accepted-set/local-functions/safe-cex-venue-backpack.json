@@ -1,7 +1,7 @@
 {
   "safe-cex-venue-backpack/src/native_http.rs::LOCAL_FUNCTION:query": {
     "category": "non-decoder",
-    "reason": "Inside qs_repeat: maps an outbound JsJsonValue request parameter tree to QueryValue for query-string serialization. Outbound encoding only; no inbound decode.",
-    "sourceSha256": "7dff403b1e4ce80bf5b1556ef17ed33722c50a08b5688fd3b285c0419076bf21"
+    "reason": "Inside qs_repeat: maps an outbound JsJsonValue request parameter tree to QueryValue for query-string serialization. Outbound encoding only; no inbound decode. Reviewed phase2: Only body ingress changes to the direct native adapter, response model views are explicit/fallible, and the legacy error view is named; nested query rendering is unchanged. Additional master review: complete changes through merge 18a37819e8: reusable primary/secondary client routing, limiter acquisition before per-attempt signing, response settlement and synchronized signing-clock plumbing are outside qs_repeat/query. The nested outbound QueryValue conversion body is unchanged.",
+    "sourceSha256": "fee4fdd57d3cc17ddf207d2905b6b977ef94ad61839bc62ddbc2ba953ea323c4"
   }
 }

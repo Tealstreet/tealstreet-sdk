@@ -60,7 +60,7 @@ fn http_create(rt: &Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         rt.shared.runtime.transport().as_ref(),
         arg(&a, 0),
         &arg(&a, 1),
-        to_typed(&arg(&a, 2).get("name")?)?,
+        rt.base(),
     )?;
     *rt.shared.extra.api_http.borrow_mut() = Some(host);
     Ok(client)
@@ -127,7 +127,7 @@ fn network_condition(_: &Rt, _: Vec<Js>) -> Result<Js, Thrown> {
                     reason: None,
                     headers: Default::default(),
                     body: safe_cex_transport::RestResponseBody::Untransformed(
-                        serde_json::Value::Null,
+                        safe_cex_types::retained_json::RetainedJsonInput::Null,
                     ),
                 }))
             },
@@ -285,7 +285,7 @@ fn sync(rt: &Rt, n: &str, a: &[Js], c: &[Js]) -> Result<Option<Js>, Thrown> {
                 &crate::order_mapper::map_order(
                     raw.as_object()
                         .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
-                    |ms| ms,
+                    |ms| (rt.shared.extra.deps.local_wall_time_to_utc)(ms),
                 )
                 .map_err(|e| Thrown::error("Error", &e))?,
             )?
@@ -299,6 +299,20 @@ fn sync(rt: &Rt, n: &str, a: &[Js], c: &[Js]) -> Result<Option<Js>, Thrown> {
                 o.stop_loss,
                 |s, l| h.log(h.logger()?, s.encode_utf16().collect(), l),
             )?)
+        }
+        "listenOrderBook" if rt.this.get("parent")?.is_undefined() => {
+            crate::subscription_delegates::listen_order_book(x, arg(a, 1), |symbol, callback| {
+                rt.this
+                    .get("publicWebsocket")?
+                    .call_method("listenOrderBook", vec![symbol, callback])
+            })?
+        }
+        "listenOHLCV" if rt.this.get("parent")?.is_undefined() => {
+            crate::subscription_delegates::listen_ohlcv(x, arg(a, 1), |opts, callback| {
+                rt.this
+                    .get("publicWebsocket")?
+                    .call_method("listenOHLCV", vec![opts, callback])
+            })?
         }
         "toChainIdHex" => crate::account_rest::to_chain_id_hex(&h, x)?,
         "toChainQuantum" => super::sdk::quantum(rt, &x, &arg(a, 1))?,
@@ -381,6 +395,11 @@ pub(super) fn select(rt: &Rt, n: &str) -> Result<Js, Thrown> {
         "signModifyOrder" => "requestSigner.signModifyOrder",
         "ensureAuth" => "ensurePrivateHistoryAuth",
         "buildOrder" => "buildMainOrderPayload",
+        "subscribeBook" => "subscribeToOrderBook",
+        "unsubscribeBook" => "unsubscribeFromOrderBook",
+        "cleanupStats" => "cleanupMessageHandlerStats",
+        "setSlippagePromise" => "parent.setMaxSlippage",
+
         "resolveIocPrice" => "resolveMarketIocExecutionPrice",
         "validateTpSl" => "validateTpSlPrices",
         "fetch" => return Ok(super::sdk::fetch_function(rt)),
@@ -413,6 +432,18 @@ pub(super) fn select(rt: &Rt, n: &str) -> Result<Js, Thrown> {
     }
 }
 async fn dispatch(rt: Rt, n: &str, a: Vec<Js>, c: Vec<Js>) -> Result<Js, Thrown> {
+    if n == "ohlcv-poll" {
+        return crate::runtime_assembly::poll_ohlcv(
+            &Host::new(&rt),
+            rt.this.clone(),
+            arg(&c, 0),
+            arg(&c, 1),
+            arg(&c, 2),
+            arg(&c, 3),
+            callback(&rt, n, c.clone()),
+        )
+        .await;
+    }
     if let Some(value) = super::sockets::asynchronous(&rt, n).await? {
         return Ok(value);
     }
@@ -426,6 +457,47 @@ async fn dispatch(rt: Rt, n: &str, a: Vec<Js>, c: Vec<Js>) -> Result<Js, Thrown>
         "fetchPositions" => crate::market_data::fetch_positions(&h).await,
         "fetchOrderBook" => crate::market_data::fetch_order_book(&h, x, arg(&a, 1)).await,
         "fetchOHLCV" => crate::market_data::fetch_ohlcv(&h, x).await,
+        "fetchHistoricalFills" => crate::account_rest::fetch_historical_fills(&h, x).await,
+        "fetchHistoricalOrders" => crate::account_rest::fetch_historical_orders(&h, x).await,
+        "fetchIncomeHistory" => crate::account_rest::fetch_income_history(&h, x).await,
+        "fetchIncomeHistoryRange" => {
+            let from = x.to_number()?;
+            let to = arg(&a, 1).to_number()?;
+            let kind: Option<String> = to_typed(&arg(&a, 2))?;
+            let records = crate::history_reads::fetch_income_history_range(
+                from,
+                to,
+                kind.as_deref(),
+                |opts| {
+                    let promise = rt
+                        .this
+                        .call_method("fetchIncomeHistory", vec![from_typed(&opts)?])?;
+                    Ok::<_, Thrown>(async move { to_typed(&await_js(promise).await?) })
+                },
+            )
+            .await?;
+            from_typed(&records)
+        }
+        "fetchHistoricalPositions" => {
+            let venue = rt
+                .shared
+                .sockets
+                .venue
+                .borrow()
+                .as_ref()
+                .and_then(std::rc::Weak::upgrade)
+                .ok_or_else(|| Thrown::error("Error", "Paradex exchange was dropped"))?;
+            let rows = venue
+                .fetch_historical_positions(safe_cex_exchange::journal::HistoricalPositionOptions {
+                    account: to_typed(&x.get("account")?)?,
+                    from: to_typed(&x.get("from")?)?,
+                    to: to_typed(&x.get("to")?)?,
+                })
+                .await
+                .map_err(Thrown::from)?;
+            from_typed(&rows)
+        }
+
         "setLeverage" => crate::account_rest::set_leverage(&h, x, arg(&a, 1)).await,
         "setMaxSlippage" => crate::account_rest::set_max_slippage(&h, x, arg(&a, 1)).await,
         "buildMainOrderPayload" => {
@@ -564,13 +636,30 @@ async fn orders(rt: &Rt) -> Result<Js, Thrown> {
         initialization,
         || rt.this.get("jwtManager").is_ok_and(|v| v.truthy()),
         |e| Ok::<_, Thrown>(data(rt.clone(), e)),
-        |row| {
-            crate::order_mapper::map_order(
-                row.as_object()
-                    .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
-                |ms| ms,
-            )
-            .map_err(|e| Thrown::error("Error", &e))
+        |row| match crate::order_mapper::map_order_row(
+            row.as_object()
+                .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
+            |ms| (rt.shared.extra.deps.local_wall_time_to_utc)(ms),
+        )
+        .map_err(|e| Thrown::error("Error", &e))?
+        {
+            Ok(order) => Ok(Some(order)),
+            Err(refusal) => {
+                let received = refusal
+                    .value
+                    .map_or_else(|| "undefined".into(), |value| value.to_string());
+                h.log(
+                    h.logger()?,
+                    format!(
+                        "Paradex order row refused: Order.{} requires a string; received: {}",
+                        refusal.field, received
+                    )
+                    .encode_utf16()
+                    .collect(),
+                    "warning",
+                )?;
+                Ok(None)
+            }
         },
         &mut crate::order_reads::OrderReadEffects {
             log: |s: String, l| h.log(h.logger()?, s.encode_utf16().collect(), l),
@@ -580,7 +669,7 @@ async fn orders(rt: &Rt) -> Result<Js, Thrown> {
         },
     )
     .await?;
-    from_typed(&value)
+    from_typed(&value.into_iter().flatten().collect::<Vec<_>>())
 }
 async fn leverage(rt: &Rt) -> Result<Js, Thrown> {
     let h = Host::new(rt);

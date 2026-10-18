@@ -425,7 +425,7 @@
   },
   "safe_cex_num::numeric_ingress::output::Capture": {
     "shape": "observed",
-    "evidence": "Reviewed every inventoried Serializer body in numeric_ingress/output.rs: native serializer events construct JsNumberInput nodes or sequence/object builders before JSON projection. Exact per-method cases observe payload bits or actual builder fields; Serialize generic witnesses are limited to i64. Unit-only entries have no data input; two metadata-only constant outputs use the two exact source-pinned policies. All 27 APIs passed actual native execution; 25 carry independently authored output observations.",
+    "evidence": "Reviewed all 27 inventoried Serializer APIs in numeric_ingress/output.rs. Raw methods execute native payload/builder observations; the two typed unit methods retain typed classification. Unit-struct metadata directly distinguishes the ModelField Undefined marker from ordinary Null. Only tuple-struct metadata retains the exact source-pinned constant policy. Generic Serialize cases remain explicitly limited to i64.",
     "entrypoints": [
       {
         "api": {
@@ -491,7 +491,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_i8 emits Node::Float from the actual i8 serializer event. Native -1 and2 cases observe value bits; no full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i8::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i8(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i8::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i8(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": -1,
@@ -573,7 +573,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_i16 emits Node::Float from the actual i16 serializer event. Native -1 and2 cases observe value bits; no full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i16::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i16(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i16::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i16(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": -1,
@@ -655,7 +655,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_i32 emits Node::Float from the actual i32 serializer event. Native -1 and2 cases observe value bits; no full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i32::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i32(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i32::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i32(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": -1,
@@ -737,7 +737,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_i64 emits Node::Float from the actual i64 serializer event. Native -1 and2 cases observe value bits; no full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i64::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i64(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i64::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i64(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": -1,
@@ -819,7 +819,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_i128 emits Node::Float from the actual i128 serializer event. Native -1 and2 cases observe value bits; no full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i128::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i128(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = i128::try_from($value.as_i64().expect(\"signed native fixture\")).expect(\"fixture width\"); observe($type.serialize_i128(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": -1,
@@ -901,7 +901,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_u8 captures the actual u8 input as Node::Float. Direct1/2 native-event witnesses; no generic byte decoder or full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u8::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u8(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u8::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u8(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": 1,
@@ -983,7 +983,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_u16 captures the actual u16 input as Node::Float. Direct1/2 native-event witnesses; no generic byte decoder or full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u16::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u16(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u16::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u16(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": 1,
@@ -1065,7 +1065,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_u32 captures the actual u32 input as Node::Float. Direct1/2 native-event witnesses; no generic byte decoder or full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u32::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u32(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u32::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u32(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": 1,
@@ -1147,7 +1147,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_u64 captures the actual u64 input as Node::Float. Direct1/2 native-event witnesses; no generic byte decoder or full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u64::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u64(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u64::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u64(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": 1,
@@ -1229,7 +1229,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_u128 captures the actual u128 input as Node::Float. Direct1/2 native-event witnesses; no generic byte decoder or full-range precision claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u128::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u128(value).expect(\"scalar capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = u128::try_from($value.as_u64().expect(\"unsigned native fixture\")).expect(\"fixture width\"); observe($type.serialize_u128(value).expect(\"scalar capture\")) }",
         "cases": [
           {
             "input": 1,
@@ -1311,7 +1311,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_f32 retains native signed zero and nonfinite numeric events, observed as Node::Float bits before any JSON serialization.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value: f32 = if $value.as_str() == Some(\"negative-zero\") { -0.0 } else { f32::NEG_INFINITY }; observe($type.serialize_f32(value).expect(\"float capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value: f32 = if $value.as_str() == Some(\"negative-zero\") { -0.0 } else { f32::NEG_INFINITY }; observe($type.serialize_f32(value).expect(\"float capture\")) }",
         "cases": [
           {
             "input": "negative-zero",
@@ -1393,7 +1393,7 @@
         },
         "input": "observed",
         "reason": "Reviewed serialize_f64 retains native signed zero and nonfinite numeric events, observed as Node::Float bits before any JSON serialization.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value: f64 = if $value.as_str() == Some(\"negative-zero\") { -0.0 } else { f64::NEG_INFINITY }; observe($type.serialize_f64(value).expect(\"float capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value: f64 = if $value.as_str() == Some(\"negative-zero\") { -0.0 } else { f64::NEG_INFINITY }; observe($type.serialize_f64(value).expect(\"float capture\")) }",
         "cases": [
           {
             "input": "negative-zero",
@@ -1475,7 +1475,7 @@
         },
         "input": "observed",
         "reason": "Actual boolean serializer events retain their native Bool payloads.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } observe($type.serialize_bool($value.as_bool().expect(\"bool fixture\")).expect(\"bool capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } observe($type.serialize_bool($value.as_bool().expect(\"bool fixture\")).expect(\"bool capture\")) }",
         "cases": [
           {
             "input": false,
@@ -1557,7 +1557,7 @@
         },
         "input": "observed",
         "reason": "Actual char events delegate to text capture; direct ASCII/non-ASCII native Text payloads are observed.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } observe($type.serialize_char($value.as_str().expect(\"char fixture\").chars().next().expect(\"fixture character\")).expect(\"char capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } observe($type.serialize_char($value.as_str().expect(\"char fixture\").chars().next().expect(\"fixture character\")).expect(\"char capture\")) }",
         "cases": [
           {
             "input": "A",
@@ -1645,7 +1645,7 @@
         },
         "input": "observed",
         "reason": "Actual borrowed UTF-8 text is copied into Node::Text. Embedded NUL and non-ASCII witnesses stay within representable Rust strings.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } observe($type.serialize_str($value.as_str().expect(\"text fixture\")).expect(\"text capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } observe($type.serialize_str($value.as_str().expect(\"text fixture\")).expect(\"text capture\")) }",
         "cases": [
           {
             "input": "\u0000",
@@ -1735,7 +1735,7 @@
         },
         "input": "observed",
         "reason": "Actual byte-slice serializer events construct an Array of native Float nodes, not a base64/text projection.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let bytes: Vec<u8> = $value.as_array().expect(\"byte fixture\").iter().map(|v| u8::try_from(v.as_u64().expect(\"byte\")).expect(\"byte range\")).collect(); observe($type.serialize_bytes(&bytes).expect(\"bytes capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let bytes: Vec<u8> = $value.as_array().expect(\"byte fixture\").iter().map(|v| u8::try_from(v.as_u64().expect(\"byte\")).expect(\"byte range\")).collect(); observe($type.serialize_bytes(&bytes).expect(\"bytes capture\")) }",
         "cases": [
           {
             "input": [],
@@ -1926,7 +1926,7 @@
         },
         "input": "observed",
         "reason": "Reviewed generic Serialize delegation is executed at i64 only, directly observing the captured numeric child; no universal T behavior claim.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = $value.as_i64().expect(\"i64 monomorphization fixture\"); observe($type.serialize_some(&value).expect(\"some capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = $value.as_i64().expect(\"i64 monomorphization fixture\"); observe($type.serialize_some(&value).expect(\"some capture\")) }",
         "cases": [
           {
             "input": -1,
@@ -2017,7 +2017,7 @@
                 }
               ],
               [
-                "_",
+                "name",
                 {
                   "borrowed_ref": {
                     "lifetime": "'static",
@@ -2072,19 +2072,28 @@
           }
         },
         "input": "observed",
-        "reason": "Native serializer ignores unit-struct name metadata and returns literal Null.",
-        "call": "{ use serde::Serializer as _; let name = if $value == &serde_json::json!(\"First\") { \"First\" } else { \"Second\" }; let native = $type.serialize_unit_struct(name).expect(\"infallible unit capture\"); match native.0 { super::Node::Null => serde_json::Value::Null, _ => panic!(\"unit capture returned a non-null native node\") } }",
+        "reason": "Unit-struct metadata is meaningful for the ModelField Undefined marker; observe Undefined versus ordinary Null directly instead of classifying it as constant.",
+        "call": "{ use serde::Serializer as _; let name=match $value.as_str().expect(\"unit metadata fixture\") { \"First\"=>\"First\", \"Second\"=>\"Second\", \"$safe_cex::Undefined\"=>\"$safe_cex::Undefined\", _=>panic!(\"outside finite unit metadata corpus\") }; let native=$type.serialize_unit_struct(name).expect(\"unit capture\"); match native.0 { super::Node::Null=>serde_json::json!([\"null\"]), super::Node::Undefined=>serde_json::json!([\"undefined\"]), _=>panic!(\"unexpected unit capture node\") } }",
         "cases": [
           {
             "input": "First",
-            "output": null
+            "output": [
+              "null"
+            ]
           },
           {
             "input": "Second",
-            "output": null
+            "output": [
+              "null"
+            ]
+          },
+          {
+            "input": "$safe_cex::Undefined",
+            "output": [
+              "undefined"
+            ]
           }
-        ],
-        "constantOutput": true
+        ]
       },
       {
         "api": {
@@ -2174,7 +2183,7 @@
         },
         "input": "observed",
         "reason": "Enum/type/index metadata is ignored; the actual static variant text becomes Node::Text.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } assert!(matches!($type.serialize_none().expect(\"none capture\").0, super::Node::Null)); assert!(matches!($type.serialize_unit().expect(\"unit capture\").0, super::Node::Null)); let variant = if $value == &serde_json::json!(\"First\") { \"First\" } else { \"Second\" }; observe($type.serialize_unit_variant(\"Enum\",0,variant).expect(\"unit variant capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } assert!(matches!($type.serialize_none().expect(\"none capture\").0, super::Node::Null)); assert!(matches!($type.serialize_unit().expect(\"unit capture\").0, super::Node::Null)); let variant = if $value == &serde_json::json!(\"First\") { \"First\" } else { \"Second\" }; observe($type.serialize_unit_variant(\"Enum\",0,variant).expect(\"unit variant capture\")) }",
         "cases": [
           {
             "input": "First",
@@ -2306,7 +2315,7 @@
         },
         "input": "observed",
         "reason": "Named newtype wrapper metadata is ignored while the i64 payload is actually captured; direct native child values vary.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = $value.as_i64().expect(\"i64 newtype fixture\"); observe($type.serialize_newtype_struct(\"Wrapper\",&value).expect(\"newtype capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let value = $value.as_i64().expect(\"i64 newtype fixture\"); observe($type.serialize_newtype_struct(\"Wrapper\",&value).expect(\"newtype capture\")) }",
         "cases": [
           {
             "input": -1,
@@ -2456,7 +2465,7 @@
         },
         "input": "observed",
         "reason": "Actual variant name and captured i64 child form a one-entry native Object; native entry order/value are inspected directly.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let (variant,value) = if $value == &serde_json::json!(\"First\") { (\"First\",1_i64) } else { (\"Second\",2_i64) }; observe($type.serialize_newtype_variant(\"Enum\",0,variant,&value).expect(\"newtype variant capture\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput) -> serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null => serde_json::json!([\"null\"]), Node::Bool(v) => serde_json::json!([\"bool\",v]), Node::Float(v) => serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]), Node::Text(v) => serde_json::json!([\"text\",v]), Node::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), Node::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), Node::Lexeme(_) => panic!(\"Capture constructor unexpectedly produced a numeric lexeme\") } } let (variant,value) = if $value == &serde_json::json!(\"First\") { (\"First\",1_i64) } else { (\"Second\",2_i64) }; observe($type.serialize_newtype_variant(\"Enum\",0,variant,&value).expect(\"newtype variant capture\")) }",
         "cases": [
           {
             "input": "First",
@@ -4091,7 +4100,7 @@
         },
         "input": "observed",
         "reason": "Actual SerializeSeq receiver is produced by its real Capture constructor and filled through its actual trait child method, then consuming end is called. Fixtures vary real native Self payload (-0/+Infinity), not invented no-data method arguments.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_seq(Some(1)) .expect(\"native sequence producer\"); <$type as serde::ser::SerializeSeq>::serialize_element(&mut receiver,&n).expect(\"native sequence child\"); observe(<$type as serde::ser::SerializeSeq>::end(receiver).expect(\"native sequence finish\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_seq(Some(1)) .expect(\"native sequence producer\"); <$type as serde::ser::SerializeSeq>::serialize_element(&mut receiver,&n).expect(\"native sequence child\"); observe(<$type as serde::ser::SerializeSeq>::end(receiver).expect(\"native sequence finish\")) }",
         "cases": [
           {
             "input": "negative-zero",
@@ -4177,7 +4186,7 @@
         },
         "input": "observed",
         "reason": "Actual SerializeTuple receiver is produced by its real Capture constructor and filled through its actual trait child method, then consuming end is called. Fixtures vary real native Self payload (-0/+Infinity), not invented no-data method arguments.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_tuple(1) .expect(\"native sequence producer\"); <$type as serde::ser::SerializeTuple>::serialize_element(&mut receiver,&n).expect(\"native sequence child\"); observe(<$type as serde::ser::SerializeTuple>::end(receiver).expect(\"native sequence finish\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_tuple(1) .expect(\"native sequence producer\"); <$type as serde::ser::SerializeTuple>::serialize_element(&mut receiver,&n).expect(\"native sequence child\"); observe(<$type as serde::ser::SerializeTuple>::end(receiver).expect(\"native sequence finish\")) }",
         "cases": [
           {
             "input": "negative-zero",
@@ -4263,7 +4272,7 @@
         },
         "input": "observed",
         "reason": "Actual SerializeTupleStruct receiver is produced by its real Capture constructor and filled through its actual trait child method, then consuming end is called. Fixtures vary real native Self payload (-0/+Infinity), not invented no-data method arguments.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_tuple_struct(\"Record\",1) .expect(\"native sequence producer\"); <$type as serde::ser::SerializeTupleStruct>::serialize_field(&mut receiver,&n).expect(\"native sequence child\"); observe(<$type as serde::ser::SerializeTupleStruct>::end(receiver).expect(\"native sequence finish\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_tuple_struct(\"Record\",1) .expect(\"native sequence producer\"); <$type as serde::ser::SerializeTupleStruct>::serialize_field(&mut receiver,&n).expect(\"native sequence child\"); observe(<$type as serde::ser::SerializeTupleStruct>::end(receiver).expect(\"native sequence finish\")) }",
         "cases": [
           {
             "input": "negative-zero",
@@ -4349,7 +4358,7 @@
         },
         "input": "observed",
         "reason": "Actual SerializeTupleVariant receiver is produced by its real Capture constructor and filled through its actual trait child method, then consuming end is called. Fixtures vary real native Self payload (-0/+Infinity), not invented no-data method arguments.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_tuple_variant(\"Enum\",0,\"Case\",1) .expect(\"native sequence producer\"); <$type as serde::ser::SerializeTupleVariant>::serialize_field(&mut receiver,&n).expect(\"native sequence child\"); observe(<$type as serde::ser::SerializeTupleVariant>::end(receiver).expect(\"native sequence finish\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_tuple_variant(\"Enum\",0,\"Case\",1) .expect(\"native sequence producer\"); <$type as serde::ser::SerializeTupleVariant>::serialize_field(&mut receiver,&n).expect(\"native sequence child\"); observe(<$type as serde::ser::SerializeTupleVariant>::end(receiver).expect(\"native sequence finish\")) }",
         "cases": [
           {
             "input": "negative-zero",
@@ -4397,7 +4406,7 @@
   },
   "safe_cex_num::numeric_ingress::output::Object": {
     "shape": "observed",
-    "evidence": "Reviewed Object finish plus every inventoried SerializeMap/SerializeStruct/SerializeStructVariant method. Native observations inspect mutating builder fields and final nodes, retaining pending-key refusal, enum wrappers and private Number/RawValue lexical parsing. Generic child witnesses deliberately use i64/f64 or explicit UTF-8 payloads only.",
+    "evidence": "Reviewed Object finish plus every inventoried SerializeMap/SerializeStruct/SerializeStructVariant method. Native observations inspect mutating builder fields and final nodes, retaining pending-key refusal, enum wrappers and private Number/RawValue lexical parsing. Generic child witnesses deliberately use i64/f64 or explicit UTF-8 payloads only. The ModelRecord skip_field hook has independent native observations for retained Undefined keys versus ordinary struct omission.",
     "entrypoints": [
       {
         "api": {
@@ -4457,7 +4466,7 @@
         },
         "input": "observed",
         "reason": "Actual consuming SerializeMap::end receives a builder populated through the matching real Capture/Serde APIs. Direct native output fields preserve wrappers/numeric bits; map pending-key refusal and struct private JSON lexemes are separately witnessed where applicable.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_map(Some(1)).expect(\"native map producer\"); if $value.as_str()==Some(\"pending\"){ <$type as serde::ser::SerializeMap>::serialize_key(&mut receiver,\"dangling\").expect(\"native pending key\"); }else{ <$type as serde::ser::SerializeMap>::serialize_entry(&mut receiver,\"field\",&n).expect(\"native map entry\"); } match <$type as serde::ser::SerializeMap>::end(receiver) { Ok(v)=>serde_json::json!({\"ok\":true,\"value\":observe(v)}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":e.to_string()}) } }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_map(Some(1)).expect(\"native map producer\"); if $value.as_str()==Some(\"pending\"){ <$type as serde::ser::SerializeMap>::serialize_key(&mut receiver,\"dangling\").expect(\"native pending key\"); }else{ <$type as serde::ser::SerializeMap>::serialize_entry(&mut receiver,\"field\",&n).expect(\"native map entry\"); } match <$type as serde::ser::SerializeMap>::end(receiver) { Ok(v)=>serde_json::json!({\"ok\":true,\"value\":observe(v)}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":e.to_string()}) } }",
         "cases": [
           {
             "input": "negative-zero",
@@ -4614,7 +4623,7 @@
         },
         "input": "observed",
         "reason": "Actual mutating serializer field API is called with independently selected static key/native i64; observe native builder values/name/variant/pending key after its unit return, so ignored writes/keys cannot hide behind unit.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let (key,n)=if $value.as_str()==Some(\"First\"){(\"First\",1_i64)}else{(\"Second\",2_i64)}; let mut receiver=super::Capture.serialize_struct(\"Record\",1).expect(\"native object producer\"); <$type as serde::ser::SerializeStruct>::serialize_field(&mut receiver,key,&n).expect(\"native field write\"); let rows=receiver.values.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>(); serde_json::json!({\"name\":receiver.name,\"variant\":receiver.variant,\"pendingKey\":receiver.key,\"rows\":rows}) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let (key,n)=if $value.as_str()==Some(\"First\"){(\"First\",1_i64)}else{(\"Second\",2_i64)}; let mut receiver=super::Capture.serialize_struct(\"Record\",1).expect(\"native object producer\"); <$type as serde::ser::SerializeStruct>::serialize_field(&mut receiver,key,&n).expect(\"native field write\"); let rows=receiver.values.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>(); serde_json::json!({\"name\":receiver.name,\"variant\":receiver.variant,\"pendingKey\":receiver.key,\"rows\":rows}) }",
         "cases": [
           {
             "input": "First",
@@ -4646,6 +4655,116 @@
                     "float",
                     "4000000000000000"
                   ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::ser::SerializeStruct",
+          "name": "skip_field",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::error::Error",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "The actual SerializeStruct skip hook retains own Undefined keys only for the designated ModelRecord; ordinary structs omit skipped keys.",
+        "call": "{ use serde::Serializer as _; let name=match $value[\"name\"].as_str().unwrap() { \"Record\"=>\"Record\", \"$safe_cex::ModelRecord\"=>\"$safe_cex::ModelRecord\", _=>panic!(\"outside finite struct metadata corpus\") }; let key=if $value[\"key\"]==\"one\" {\"one\"} else {\"two\"}; let mut receiver=super::Capture.serialize_struct(name,0).expect(\"native struct producer\"); <$type as serde::ser::SerializeStruct>::skip_field(&mut receiver,key).expect(\"actual skipped field hook\"); let rows:Vec<_>=receiver.values.into_iter().map(|(key,node)| match node.0 {super::Node::Undefined=>serde_json::json!([key,\"undefined\"]),_=>panic!(\"skipped model key lost Undefined node\")}).collect(); serde_json::json!({\"name\":receiver.name,\"rows\":rows}) }",
+        "cases": [
+          {
+            "input": {
+              "name": "Record",
+              "key": "one"
+            },
+            "output": {
+              "name": "Record",
+              "rows": []
+            }
+          },
+          {
+            "input": {
+              "name": "$safe_cex::ModelRecord",
+              "key": "one"
+            },
+            "output": {
+              "name": "$safe_cex::ModelRecord",
+              "rows": [
+                [
+                  "one",
+                  "undefined"
+                ]
+              ]
+            }
+          },
+          {
+            "input": {
+              "name": "$safe_cex::ModelRecord",
+              "key": "two"
+            },
+            "output": {
+              "name": "$safe_cex::ModelRecord",
+              "rows": [
+                [
+                  "two",
+                  "undefined"
                 ]
               ]
             }
@@ -4710,7 +4829,7 @@
         },
         "input": "observed",
         "reason": "Actual consuming SerializeStruct::end receives a builder populated through the matching real Capture/Serde APIs. Direct native output fields preserve wrappers/numeric bits; map pending-key refusal and struct private JSON lexemes are separately witnessed where applicable.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let kind=$value[\"kind\"].as_str().expect(\"native struct fixture kind\"); let name=match kind { \"number\"=>\"$serde_json::private::Number\",\"raw\"=>\"$serde_json::private::RawValue\",\"record\"=>\"Record\",_=>panic!(\"unreviewed fixture kind\") }; let mut receiver=super::Capture.serialize_struct(name,1).expect(\"native struct producer\"); if kind==\"record\" { let n=if $value[\"payload\"].as_str()==Some(\"negative-zero\"){-0.0_f64}else{f64::INFINITY}; <$type as serde::ser::SerializeStruct>::serialize_field(&mut receiver,\"field\",&n).expect(\"native numeric field\"); }else{ <$type as serde::ser::SerializeStruct>::serialize_field(&mut receiver,\"field\",$value[\"payload\"].as_str().expect(\"native private text payload\")).expect(\"native private field\"); } observe(<$type as serde::ser::SerializeStruct>::end(receiver).expect(\"native object finish\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let kind=$value[\"kind\"].as_str().expect(\"native struct fixture kind\"); let name=match kind { \"number\"=>\"$serde_json::private::Number\",\"raw\"=>\"$serde_json::private::RawValue\",\"record\"=>\"Record\",_=>panic!(\"unreviewed fixture kind\") }; let mut receiver=super::Capture.serialize_struct(name,1).expect(\"native struct producer\"); if kind==\"record\" { let n=if $value[\"payload\"].as_str()==Some(\"negative-zero\"){-0.0_f64}else{f64::INFINITY}; <$type as serde::ser::SerializeStruct>::serialize_field(&mut receiver,\"field\",&n).expect(\"native numeric field\"); }else{ <$type as serde::ser::SerializeStruct>::serialize_field(&mut receiver,\"field\",$value[\"payload\"].as_str().expect(\"native private text payload\")).expect(\"native private field\"); } observe(<$type as serde::ser::SerializeStruct>::end(receiver).expect(\"native object finish\")) }",
         "cases": [
           {
             "input": {
@@ -4905,7 +5024,7 @@
         },
         "input": "observed",
         "reason": "Actual mutating serializer field API is called with independently selected static key/native i64; observe native builder values/name/variant/pending key after its unit return, so ignored writes/keys cannot hide behind unit.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let (key,n)=if $value.as_str()==Some(\"First\"){(\"First\",1_i64)}else{(\"Second\",2_i64)}; let mut receiver=super::Capture.serialize_struct_variant(\"Enum\",0,\"Case\",1).expect(\"native object producer\"); <$type as serde::ser::SerializeStructVariant>::serialize_field(&mut receiver,key,&n).expect(\"native field write\"); let rows=receiver.values.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>(); serde_json::json!({\"name\":receiver.name,\"variant\":receiver.variant,\"pendingKey\":receiver.key,\"rows\":rows}) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let (key,n)=if $value.as_str()==Some(\"First\"){(\"First\",1_i64)}else{(\"Second\",2_i64)}; let mut receiver=super::Capture.serialize_struct_variant(\"Enum\",0,\"Case\",1).expect(\"native object producer\"); <$type as serde::ser::SerializeStructVariant>::serialize_field(&mut receiver,key,&n).expect(\"native field write\"); let rows=receiver.values.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>(); serde_json::json!({\"name\":receiver.name,\"variant\":receiver.variant,\"pendingKey\":receiver.key,\"rows\":rows}) }",
         "cases": [
           {
             "input": "First",
@@ -5001,7 +5120,7 @@
         },
         "input": "observed",
         "reason": "Actual consuming SerializeStructVariant::end receives a builder populated through the matching real Capture/Serde APIs. Direct native output fields preserve wrappers/numeric bits; map pending-key refusal and struct private JSON lexemes are separately witnessed where applicable.",
-        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Null=>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_struct_variant(\"Enum\",0,\"Case\",1).expect(\"native variant producer\"); <$type as serde::ser::SerializeStructVariant>::serialize_field(&mut receiver,\"field\",&n).expect(\"native variant field\"); observe(<$type as serde::ser::SerializeStructVariant>::end(receiver).expect(\"native variant finish\")) }",
+        "call": "{ use serde::Serializer as _; fn observe(v: super::JsNumberInput)->serde_json::Value { use super::Node; match v.0 { Node::Undefined => serde_json::json!([\"undefined\"]), Node::Null =>serde_json::json!([\"null\"]),Node::Bool(v)=>serde_json::json!([\"bool\",v]),Node::Float(v)=>serde_json::json!([\"float\",format!(\"{:016x}\",v.to_bits())]),Node::Text(v)=>serde_json::json!([\"text\",v]),Node::Lexeme(v)=>serde_json::json!([\"lexeme\",v]),Node::Array(v)=>serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]),Node::Object(v)=>serde_json::json!([\"object\",v.into_iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]) } } let n: f64=if $value.as_str()==Some(\"negative-zero\"){-0.0}else{f64::INFINITY}; let mut receiver=super::Capture.serialize_struct_variant(\"Enum\",0,\"Case\",1).expect(\"native variant producer\"); <$type as serde::ser::SerializeStructVariant>::serialize_field(&mut receiver,\"field\",&n).expect(\"native variant field\"); observe(<$type as serde::ser::SerializeStructVariant>::end(receiver).expect(\"native variant finish\")) }",
         "cases": [
           {
             "input": "negative-zero",
@@ -10895,7 +11014,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ fn fields(v:&crate::numeric_ingress::JsNumberInput)->serde_json::Value { match &v.0 { crate::numeric_ingress::Node::Null=>serde_json::json!({\"kind\":\"null\"}),crate::numeric_ingress::Node::Bool(b)=>serde_json::json!({\"kind\":\"bool\",\"value\":b}),crate::numeric_ingress::Node::Text(s)=>serde_json::json!({\"kind\":\"text\",\"value\":s}),crate::numeric_ingress::Node::Lexeme(s)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":s}),crate::numeric_ingress::Node::Float(n)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",n.to_bits())}),crate::numeric_ingress::Node::Array(a)=>serde_json::json!({\"kind\":\"array\",\"values\":a.iter().map(fields).collect::<Vec<_>>()}),crate::numeric_ingress::Node::Object(o)=>serde_json::json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|serde_json::json!([k,fields(v)])).collect::<Vec<_>>()}) } } let raw=$value.as_str().expect(\"raw JSON fixture\");let input:$type=serde_json::from_str(raw).expect(\"valid raw JSON fixture\");let actual=fields(&input);let data=actual.get(\"values\").or_else(||actual.get(\"entries\")).or_else(||actual.get(\"value\")).or_else(||actual.get(\"bits\")).cloned().unwrap_or(serde_json::Value::Null);serde_json::json!({\"ok\":true,\"kind\":actual[\"kind\"],\"data\":data}) }",
+      "call": "{ fn fields(v:&crate::numeric_ingress::JsNumberInput)->serde_json::Value { match &v.0 { crate::numeric_ingress::Node::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),crate::numeric_ingress::Node::Null=>serde_json::json!({\"kind\":\"null\"}),crate::numeric_ingress::Node::Bool(b)=>serde_json::json!({\"kind\":\"bool\",\"value\":b}),crate::numeric_ingress::Node::Text(s)=>serde_json::json!({\"kind\":\"text\",\"value\":s}),crate::numeric_ingress::Node::Lexeme(s)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":s}),crate::numeric_ingress::Node::Float(n)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",n.to_bits())}),crate::numeric_ingress::Node::Array(a)=>serde_json::json!({\"kind\":\"array\",\"values\":a.iter().map(fields).collect::<Vec<_>>()}),crate::numeric_ingress::Node::Object(o)=>serde_json::json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|serde_json::json!([k,fields(v)])).collect::<Vec<_>>()}) } } let input:$type=match $value.get(\"native\").and_then(serde_json::Value::as_str) { Some(\"undefined\")=>$type::from_retained(crate::numeric_ingress::js_capture_output(&safe_cex_types::ModelField::<f64>::Undefined).expect(\"native undefined capture\")).expect(\"native undefined ingress\"),Some(\"undefined-array\")=>$type::from_retained(crate::numeric_ingress::js_capture_output(&[safe_cex_types::ModelField::<f64>::Undefined,safe_cex_types::ModelField::Value(1.25)]).expect(\"native array capture\")).expect(\"native array ingress\"),None=>{let raw=$value.as_str().expect(\"raw JSON fixture\");serde_json::from_str(raw).expect(\"valid raw JSON fixture\")},Some(other)=>panic!(\"unknown native fixture {other}\") };let actual=fields(&input);let data=actual.get(\"values\").or_else(||actual.get(\"entries\")).or_else(||actual.get(\"value\")).or_else(||actual.get(\"bits\")).cloned().unwrap_or(serde_json::Value::Null);serde_json::json!({\"ok\":true,\"kind\":actual[\"kind\"],\"data\":data}) }",
       "cases": [
         {
           "input": "null",
@@ -10968,6 +11087,34 @@
               ]
             ]
           }
+        },
+        {
+          "input": {
+            "native": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "kind": "undefined",
+            "data": null
+          }
+        },
+        {
+          "input": {
+            "native": "undefined-array"
+          },
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "data": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "float",
+                "bits": "3ff4000000000000"
+              }
+            ]
+          }
         }
       ],
       "nativeFields": [
@@ -10994,7 +11141,7 @@
                 }
               ],
               [
-                "_",
+                "name",
                 {
                   "borrowed_ref": {
                     "lifetime": "'static",
@@ -14571,5 +14718,166 @@
         "reason": "into_deserializer receives only the already captured private Node decoder and a typed caller visitor (or returns the same decoder for IntoDeserializer). Its standard Serde delegation does not admit a new raw string/JSON API. The caller visitor supplies its result schema; numeric event retention and model/refusal paths are exercised by the separately observed raw-metadata methods, whole-entry tests/numeric_ingress.rs and native sequence/map seeds. No claim that every generic visitor/model is eligible."
       }
     ]
+  },
+  "safe_cex_num::json_stringify::quoted_utf16": {
+    "api": {
+      "kind": "function",
+      "name": "quoted_utf16",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Specific outbound rendering role reviewed against this production body; retained_json_writer executes actual Node JSON.stringify comparisons and scripts/retained-json-controls.py requires compiled text-replacement/array-truncation failures with exact restored passes. This classification is separate from universal semantic or admission proof.",
+    "reason": "Appends wire JSON quotation of an already captured UTF-16 string to the caller-owned output buffer via the single lower quote helper. It does not parse JSON, construct a DTO or select an input shape."
+  },
+  "safe_cex_num::json_stringify::number": {
+    "api": {
+      "kind": "function",
+      "name": "number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Specific outbound rendering role reviewed against this production body; retained_json_writer executes actual Node JSON.stringify comparisons and scripts/retained-json-controls.py requires compiled text-replacement/array-truncation failures with exact restored passes. This classification is separate from universal semantic or admission proof.",
+    "reason": "Appends the JSON number spelling of an already native binary64 scalar to a caller-owned output buffer; finite values delegate to shared Number-to-String and nonfinite values emit null at this final wire boundary. No decoder or new numeric admission."
+  },
+  "safe_cex_num::json_stringify::write_retained": {
+    "api": {
+      "kind": "function",
+      "name": "write_retained",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Specific outbound rendering role reviewed against this production body; retained_json_writer executes actual Node JSON.stringify comparisons and scripts/retained-json-controls.py requires compiled text-replacement/array-truncation failures with exact restored passes. This classification is separate from universal semantic or admission proof.",
+    "reason": "Recursively renders already captured canonical retained data into the caller-owned wire buffer, preserving omission/array-null policy until this final JSON projection. It does not parse JSON or construct a new value carrier; all capture/admission remains in the canonical types parser."
   }
 }

@@ -101,12 +101,37 @@ fn get_key(obj: &Js, key: &str) -> Result<Js, Thrown> {
     if obj.is_nullish() {
         return Ok(Js::Undefined);
     }
+    if !obj.is_object() {
+        return Err(Thrown::type_error(&format!(
+            "Cannot use 'in' operator to search for '{key}' in {}",
+            obj.to_display()
+        )));
+    }
+    fn contains(value: &Js, key: &str) -> bool {
+        if value.has_own(key) {
+            return true;
+        }
+        match value {
+            Js::Object(data) => data
+                .proto
+                .borrow()
+                .as_ref()
+                .is_some_and(|p| contains(p, key)),
+            Js::Array(_) => {
+                key == "length" || crate::binding::builtins::member(value, &utf16(key)).is_some()
+            }
+            Js::Function(_) => {
+                key == "name" || crate::binding::builtins::member(value, &utf16(key)).is_some()
+            }
+            _ => crate::binding::builtins::member(value, &utf16(key)).is_some(),
+        }
+    }
     for candidate in [
         key.to_owned(),
         safe_cex_num::lodash_snake_case(key),
         safe_cex_num::lodash_camel_case(key),
     ] {
-        if obj.has_own(&candidate) {
+        if contains(obj, &candidate) {
             return obj.get(&candidate);
         }
     }
@@ -345,7 +370,7 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
                 rt.shared.runtime.transport().as_ref(),
                 arg(&a, 0),
                 &arg(&a, 1),
-                crate::binding::value::to_typed(&arg(&a, 2).get("name")?)?,
+                rt.base(),
             )
         }),
     );

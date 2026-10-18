@@ -3,6 +3,7 @@ use super::runtime::{Host, value};
 use crate::{
     account_runtime::AccountHost, builder_workflow::JsResult, signing_runtime::SigningHost,
 };
+use num_bigint::{BigInt, Sign};
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_json, to_json};
 use serde_json::{Value, json};
 
@@ -52,21 +53,99 @@ fn typed_numbers(value: &mut Value) {
     }
 }
 
+// MetaMask eth-sig-util encodeField(address) and abi-utils getAddress. Its
+// unprefixed/nonhex string path deliberately retains the legacy base-10 loop
+// over UTF-16 units, then takes the first 20 bytes of an oversized result.
+fn sdk_builder_address(address: &Value) -> JsResult<Js, Value> {
+    let bytes = match address {
+        Value::Number(_) => {
+            let unsafe_number = || {
+                Thrown::error(
+                    "Error",
+                    "Value is not a safe integer. Use `bigIntToBytes` instead.",
+                )
+                .value
+            };
+            let number = safe_cex_num::numeric_ingress::js_value_as_f64(address)
+                .ok_or_else(unsafe_number)?;
+            if number < 0.0 {
+                return Err(Thrown::error("Error", "Value must be a non-negative number.").value);
+            }
+            if !number.is_finite() || number.fract() != 0.0 || number > 9007199254740991.0 {
+                return Err(unsafe_number());
+            }
+            (number as u64).to_be_bytes().to_vec()
+        }
+        Value::String(address) => {
+            if let Some(digits) = address
+                .strip_prefix("0x")
+                .or_else(|| address.strip_prefix("0X"))
+                && !digits.is_empty()
+                && digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                let byte_count = digits.len().div_ceil(2);
+                if byte_count > 20 {
+                    return Err(Thrown::error("ParserError", &format!(
+                        "Unable to encode value: Invalid address value. Expected address to be 20 bytes long, but received {byte_count} bytes."
+                    )).value);
+                }
+                return Ok(Value::String(format!(
+                    "0x{:0>40}",
+                    digits.to_ascii_lowercase()
+                )));
+            }
+            let mut integer = BigInt::from(0);
+            for unit in address.encode_utf16() {
+                let character = i32::from(unit) - 48;
+                let digit = if character >= 49 {
+                    character - 49 + 10
+                } else if character >= 17 {
+                    character - 17 + 10
+                } else {
+                    character
+                };
+                integer = integer * 10 + digit;
+            }
+            if integer.sign() == Sign::Minus {
+                return Err(Thrown::error("Error", "Value must be a non-negative bigint.").value);
+            }
+            let (_, mut bytes) = integer.to_bytes_be();
+            bytes.truncate(20);
+            bytes
+        }
+        address => {
+            let text = safe_cex_num::js_string(Some(address))
+                .map_err(|e| Thrown::error(e.name, &e.message).value)?;
+            return Err(Thrown::error(
+                "ParserError",
+                &format!(
+                    "An unexpected error occurred: Expected a bytes-like value, got \"{text}\"."
+                ),
+            )
+            .value);
+        }
+    };
+    Ok(Value::String(format!(
+        "0x{}{}",
+        "00".repeat(20 - bytes.len()),
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    )))
+}
+
 pub(super) fn sign(key: Js, typed: Js) -> JsResult<Js> {
     let key = value(key.to_js_string())?;
     let mut typed = value(to_json(&typed))?;
-    typed_numbers(&mut typed);
-    // MetaMask encodes this SDK address as bytes without EIP-55 validation.
-    // Normalize only the local signing copy before the shared ethers-style guard.
+    // Normalize only this SDK field in the local signing copy. Number addresses
+    // must retain their type until the SDK byte conversion is complete.
     if typed["primaryType"].as_str() == Some("OrderWithBuilderFee")
         && let Some(builder) = typed.get_mut("message").and_then(|v| v.get_mut("builder"))
-        && let Some(address) = builder.as_str()
-        && address.len() == 42
-        && address.starts_with("0x")
-        && address[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
     {
-        *builder = Value::String(address.to_ascii_lowercase());
+        *builder = sdk_builder_address(builder)?;
     }
+    typed_numbers(&mut typed);
     let raw = typed.to_string();
     safe_cex_crypto::eip712::sign_typed_data(&raw, &String::from_utf16_lossy(&key))
         .map(|signature| Js::str(&signature))
@@ -249,7 +328,6 @@ impl crate::trading_runtime::TradingHost for Host {
 mod tests {
     use super::*;
     #[test]
-    #[ignore = "requires Node, maintained TypeScript and the vendored SDK dependencies"]
     fn native_sdk_signature_matches_actual_sdk_source() {
         let output = std::process::Command::new("node")
             .arg(concat!(

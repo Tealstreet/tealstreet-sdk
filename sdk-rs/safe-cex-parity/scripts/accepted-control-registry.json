@@ -9,6 +9,9 @@
       "alias contracts retain actual types, compiler roots and direct native witnesses",
       "alias native cases cover positive conversions without redecoding their input"
     ],
+    "accepted-breakout-portfolio-native.test.mjs": [
+      "Breakout portfolio contracts execute the production native readers"
+    ],
     "accepted-callable-alias-native.test.mjs": [
       "generic callable aliases execute their actual fixed native probe and reject root identity drift"
     ],
@@ -30,15 +33,20 @@
       "selected candle-cache inventory closes every construction owner and rejects both error policy mutations"
     ],
     "accepted-contract-files.test.mjs": [
+      "per-crate contracts preserve every legacy value and explicit fixture file",
+      "contract directories reject missing malformed misplaced duplicate and hidden inputs",
+      "contract shard namespace and complete merge checks reject executed mutations",
       "authored JSON tokens retain integer key order, numbers and escaped keys",
       "generated case wrappers retain nested and primitive authored input tokens",
       "raw contract and dispatch token retention reject executed loader mutations",
-      "per-crate contracts preserve every legacy value and explicit fixture file",
-      "contract directories reject missing malformed misplaced duplicate and hidden inputs",
-      "contract shard namespace and complete merge checks reject executed mutations"
+      "source-aware JSON rejects duplicate decoded keys at every nesting level",
+      "source-aware JSON retains programmatic and edited negative zero",
+      "source-aware JSON retains authored integer-key order after edits"
+    ],
+    "accepted-contract-order-native.test.mjs": [
+      "authored integer-key order reaches the maintained native decoder probe"
     ],
     "accepted-contracts.test.mjs": [
-      "multi-entry dispatch carries authored raw case tokens into native contracts",
       "new public or private Deserialize owner fails closed by name",
       "new conversion is not discharged by a strict serde contract",
       "new inherent decoder fails even if its name is unrelated to parsing",
@@ -52,7 +60,8 @@
       "self-only Visitor unit witnesses cannot invent varying input or exempt data methods",
       "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders",
       "reviewed serializer constants pin compiler source adapters and witnesses",
-      "reviewed direct transport constant pins raw compiler source and native capability observations"
+      "reviewed direct transport constant pins raw compiler source and native capability observations",
+      "multi-entry dispatch carries authored raw case tokens into native contracts"
     ],
     "accepted-controls.test.mjs": [
       "private Cargo targets cannot execute a stale default scanner in production or history",
@@ -165,6 +174,21 @@
       "builtin macro capabilities follow sysroot realpaths and refuse Cargo shadows",
       "renamed same-name libraries require the active registry compiler artifact"
     ],
+    "accepted-model-field-native.test.mjs": [
+      "generic model field visitor has executed native decoder observations"
+    ],
+    "accepted-model-record-native.test.mjs": [
+      "model record visitors have executed native field observations"
+    ],
+    "accepted-napi-alias.test.mjs": [
+      "NAPI callbacks retain their exact compiler signatures and Cargo identities",
+      "unknown NAPI callback aliases keep the existing refusal",
+      "NAPI alias compiler and artifact guards are load bearing"
+    ],
+    "accepted-node-probes.test.mjs": [
+      "real Node probe execution is restricted to the production FFI addon profile",
+      "Node probe execution refuses failed builds and foreign or ambiguous Cargo artifacts"
+    ],
     "accepted-number-output-native.test.mjs": [
       "numeric production compiler binding catches a compiling recipe mutation"
     ],
@@ -206,6 +230,9 @@
     ],
     "accepted-telemetry-defaults.test.mjs": [
       "telemetry defaults execute inherited native results and reject body drift"
+    ],
+    "accepted-transport-socket-native.test.mjs": [
+      "Transport socket and provider contracts execute all four owners and reject production disconnects"
     ],
     "accepted-weex-kline-alias.test.mjs": [
       "exact Weex kline tuple policy refuses slot root and caller redirects",
@@ -392,6 +419,14 @@
     "projection native concrete owner identity",
     "receiver item pin widened to whole file",
     "receiver item source check removed",
+    "transport HOW auth wire token",
+    "transport relay close code",
+    "transport registry instance precedence",
+    "transport provider foreign URL refusal",
+    "NAPI alias source identity",
+    "NAPI alias expanded signature",
+    "NAPI alias nested Cargo identity",
+    "NAPI alias caller redirection",
     "authored JSON contract source retention",
     "authored JSON dispatch token retention",
     "authored JSON native key ordering"

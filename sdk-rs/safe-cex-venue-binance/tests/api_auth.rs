@@ -29,7 +29,9 @@ fn decoded(v: Value) -> EventValue {
 fn failure() -> Failure {
     let mut e = ExchangeError::new("api fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!("api-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "api-code"
+    )));
     e.response = Some(json!({"status":503}));
     Rc::new(e)
 }
@@ -75,11 +77,15 @@ fn original(got: &Failure, want: &Failure, label: &str) {
     assert!(Rc::ptr_eq(got, want), "{label}: original Error Rc");
     assert_eq!(got.name, "RangeError", "{label}");
     assert_eq!(got.message, "api fixture", "{label}");
-    assert_eq!(got.code, Some(json!("api-code")), "{label}");
+    assert_eq!(
+        observed_error_code(&got.code),
+        Some(json!("api-code")),
+        "{label}"
+    );
     assert_eq!(got.response, Some(json!({"status":503})), "{label}")
 }
 fn error_wire(e: &Failure, want: &Failure) -> Value {
-    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
 }
 #[derive(Default)]
 struct Trace(Vec<Value>);
@@ -1165,4 +1171,17 @@ fn auth() {
             "source Spot auth case{i}: native {a} source {b}"
         );
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

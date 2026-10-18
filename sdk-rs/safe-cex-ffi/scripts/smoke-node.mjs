@@ -9,5 +9,21 @@ try {
 }
 execFileSync(process.execPath, [join(crate, 'scripts/build.mjs'), 'node'], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-methods.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-deactivation.test.mjs')], { stdio: 'inherit' });
 execFileSync('bun', ['run', join(crate, 'smoke/bun/run.mjs')], { stdio: 'inherit' });
 execFileSync('bun', ['run', join(crate, 'smoke/bun/native-exchange.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-placement.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-streams.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-factory-errors.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-factory-routing.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-callback-lifetime.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-errors.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-hyperliquid-timeout.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-store.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-values.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-metadata.test.mjs')], { stdio: 'inherit' });
+
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-lifecycle.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-signer-availability.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-signer-rejections.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-events.test.mjs')], { stdio: 'inherit' });

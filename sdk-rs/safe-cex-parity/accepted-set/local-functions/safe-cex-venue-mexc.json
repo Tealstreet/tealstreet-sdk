@@ -1,23 +1,23 @@
 {
   "safe-cex-venue-mexc/src/api.rs::LOCAL_FUNCTION:entries": {
     "category": "non-decoder",
-    "reason": "Inside serialize_mexc_params: enumerates outbound parameter entries in JS own-key order (array indices, then de-duplicated object keys). Outbound serialization only.",
-    "sourceSha256": "ccf85463f978f0c0158c99fbe4e1e422a822388a6f23e57b84d78ff065313718"
+    "reason": "Inside serialize_mexc_params: enumerates outbound parameter entries in JS own-key order (array indices, then de-duplicated object keys). Outbound serialization only. Reviewed phase2: The separate request-body normalizer now accepts native Js and delegates shared JSON.stringify; the nested query entries/write helpers retain their exact bodies.",
+    "sourceSha256": "74f5cfe44cd6eab920241e251c5dce7b59d8528fc8515b9568de2bcf506a1785"
   },
   "safe-cex-venue-mexc/src/api.rs::LOCAL_FUNCTION:write": {
     "category": "non-decoder",
-    "reason": "Inside serialize_mexc_params: writes outbound parameter scalars as encoded key=value pairs, recursing into containers. Outbound serialization only.",
-    "sourceSha256": "ccf85463f978f0c0158c99fbe4e1e422a822388a6f23e57b84d78ff065313718"
+    "reason": "Inside serialize_mexc_params: writes outbound parameter scalars as encoded key=value pairs, recursing into containers. Outbound serialization only. Reviewed phase2: The separate request-body normalizer now accepts native Js and delegates shared JSON.stringify; the nested query entries/write helpers retain their exact bodies.",
+    "sourceSha256": "74f5cfe44cd6eab920241e251c5dce7b59d8528fc8515b9568de2bcf506a1785"
   },
   "safe-cex-venue-mexc/src/exchange_helpers.rs::LOCAL_FUNCTION:nonnull": {
     "category": "non-decoder",
     "reason": "Inside submit_error_fields: filters a JSON reference to non-null. No coercion, no typed output.",
-    "sourceSha256": "486c3eb86f59c972ed5d22f12f53ccbeb706270190945f60b37b3aced31caf85"
+    "sourceSha256": "f254372ec750712e4012388c88935d4b9b5db291368f2962c248ba1ea7be24df"
   },
   "safe-cex-venue-mexc/src/utils.rs::LOCAL_FUNCTION:row_balance": {
     "category": "decoder-helper",
     "runtimeOwner": "safe_cex_venue_mexc::utils::normalize_balance",
     "reason": "Inside normalize_balance: picks aliased balance fields from one raw row and coerces them to numbers, retaining the row as info. Raw JSON to typed Balance; its runtime owner's probes exercise it.",
-    "sourceSha256": "a21a833b2174543371284f88e091f39693eff920c73f66e14be9c926a3608611"
+    "sourceSha256": "cc256268f5e0a1af606563e1d4427e0ef5deab6673d06ab231f02d790742267f"
   }
 }

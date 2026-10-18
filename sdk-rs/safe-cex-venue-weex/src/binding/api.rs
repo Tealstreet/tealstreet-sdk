@@ -93,45 +93,18 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
                 if !value.is_string() {
                     return Ok(value);
                 }
-                Ok(safe_cex_exchange::js_runtime::value::from_json(
-                    &safe_cex_transport::how::big_int_as_string_json_parse(&value.to_display()),
+                Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+                    safe_cex_transport::how::big_int_as_string_json_parse(&value.to_display()),
                 ))
             }))
         },
-        create: |h, config, options, exchange| {
-            // The shared wire host supplies original tokens. Install this venue's
-            // explicit transform before its response/error status handling.
-            let transform = config.get("transformResponse")?;
-            config.define("responseType", Js::str("text"))?;
+        create: |h, config, options, _exchange| {
             let xhr = safe_cex_exchange::js_runtime::client::factory::create(
                 h.0.shared.http.clone(),
                 h.0.shared.runtime.transport().as_ref(),
                 config,
                 &options,
-                to_typed(&exchange.get("name")?)?,
-            )?;
-            let apply = std::rc::Rc::new(move |response: &Js| -> Result<(), Thrown> {
-                let data = transform.call(Js::Undefined, std::vec![response.get("data")?])?;
-                response.set("data", data)
-            });
-            let fulfilled = apply.clone();
-            xhr.get("interceptors")?.get("response")?.call_method(
-                "use",
-                std::vec![
-                    Js::function("weexTransformResponse", move |_, args| {
-                        let response = arg(&args, 0);
-                        fulfilled(&response)?;
-                        Ok(response)
-                    }),
-                    Js::function("weexTransformErrorResponse", move |_, args| {
-                        let error = arg(&args, 0);
-                        let response = v::optional_dummy(&error, "response")?;
-                        if !response.is_nullish() {
-                            apply(&response)?;
-                        }
-                        Err(Thrown::new(error))
-                    }),
-                ],
+                h.0.base(),
             )?;
             Ok(xhr)
         },
@@ -143,7 +116,11 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
                 .call_method("use", std::vec![callback])?;
             Ok(())
         },
-        clock_ms: |h| Ok(Js::Number(h.0.now())),
+        clock_ms: |_| {
+            Ok(Js::Number(
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
+            ))
+        },
         sign: |_, secret, message| {
             Ok(Js::str(&crate::signing::sign_weex_message(
                 &v::units(&secret)?,
@@ -202,7 +179,9 @@ fn install_retry(h: &Host, client: &Js) -> Result<(), Thrown> {
                                 status: status.unwrap_or(0.0) as u16,
                                 reason: None,
                                 headers: Default::default(),
-                                body: RestResponseBody::Untransformed(serde_json::Value::Null),
+                                body: RestResponseBody::Untransformed(
+                                    safe_cex_types::retained_json::RetainedJsonInput::Null,
+                                ),
                             })
                         }),
                         request: Box::default(),

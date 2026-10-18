@@ -42,6 +42,27 @@ test('authored JSON tokens retain integer key order, numbers and escaped keys', 
   } finally { f.close(); }
 });
 
+test('source-aware JSON rejects duplicate decoded keys at every nesting level', () => {
+  for (const text of ['{"x":1,"x":2}', '{"input":{"x":1,"\\u0078":2}}', '[{"x":1,"x":2}]']) {
+    assert.throws(() => parseJsonWithSource(text), /duplicate JSON key: x/);
+  }
+});
+
+test('source-aware JSON retains programmatic and edited negative zero', () => {
+  assert.equal(stringifyJsonWithSource({ input: -0 }), '{"input":-0}');
+  const row = parseJsonWithSource('{"input":1,"output":true}');
+  row.input = -0;
+  assert.equal(stringifyJsonWithSource(row), '{"input":-0,"output":true}');
+});
+
+test('source-aware JSON retains authored integer-key order after edits', () => {
+  const row = parseJsonWithSource('{"9":9,"2":2,"x":1}');
+  row.x = 3;
+  assert.equal(stringifyJsonWithSource(row), '{"9":9,"2":2,"x":3}');
+  row.extra = false;
+  assert.equal(stringifyJsonWithSource(row), '{"9":9,"2":2,"x":3,"extra":false}');
+});
+
 test('generated case wrappers retain nested and primitive authored input tokens', () => {
   for (const raw of ['{"9":9,"2":2,"x":1}', '-0', '9007199254740993', '1e400']) {
     const row = parseJsonWithSource(`{"input":${raw},"output":true}`);
@@ -64,7 +85,7 @@ test('raw contract and dispatch token retention reject executed loader mutations
       ['authored JSON contract source retention', loader, "const value = parseJsonWithSource(fs.readFileSync(file, 'utf8'));", "const value = JSON.parse(fs.readFileSync(file, 'utf8'));",
         `const {loadContracts}=await import(${JSON.stringify(loader)});assert.match(stringifyJsonWithSource(loadContracts(${JSON.stringify(f.legacy)})),/"input":\\{"9":9,"2":2,"x":1\\}/,'authored JSON contract source retention must preserve order');`],
       ['authored JSON dispatch token retention', tokens, '  if (node) {', '  if (false) {',
-        "const row=parseJsonWithSource('{\"input\":-0}');const wrapped=copyJsonSourceProperty({input:row.input},'input',row);assert.equal(stringifyJsonWithSource(wrapped),'{\"input\":-0}','authored JSON dispatch token retention must preserve primitive');"],
+        "const row=parseJsonWithSource('{\"input\":9007199254740993}');const wrapped=copyJsonSourceProperty({input:row.input},'input',row);assert.equal(stringifyJsonWithSource(wrapped),'{\"input\":9007199254740993}','authored JSON dispatch token retention must preserve primitive');"],
     ];
     for (const [label, module, anchor, replacement, assertion] of mutations) {
       const execute = mutate => spawnSync(process.execPath, ['--input-type=module', '--eval', `import assert from 'node:assert/strict';import {registerHooks} from 'node:module';${mutate ? `registerHooks({load(url,context,next){const result=next(url,context);if(url!==${JSON.stringify(module)})return result;const source=String(result.source),anchor=${JSON.stringify(anchor)};assert.equal(source.split(anchor).length,2);return {...result,source:source.replace(anchor,${JSON.stringify(replacement)})};}});` : ''}const {parseJsonWithSource,stringifyJsonWithSource,copyJsonSourceProperty}=await import(${JSON.stringify(tokens)});${assertion}`], { encoding: 'utf8' });
@@ -149,5 +170,26 @@ test('contract shard namespace and complete merge checks reject executed mutatio
       console.log(`${label}: named assertion; process exit 1`);
       result = run(false); assert.equal(result.status, 0, result.stderr);
     }
+  } finally { f.close(); }
+});
+
+test('native contract serialization retains authored nested keys and signed zero', async () => {
+  const { contractJson } = await import('./accepted-contract-files.mjs');
+  const f = fixture();
+  try {
+    const text = String.raw`{"fixture_core::Owner":{"cases":[{"input":{"9":9,"2":2,"x":[{"10":10,"1":1,"text":"escaped \\\" {} [] : ,"}],"zero":-0},"output":null}]}}`;
+    fs.writeFileSync(f.legacy, text);
+    const contract = loadContracts(f.legacy)['fixture_core::Owner'];
+    const input = contract.cases[0].input;
+    const expected = String.raw`{"9":9,"2":2,"x":[{"10":10,"1":1,"text":"escaped \\\" {} [] : ,"}],"zero":-0}`;
+    assert.equal(contractJson(input), expected, 'authored order must survive at every nesting level');
+    assert.equal(contractJson({ generated: input }), `{"generated":${expected}}`, 'generated dispatch wrappers retain authored children');
+    input.extra = false;
+    delete input['9'];
+    const encoded = contractJson(input);
+    assert.ok(encoded.startsWith('{"2":2,"x":['));
+    assert.ok(encoded.endsWith(',"zero":-0,"extra":false}'), 'serialization must observe current fields rather than stale source bytes');
+    fs.writeFileSync(f.legacy, '{"fixture_core::Owner":{"x":1,"\\u0078":2}}');
+    assert.throws(() => loadContracts(f.legacy), /duplicate JSON key: x/);
   } finally { f.close(); }
 });

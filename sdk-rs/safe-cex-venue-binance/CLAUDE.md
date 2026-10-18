@@ -467,3 +467,72 @@ These native referents support the existing data/reference profile, not arbitrar
 intrinsic execution or full descriptors. Typed DTO conversion uses the shared
 native bridge. See [shared value evidence](SHARED_VALUES.md); the separately
 planned typed JS-string cutover remains outside this change.
+
+The native host's `uuid()` must use `safe_cex_crypto::uuid::uuid`, the maintained
+source `nanoid().replace(/-|_/g, '')` implementation. RFC UUID-v4 is36 characters
+before the10-character broker prefix and exceeds every family's ID limit.
+Stripping the default21-character nanoid yields at most21 alphanumerics; do not
+pad it to a fixed length. The production dependency/owner witnesses in
+`tests/private_classes.rs` cover actual host entropy, minting, regular/split and
+attached/standalone/trailing payloads, and preserve caller IDs. Run them with
+`--features native`; a default-feature filtered run cannot execute this host.
+The same native host fixtures deliver private orders/fills/positions/balance
+frames through the assembled private binding and assert real Store and emitted
+fill contents, including the source's ignored derivative balance rows and Spot's
+absence of a derivative-position topic.
+
+
+The unused `private_order_logic` JSON classifier and the opt-in typed historical
+mapper are removed. The production socket and its event tests share
+`private_events::get_order_reject_reason`; history orchestration tests consume
+the same native mapper as the actual exchange. Keep the canonical history source
+corpus in `history_native` and the production private-topic regressions in
+`private_classes --features native`; do not restore a parallel typed mapper to
+make a test host easier to implement.
+
+Signature-predicate coercion failures retain their TypeError name and unprefixed
+message through the shared ExchangeError conversion. The real native receiver
+regressions cover both resolved and rejected HTTP responses without a resend.
+
+Native HTTP dispatch retains the original params/data until the real request
+interceptors run. Query BigInt leaves take qs decimal spelling; signed bodies
+are moved into query fields by the source signer before JSON transformation.
+Public/unsigned BigInt bodies reject with TypeError before terminal I/O, retaining
+the original refusal when signing is skipped. Never turn a conversion error into
+an absent params/body field. `private_classes::native_projection_*` uses actual
+native imports, factories, signing and terminal HTTP; four regressions compile
+and fail on master. Signed GET/POST wire bytes and HMACs compare against actual
+TypeScript with real qs/create-hmac in one two-case capture. Maintained typed
+exchange callers still supply ordinary string/number payloads; these BigInt cases
+cover the reachable native-host boundary, not a new typed DTO admission claim.
+
+Portfolio Margin account updates keep the source body's `info: position` reference
+until the concrete native Store adapter. That adapter applies the approved
+representation choice: a depth-one snapshot of the updated position's own fields,
+excluding `info`. Include the current price/contracts/PnL/side patch before
+capturing it; a previous-state snapshot has stale readable fields. Identity and
+recursive `info` reads remain an accepted divergence from TS's cycle. Never nest
+the previous owned info on every frame. The native `private_classes` growth and
+current-field regressions use the real socket and Store;
+`SAFE_CEX_TYPESCRIPT_PATH=<typescript> node scripts/pm-position-info.mjs` observes
+the maintained TS handler with the actual TS Store across sixteen changing frames.
+
+
+Concrete market reads apply the approved strict-asset row policy after complete
+source REST projection. Non-string base/quote/symbol or nonnumeric leverage-max rows emit their
+field and original value through the existing error path; valid siblings remain available to typed
+fetch and Store refresh. Raw REST helpers retain their source-owned values.
+
+Native depth application converts coercion failures through ExchangeError::from,
+retaining the source error name and cause. The production socket regression covers
+all three families, subsequent valid deltas and sequence-gap snapshot recovery.
+
+The constructed ticker census in `private_classes --features native` uses actual
+NativeImports and ExchangeOwner/PublicSocket dispatch for all three families.
+Futures and PM each cover80 field-independent packed frames through market and
+book sockets; Spot covers48. All native numeric fields compare by bits against
+the constructed maintained TS exchanges and DefaultStores after finite resets,
+with distinct good rows surrounding malformed input. The shared control runner
+misroutes the live last-price publication and requires all three family tests
+to compile and fail, then all three pass after exact restoration. Default-feature
+filtered runs cannot execute these native-host witnesses.

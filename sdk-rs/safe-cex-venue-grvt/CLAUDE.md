@@ -192,8 +192,10 @@ These extracted helpers have no Store effects; mapOrder has separate runtime tes
 
 Market reads now use src/markets.rs and the shared optional Market.is_perpetual.
 The configured post hook supplies already transformed response.data. Keep native
-representation refusal after source mapping and logging; earlier malformed base
-fields must not conceal a later null row's source error. Refresh always replaces
+representation admission after source mapping and logging; earlier malformed base
+fields must not conceal a later null row's source error. Strict base/quote refusals
+now omit only that row and log its index/id and exact field values at Warning,
+under the approved per-row policy; valid surrounding markets remain available. Refresh always replaces
 signing metadata before membership events. Its old snapshots and callback values
 are owned; the manifest names the measured difference from live JS aliases.
 
@@ -294,16 +296,73 @@ APIs, method bodies, TypeScript sources and native witnesses; only the import-dr
 Rust line spans and whole-file hash change. This visibility repair does not
 classify the remaining unreviewed owners.
 
-GRVT SDK OrderWithBuilderFee signing treats its 20-byte 0x-prefixed builder
-address as bytes, matching the vendored MetaMask signer rather than ethers'
-checksum admission. Normalize only that address's casing in the local typed-data
-copy before calling shared EIP-712; preserve the caller's original spelling and
-all existing integer conversion. The 24-case actual-SDK signature matrix covers
-three address spellings across both networks, order kinds and integer ranges.
-Shared ethers address validation and legacy signing retain their own boundaries.
+GRVT SDK OrderWithBuilderFee signing converts the builder field with MetaMask's
+address rules in the local typed-data copy before shared EIP-712. Short hex and
+either prefix casing are padded to 20 bytes; safe integer Numbers become bytes.
+Other strings use the SDK dependency's legacy base-10 loop over UTF-16 units,
+including its first-20-byte selection for oversized results. Preserve source
+error names/messages, the caller's original value/reference, and integer-field
+conversion after the address's Number conversion. The original 24-case signature
+matrix remains; a separate constructed SDK host compares 24 independently
+authored address inputs with the actual vendored Signer. Shared ethers address
+validation and legacy signing retain their own boundaries.
 
 The native `Exchange::refresh_markets` entry calls the existing GRVT receiver
 override, which always replaces stored markets. It must not inherit the shared
 membership-only refresh: unchanged IDs can carry new tick, limit and ih/bd/qd
 signing metadata. Constructed trait regressions cover that replacement and the
 added/removed native result projection.
+
+
+The SDK signature oracle runs in the ordinary native lib test suite (no ignore
+annotation). Its offline vendored-SDK matrix compares 24 complete signatures and
+r/s/v values across both networks, order kinds, Number integer boundaries and
+builder-address casing. It requires Node, TypeScript and vendored SDK dependencies;
+missing dependencies fail the oracle rather than silently skipping signing checks.
+
+The accepted signing-metadata row includes 66/67-character hash boundaries.
+`exchange_binding` sends both through actual market loading and placement, comparing
+with the maintained TS method: 66 characters signs/submits, 67 refuses before
+builder lookup. `hash-length-binding-control.py` removes the production bound,
+requires a compiled placement diagnostic failure and restores/reruns the witness.
+
+The accepted builder fee contract includes negative-half and signed-zero bits.
+The production placement witness feeds negative authorization caps through the
+real client/builder check and verifies its refusal message before any order write.
+`tests/negative-half-binding-control.py` swaps only Math.round for Rust round,
+requires that binding assertion to fail after compilation, restores exact bytes
+and requires the witness to pass. Native private frame tests also assert orders,
+fill events, positions and the balance UPNL updated by a position event.
+
+`convertInterval` preserves the twelve stock inherited table members in the
+assembled class as native realm references. The typed OHLCV caller still uses the
+closed Timeframe union; the receiver-level test calls the real constructor's
+method, compares all 93 maintained-source cases, and checks inherited kind,
+stringification, arity and repeated reference identity. The accepted helper row
+now witnesses every inherited member (17 -> 27 cases).
+
+`private_receive_watchdog_obeys_grvt_idle_thresholds` drives the real private socket
+through authentication and the shared receive timer. GRVT stays silent at 8 seconds,
+pings after 30 seconds and reconnects after 90 seconds with source Warning severity.
+The shared socket bridge preserves lastReceived reads and dispatches the actual
+GRVT override; the former base-only timer fails the 8-second assertion.
+
+The uncalled generic api_runtime::last_segment copy and its isolated session
+routing cases were removed. TypeScript lastSegment is an unexported helper of
+isGrvtRead; production request classification retains the shared transport
+predicate. The session oracle keeps its other eight groups (84 source cases).
+The helper manifest row is not-applicable, with the live predicate mapped next
+to it; this does not remove any exported builder or browser workflow.
+
+The concrete amendment and cancellation catch callbacks invoke the installed
+`emitAndLogError` reporter. Constructed binding regressions cover preflight
+amendment refusal and SDK account/symbol cancellation failures: reporter metadata,
+console error/trace effects and the absence of premature amendment writes must
+survive. Direct emitter calls lose the source reporter's second argument.
+
+Constructed candle coverage in `tests/exchange_binding.rs` drives REST and raw
+public socket frames for lite/full aliases, nanosecond-string versus numeric
+millisecond timestamps, truthy fallback, reverse REST order and callback cleanup.
+It compares all six native fields against unchanged maintained-source captures,
+including NaN, infinities and signed zero. Run `tests/candle-binding-controls.mjs`
+alone for two compiling live-volume substitutions and exact restoration proof.

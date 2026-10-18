@@ -19,7 +19,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_num::JsJsonValue as J;
 use safe_cex_store::Store;
-use safe_cex_types::*;
+use safe_cex_types::{Candle, ExchangeOptions, OHLCVOptions, OrderBook};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -43,7 +43,6 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
     native.response = field("response");
     native.config = field("config");
     native.request = field("request");
-    native.code = field("code");
     native
 }
 // Conversion between the existing prepared-data carrier and shared JS heap.
@@ -103,7 +102,7 @@ impl Host {
         let public = sockets::base_websocket(&scope.sockets, parent.clone());
         let private = sockets::base_websocket(&scope.sockets, parent);
         Rc::new(Self {
-            sdk: NativeSigner::module(scope.runtime.clone()),
+            sdk: NativeSigner::module(),
             scope,
             public,
             private,
@@ -316,10 +315,7 @@ impl ApexServices for Host {
     }
     fn new_signer(&self, seed: Option<String>) -> ExchangeFuture<'_, Rc<dyn ZkLinkHost>> {
         Box::pin(async move {
-            Ok(Rc::new(NativeSigner::from_seed(
-                self.scope.runtime.clone(),
-                seed.as_deref(),
-            )?) as Rc<dyn ZkLinkHost>)
+            Ok(Rc::new(NativeSigner::from_seed(seed.as_deref())?) as Rc<dyn ZkLinkHost>)
         })
     }
     fn schedule_tick(
@@ -341,7 +337,10 @@ impl ApexServices for Host {
             .ok_or_else(|| ExchangeError::new("socket disposed"))?;
         body.throttle_fetch_orders()
     }
-    fn place_orders(&self, orders: Vec<PlaceOrderOpts>) -> ExchangeFuture<'_, Vec<String>> {
+    fn place_orders(
+        &self,
+        orders: Vec<safe_cex_types::PreparedOrderOpts>,
+    ) -> ExchangeFuture<'_, Vec<String>> {
         let venue = self
             .scope
             .sockets
@@ -351,7 +350,15 @@ impl ApexServices for Host {
             .and_then(Weak::upgrade);
         Box::pin(async move {
             let venue = venue.ok_or_else(|| ExchangeError::new("ApexOmni exchange released"))?;
-            self.base().place_orders(venue.as_ref(), orders).await
+            self.base().assert_caller_client_order_ids(&orders)?;
+            let venue = (venue.as_ref() as &dyn std::any::Any)
+                .downcast_ref::<super::exchange::ApexOmniExchange>()
+                .ok_or_else(|| ExchangeError::new("ApexOmni placement receiver changed type"))?;
+            let mut ids = Vec::new();
+            for order in orders {
+                ids.extend(venue.inner.place_order(order).await?);
+            }
+            Ok(ids)
         })
     }
     fn dayjs_value_ms(&self, input: Option<f64>) -> Result<f64, ExchangeError> {

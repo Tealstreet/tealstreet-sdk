@@ -36,6 +36,7 @@ struct Runtime {
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
+    dial_socket: RefCell<Option<Rc<dyn WsSocket>>>,
 }
 impl Runtime {
     fn pump(&self) {
@@ -1238,7 +1239,10 @@ impl WsRuntime for Runtime {
         _: WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
-        Box::pin(std::future::pending())
+        match self.dial_socket.borrow().clone() {
+            Some(socket) => Box::pin(std::future::ready(Ok(socket))),
+            None => Box::pin(std::future::pending()),
+        }
     }
     fn headers_capable(&self) -> bool {
         false
@@ -2545,7 +2549,7 @@ fn exchange_class_sdk_external_listener_setup_and_cleanup_keep_errors() {
     let owner = class_owner(Venue::Futures, Rc::new(Imports::default()), runtime);
     let exchange = sdk_class(Venue::Futures, owner.clone());
     let mut error = ExchangeError::new("authored external listener error");
-    error.code = Some(json!(731));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(731)));
     let provider = Rc::new(ThrowingExternal {
         error: error.clone(),
         setup_fails: Cell::new(false),
@@ -2817,7 +2821,7 @@ const SIXTEEN_METHOD_OUTCOMES: &[(&str, &str, &str, &[&str])] = &[
     (
         "Futures",
         "fetch_positions",
-        r#"ok:[{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":10.0,"notional":10.0,"leverage":5.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.5,"contracts":1.0,"liquidationPrice":0.0,"marginSize":2.0,"info":{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1.0}},{"id":"ETHUSDC","symbol":"ETHUSDC","side":"long","entryPrice":0.0,"notional":0.0,"leverage":0.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.0,"contracts":0.0,"liquidationPrice":0.0,"marginSize":0.0,"info":{"synthetic":true,"symbolConfig":null}}]"#,
+        r#"ok:[{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":10.0,"notional":10.0,"leverage":5.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.5,"contracts":1.0,"liquidationPrice":0.0,"marginSize":2.0,"info":{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1.0}},{"id":"ETHUSDC","symbol":"ETHUSDC","side":"long","entryPrice":0.0,"notional":0.0,"leverage":0.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.0,"contracts":0.0,"liquidationPrice":0.0,"marginSize":0.0,"info":{"synthetic":true}}]"#,
         &["/fapi/v3/positionRisk", "/fapi/v1/symbolConfig"],
     ),
     (
@@ -3222,6 +3226,7 @@ fn native_import_default_weight_property_returns_existing_values() {
         std::sync::Arc::new(UnusedAdapter),
         Rc::new(|_, _| panic!("property forwarding must not construct external data")),
         None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
     );
     let receiver: &dyn ExchangeImports = dependencies.imports.as_ref();
     let child = record([("id", number(-0.0))]);
@@ -3251,4 +3256,1460 @@ fn native_import_default_weight_property_returns_existing_values() {
             .name,
         "TypeError"
     );
+}
+
+#[cfg(feature = "native")]
+fn production_native_owner(venue: Venue) -> Rc<ExchangeOwner> {
+    let runtime = Rc::new(Runtime::default());
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime,
+        std::sync::Arc::new(IdOnlyAdapter),
+        Rc::new(|_, _| panic!("no external provider is configured")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let name = match venue {
+        Venue::Futures => "binance",
+        Venue::PM => "binancepm",
+        Venue::Spot => "binancespot",
+    };
+    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    safe_cex_store::Store::update(
+        store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.1},"limits":{"amount":{"min":0.1,"max":1},"leverage":{"min":1,"max":100}}})).unwrap()]),
+            tickers: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","bid":99,"ask":101,"last":100,"mark":100,"index":100,"percentage":0,"volume":0,"quoteVolume":0,"fundingRate":0,"fundingTime":0,"openInterest":0})).unwrap()]),
+            positions: Some(vec![serde_json::from_value(json!({"id":"BTCUSDTshort","symbol":"BTCUSDT","side":"short","entryPrice":100,"notional":300,"leverage":10,"unrealizedPnl":0,"contracts":3,"liquidationPrice":200})).unwrap()]),
+            ..Default::default()
+        },
+        false,
+    ).unwrap();
+    ExchangeOwner::new(
+        venue,
+        serde_json::from_value(json!(name)).unwrap(),
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        store,
+        dependencies,
+    )
+    .unwrap()
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_client_ids_fit_every_family_and_payload_path() {
+    use safe_cex_venue_binance::exchange_classes::ExchangeImports;
+    // Exercise the actual production import, not Imports::uuid()'s "fixture".
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        Rc::new(Runtime::default()),
+        std::sync::Arc::new(IdOnlyAdapter),
+        Rc::new(|_, _| panic!("ID generation has no external-data dependency")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let imports: &dyn ExchangeImports = dependencies.imports.as_ref();
+    for _ in 0..128 {
+        let id = imports.uuid();
+        assert!(
+            id.len() <= 21,
+            "production uuid must be stripped nanoid, got {id:?}"
+        );
+        assert!(
+            id.bytes().all(|b| b.is_ascii_alphanumeric()),
+            "source strips both URL-alphabet punctuation characters: {id:?}"
+        );
+    }
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let mint_opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":90}),
+        )
+        .unwrap();
+        let minted = owner
+            .base
+            .mint_client_order_id(&mint_opts)
+            .expect("production rule mint must produce a valid venue ID");
+        assert!(minted.starts_with("x-s3vFFRQp"));
+        assert!(minted.len() <= "x-s3vFFRQp".len() + 21);
+        assert!(
+            minted["x-s3vFFRQp".len()..]
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric())
+        );
+        let check = |row: &EventValue, field: &str, prefixed: bool| {
+            let id = row.read(field).unwrap().text().unwrap();
+            let suffix = if prefixed {
+                id.strip_prefix("x-s3vFFRQp").expect("broker prefix")
+            } else {
+                &id
+            };
+            assert!(
+                suffix.len() <= 21,
+                "native payload suffix is stripped nanoid: {venue:?} {field} {id}"
+            );
+            assert!(suffix.bytes().all(|b| b.is_ascii_alphanumeric()));
+            assert!(
+                id.len() <= if venue == Venue::PM { 32 } else { 36 },
+                "venue ID length: {venue:?} {field} {id}"
+            );
+        };
+        for (kind, amount, attached, count) in [
+            ("limit", 1.0, false, 1),
+            ("market", 3.0, false, 3),
+            ("limit", 3.0, true, 5),
+            ("stop_market", 1.0, false, 1),
+            ("take_profit_market", 1.0, false, 1),
+        ] {
+            let mut options =
+                json!({"symbol":"BTCUSDT","type":kind,"side":"buy","amount":amount,"price":90});
+            if attached {
+                options["stopLoss"] = json!(80);
+                options["takeProfit"] = json!(120);
+            }
+            let result = owner.format_order(EventValue::from_json(options)).unwrap();
+            let (regular, algo) = if venue == Venue::Futures {
+                (
+                    result.read("regular").unwrap(),
+                    result.read("algo").unwrap(),
+                )
+            } else {
+                (result, EventValue::array(vec![]))
+            };
+            assert_eq!(
+                regular.array_values().unwrap().len() + algo.array_values().unwrap().len(),
+                count,
+                "real formatted payload count {venue:?} {kind}"
+            );
+            for row in regular.array_values().unwrap() {
+                check(&row, "newClientOrderId", true);
+            }
+            for row in algo.array_values().unwrap() {
+                check(&row, "clientAlgoId", true);
+            }
+        }
+        let result = owner.format_order(EventValue::from_json(json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":90,"clientOrderId":"caller_kept-123"}))).unwrap();
+        let rows = if venue == Venue::Futures {
+            result.read("regular").unwrap()
+        } else {
+            result
+        };
+        assert_eq!(
+            rows.array_values().unwrap()[0]
+                .read("newClientOrderId")
+                .unwrap()
+                .text()
+                .unwrap(),
+            "caller_kept-123"
+        );
+        if venue != Venue::Spot {
+            let opts = serde_json::from_value(json!({"symbol":"BTCUSDT","type":"trailing_stop_market","side":"buy","amount":1,"price":90})).unwrap();
+            let rows = owner.format_trailing(&opts).unwrap();
+            assert_eq!(rows.array_values().unwrap().len(), 1);
+            check(
+                &rows.array_values().unwrap()[0],
+                if venue == Venue::PM {
+                    "newClientOrderId"
+                } else {
+                    "clientAlgoId"
+                },
+                venue != Venue::PM,
+            );
+            let rows = owner
+                .format_order(EventValue::from_json(serde_json::to_value(opts).unwrap()))
+                .unwrap();
+            let rows = if venue == Venue::Futures {
+                rows.read("algo").unwrap()
+            } else {
+                rows
+            };
+            assert_eq!(rows.array_values().unwrap().len(), 1);
+            check(
+                &rows.array_values().unwrap()[0],
+                if venue == Venue::PM {
+                    "newClientOrderId"
+                } else {
+                    "clientAlgoId"
+                },
+                venue != Venue::PM,
+            );
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+struct IdOnlyAdapter;
+#[cfg(feature = "native")]
+impl safe_cex_transport::RestAdapter for IdOnlyAdapter {
+    fn execute(
+        &self,
+        _: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        panic!("ID-only production host must perform no HTTP I/O")
+    }
+}
+
+#[cfg(feature = "native")]
+fn native_fill_events(owner: &ExchangeOwner) -> Rc<RefCell<Vec<Value>>> {
+    let events = Rc::new(RefCell::new(vec![]));
+    let saved = events.clone();
+    owner.base.on(
+        "fill",
+        Rc::new(move |_, payload| {
+            let payload = safe_cex_exchange::js_runtime::value::to_json(payload).unwrap();
+            saved.borrow_mut().push(payload.clone());
+            Ok(())
+        }),
+    );
+    events
+}
+
+#[cfg(feature = "native")]
+fn native_order_frame(venue: Venue, filled: bool) -> Value {
+    let data = json!({"e":"executionReport","c":"native-client","i":42,"X":if filled {"PARTIALLY_FILLED"}else{"NEW"},"x":if filled {"TRADE"}else{"NEW"},"ot":"LIMIT","o":"LIMIT","s":"BTCUSDT","S":"BUY","p":"91.2","ap":"92.3","sp":"0","q":"3","z":if filled {"0.75"}else{"0"},"l":"0.25","R":false});
+    if venue == Venue::Spot {
+        json!({"subscriptionId":7,"event":data})
+    } else {
+        json!({"e":"ORDER_TRADE_UPDATE","o":data})
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_orders_frames_update_the_real_store() {
+    use safe_cex_types::{OrderSide, OrderStatus, OrderType};
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let fills = native_fill_events(&owner);
+        owner
+            .private
+            .on_message(string(native_order_frame(venue, false).to_string()))
+            .unwrap();
+        let rows = owner.base.store.orders();
+        assert_eq!(
+            rows.len(),
+            1,
+            "one order through real private binding: {venue:?}"
+        );
+        let order = &rows[0];
+        assert_eq!(
+            order.id,
+            if venue == Venue::Futures {
+                "42"
+            } else {
+                "native-client"
+            }
+        );
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.status, OrderStatus::Open);
+        assert_eq!(order.r#type, OrderType::Limit);
+        assert_eq!(order.side, OrderSide::Buy);
+        assert_eq!(
+            (
+                order.price.to_number(),
+                order.amount,
+                order.filled,
+                order.remaining
+            ),
+            (91.2, 3.0, 0.0, 3.0)
+        );
+        assert!(fills.borrow().is_empty(), "NEW must emit no fill");
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_fill_frames_emit_and_update_the_real_order() {
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let fills = native_fill_events(&owner);
+        owner
+            .private
+            .on_message(string(native_order_frame(venue, false).to_string()))
+            .unwrap();
+        owner
+            .private
+            .on_message(string(native_order_frame(venue, true).to_string()))
+            .unwrap();
+        let rows = owner.base.store.orders();
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].filled, rows[0].remaining), (0.75, 2.25));
+        assert_eq!(rows[0].status, safe_cex_types::OrderStatus::Open);
+        assert_eq!(
+            *fills.borrow(),
+            [
+                json!({"id":if venue==Venue::Futures {"42"}else{"native-client"},"side":"buy","symbol":"BTCUSDT","price":if venue==Venue::Spot {91.2}else{92.3},"amount":0.25})
+            ],
+            "native emitted fill contents: {venue:?}"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_position_frames_update_the_real_store() {
+    for venue in [Venue::Futures, Venue::PM] {
+        let owner = production_native_owner(venue);
+        let fills = native_fill_events(&owner);
+        let frame = json!({"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTCUSDT","pa":"2","ep":"110","up":"7","ps":"BOTH"}],"B":[]}});
+        // Native test time starts at 0: the production throttle schedules its
+        // REST repair, allowing this immediate WS mutation to be observed first.
+        owner.private.on_message(string(frame.to_string())).unwrap();
+        let positions = owner.base.store.positions();
+        let p = positions
+            .iter()
+            .find(|p| {
+                p.id == if venue == Venue::Futures {
+                    "BTCUSDT"
+                } else {
+                    "BTCUSDTshort"
+                }
+            })
+            .unwrap();
+        assert_eq!(p.symbol, "BTCUSDT");
+        assert_eq!(p.side, safe_cex_types::PositionSide::Long);
+        assert_eq!(
+            (p.contracts, p.entry_price, p.unrealized_pnl),
+            (2.0, 110.0, 7.0)
+        );
+        assert_eq!(
+            p.notional,
+            if venue == Venue::Futures {
+                227.0
+            } else {
+                220.0
+            }
+        );
+        assert!(fills.borrow().is_empty(), "account frame must emit no fill");
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_position_info_does_not_grow_per_frame() {
+    let owner = production_native_owner(Venue::PM);
+    let frame = json!({"e":"ACCOUNT_UPDATE","a":{"P":[{
+        "s":"BTCUSDT","pa":"2","ep":"110","up":"7","ps":"BOTH"
+    }],"B":[]}})
+    .to_string();
+    let mut first_depth = None;
+    for index in 0..8 {
+        owner.private.on_message(string(frame.clone())).unwrap();
+        let positions = owner.base.store.positions();
+        let position = positions.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+        assert_eq!((position.contracts, position.entry_price), (2.0, 110.0));
+        let mut info = position.info.as_ref();
+        let mut depth = 0;
+        while let Some(value) = info {
+            depth += 1;
+            info = value.get("info");
+        }
+        let expected = *first_depth.get_or_insert(depth);
+        assert_eq!(
+            depth, expected,
+            "identical PM frame {index} must not append a previous-position info snapshot"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_position_info_is_the_current_position_without_info() {
+    let owner = production_native_owner(Venue::PM);
+    for index in 0..16 {
+        let amount: f64 = if index % 2 == 0 { 2.0 } else { -3.0 };
+        let entry = 110.0 + f64::from(index);
+        let upnl = 7.0 - f64::from(index);
+        let frame = json!({"e":"ACCOUNT_UPDATE","a":{"P":[{
+            "s":"BTCUSDT","pa":amount.to_string(),"ep":entry.to_string(),
+            "up":upnl.to_string(),"ps":"BOTH"
+        }],"B":[]}});
+        owner.private.on_message(string(frame.to_string())).unwrap();
+        let positions = owner.base.store.positions();
+        let position = positions.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+        assert_eq!(position.entry_price, entry);
+        assert_eq!(position.contracts, amount.abs());
+        assert_eq!(position.unrealized_pnl, upnl);
+        assert_eq!(position.notional, amount.abs() * entry);
+        assert_eq!(
+            position.side,
+            if amount > 0.0 {
+                safe_cex_types::PositionSide::Long
+            } else {
+                safe_cex_types::PositionSide::Short
+            }
+        );
+        let mut expected = serde_json::to_value(position).unwrap();
+        expected.as_object_mut().unwrap().remove("info");
+        let info = position
+            .info
+            .as_ref()
+            .expect("PM keeps a position snapshot");
+        assert!(
+            info.get("info").is_none(),
+            "snapshot must have exactly one info depth"
+        );
+        let expected = expected.as_object().unwrap();
+        assert_eq!(info.as_object().unwrap().len(), expected.len());
+        for (field, value) in expected {
+            if let Some(number) = value.as_f64() {
+                assert_eq!(
+                    info.get(field).and_then(Value::as_f64).map(f64::to_bits),
+                    Some(number.to_bits()),
+                    "frame {index}: info numeric field {field} uses the current position"
+                );
+            } else {
+                assert_eq!(
+                    info.get(field),
+                    Some(value),
+                    "frame {index}: info field {field}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_balance_frames_follow_each_source_family() {
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let fills = native_fill_events(&owner);
+        let old_balance = owner.base.store.balance().clone();
+        let frame = if venue == Venue::Spot {
+            json!({"subscriptionId":7,"event":{"e":"outboundAccountPosition","B":[{"a":"USDT","f":"8","l":"2"}]}})
+        } else {
+            json!({"e":"ACCOUNT_UPDATE","a":{"P":[],"B":[{"a":"USDT","wb":"10","cw":"8","bc":"0"}]}})
+        };
+        owner.private.on_message(string(frame.to_string())).unwrap();
+        let balance = owner.base.store.balance();
+        if venue == Venue::Spot {
+            assert_eq!(
+                (balance.free, balance.used, balance.total, balance.upnl),
+                (8.0, 2.0, 10.0, 0.0)
+            );
+            let currency = balance
+                .currencies
+                .as_ref()
+                .unwrap()
+                .get("USDT")
+                .unwrap()
+                .as_balance()
+                .expect("Binance supplies a declared Balance row");
+            assert_eq!(
+                (currency.free, currency.used, currency.total),
+                (8.0, 2.0, 10.0)
+            );
+            assert_eq!(
+                owner.base.store.positions().len(),
+                1,
+                "spot account topic does not invent derivative positions"
+            );
+        } else {
+            // Both derivatives source handlers leave B to REST reconciliation.
+            assert_eq!(
+                (balance.free, balance.used, balance.total, balance.upnl),
+                (
+                    old_balance.free,
+                    old_balance.used,
+                    old_balance.total,
+                    old_balance.upnl
+                )
+            );
+        }
+        assert!(owner.base.store.orders().is_empty());
+        assert!(fills.borrow().is_empty(), "balance topic must emit no fill");
+    }
+}
+
+#[cfg(feature = "native")]
+fn native_stop_limit_snapshot_case(venue: Venue) {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponse, RestResponseBody};
+    use std::sync::{Arc, Mutex};
+    struct OpenOrders {
+        calls: Mutex<Vec<String>>,
+        unmapped: bool,
+    }
+    impl RestAdapter for OpenOrders {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            let path = request.url.split('?').next().unwrap().to_owned();
+            self.calls.lock().unwrap().push(path.clone());
+            let normal = json!({"orderId":11,"clientOrderId":"regular-11","symbol":"BTCUSDT","type":"LIMIT","side":"BUY","price":"90","origQty":"3","executedQty":"1","reduceOnly":false});
+            let rows = if path.ends_with("/openOrders") && !path.contains("/conditional/") {
+                json!([normal])
+            } else if path.ends_with("/openAlgoOrders") {
+                json!([
+                    {"algoId":22,"symbol":"BTCUSDT","orderType":if self.unmapped {"STOP"}else{"STOP_MARKET"},"side":"SELL","triggerPrice":"80","quantity":"2","reduceOnly":true,"workingType":"MARK_PRICE"},
+                    {"algoId":33,"symbol":"BTCUSDT","orderType":if self.unmapped {"TAKE_PROFIT"}else{"TAKE_PROFIT_MARKET"},"side":"SELL","triggerPrice":"120","quantity":"2","reduceOnly":true,"workingType":"MARK_PRICE"}
+                ])
+            } else if path.ends_with("/conditional/openOrders") {
+                json!([
+                    {"newClientStrategyId":"stop-22","symbol":"BTCUSDT","strategyType":if self.unmapped {"STOP"}else{"STOP_MARKET"},"side":"SELL","price":"80","origQty":"2","executedQty":"0","reduceOnly":true,"workingType":"MARK_PRICE"},
+                    {"newClientStrategyId":"tp-33","symbol":"BTCUSDT","strategyType":if self.unmapped {"TAKE_PROFIT"}else{"TAKE_PROFIT_MARKET"},"side":"SELL","price":"120","origQty":"2","executedQty":"0","reduceOnly":true,"workingType":"MARK_PRICE"}
+                ])
+            } else {
+                panic!("unexpected production request {path}")
+            };
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(serde_json::to_vec(&rows).unwrap()),
+            })))
+        }
+    }
+    for unmapped in [false, true] {
+        // Each phase uses a fresh actual host/client rate window.
+        let construct = || {
+            let runtime = Rc::new(Runtime::default());
+            let adapter = Arc::new(OpenOrders {
+                calls: Mutex::new(vec![]),
+                unmapped,
+            });
+            let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+                runtime.clone(),
+                adapter.clone(),
+                Rc::new(|_, _| panic!("no external provider configured")),
+                None,
+                safe_cex_exchange::native::NativeHttpEvents::default(),
+            );
+            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let owner = ExchangeOwner::new(
+                venue,
+                serde_json::from_value(json!(if venue == Venue::Futures {
+                    "binance"
+                } else {
+                    "binancepm"
+                }))
+                .unwrap(),
+                serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"}))
+                    .unwrap(),
+                store,
+                dependencies,
+            )
+            .unwrap();
+            (runtime, adapter, owner)
+        };
+        let (runtime, adapter, owner) = construct();
+        let mapped = run(
+            &runtime,
+            safe_cex_venue_binance::class_jobs::reaction(owner.invoke(Method::Orders, vec![])),
+        )
+        .unwrap();
+        let raw = mapped.array_values().unwrap();
+        assert_eq!(raw.len(), 3);
+        for row in raw.iter().skip(1) {
+            if unmapped {
+                assert!(
+                    row.has_own("type"),
+                    "native mapper keeps own undefined, not absence"
+                );
+                assert!(matches!(row.read("type").unwrap(), EventValue::Undefined));
+            }
+        }
+        assert_eq!(adapter.calls.lock().unwrap().len(), 2);
+        let (runtime, adapter, owner) = construct();
+        let exchange = sdk_class(venue, owner.clone());
+        let orders = run(&runtime, exchange.fetch_orders(None))
+            .expect("unmapped STOP/TAKE_PROFIT must not discard the production snapshot");
+        assert_eq!(
+            orders.len(),
+            3,
+            "retain normal plus both unmapped stop-limit rows"
+        );
+        assert_eq!(
+            (
+                orders[0].price.to_number(),
+                orders[0].amount,
+                orders[0].filled,
+                orders[0].remaining
+            ),
+            (90.0, 3.0, 1.0, 2.0)
+        );
+        for (index, expected_price) in [(1, 80.0), (2, 120.0)] {
+            assert_eq!(orders[index].symbol, "BTCUSDT");
+            assert_eq!(
+                (
+                    orders[index].price.to_number(),
+                    orders[index].amount,
+                    orders[index].filled,
+                    orders[index].remaining
+                ),
+                (expected_price, 2.0, 0.0, 2.0)
+            );
+            // TS table miss is undefined, never an invented stop-market type.
+            let wire = serde_json::to_value(&orders[index]).unwrap();
+            if unmapped {
+                assert!(matches!(
+                    orders[index].r#type,
+                    safe_cex_types::ModelField::Undefined
+                ));
+                assert!(wire.get("type").is_none());
+            } else {
+                assert_eq!(
+                    wire["type"],
+                    if index == 1 {
+                        "stop_market"
+                    } else {
+                        "take_profit_market"
+                    }
+                );
+            }
+        }
+        assert_eq!(adapter.calls.lock().unwrap().len(), 2);
+        let (runtime, adapter, owner) = construct();
+        let exchange = sdk_class(venue, owner.clone());
+        run(&runtime, exchange.fetch_and_set_private_snapshot(1)).unwrap();
+        assert!(
+            owner.base.store.loaded().orders,
+            "real binding snapshot sets loaded.orders"
+        );
+        assert_eq!(owner.base.store.orders().len(), 3);
+        assert_eq!(adapter.calls.lock().unwrap().len(), 2);
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_stop_limit_snapshot_keeps_rows_and_loads() {
+    native_stop_limit_snapshot_case(Venue::Futures);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_stop_limit_snapshot_keeps_rows_and_loads() {
+    native_stop_limit_snapshot_case(Venue::PM);
+}
+
+#[cfg(feature = "native")]
+fn native_stop_limit_frame_case(venue: Venue) {
+    let owner = production_native_owner(venue);
+    let fills = native_fill_events(&owner);
+    for (index, kind) in ["STOP", "TAKE_PROFIT"].into_iter().enumerate() {
+        let event = if venue == Venue::Futures {
+            json!({"e":"ALGO_UPDATE","o":{"aid":22+index,"caid":"native-stop","o":kind,"s":"BTCUSDT","S":"SELL","X":"NEW","tp":"80","q":"2","R":true,"wt":"MARK_PRICE"}})
+        } else {
+            json!({"e":"CONDITIONAL_ORDER_TRADE_UPDATE","so":{"c":format!("native-stop-{index}"),"st":kind,"os":"NEW","s":"BTCUSDT","S":"SELL","p":"0","sp":"80","q":"2","z":"0","R":true,"wt":"MARK_PRICE"}})
+        };
+        owner
+            .private
+            .on_message(string(event.to_string()))
+            .expect("source-accepted stop-limit private frame must reach the real Store");
+    }
+    owner
+        .private
+        .on_message(string(native_order_frame(venue, false).to_string()))
+        .unwrap();
+    let orders = owner.base.store.orders();
+    assert_eq!(
+        orders.len(),
+        3,
+        "both stop-limit rows and subsequent normal frame survive"
+    );
+    for row in orders.iter().take(2) {
+        assert_eq!(
+            (row.price.to_number(), row.amount, row.filled, row.remaining),
+            (80.0, 2.0, 0.0, 2.0)
+        );
+        assert!(matches!(row.r#type, safe_cex_types::ModelField::Undefined));
+        assert!(serde_json::to_value(row).unwrap().get("type").is_none());
+    }
+    assert_eq!(orders[2].symbol, "BTCUSDT");
+    assert!(fills.borrow().is_empty());
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_stop_limit_private_frames_keep_rows() {
+    native_stop_limit_frame_case(Venue::Futures);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_stop_limit_private_frames_keep_rows() {
+    native_stop_limit_frame_case(Venue::PM);
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_post_only_rejection_keeps_the_rejection_reason() {
+    let owner = production_native_owner(Venue::Futures);
+    let fills = native_fill_events(&owner);
+    owner
+        .private
+        .on_message(string(
+            native_order_frame(Venue::Futures, false).to_string(),
+        ))
+        .unwrap();
+    let mut frame = native_order_frame(Venue::Futures, false);
+    frame["o"]["X"] = json!("CANCELED");
+    frame["o"]["r"] = json!("GTX order rejected");
+    owner.private.on_message(string(frame.to_string())).unwrap();
+    let rows = owner.base.store.orders();
+    assert_eq!(
+        rows.len(),
+        1,
+        "production canceled order remains observable"
+    );
+    assert_eq!(rows[0].status, safe_cex_types::OrderStatus::Canceled);
+    assert_eq!(
+        rows[0].extra.as_ref().and_then(|extra| extra.reject_reason),
+        Some(safe_cex_types::OrderRejectReason::PostOnly),
+        "production rejection classifier updates the real Store extra"
+    );
+    assert!(fills.borrow().is_empty(), "cancel rejection emits no fill");
+}
+
+#[cfg(feature = "native")]
+#[derive(Default)]
+struct ProjectionWire(std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>);
+#[cfg(feature = "native")]
+impl safe_cex_transport::RestAdapter for ProjectionWire {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        self.0.lock().unwrap().push(request);
+        Box::pin(async {
+            Ok(safe_cex_transport::RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: safe_cex_transport::RestResponseBody::Encoded(br#"{"ok":true}"#.to_vec()),
+            })
+        })
+    }
+}
+#[cfg(feature = "native")]
+fn projection_host() -> (
+    Rc<Runtime>,
+    Rc<dyn ExchangeImports>,
+    std::sync::Arc<ProjectionWire>,
+) {
+    let runtime = Rc::new(Runtime::default());
+    let wire = std::sync::Arc::new(ProjectionWire::default());
+    let deps = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        wire.clone(),
+        Rc::new(|_, _| panic!("no external provider")),
+        None,
+        Default::default(),
+    );
+    (runtime, deps.imports, wire)
+}
+#[cfg(feature = "native")]
+fn projection_client(imports: &dyn ExchangeImports, kind: Factory) -> EventValue {
+    let options = EventValue::from_json(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    let owner = record([("name", string("binance")), ("options", options.clone())]);
+    imports
+        .factory(Venue::Futures, kind, options, owner)
+        .unwrap()
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_query_bigint_is_rendered_instead_of_dropping_every_parameter() {
+    for method in [HttpMethod::Get, HttpMethod::Delete] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::PublicAPI);
+        let params = record([
+            ("symbol", string("BTCUSDT")),
+            (
+                "orderId",
+                EventValue::BigInt(Rc::new("10".parse().unwrap())),
+            ),
+        ]);
+        let result = run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(params))
+                .unwrap(),
+        )
+        .result;
+        result.expect("BigInt query must be admitted by the real production host");
+        let calls = wire.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].url, "/projection?symbol=BTCUSDT&orderId=10",
+            "real native query must keep all params and stringify BigInt"
+        );
+    }
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_body_bigint_rejects_before_any_transport_call() {
+    for method in [HttpMethod::Post, HttpMethod::Put] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::PublicAPI);
+        let data = record([(
+            "quantity",
+            EventValue::BigInt(Rc::new("10".parse().unwrap())),
+        )]);
+        let error = run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(data))
+                .unwrap(),
+        )
+        .result
+        .expect_err("real native JSON body must reject BigInt before transport");
+        assert_eq!(error.name, "TypeError");
+        assert!(
+            wire.0.lock().unwrap().is_empty(),
+            "serialization refusal must send no empty request"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_signing_observes_bigint_query_and_body_before_serialization() {
+    use std::io::Write;
+    let mut vectors = vec![];
+    let mut queries = vec![];
+    for method in [HttpMethod::Get, HttpMethod::Post] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::API);
+        let payload = record([
+            ("symbol", string("BTCUSDT")),
+            (
+                "orderId",
+                EventValue::BigInt(Rc::new("10".parse().unwrap())),
+            ),
+        ]);
+        run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(payload))
+                .unwrap(),
+        )
+        .result
+        .expect("source signs BigInt as its decimal query spelling");
+        let calls = wire.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert!(
+            calls[0]
+                .url
+                .starts_with("/projection?symbol=BTCUSDT&orderId=10&timestamp="),
+            "real native signer must retain request arguments: {}",
+            calls[0].url
+        );
+        assert!(calls[0].url.contains("&signature="));
+        assert!(
+            calls[0].body.is_none(),
+            "source signer moves data to the query"
+        );
+        let query = calls[0].url.split_once('?').unwrap().1.to_owned();
+        let fields: std::collections::HashMap<_, _> = query
+            .split('&')
+            .map(|pair| pair.split_once('=').unwrap())
+            .collect();
+        let is_get = matches!(method, HttpMethod::Get);
+        let mut config = json!({"method":if is_get {"get"}else{"post"},"url":"/projection"});
+        config[if is_get { "params" } else { "data" }] = json!({"symbol":"BTCUSDT","orderId":"10"});
+        vectors.push(json!({"mode":if is_get {"bigint-query"}else{"bigint-body"},"lossy":true,"config":config,"options":{"key":"fixture-key","secret":"fixture-secret"},"now":fields["timestamp"].parse::<f64>().unwrap(),"window":fields["recvWindow"].parse::<f64>().unwrap()}));
+        queries.push(query);
+    }
+    // One source capture for the complete signed corpus, using actual TS, qs and HMAC.
+    let compiler = std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+    });
+    let mut child = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/signing.mjs"))
+        .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&vectors).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 2, "independent signed BigInt source floor");
+    assert_eq!(queries.len(), 2);
+    for (native, source) in queries.iter().zip(source) {
+        assert_eq!(
+            source["query"].as_str(),
+            Some(native.as_str()),
+            "real signed wire must match actual TS BigInt query/HMAC"
+        );
+    }
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_unsigned_private_body_keeps_json_bigint_refusal() {
+    let (runtime, imports, wire) = projection_host();
+    let options = EventValue::from_json(json!({"key":"","secret":""}));
+    let owner = record([("name", string("binance")), ("options", options.clone())]);
+    let client = imports
+        .factory(Venue::Futures, Factory::API, options, owner)
+        .unwrap();
+    let payload = record([(
+        "quantity",
+        EventValue::BigInt(Rc::new("10".parse().unwrap())),
+    )]);
+    let error = run(
+        &runtime,
+        imports
+            .request(client, HttpMethod::Post, "/projection", Some(payload))
+            .unwrap(),
+    )
+    .result
+    .expect_err("skipped signing must leave original JSON BigInt refusal");
+    assert_eq!(error.name, "TypeError");
+    assert!(wire.0.lock().unwrap().is_empty());
+}
+
+#[cfg(feature = "native")]
+fn asset_market(symbol: &str, base: &str) -> Value {
+    json!({"symbol":symbol,"baseAsset":base,"quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","status":"TRADING","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"0.01","minQty":"0.01","maxQty":"100"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.01","minQty":"0.01","maxQty":"100"}]})
+}
+
+#[cfg(feature = "native")]
+fn market_asset_refusal_case(venue: Venue) {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponse, RestResponseBody};
+    use std::sync::Arc;
+    struct Markets(Value);
+    impl RestAdapter for Markets {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            assert!(
+                request
+                    .url
+                    .split('?')
+                    .next()
+                    .unwrap()
+                    .ends_with("/exchangeInfo"),
+                "{}",
+                request.url
+            );
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(serde_json::to_vec(&self.0).unwrap()),
+            })))
+        }
+    }
+    let source = std::process::Command::new("node")
+        .arg(format!(
+            "{}/scripts/public-rest.mjs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .args([
+            match venue {
+                Venue::Futures => "futures",
+                Venue::PM => "pm",
+                Venue::Spot => "spot",
+            },
+            "markets",
+            "asset-rows",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        source.as_array().unwrap().len(),
+        10,
+        "source raw asset cases"
+    );
+    let mut witnesses = 0;
+    for (field, wire_field) in [("base", "baseAsset"), ("quote", "quoteAsset")] {
+        for value in [
+            Some(json!({"asset":"wrong"})),
+            Some(json!(false)),
+            Some(Value::Null),
+            Some(json!(17)),
+            None,
+        ] {
+            for refresh in [false, true] {
+                let runtime = Rc::new(Runtime::default());
+                let mut bad = asset_market("BADUSDT", "BAD");
+                if let Some(value) = &value {
+                    bad[wire_field] = value.clone();
+                } else {
+                    bad.as_object_mut().unwrap().remove(wire_field);
+                }
+                let deps = safe_cex_venue_binance::native_host::native_dependencies(
+                    runtime.clone(),
+                    Arc::new(Markets(
+                        json!({"symbols":[asset_market("BTCUSDT","BTC"),bad,asset_market("ETHUSDT","ETH")]}),
+                    )),
+                    Rc::new(|_, _| panic!("no external provider")),
+                    None,
+                    safe_cex_exchange::native::NativeHttpEvents::default(),
+                );
+                let owner = ExchangeOwner::new(
+                    venue,
+                    serde_json::from_value(json!(match venue {
+                        Venue::Futures => "binance",
+                        Venue::PM => "binancepm",
+                        Venue::Spot => "binancespot",
+                    }))
+                    .unwrap(),
+                    serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true}))
+                        .unwrap(),
+                    Rc::new(safe_cex_store::store::DefaultStore::new()),
+                    deps,
+                )
+                .unwrap();
+                let errors = Rc::new(RefCell::new(Vec::new()));
+                let capture = errors.clone();
+                owner.base.on(
+                    "error",
+                    Rc::new(move |_, error| {
+                        capture.borrow_mut().push(error.clone());
+                        Ok(())
+                    }),
+                );
+                let exchange = sdk_class(venue, owner.clone());
+                let markets = if refresh {
+                    run(&runtime, exchange.refresh_markets()).unwrap();
+                    owner.base.store.markets().to_vec()
+                } else {
+                    run(&runtime, exchange.fetch_markets()).unwrap()
+                };
+                assert_eq!(
+                    markets
+                        .iter()
+                        .map(|m| m.symbol.as_str())
+                        .collect::<Vec<_>>(),
+                    ["BTCUSDT", "ETHUSDT"],
+                    "{venue:?} bad{field} refresh={refresh}"
+                );
+                let errors = errors.borrow();
+                assert_eq!(errors.len(), 1, "one visible row refusal");
+                let message = String::from_utf16(errors[0].as_str().unwrap())
+                    .expect("market refusal is a scalar Unicode message");
+                let expected = value
+                    .as_ref()
+                    .map_or_else(|| "undefined".into(), Value::to_string);
+                assert!(
+                    message.contains("BADUSDT") && message.contains(&format!("{field}={expected}")),
+                    "{message}"
+                );
+                assert_eq!(runtime.reported.borrow().len(), 1);
+                witnesses += 1;
+                owner.base.dispose().unwrap();
+            }
+        }
+    }
+    assert_eq!(witnesses, 20, "typed fetch and refresh per asset/domain");
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_market_asset_refusals_keep_siblings() {
+    market_asset_refusal_case(Venue::Futures);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_market_asset_refusals_keep_siblings() {
+    market_asset_refusal_case(Venue::PM);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_spot_market_asset_refusals_keep_siblings() {
+    market_asset_refusal_case(Venue::Spot);
+}
+
+#[cfg(feature = "native")]
+fn market_field_refusal_case(venue: Venue, leverage: bool) {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponse, RestResponseBody};
+    use std::sync::Arc;
+    struct Markets {
+        rows: Value,
+        brackets: Value,
+    }
+    impl RestAdapter for Markets {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            let path = request.url.split('?').next().unwrap();
+            let body = if path.ends_with("/exchangeInfo") {
+                &self.rows
+            } else if path.ends_with("/leverageBracket") {
+                &self.brackets
+            } else {
+                panic!("unexpected {path}")
+            };
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(serde_json::to_vec(body).unwrap()),
+            })))
+        }
+    }
+    let values = if leverage {
+        vec![
+            Some(json!("125")),
+            Some(json!({"leverage":125})),
+            Some(json!([125])),
+            Some(json!(true)),
+        ]
+    } else {
+        vec![
+            Some(json!({"symbol":"wrong"})),
+            Some(json!(false)),
+            Some(Value::Null),
+            Some(json!(17)),
+            None,
+        ]
+    };
+    let field = if leverage {
+        "limits.leverage.max"
+    } else {
+        "symbol"
+    };
+    let mut count = 0;
+    for value in values {
+        for refresh in [false, true] {
+            let runtime = Rc::new(Runtime::default());
+            let mut bad = asset_market("BADUSDT", "BAD");
+            if !leverage {
+                if let Some(value) = &value {
+                    bad["symbol"] = value.clone();
+                } else {
+                    bad.as_object_mut().unwrap().remove("symbol");
+                }
+            }
+            let deps = safe_cex_venue_binance::native_host::native_dependencies(
+                runtime.clone(),
+                Arc::new(Markets {
+                    rows: json!({"symbols":[asset_market("BTCUSDT","BTC"),bad,asset_market("ETHUSDT","ETH")]}),
+                    brackets: json!([{"symbol":"BADUSDT","brackets":[{"initialLeverage":value}]}]),
+                }),
+                Rc::new(|_, _| panic!("no external provider")),
+                None,
+                safe_cex_exchange::native::NativeHttpEvents::default(),
+            );
+            let owner=ExchangeOwner::new(venue,serde_json::from_value(json!(match venue{Venue::Futures=>"binance",Venue::PM=>"binancepm",Venue::Spot=>"binancespot"})).unwrap(),serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret","publicDataOnly":!leverage})).unwrap(),Rc::new(safe_cex_store::store::DefaultStore::new()),deps).unwrap();
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let capture = errors.clone();
+            owner.base.on(
+                "error",
+                Rc::new(move |_, error| {
+                    capture.borrow_mut().push(error.clone());
+                    Ok(())
+                }),
+            );
+            let exchange = sdk_class(venue, owner.clone());
+            let markets = if refresh {
+                run(&runtime, exchange.refresh_markets()).unwrap();
+                owner.base.store.markets().to_vec()
+            } else {
+                run(&runtime, exchange.fetch_markets()).unwrap()
+            };
+            assert_eq!(
+                markets
+                    .iter()
+                    .map(|m| m.symbol.as_str())
+                    .collect::<Vec<_>>(),
+                ["BTCUSDT", "ETHUSDT"],
+                "bad{field} refresh={refresh}"
+            );
+            let errors = errors.borrow();
+            assert_eq!(errors.len(), 1);
+            let message = String::from_utf16(errors[0].as_str().unwrap()).unwrap();
+            let expected = value
+                .as_ref()
+                .map_or_else(|| "undefined".into(), Value::to_string);
+            assert!(
+                message.contains("row 1") && message.contains(&format!("{field}={expected}")),
+                "{message}"
+            );
+            assert_eq!(runtime.reported.borrow().len(), 1);
+            owner.base.dispose().unwrap();
+            count += 1;
+        }
+    }
+    assert_eq!(count, if leverage { 8 } else { 10 });
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_market_symbol_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::Futures, false);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_market_symbol_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::PM, false);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_spot_market_symbol_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::Spot, false);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_market_leverage_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::Futures, true);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_market_leverage_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::PM, true);
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_market_field_source_preserves_raw_symbol_and_leverage() {
+    let mut count = 0;
+    for venue in ["futures", "pm", "spot"] {
+        let result = std::process::Command::new("node")
+            .arg(format!(
+                "{}/scripts/public-rest.mjs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .args([venue, "markets", "field-rows"])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let source: Value = serde_json::from_slice(&result.stdout).unwrap();
+        let rows = source.as_array().unwrap();
+        assert_eq!(rows.len(), if venue == "spot" { 5 } else { 9 });
+        count += rows.len();
+    }
+    assert_eq!(count, 23, "source raw symbols and leverage cases");
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_depth_binding_preserves_the_source_type_error_and_recovers() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::{
+        RestAdapter, RestRequest, RestResponse, RestResponseBody, socket::SocketFrame,
+    };
+    struct DepthHttp(std::sync::atomic::AtomicU64);
+    impl RestAdapter for DepthHttp {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            assert!(request.url.split('?').next().unwrap().ends_with("/depth"));
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: None,
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(
+                    serde_json::to_vec(
+                        &json!({"lastUpdateId":self.0.load(std::sync::atomic::Ordering::SeqCst),"bids":[["99","2"]],"asks":[["101","3"]]}),
+                    )
+                    .unwrap(),
+                ),
+            })))
+        }
+    }
+    struct DepthSocket {
+        events: Rc<RefCell<std::collections::VecDeque<WsEvent>>>,
+        sent: RefCell<Vec<String>>,
+    }
+    impl WsSocket for DepthSocket {
+        fn ready_state(&self) -> u8 {
+            1
+        }
+        fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+            let events = self.events.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                events
+                    .borrow_mut()
+                    .pop_front()
+                    .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+            }))
+        }
+        fn send(&self, text: &str) -> Result<(), ExchangeError> {
+            self.sent.borrow_mut().push(text.into());
+            Ok(())
+        }
+        fn close(&self) {}
+        fn terminate(&self) {}
+        fn reconnect(&self) {}
+        fn is_reconnecting(&self) -> bool {
+            false
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let runtime = Rc::new(Runtime::default());
+        let socket = Rc::new(DepthSocket {
+            events: Rc::new(RefCell::new(std::collections::VecDeque::from([
+                WsEvent::Open,
+            ]))),
+            sent: RefCell::default(),
+        });
+        *runtime.dial_socket.borrow_mut() = Some(socket.clone());
+        let http = std::sync::Arc::new(DepthHttp(std::sync::atomic::AtomicU64::new(100)));
+        let deps = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            http.clone(),
+            Rc::new(|_, _| panic!("no external data configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let name = match venue {
+            Venue::Futures => "binance",
+            Venue::PM => "binancepm",
+            Venue::Spot => "binancespot",
+        };
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(name)).unwrap(),
+            serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            deps,
+        )
+        .unwrap();
+        let exchange = sdk_class(venue, owner.clone());
+        owner.public_socket().connect_and_subscribe().unwrap();
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let seen = books.clone();
+        let cleanup = exchange
+            .listen_order_book(
+                "BTCUSDT".into(),
+                Rc::new(move |book| seen.borrow_mut().push(book)),
+            )
+            .unwrap();
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|wire| wire.contains("btcusdt@depth"))
+        );
+        let push = |frame: Value| {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+            for _ in 0..12 {
+                runtime.pump();
+            }
+        };
+        push(
+            json!({"e":"depthUpdate","s":"BTCUSDT","U":101,"u":101,"pu":100,"b":[["99","4"]],"a":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "native snapshot/buffered delta callback {venue:?}"
+        );
+        assert_eq!(books.borrow()[0].bids[0].amount, 4.0);
+        let malformed =
+            json!({"e":"depthUpdate","s":"BTCUSDT","U":102,"u":102,"pu":101,"b":[null],"a":[]});
+        let error = owner
+            .public_socket()
+            .base()
+            .on_message(&SocketFrame::Text(malformed.to_string()))
+            .unwrap_err();
+        assert_eq!(
+            error.name, "TypeError",
+            "native depth preserves source TypeError {venue:?}"
+        );
+        assert_eq!(
+            error.message,
+            "Cannot read properties of null (reading '0')"
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "malformed delta must not emit a book"
+        );
+        push(
+            json!({"e":"depthUpdate","s":"BTCUSDT","U":102,"u":102,"pu":101,"b":[["99","5"]],"a":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            2,
+            "next valid delta still reaches listener"
+        );
+        assert_eq!(books.borrow()[1].bids[0].total, 5.0);
+        http.0.store(104, std::sync::atomic::Ordering::SeqCst);
+        push(
+            json!({"e":"depthUpdate","s":"BTCUSDT","U":105,"u":105,"pu":104,"b":[["99","8"]],"a":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            3,
+            "sequence gap fetches a fresh native snapshot"
+        );
+        assert_eq!(books.borrow()[2].bids[0].amount, 8.0);
+        cleanup().unwrap();
+        exchange.dispose().unwrap();
+    }
+}
+
+#[cfg(feature = "native")]
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[cfg(feature = "native")]
+fn native_ticker_coercion(venue: Venue, name: &str, count: usize) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let source = ticker_coercion::source(name);
+    assert_eq!(source["cases"].as_array().unwrap().len(), count);
+    let owner = production_native_owner(venue);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            owner.base.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed(name)),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = if venue != Venue::Spot && case["channel"] != "bookTicker" {
+            owner
+                .public
+                .market_websocket
+                .get()
+                .expect("production market socket")
+        } else {
+            &owner.public
+        };
+        for frame in case["frames"].as_array().unwrap() {
+            socket.on_message(frame.as_str().unwrap()).unwrap();
+        }
+        ticker_coercion::assert_native(&owner.base.store.tickers(), case);
+    }
+    owner.base.dispose().unwrap();
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Futures, "binance", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_pm_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::PM, "binancepm", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Spot, "binancespot", 48);
 }

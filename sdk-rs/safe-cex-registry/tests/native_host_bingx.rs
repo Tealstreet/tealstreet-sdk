@@ -35,6 +35,49 @@ fn routes(request: &Seen) -> Option<Value> {
     Some(json!({"code":0,"data":data}))
 }
 #[test]
+fn bingx_native_signed_get_query_keeps_the_source_qs_sort() {
+    run_local(async {
+        let h = venue_harness(
+            ExchangeName::Bingx,
+            Rc::new(routes),
+            json!({"key":"native-key","secret":SECRET,"tealstreetTunnel":false}),
+            None,
+            safe_cex_exchange::native::native_runtime(),
+        )
+        .await;
+        h.exchange.get_account().await.expect("signed account read");
+        let seen = h.seen.borrow();
+        let request = seen
+            .iter()
+            .find(|r| r.path == "/openApi/swap/v3/user/balance")
+            .unwrap();
+        let keys = request
+            .query
+            .split('&')
+            .map(|pair| pair.split_once('=').unwrap().0)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            ["signature", "timestamp"],
+            "source qs locale sort includes signature at the final wire serializer"
+        );
+        use hmac::{Hmac, Mac};
+        let timestamp = query_value(&request.query, "timestamp").unwrap();
+        let mut mac = Hmac::<sha2::Sha256>::new_from_slice(SECRET.as_bytes()).unwrap();
+        mac.update(format!("timestamp={timestamp}").as_bytes());
+        let signature = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert_eq!(query_value(&request.query, "signature").unwrap(), signature);
+        drop(seen);
+        h.exchange.dispose().unwrap();
+    });
+}
+
+#[test]
 fn bingx_native_registry_bootstraps_signs_places_and_cancels() {
     run_local(async {
         let h = venue_harness(
@@ -187,6 +230,7 @@ impl safe_cex_transport::signing::RemoteSigner for HostedBingx {
             let mut data = config
                 .data
                 .clone()
+                .map(|value| value.into_value().unwrap())
                 .or(config.params.clone())
                 .unwrap_or_else(|| json!({}));
             if let Some(text) = data.as_str() {
@@ -238,7 +282,12 @@ impl safe_cex_transport::signing::RemoteSigner for HostedBingx {
                 signed
                     .headers
                     .insert("Content-Type".into(), "application/json".into());
-                signed.data = Some(Value::String(serde_json::to_string(&payload).unwrap()));
+                signed.data = Some(safe_cex_types::retained_json::RetainedJsonInput::Text(
+                    serde_json::to_string(&payload)
+                        .unwrap()
+                        .encode_utf16()
+                        .collect(),
+                ));
             } else {
                 signed.params = Some(payload);
             }

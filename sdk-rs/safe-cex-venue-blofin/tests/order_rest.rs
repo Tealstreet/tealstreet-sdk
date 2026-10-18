@@ -4,7 +4,7 @@ use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };
-use safe_cex_types::{FetchedLeverage, Order, PlaceOrderOpts};
+use safe_cex_types::{FetchedLeverage, Order, PreparedOrderOpts as PlaceOrderOpts};
 use safe_cex_venue_blofin::{
     modes::AccountModes,
     order_formatters::OrderPayload,
@@ -91,12 +91,12 @@ fn native_opts(opts: &PlaceOrderOpts, raw: &Value) {
     // Enum equality is performed against an independently decoded source literal.
     assert_eq!(
         opts.r#type,
-        js_from_value(raw["type"].clone()).unwrap(),
+        js_from_value::<safe_cex_types::OrderType>(raw["type"].clone()).unwrap(),
         "native opts type"
     );
     assert_eq!(
         opts.side,
-        js_from_value(raw["side"].clone()).unwrap(),
+        js_from_value::<safe_cex_types::OrderSide>(raw["side"].clone()).unwrap(),
         "native opts side"
     );
     assert_eq!(
@@ -194,6 +194,7 @@ impl RestAdapter for Xhr<'_> {
             let Some(RestBody::Untransformed(payload)) = req.body.clone() else {
                 panic!("native body provenance")
             };
+            let payload = payload.into_value().unwrap();
             if let Some(native) = payload.as_array() {
                 let raw = expected[2].as_array().unwrap();
                 assert_eq!(native.len(), raw.len(), "independent native batch size");
@@ -216,7 +217,12 @@ impl RestAdapter for Xhr<'_> {
                         status: 503,
                         reason: None,
                         headers: Default::default(),
-                        body: RestResponseBody::Untransformed(json!({"msg":hint})),
+                        body: RestResponseBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                json!({"msg":hint}),
+                            )
+                            .unwrap(),
+                        ),
                     }));
                 }
                 return Err(failure);
@@ -224,8 +230,14 @@ impl RestAdapter for Xhr<'_> {
             Ok(RestResponse {
                 body: match self.variant {
                     0 => RestResponseBody::Encoded(serde_json::to_vec(&value).unwrap()),
-                    1 => RestResponseBody::Untransformed(value),
-                    _ => RestResponseBody::Transformed(value),
+                    1 => RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
+                            .unwrap(),
+                    ),
+                    _ => RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
+                            .unwrap(),
+                    ),
                 },
                 status: 200,
                 reason: None,
@@ -695,6 +707,7 @@ impl RestAdapter for HoldingAdapter {
         let Some(RestBody::Untransformed(payload)) = request.body.as_ref() else {
             panic!("native parallel payload origin")
         };
+        let payload = payload.clone().into_value().unwrap();
         assert_eq!(payload["leverage"].as_str(), Some("9"));
         assert_eq!(payload["marginMode"].as_str(), Some("isolated"));
         let side = payload["positionSide"].as_str().unwrap().to_owned();
@@ -713,11 +726,16 @@ impl RestAdapter for HoldingAdapter {
                 status: 200,
                 reason: None,
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(if side == "long" {
-                    json!({"code":"0"})
-                } else {
-                    json!({"code":"5","msg":"short denied"})
-                }),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        if side == "long" {
+                            json!({"code":"0"})
+                        } else {
+                            json!({"code":"5","msg":"short denied"})
+                        },
+                    )
+                    .unwrap(),
+                ),
             }))
         }))
     }
@@ -847,7 +865,12 @@ fn native_signed_zero_leverage_clamp() {
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"code":"0"})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"code":"0"}),
+                        )
+                        .unwrap(),
+                    ),
                 })))
             }
         }
@@ -887,7 +910,7 @@ fn native_signed_zero_leverage_clamp() {
             panic!("native zero origin")
         };
         assert_eq!(
-            body["leverage"].as_str(),
+            body.clone().into_value().unwrap()["leverage"].as_str(),
             Some("0"),
             "wire zero AFTER cached native bits"
         );

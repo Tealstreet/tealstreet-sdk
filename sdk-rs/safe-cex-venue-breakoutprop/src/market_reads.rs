@@ -1,6 +1,5 @@
 //! Instrument joining over the two existing raw-read hooks.
-use crate::types::{InstrumentDetailsResponse, InstrumentsResponse};
-use safe_cex_exchange::runtime::ExchangeError;
+use safe_cex_exchange::{js_runtime::value::from_json, runtime::ExchangeError};
 use safe_cex_num::{
     js_number_output, js_truthy,
     numeric_ingress::{JsNumberInput, JsNumberOutput, js_deserialize_passthrough, js_from_value},
@@ -38,28 +37,31 @@ fn combine(
     if !js_truthy(left_raw.as_ref()) || !js_truthy(right_raw.as_ref()) {
         return js_from_value(json!([])).map_err(|e| ExchangeError::new(e.to_string()));
     }
-    // ts-bug CHOSEN declared-record validation; see the manifest witness.
-    let instruments: InstrumentsResponse = left
-        .unwrap()
-        .decode()
-        .map_err(|e| ExchangeError::new(e.to_string()))?;
-    let details: InstrumentDetailsResponse = right
-        .unwrap()
-        .decode()
-        .map_err(|e| ExchangeError::new(e.to_string()))?;
     let left_raw = left_raw.unwrap();
     let right_raw = right_raw.unwrap();
+    let details = right_raw
+        .get("instrumentDetails")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            ExchangeError::new("instrumentDetails.instrumentDetails.map is not a function")
+        })?;
     let mut output = Vec::new();
-    for (detail_index, detail) in details.instrument_details.iter().enumerate() {
-        if let Some(instrument_index) = instruments
-            .instruments
-            .iter()
-            .position(|i| i.symbol == detail.symbol)
-        {
-            output.push(json!({
-                "instrument": left_raw["instruments"][instrument_index].clone(),
-                "instrumentDetails": right_raw["instrumentDetails"][detail_index].clone(),
-            }));
+    for detail in details {
+        let instruments = left_raw
+            .get("instruments")
+            .and_then(Value::as_array)
+            .ok_or_else(|| ExchangeError::new("instruments.instruments.find is not a function"))?;
+        for instrument in instruments {
+            let symbol = from_json(instrument)
+                .get("symbol")
+                .map_err(|e| e.to_exchange_error())?;
+            let requested = from_json(detail)
+                .get("symbol")
+                .map_err(|e| e.to_exchange_error())?;
+            if symbol.strict_equals(&requested) {
+                output.push(json!({"instrument":instrument,"instrumentDetails":detail}));
+                break;
+            }
         }
     }
     js_from_value(Value::Array(output)).map_err(|e| ExchangeError::new(e.to_string()))

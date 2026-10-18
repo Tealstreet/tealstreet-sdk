@@ -2,6 +2,7 @@
 //! an HTTP host that drives the supplied adapter once. Everything here must run
 //! inside a `tokio::task::LocalSet` on a current-thread runtime.
 use crate::{
+    exchange::Exchange,
     http::{HttpFuture, HttpHost},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{UpgradeHeaders, WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
@@ -22,11 +23,11 @@ use safe_cex_transport::{
 use safe_cex_types::ExchangeName;
 use serde_json::Value;
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::BTreeMap,
     future::Future,
     pin::Pin,
-    rc::Rc,
+    rc::{Rc, Weak},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -67,9 +68,28 @@ impl ExchangeTask for LocalTask {
     }
 }
 
+struct HostTask {
+    future: Pin<Box<dyn Future<Output = ()>>>,
+    runtime: Weak<NativeRuntime>,
+}
+impl Future for HostTask {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if let Some(runtime) = self.runtime.upgrade() {
+            crate::js_runtime::jobs::checkpoint(runtime);
+        }
+        let result = self.future.as_mut().poll(cx);
+        if let Some(runtime) = self.runtime.upgrade() {
+            crate::js_runtime::jobs::checkpoint(runtime);
+        }
+        result
+    }
+}
+
 /// `ExchangeRuntime` + `WsRuntime` on the current tokio `LocalSet`.
 pub struct NativeRuntime {
     origin: Instant,
+    owner: Weak<NativeRuntime>,
     transport: Arc<dyn TransportProvider>,
     tunnel: Rc<dyn TunnelHost>,
     min_reconnection_delay_ms: f64,
@@ -109,8 +129,9 @@ fn runtime_over(
     tunnel: Rc<dyn TunnelHost>,
 ) -> Rc<NativeRuntime> {
     let random = random_unit();
-    Rc::new(NativeRuntime {
+    Rc::new_cyclic(|owner| NativeRuntime {
         origin: Instant::now(),
+        owner: owner.clone(),
         transport,
         tunnel,
         min_reconnection_delay_ms: 1000.0 + random * 2000.0,
@@ -239,7 +260,10 @@ impl ExchangeRuntime for NativeRuntime {
         })
     }
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
-        Box::new(LocalTask(spawn_local_task(future)))
+        Box::new(LocalTask(spawn_local_task(Box::pin(HostTask {
+            future,
+            runtime: self.owner.clone(),
+        }))))
     }
     fn console(&self, severity: &str, message: &str) {
         eprintln!("[safe-cex {severity}] {message}");
@@ -390,10 +414,16 @@ impl WsSocket for NativeWsSocket {
     }
 }
 
+/// ts: the `exchange.emitter` safeCexAxiosCreate emits through. The account host
+/// binds its constructed exchange here; an unbound host refuses visibly.
+pub type NativeHttpEvents = Rc<RefCell<Option<Weak<dyn Exchange>>>>;
+
 /// HTTP host for the native runtime: drives the adapter exactly once and keeps
 /// its failure and request/response provenance intact.
 #[derive(Default)]
-pub struct NativeHttpHost;
+pub struct NativeHttpHost {
+    pub events: NativeHttpEvents,
+}
 impl HttpHost for NativeHttpHost {
     fn execute(&self, adapter: Arc<dyn RestAdapter>, request: RestRequest) -> HttpFuture<'_> {
         Box::pin(async move { adapter.execute_with_receipt(request).await })
@@ -401,8 +431,17 @@ impl HttpHost for NativeHttpHost {
     fn enhance_error(&self, error: RestFailure, _exchange: &ExchangeName) -> RestFailure {
         error
     }
-    fn emit(&self, _event: &str, _message: &str) -> Result<(), String> {
-        Ok(())
+    fn emit(&self, event: &str, message: &str) -> Result<(), String> {
+        let exchange = self
+            .events
+            .borrow()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .ok_or_else(|| format!("native HTTP host has no exchange to emit {event}"))?;
+        exchange
+            .base()
+            .emit(event, crate::js_runtime::value::Js::str(message))
+            .map_err(|error| error.message)
     }
     fn note_success(&self, _exchange: &ExchangeName, _response: &RestResponse) {}
     fn note_failure(&self, _exchange: &ExchangeName, _error: &RestFailure) {}

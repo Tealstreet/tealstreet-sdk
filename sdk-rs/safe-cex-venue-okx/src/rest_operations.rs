@@ -294,7 +294,7 @@ pub async fn find_order_by_client_order_id(
             ("mmp_canceled", OrderStatus::Canceled),
         ];
         match js_table_lookup(&status_table, &key) {
-            TableHit::Mapped(status) => order.status = *status,
+            TableHit::Mapped(status) => order.status = (*status).into(),
             TableHit::Inherited(_) => {
                 return Err(RestFailure {
                     code: None,

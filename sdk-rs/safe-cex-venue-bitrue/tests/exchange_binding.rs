@@ -216,27 +216,63 @@ fn private_order_frame_commits_to_the_production_store() {
 }
 
 #[test]
+fn private_order_frames_map_native_types_to_source_limit() {
+    let f = PrivateFixture::new();
+    f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":"existing-order","S":"SELL","o":"LIMIT","x":"NEW","X":"NEW","p":"27300","q":"3","z":"1"}}));
+    for kind in ["IOC", "FOK", "POST_ONLY", "STOP_LIMIT"] {
+        let id = format!("native-{kind}");
+        f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":id,"S":"SELL","o":kind,"x":"NEW","X":"NEW","p":"27300","q":"3","z":"1"}}));
+        let orders = f.store.orders();
+        let order = orders
+            .iter()
+            .find(|order| order.id == id)
+            .expect("native private order reaches Store");
+        assert_eq!(
+            order.r#type.value(),
+            Some(&safe_cex_types::OrderType::Limit),
+            "private parseOrderType maps {kind} to limit"
+        );
+        let native = safe_cex_exchange::js_runtime::value::from_typed(order).unwrap();
+        assert!(native.has_own("type"));
+        assert_eq!(to_json(&native.get("type").unwrap()).unwrap(), "limit");
+        assert_eq!(order.filled, 1.0);
+        assert_eq!(order.remaining, 2.0);
+    }
+    assert!(
+        f.store
+            .orders()
+            .iter()
+            .any(|order| order.id == "existing-order")
+    );
+    assert!(f.runtime.reports.borrow().is_empty());
+}
+
+#[test]
 fn private_trade_frame_emits_incremental_fill_and_commits_order() {
     let f = PrivateFixture::new();
     let fills = Rc::new(RefCell::new(vec![]));
     let capture = fills.clone();
-    f.venue.base().on(
+    f.venue.base().on_args(
         "fill",
-        Rc::new(move |_, fill| {
-            // The shared JS emitter bridge exposes its argument list here.
-            let args = fill.as_array().expect("JS emitter argument list");
+        Rc::new(move |_, args| {
             assert_eq!(args.len(), 1);
             capture.borrow_mut().push(args[0].clone());
             Ok(())
         }),
     );
     f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":"socket-fill","S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","p":"27300","q":"3","z":"1"}}));
-    assert_eq!(
-        *fills.borrow(),
-        vec![
-            json!({"id":"socket-fill","symbol":"E-BTC-USDT","side":"buy","price":27300.0,"amount":1.0})
-        ]
-    );
+    assert_eq!(fills.borrow().len(), 1);
+    let fill = fills.borrow()[0].clone();
+    assert_eq!(fill.own_entries().unwrap().len(), 5);
+    for (key, expected) in [
+        ("id", "socket-fill"),
+        ("symbol", "E-BTC-USDT"),
+        ("side", "buy"),
+    ] {
+        assert!(fill.get(key).unwrap().strict_equals(&Js::str(expected)));
+    }
+    assert_eq!(fill.get("price").unwrap().as_f64(), Some(27300.0));
+    assert_eq!(fill.get("amount").unwrap().as_f64(), Some(1.0));
     assert_eq!(
         f.store
             .orders()
@@ -371,7 +407,11 @@ fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
                     .base()
                     .emit(
                         "callMethod:done",
-                        json!({"requestId":request["requestId"],"success":true,"result":null}),
+                        Js::object(vec![
+                            ("requestId", request.get("requestId").unwrap()),
+                            ("success", Js::Bool(true)),
+                            ("result", Js::Null),
+                        ]),
                     )
                     .unwrap();
             }));
@@ -531,10 +571,19 @@ fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
         "BIND native request signing"
     );
     assert!(
-        worker_calls
-            .borrow()
-            .iter()
-            .any(|r| r["method"] == "removeOrders" && r["args"][0][0]["id"] == "existing-order"),
+        worker_calls.borrow().iter().any(|r| r
+            .get("method")
+            .unwrap()
+            .strict_equals(&Js::str("removeOrders"))
+            && r.get("args")
+                .unwrap()
+                .get("0")
+                .unwrap()
+                .get("0")
+                .unwrap()
+                .get("id")
+                .unwrap()
+                .strict_equals(&Js::str("existing-order"))),
         "BIND cancelOrders worker payload"
     );
     api.dispose().unwrap();
@@ -706,7 +755,12 @@ fn source_routing_authorizes_signed_requests_and_installs_bigint_only_for_tunnel
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"code":"0","data":{}})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"code":"0","data":{}}),
+                        )
+                        .unwrap(),
+                    ),
                 })
             })
         }
@@ -832,4 +886,395 @@ fn source_routing_authorizes_signed_requests_and_installs_bigint_only_for_tunnel
         }
         venue.dispose().unwrap();
     }
+}
+
+#[test]
+fn connected_candle_history_resolves_the_real_promise_executor_and_caches_the_response() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let runtime = Rc::new(support::Runtime::default());
+    let http = Rc::new(Http(
+        runtime.clone(),
+        RefCell::new(vec![]),
+        Cell::new(false),
+    ));
+    let venue = BitrueExchange::new(
+        ExchangeName::Bitrue,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+        BitrueDependencies {
+            runtime: runtime.clone(),
+            http,
+            external_public_data: None,
+        },
+    )
+    .unwrap();
+    complete(&runtime, venue.start()).unwrap();
+    let public_socket = || {
+        runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url.contains("/kline-api/ws"))
+            .map(|(_, s)| s.clone())
+    };
+    for _ in 0..16 {
+        if public_socket().is_some() {
+            break;
+        }
+        runtime.advance(1000.);
+    }
+    let public = public_socket().expect("actual public socket");
+    runtime.pump();
+    let opts = || serde_json::from_value(json!({"symbol":"E-BTC-USDT","interval":"15m"})).unwrap();
+    let mut future = venue.fetch_ohlcv(opts());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(
+        future.as_mut().poll(&mut cx).is_pending(),
+        "real Promise executor must return a pending candle request"
+    );
+    let topic = "market_e_btcusdt_kline_15min";
+    assert!(
+        public
+            .sent
+            .borrow()
+            .iter()
+            .any(|s| s.contains("\"event\":\"req\"") && s.contains(topic)),
+        "Promise executor sends the actual request synchronously"
+    );
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({
+                "event_rep":"rep","channel":topic,"data":[]
+            })
+            .to_string(),
+        )));
+    runtime.pump();
+    let candles =
+        complete(&runtime, future).expect("connected fetchOHLCV resolves server response");
+    assert!(
+        candles.is_empty(),
+        "empty server history resolves without inventing rows"
+    );
+    let before = public.sent.borrow().len();
+    let cached = complete(&runtime, venue.fetch_ohlcv(opts())).unwrap();
+    assert!(cached.is_empty());
+    assert_eq!(
+        public.sent.borrow().len(),
+        before,
+        "source ten-second request cache avoids another request"
+    );
+    runtime.advance(11000.);
+    let mut timeout = venue.fetch_ohlcv(opts());
+    assert!(timeout.as_mut().poll(&mut cx).is_pending());
+    runtime.advance(5000.);
+    let error =
+        complete(&runtime, timeout).expect_err("request timeout rejects the constructor promise");
+    assert_eq!(error.message, "Request timeout");
+    assert!(
+        runtime.reports.borrow().is_empty(),
+        "resolved request clears its timeout"
+    );
+    venue.dispose().unwrap();
+}
+
+struct AccountRowsHttp(Rc<Http>, Value);
+impl JsHttpHost for AccountRowsHttp {
+    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+        self.0.0.clone()
+    }
+    fn send(&self, config: Js) -> JsFuture<'static> {
+        if config.get("url").unwrap().to_display() != "/fapi/v2/account" {
+            return self.0.send(config);
+        }
+        let response = Js::object(vec![
+            ("status", Js::Number(200.)),
+            ("data", from_json(&self.1)),
+            ("config", config),
+        ]);
+        Box::pin(async move { Ok(response) })
+    }
+}
+#[test]
+fn malformed_balance_upnl_refuses_only_its_account_row() {
+    for bad in [json!("bad-pnl"), json!(null), json!({}), json!(true)] {
+        let runtime = Rc::new(support::Runtime::default());
+        let http = Rc::new(AccountRowsHttp(
+            Rc::new(Http(
+                runtime.clone(),
+                RefCell::new(vec![]),
+                Cell::new(false),
+            )),
+            json!({"code":"0","data":{"account":[
+                {"marginCoin":"USDT","totalEquity":100,"accountNormal":70,"sumOpenRealizedAmount":3},
+                {"marginCoin":"USDT","totalEquity":999,"accountNormal":900,"sumOpenRealizedAmount":bad},
+                {"marginCoin":"USDC","totalEquity":200,"accountNormal":150,"sumOpenRealizedAmount":7}
+            ]}}),
+        ));
+        let store = Rc::new(DefaultStore::new());
+        let venue = BitrueExchange::new(
+            ExchangeName::Bitrue,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store.clone(),
+            BitrueDependencies {
+                runtime: runtime.clone(),
+                http,
+                external_public_data: None,
+            },
+        )
+        .unwrap();
+        complete(&runtime, venue.start()).expect("bad upnl must not reject the valid account rows");
+        let balance = store.balance();
+        assert_eq!(
+            (balance.total, balance.free, balance.used, balance.upnl),
+            (100., 70., 30., 3.)
+        );
+        let currencies = balance.currencies.as_ref().unwrap();
+        assert_eq!(currencies.len(), 2);
+        let usdc = currencies.get("USDC").unwrap().as_balance().unwrap();
+        assert_eq!(
+            (usdc.total, usdc.free, usdc.used, usdc.upnl),
+            (200., 150., 50., 7.)
+        );
+        assert_eq!(
+            balance.info.as_ref().unwrap()["data"]["account"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        let warnings = runtime.console.borrow();
+        let refusals: Vec<_> = warnings
+            .iter()
+            .filter(|line| line.contains("Balance.upnl"))
+            .collect();
+        assert!(!refusals.is_empty());
+        assert!(
+            refusals
+                .iter()
+                .all(|line| line.contains("USDT") && line.contains(&bad.to_string())),
+            "warning must identify field, currency and original value: {warnings:?}"
+        );
+        assert!(runtime.reports.borrow().is_empty());
+        drop(balance);
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
+fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
+    let unhandled = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/composition-streams-oracle.cjs"
+        ))
+        .arg("--unhandled-book-pair")
+        .output()
+        .unwrap();
+    assert!(
+        unhandled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&unhandled.stderr)
+    );
+    let unhandled: Value = serde_json::from_slice(&unhandled.stdout).unwrap();
+    assert_eq!(unhandled["callbacks"], 0);
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/composition-streams-oracle.cjs"
+        ))
+        .arg("--book-pairs")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let source = source["rows"]["book"].as_array().unwrap();
+    assert_eq!(source.len(), 3);
+    assert_eq!(source[2]["error"], json!({"undefined":true}));
+    for (index, pair) in [json!({"0":2,"1":3}), json!(2)].into_iter().enumerate() {
+        assert_eq!(
+            source[index]["error"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry[0] == "name")
+                .unwrap()[1],
+            "TypeError"
+        );
+        let f = PrivateFixture::new();
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let sink = books.clone();
+        let cleanup = f
+            .venue
+            .listen_order_book(
+                "E-BTC-USDT".into(),
+                Rc::new(move |book| sink.borrow_mut().push(book)),
+            )
+            .unwrap();
+        f.runtime.pump();
+        f.runtime.advance(100.0);
+        let public = f
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("listenKey="))
+            .unwrap()
+            .1
+            .clone();
+        assert!(
+            public
+                .sent
+                .borrow()
+                .iter()
+                .any(|raw| raw.contains("market_e_btcusdt_simple_depth_step0"))
+        );
+        let push = |buys: Value, asks: Value| {
+            public.events.borrow_mut().push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                safe_cex_transport::socket::SocketFrame::Text(json!({
+                    "channel":"market_e_btcusdt_simple_depth_step0","tick":{"buys":buys,"asks":asks}
+                }).to_string())));
+            f.runtime.pump();
+        };
+        assert!(f.runtime.exceptions.borrow().is_empty());
+        push(json!([pair]), json!([]));
+        assert!(
+            books.borrow().is_empty(),
+            "source refuses noniterable book row {index}"
+        );
+        {
+            let reports = f.runtime.exceptions.borrow();
+            assert_eq!(
+                reports.len(),
+                1,
+                "shared unhandled async rejection must be surfaced exactly once"
+            );
+            let (error, context) = &reports[0];
+            assert_eq!(error.name, unhandled["rejection"]["name"].as_str().unwrap());
+            let expected = source[index]["error"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry[0] == "message")
+                .unwrap();
+            assert_eq!(error.message, expected[1].as_str().unwrap());
+            assert_eq!(context["source"], "unhandledRejection");
+            if index == 0 {
+                assert_eq!(
+                    error.message,
+                    unhandled["rejection"]["message"].as_str().unwrap()
+                );
+            }
+        }
+        push(json!([[2, 3]]), json!([[4, 5]]));
+        let books = books.borrow();
+        assert_eq!(books.len(), 1, "next valid snapshot recovers after refusal");
+        assert_eq!(
+            (
+                books[0].bids[0].price,
+                books[0].bids[0].amount,
+                books[0].bids[0].total
+            ),
+            (2.0, 3.0, 3.0)
+        );
+        assert_eq!(
+            (
+                books[0].asks[0].price,
+                books[0].asks[0].amount,
+                books[0].asks[0].total
+            ),
+            (4.0, 5.0, 5.0)
+        );
+        drop(books);
+        cleanup().unwrap();
+        f.runtime.pump();
+        assert_eq!(
+            f.runtime.exceptions.borrow().len(),
+            1,
+            "valid recovery and cleanup must not duplicate the rejection report"
+        );
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bitrue");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 32);
+    let f = PrivateFixture::new();
+    let template = f.store.markets()[0].clone();
+    let tickers = ticker_coercion::seed("bitrue");
+    let markets = tickers
+        .iter()
+        .map(|ticker| {
+            let mut market = template.clone();
+            market.id.clone_from(&ticker.id);
+            market.symbol.clone_from(&ticker.symbol);
+            market
+        })
+        .collect();
+    Store::update(
+        f.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    f.venue
+        .base()
+        .emit(
+            "markets:changed",
+            from_json(&json!({"added":[{"symbol":"E-ETH-USDT"},{"symbol":"E-ADA-USDT"}]})),
+        )
+        .unwrap();
+    f.runtime.pump();
+    let socket = f
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.contains("listenKey="))
+        .unwrap()
+        .1
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("bitrue")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            f.runtime.pump();
+        }
+        ticker_coercion::assert_native(&f.store.tickers(), case);
+    }
+    assert!(
+        f.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        f.runtime.reports.borrow()
+    );
 }

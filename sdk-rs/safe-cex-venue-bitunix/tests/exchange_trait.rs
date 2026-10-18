@@ -12,6 +12,156 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+#[test]
+fn public_market_data_uses_futures_frames_and_distinct_candle_volumes() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_transport::socket::SocketFrame;
+    use std::cell::RefCell;
+    let (venue, rt, store, wire) = support::fixture();
+    script(
+        &wire,
+        "/api/v1/futures/account/get_leverage_margin_mode",
+        json!({"code":0,"data":{"symbol":"BTCUSDT","leverage":10,"marginMode":"CROSS"}}),
+    );
+    script(
+        &wire,
+        "/api/v1/futures/market/kline",
+        json!({"code":0,"data":[{"time":1700000000000u64,"open":"99","high":"103","low":"98","close":"101","baseVol":"111","quoteVol":"7"}]}),
+    );
+    let history = drive(
+        &rt,
+        venue.fetch_ohlcv(
+            serde_json::from_value(
+                json!({"symbol":"BTCUSDT","interval":"1m","limit":2,"to":1700000000000u64}),
+            )
+            .unwrap(),
+        ),
+    )
+    .unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(
+        (history[0].timestamp, history[0].volume),
+        (1700000000.0, 7.0)
+    );
+    rt.dial.set(true);
+    let core = venue.base().get_socket(SocketSlot::Futures).unwrap();
+    drive(
+        &rt,
+        core.create_websocket("ws://futures-fixture".into(), vec![], None),
+    )
+    .unwrap();
+    let pump = || {
+        for _ in 0..12 {
+            rt.pump();
+        }
+    };
+    pump();
+    let socket = rt.dialed.borrow()[0].1.clone();
+    let books = Rc::new(RefCell::new(Vec::new()));
+    let seen = books.clone();
+    let close_book = venue
+        .listen_order_book(
+            "BTCUSDT".into(),
+            Rc::new(move |book| seen.borrow_mut().push(book)),
+        )
+        .unwrap();
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let seen = candles.clone();
+    let close_candle = venue
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(),
+            Rc::new(move |candle| seen.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|frame| frame.contains("market_btcusdt_depthop_0.1")),
+        "book uses price precision, not amount0.001"
+    );
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|frame| frame.contains("market_btcusdt_klineop_1min"))
+    );
+    let frame = |channel: &str, data: Value| {
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({"channel":channel,"data":data}).to_string(),
+            )));
+        pump();
+        assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    };
+    frame(
+        "market_btcusdt_depthop_0.1",
+        json!({"bids":[["99","2"],["98","3"]],"asks":[["101","4"]]}),
+    );
+    assert_eq!(books.borrow().len(), 1);
+    assert_eq!(
+        (
+            books.borrow()[0].bids[1].total,
+            books.borrow()[0].asks[0].amount
+        ),
+        (5.0, 4.0)
+    );
+    frame(
+        "market_btcusdt_depthop_0.1",
+        json!({"bids":[["97","6"]],"asks":[["104","7"]]}),
+    );
+    assert_eq!(books.borrow().len(), 2);
+    assert_eq!(
+        (
+            books.borrow()[1].bids.len(),
+            books.borrow()[1].bids[0].price
+        ),
+        (1, 97.0),
+        "each futures book frame replaces both sides"
+    );
+    frame(
+        "market_btcusdt_klineop_1min",
+        json!({"time":1700000060000u64,"open":"100","high":"104","low":"99","close":"102","volume":"8","quoteVol":"999"}),
+    );
+    assert_eq!(candles.borrow().len(), 1);
+    assert_eq!(
+        (
+            candles.borrow()[0].timestamp,
+            candles.borrow()[0].close,
+            candles.borrow()[0].volume
+        ),
+        (1700000060000.0, 102.0, 8.0)
+    );
+    assert_eq!(
+        store.tickers()[0].last,
+        102.0,
+        "candle parser updates the real ticker before callback"
+    );
+    let sent = socket.sent.borrow().len();
+    close_book().unwrap();
+    close_candle().unwrap();
+    assert_eq!(
+        socket.sent.borrow().len(),
+        sent,
+        "source cleanup removes handlers without an unsubscribe frame"
+    );
+    frame(
+        "market_btcusdt_depthop_0.1",
+        json!({"bids":[["96","1"]],"asks":[["105","1"]]}),
+    );
+    frame(
+        "market_btcusdt_klineop_1min",
+        json!({"time":1700000120000u64,"open":"100","high":"104","low":"99","close":"103","volume":"9"}),
+    );
+    assert_eq!((books.borrow().len(), candles.borrow().len()), (2, 1));
+    assert_eq!(store.tickers()[0].last, 102.0);
+    venue.dispose().unwrap();
+}
+
 fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
     let mut f = std::pin::pin!(f);
     for _ in 0..64 {
@@ -34,14 +184,16 @@ fn calls(wire: &support::Wire) -> Vec<(String, String, Value)> {
         .drain(..)
         .map(|r| {
             let body = match r.body {
-                Some(safe_cex_transport::RestBody::Untransformed(v)) => v,
+                Some(safe_cex_transport::RestBody::Untransformed(v)) => v.into_value().unwrap(),
                 Some(safe_cex_transport::RestBody::Encoded(b)) => {
                     serde_json::from_slice(&b).unwrap()
                 }
-                Some(safe_cex_transport::RestBody::Transformed(t)) => match t.value() {
-                    Value::String(s) => serde_json::from_str(s).unwrap(),
-                    v => v.clone(),
-                },
+                Some(safe_cex_transport::RestBody::Transformed(t)) => {
+                    match &t.value().clone().into_value().unwrap() {
+                        Value::String(s) => serde_json::from_str(s).unwrap(),
+                        v => v.clone(),
+                    }
+                }
                 None => Value::Null,
             };
             (r.method.to_uppercase(), r.url, body)
@@ -57,11 +209,15 @@ fn wire_request(wire: &support::Wire, path: &str) -> (Vec<(String, String)>, Str
         .find(|r| r.url == path)
         .expect("request sent");
     let raw = match &r.body {
-        Some(safe_cex_transport::RestBody::Transformed(t)) => match t.value() {
-            Value::String(s) => s.clone(),
-            v => v.to_string(),
-        },
-        Some(safe_cex_transport::RestBody::Untransformed(v)) => v.to_string(),
+        Some(safe_cex_transport::RestBody::Transformed(t)) => {
+            match &t.value().clone().into_value().unwrap() {
+                Value::String(s) => s.clone(),
+                v => v.to_string(),
+            }
+        }
+        Some(safe_cex_transport::RestBody::Untransformed(v)) => {
+            v.clone().into_value().unwrap().to_string()
+        }
         Some(safe_cex_transport::RestBody::Encoded(b)) => String::from_utf8(b.clone()).unwrap(),
         None => String::new(),
     };

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.options.ts"
-rust_files = [ "safe-cex-venue-bybit/src/options.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/options.rs", "safe-cex-venue-bybit/src/binding/members/options.rs" ]
 
 [[symbol]]
 ts = "BYBIT_GREEK_UNITS"
@@ -38,49 +38,49 @@ note = ""
 ts = "mapBybitOptionGreeks"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/options.rs::map_bybit_option_greeks"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::map_option_greeks"
 status = "ported"
-note = ""
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::map_option_greeks. "
 
 [[symbol]]
 ts = "mapBybitOptionTicker"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::map_option_ticker"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::map_option_ticker. Native production option-read path; maintained source methods/helpers compared through actual signed HTTP and live Store markets. Shared localeCompare remains a runtime dependency, with its real chain test retained."
 
 [[symbol]]
 ts = "mapBybitCoinGreeks"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::map_coin_greeks"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::map_coin_greeks. Native production option-read path; maintained source methods/helpers compared through actual signed HTTP and live Store markets. Shared localeCompare remains a runtime dependency, with its real chain test retained."
 
 [[symbol]]
 ts = "matchesOptionQuery"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::matches_option_query"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::matches_option_query. Native production option-read path; maintained source methods/helpers compared through actual signed HTTP and live Store markets. Shared localeCompare remains a runtime dependency, with its real chain test retained."
 
 [[symbol]]
 ts = "buildOptionChain"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::build_option_chain"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::build_option_chain. Native production option-read path; maintained source methods/helpers compared through actual signed HTTP and live Store markets. Shared localeCompare remains a runtime dependency, with its real chain test retained."
 
 [[symbol]]
 ts = "optionExpiries"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/options.rs::option_expiries"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::option_expiries"
 status = "ported"
-note = ""
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::option_expiries. "
 
 [[symbol]]
 ts = "isOptionMarket"

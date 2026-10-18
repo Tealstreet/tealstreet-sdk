@@ -70,6 +70,7 @@ pub struct BlofinDependencies {
 
 /// Native collaborators of the already-bound MEXC exchange.
 pub struct MexcDependencies {
+    pub current_time_ms: Rc<dyn Fn() -> f64>,
     pub runtime: Rc<dyn WsRuntime>,
     pub http: Rc<dyn RestAdapter>,
     pub local_to_utc: Rc<dyn Fn(f64) -> f64>,
@@ -257,6 +258,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bybitdemo, bybit_constructor),
     (ExchangeName::Bybitspot, bybit_constructor),
     (ExchangeName::Bybitinverse, bybit_constructor),
+    (ExchangeName::Hyrotrader, bybit_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
     (ExchangeName::Cryptocom, cryptocom_constructor),
@@ -377,6 +379,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
             deps.http,
             deps.local_to_utc,
             safe_cex_venue_mexc::sockets::MexcSocketDependencies {
+                current_time_ms: deps.current_time_ms,
                 runtime: deps.runtime,
                 remote_account_name: host.hosted_signer().and_then(|(_, account)| account),
                 emit_fill: Rc::new(move |fill| {
@@ -384,8 +387,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
                     if let Some(parent) = fill_parent.borrow().upgrade() {
                         parent.base().emit(
                             "fill",
-                            serde_json::to_value(fill)
-                                .map_err(|e| ExchangeError::new(e.to_string()))?,
+                            safe_cex_exchange::js_runtime::value::from_typed(&fill)?,
                         )?;
                     }
                     Ok(())

@@ -33,13 +33,12 @@ use std::{
     rc::{Rc, Weak},
 };
 
-/// Supply a fresh host per account. HTTP must carry the selected transport.
+/// Supply a fresh terminal HTTP host per account.
 #[derive(Clone)]
 pub struct BreakoutDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub http: Rc<dyn JsHttpHost>,
     pub external_public_data: Option<ExternalPublicDataFactory>,
-    pub install_transport: Rc<dyn Fn(&ExchangeOptions) -> Result<(), ExchangeError>>,
     /// Offset-less legacy timestamps use the embedding host's timezone policy.
     pub local_to_utc: Rc<dyn Fn(f64) -> f64>,
 }
@@ -128,7 +127,7 @@ impl BreakoutHost for ProductionHost {
         let host = ClientFactory {
             http: self.deps.http.clone(),
             xhr: RefCell::new(None),
-            install: self.deps.install_transport.clone(),
+            provider: self.deps.runtime.transport(),
         };
         let options = exchange.base.options();
         api::create_api(&host, options, &exchange).map(|api| api as Rc<dyn DxClient>)
@@ -187,7 +186,7 @@ impl NativeRuntimeHost for ProductionHost {
         (self.deps.local_to_utc)(value)
     }
     fn uuid(&self) -> String {
-        self.deps.runtime.unique_id()
+        self.deps.runtime.unique_id().replace(['-', '_'], "")
     }
     fn spawn_order(&self, future: ExchangeFuture<'static, ()>) {
         self.owned(future)
@@ -297,7 +296,7 @@ impl PollingAncestor for PollingBase {
 struct ClientFactory {
     http: Rc<dyn JsHttpHost>,
     xhr: RefCell<Option<Js>>,
-    install: Rc<dyn Fn(&ExchangeOptions) -> Result<(), ExchangeError>>,
+    provider: std::sync::Arc<dyn safe_cex_transport::TransportProvider>,
 }
 struct Wire {
     xhr: Js,
@@ -306,12 +305,13 @@ impl ApiHost for ClientFactory {
     fn create(
         &self,
         defaults: ApiDefaults,
-        _options: &ExchangeOptions,
-        _exchange: &Rc<BreakoutpropExchange>,
+        options: &ExchangeOptions,
+        exchange: &Rc<BreakoutpropExchange>,
     ) -> Result<Rc<dyn ApiWire>, ExchangeError> {
         let serialize = defaults.serialize_params;
-        let xhr = client::create(
+        let xhr = client::factory::create(
             self.http.clone(),
+            &*self.provider,
             Js::object(vec![
                 ("baseURL", Js::str(defaults.base_url)),
                 ("timeout", Js::Number(defaults.timeout)),
@@ -326,7 +326,9 @@ impl ApiHost for ClientFactory {
                     }),
                 ),
             ]),
-        );
+            &safe_cex_exchange::js_runtime::value::from_typed(options)?,
+            &exchange.base,
+        )?;
         *self.xhr.borrow_mut() = Some(xhr.clone());
         Ok(Rc::new(Wire { xhr }))
     }
@@ -382,13 +384,71 @@ impl ApiHost for ClientFactory {
     fn install_transport_adapter(
         &self,
         _wire: &Rc<dyn ApiWire>,
-        _options: &ExchangeOptions,
-        _exchange: &Rc<BreakoutpropExchange>,
+        options: &ExchangeOptions,
+        exchange: &Rc<BreakoutpropExchange>,
     ) -> Result<(), ExchangeError> {
-        (self.install)(_options)
+        client::factory::install_transport_adapter(
+            self.http.clone(),
+            &*self.provider,
+            self.xhr
+                .borrow()
+                .as_ref()
+                .expect("create precedes transport"),
+            &safe_cex_exchange::js_runtime::value::from_typed(options)?,
+            exchange.base.name.clone(),
+            safe_cex_transport::RestAdapterVariant::Default,
+        )?;
+        Ok(())
     }
 }
 impl ApiWire for Wire {
+    fn install_request_interceptor(&self, api: Weak<api::DxApi>) -> Result<(), ExchangeError> {
+        let interceptor = Js::function("dxSessionAuth", move |_, args| {
+            let config = arg(&args, 0);
+            let api = api
+                .upgrade()
+                .ok_or_else(|| Thrown::from(ExchangeError::new("DXtrade API dropped")))?;
+            let mut projected = api::DxConfig {
+                request: RestRequest {
+                    url: config.get("url")?.to_display(),
+                    params: if config.get("params")?.is_undefined() {
+                        None
+                    } else {
+                        Some(
+                            safe_cex_exchange::js_runtime::value::to_retained_input(
+                                &config.get("params")?,
+                            )?
+                            .into_value()
+                            .map_err(|error| Thrown::type_error(&error.to_string()))?,
+                        )
+                    },
+                    ..Default::default()
+                },
+                session_retried: false,
+            };
+            api.intercept_request(&mut projected)?;
+            let next = Js::object(vec![]);
+            for (key, value) in config.own_entries()? {
+                next.define_key(&key, value)?;
+            }
+            next.define("url", Js::str(&projected.request.url))?;
+            next.define(
+                "params",
+                from_json(projected.request.params.as_ref().unwrap()),
+            )?;
+            let headers = config.get("headers")?;
+            for (key, value) in projected.request.headers {
+                headers.call_method("set", vec![Js::str(&key), Js::str(&value), Js::Bool(true)])?;
+            }
+            next.define("headers", headers)?;
+            Ok(next)
+        });
+        self.xhr
+            .get("interceptors")?
+            .get("request")?
+            .call_method("use", vec![interceptor])?;
+        Ok(())
+    }
     fn rate_limit(&self, max_rps: f64) -> Result<(), ExchangeError> {
         self.xhr.call_method(
             "__configureRateLimit",
@@ -407,12 +467,18 @@ impl ApiWire for Wire {
             let result = async {
                 let body = match request.body {
                     None => Js::Undefined,
-                    Some(RestBody::Untransformed(value)) => from_json(&value),
+                    Some(RestBody::Untransformed(value)) => {
+                        safe_cex_exchange::js_runtime::value::from_retained_input(value)
+                    }
                     Some(RestBody::Encoded(bytes)) => Js::str(
                         &String::from_utf8(bytes)
                             .map_err(|e| Thrown::type_error(&e.to_string()))?,
                     ),
-                    Some(RestBody::Transformed(value)) => from_json(value.value()),
+                    Some(RestBody::Transformed(value)) => {
+                        safe_cex_exchange::js_runtime::value::from_retained_input(
+                            value.value().clone(),
+                        )
+                    }
                 };
                 let mut fields = vec![
                     ("method", Js::str(&request.method)),
@@ -446,8 +512,7 @@ impl ApiWire for Wire {
                     native.response = to_json(&response).ok();
                 }
                 if let Ok(code) = error.value.get("code")
-                    && !code.is_undefined()
-                    && let Ok(code) = to_json(&code)
+                    && (error.value.has_own("code") || !code.is_undefined())
                 {
                     native.code = Some(code);
                 }

@@ -101,52 +101,61 @@ fn request_url(request: &RestRequest) -> String {
     }
 }
 
-/// Axios buildURL's default params encoding for params no factory codec consumed.
-fn axios_default_query(params: &serde_json::Value) -> String {
-    fn encode(text: &str) -> String {
-        url::form_urlencoded::byte_serialize(text.as_bytes())
-            .collect::<String>()
-            .replace("%3A", ":")
-            .replace("%24", "$")
-            .replace("%2C", ",")
-            .replace("%5B", "[")
-            .replace("%5D", "]")
-    }
-    fn scalar(value: &serde_json::Value) -> Option<String> {
-        match value {
-            serde_json::Value::Null => None,
-            serde_json::Value::String(s) => Some(s.clone()),
-            serde_json::Value::Number(n) => n
-                .as_f64()
-                .map(safe_cex_num::js_number_string)
-                .or_else(|| Some(n.to_string())),
-            other => Some(other.to_string()),
-        }
-    }
-    let serde_json::Value::Object(map) = params else {
-        return String::new();
-    };
-    let mut parts = vec![];
-    for (key, value) in map {
-        match value {
-            serde_json::Value::Array(items) => {
-                for item in items.iter().filter_map(scalar) {
-                    parts.push(format!("{}[]={}", encode(key), encode(&item)));
-                }
-            }
-            other => {
-                if let Some(text) = scalar(other) {
-                    parts.push(format!("{}={}", encode(key), encode(&text)));
-                }
-            }
-        }
-    }
-    parts.join("&")
+/// Axios default traversal is shared with the native-number JS host frontdoor.
+fn axios_default_query(params: &serde_json::Value) -> Result<String, TransportError> {
+    crate::query::axios_default_query(&params.clone().into())
 }
 fn network_failure(error: &reqwest::Error, request: &RestRequest) -> RestFailure {
+    let mut cause = std::error::Error::source(error);
+    let mut originating_code = None;
+    let mut detail = error.to_string();
+    while let Some(current) = cause {
+        detail = current.to_string();
+        // Hyper's connector erases its DNS error type but retains this context.
+        if detail == "dns error" {
+            originating_code = Some("ENOTFOUND");
+        }
+        if originating_code == Some("ENOTFOUND")
+            && detail.contains("Temporary failure in name resolution")
+        {
+            originating_code = Some("EAI_AGAIN");
+        }
+        if let Some(rustls::Error::InvalidCertificate(certificate)) =
+            current.downcast_ref::<rustls::Error>()
+        {
+            use rustls::CertificateError;
+            originating_code = Some(match certificate {
+                CertificateError::Expired | CertificateError::ExpiredContext { .. } => {
+                    "CERT_HAS_EXPIRED"
+                }
+                CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => {
+                    "CERT_NOT_YET_VALID"
+                }
+                CertificateError::Revoked => "CERT_REVOKED",
+                CertificateError::NotValidForName
+                | CertificateError::NotValidForNameContext { .. } => "ERR_TLS_CERT_ALTNAME_INVALID",
+                CertificateError::BadSignature => "CERT_SIGNATURE_FAILURE",
+                CertificateError::InvalidPurpose
+                | CertificateError::InvalidPurposeContext { .. } => "INVALID_PURPOSE",
+                _ => "CERT_REJECTED",
+            });
+        }
+        if let Some(io) = current.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::NetworkUnreachable
+        {
+            originating_code = Some("ENETUNREACH");
+        }
+        // io::Error::source skips its immediate custom error; TLS lives there.
+        cause = current
+            .downcast_ref::<std::io::Error>()
+            .and_then(|io| io.get_ref().map(|inner| inner as &dyn std::error::Error))
+            .or_else(|| current.source());
+    }
     let (code, message) = if error.is_timeout() {
         let ms = request.timeout_ms.unwrap_or(0);
         ("ECONNABORTED", format!("timeout of {ms}ms exceeded"))
+    } else if let Some(code) = originating_code {
+        (code, format!("{code}: {detail}"))
     } else if error.is_connect() {
         (
             "ECONNREFUSED",
@@ -169,7 +178,8 @@ impl RestAdapter for ReqwestAdapter {
                 .as_ref()
                 .filter(|p| safe_cex_num::js_truthy(Some(p)))
             {
-                let query = axios_default_query(params);
+                let query = axios_default_query(params)
+                    .map_err(|error| RestFailure::from_transport(error, request.clone()))?;
                 if !query.is_empty() {
                     if let Some(hash) = url.find('#') {
                         url.truncate(hash);
@@ -455,6 +465,10 @@ impl TunnelHost for NativeTunnelHost {
 }
 
 #[cfg(test)]
+#[path = "native_network_tests.rs"]
+mod network_tests;
+
+#[cfg(test)]
 mod url_tests {
     use super::*;
 
@@ -505,5 +519,38 @@ mod url_tests {
                 "AXIOS URL JOIN {base:?} {path}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn default_query_matches_installed_axios_bytes() {
+        let mut failures = Vec::new();
+        for (params, expected) in [
+            (json!({"a":[1,2]}), "a%5B%5D=1&a%5B%5D=2"),
+            (json!({"a":"f[g]h"}), "a=f%5Bg%5Dh"),
+            (json!({"a":"x~y!z(1)'"}), "a=x~y!z(1)'"),
+            (json!({"a":{"b":1}}), "a%5Bb%5D=1"),
+            (json!({"a":[{"b":1}]}), "a%5B0%5D%5Bb%5D=1"),
+            (
+                json!({"tags[]":["a b",null,"x+y"]}),
+                "tags%5B%5D=a+b&tags%5B%5D=x%2By",
+            ),
+        ] {
+            let actual = axios_default_query(&params).expect("valid default params");
+            if actual != expected {
+                failures.push(format!(
+                    "params={params}: expected {expected:?}, actual {actual:?}"
+                ));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "native Axios default query mismatch: {failures:#?}"
+        );
     }
 }

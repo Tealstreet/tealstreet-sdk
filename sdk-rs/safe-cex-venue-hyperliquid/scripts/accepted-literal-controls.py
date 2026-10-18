@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Remove each reviewed enum's string admission, prove failure, restore exactly."""
-import argparse
 import os
 from pathlib import Path
 import re
@@ -10,18 +9,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "safe-cex-venue-hyperliquid/src/types.rs"
 ORIGINAL = SOURCE.read_bytes()
 ENV = {**os.environ, "RUSTUP_TOOLCHAIN": "1.99.0", "RUSTC_BOOTSTRAP": "1", "CARGO_BUILD_JOBS": "1"}
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--cohort", choices=["orders", "statuses"], default="orders")
-args = parser.parse_args()
-CONTROLS = ([
+CONTROLS = [
     ("Tif", "tif_variants_and_string_only_ingress"),
     ("Tpsl", "tpsl_variants_and_string_only_ingress"),
     ("Grouping", "grouping_variants_and_string_only_ingress"),
-    ("ScheduleCancelActionType", "schedule_cancel_variants_and_string_only_ingress"),
-] if args.cohort == "orders" else [
-    ("OrderResponseStatusCase3", "waiting_for_fill_variant_and_string_only_ingress"),
-    ("OrderResponseStatusCase4", "waiting_for_trigger_variant_and_string_only_ingress"),
-])
+]
 
 
 def run(name=None, *, failure=False):

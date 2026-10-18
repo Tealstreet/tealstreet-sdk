@@ -33,9 +33,11 @@ The review keeps these roles distinct:
   native results, numeric bits, variant identity or error payload observations.
 - Serializer Capture, sequence and object builders have per-method native
   observations of retained nodes, builder fields and refusals. Capture covers
-  all 27 compiler APIs, 25 with observed outputs. Only its two metadata-only
-  constant outputs use the existing exact source-pinned policies; their results
-  remain native null/empty builders, with no fabricated input echo.
+  all 27 compiler APIs. Unit-struct metadata now distinguishes the ModelField
+  Undefined marker from ordinary Null through direct native observations. Only
+  the empty tuple-struct builder uses an exact source-pinned constant policy.
+  Object skip_field observations retain own Undefined keys for ModelRecord and
+  omit them for ordinary structs; retained-node observers include Undefined.
 - Prototype conversions and property APIs inspect actual variants, referent
   identity, realm state and mutations. Generic callback cases are bounded to
   the concrete witnesses stated in their entries.
@@ -80,3 +82,16 @@ generic implementation or a feature/wasm coverage claim. The maintained
 [numeric ingress contract](../parity/MANIFEST-SPEC.md#numeric-ingress-defect)
 and [representation boundaries](../parity/MANIFEST-SPEC.md#divergence-taxonomy)
 remain unchanged.
+
+JsNumberInput's native observation covers the internal Undefined variant as well
+as every pre-existing raw JSON case. Two additional fixtures capture ModelField
+Undefined directly and inside an array through the real js_capture_output API,
+then enter through the production from_retained conversion. The observed kind
+keeps Undefined distinct from Null; the second array member independently pins
+native 1.25 bits. This repairs stale generated observation code after the
+presence cutover, without changing production decoder admission or APIs.
+
+The same presence cutover names the newtype metadata argument `name` so the
+ModelField Undefined marker dispatches `visit_unit`; ordinary named newtypes
+still dispatch `visit_newtype_struct`. The accepted compiler signature now
+records that reviewed argument name while preserving all entrypoint witnesses.

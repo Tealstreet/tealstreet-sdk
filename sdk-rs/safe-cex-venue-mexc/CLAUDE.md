@@ -3,10 +3,50 @@
 Behavioral reference: [TypeScript MEXC guidance](../../packages/safe-cex/src/exchanges/mexc/CLAUDE.md).
 Use the [shared exchange contract](../safe-cex-exchange/CLAUDE.md); variants stay within this crate.
 
+REST signing and private WebSocket login take `current_time_ms` from their
+construction dependencies. The native registry passes the same shared
+`VIRTUAL_CLOCK.get_current_time_ms` getter to both; host wall time remains for
+runtime accounting and retry/rate-limit timing. The same callback drives order
+submit pacing/cooldown, optimistic timestamps, stop-order lookbacks and all
+placement/cancel/rejection shields. Do not derive these source virtual-clock
+reads from `ExchangeRuntime::now_ms`. The native registry regression
+`native_host_mexc_clock` applies a 90-second sync offset and checks both signed
+wire timestamps and HMACs over real loopback HTTP/WebSocket transports.
+
+REST ticker funding timestamps use the required host local-wall-time converter,
+just like other MEXC readers. A constructed REST regression compares the actual
+TypeScript normalizer under America/Los_Angeles for offset-less dates, explicit
+UTC, date-only and numeric times. Only offset-less date-times invoke conversion;
+UTC/date-only/numeric inputs retain their source bypass behavior.
+
+Leverage refresh uses stored symbol settings before deriving from positions,
+matching the source short-circuit. Derivation reads positions/account mode only
+when settings are absent. A constructed public-trait regression uses real
+setLeverage to cache 50, seeds stale position leverage 20 and checks empty or
+untyped leverage rows and missing markets against the actual TypeScript method.
+Cached margin/position mode and both leverage sides survive the refresh.
+
+
 Regular-order `externalOid` generation uses the shared crypto `uuid_with_entropy`
 helper with runtime entropy: generate 21 nanoid characters, then strip `-` and
 `_`, as `utils/uuid.ts` does. The runtime's generic `unique_id` contract does not
 specify that format. The trait-level wire test pins length and separator removal.
+
+The unused generic `private_session`, `public_subscriptions` and `ws_lifecycle`
+socket bodies and their fake-host tests/oracles/controls were removed after the
+wave2-vacuous-tests audit. Shared value traits and owned-method completion helpers
+are still production dependencies; their bodies moved unchanged to `method_tasks`.
+The old isolated-body manifest claims now point at production owners and retain an
+explicit coverage finding rather than reporting those removed tests as proof.
+`safe-cex-registry/tests/native_host_mexc_private_frames.rs` covers authenticated
+regular orders, partial/full fills and cancellation, the emitted fill event,
+positions and debounced balance refresh over real native HTTP/WebSocket servers.
+Disconnecting all four production topic routes makes all four named tests fail;
+restoring those routes and removing the duplicate bodies keeps them passing.
+
+Private login-failure diagnostics use the shared JavaScript JSON stringifier.
+The constructed venue's real private receiver covers ten numeric/key-order
+profiles, independently checked against the maintained TypeScript handler.
 
 Protocol tables are maintained in `src/types.rs` and compared in full to live
 TypeScript by `tests/tables.rs`. The envelope uses a private map-only decoder;
@@ -307,3 +347,24 @@ values/keys/entries and raw Map, including insertion/deletion, native numeric bi
 and reference identity. `scripts/iterator-consumer-controls.py` compiles an
 iterator-object rejection, requires both named failures and restores exact bytes.
 Its Cargo subprocesses have deadlines and private temporary logs.
+
+The production private asset handler debounces `fetchBalance` for 1000ms and
+swallows both fetch and Store-update failures, matching the TypeScript callback's
+empty catch. `socket_assembly::registered_private_asset_refresh_swallows_balance_fetch_failure`
+drives a real registered private frame, advances the host monotonic timer, and
+requires one attempted balance read with no host exception report.
+
+The two remaining generic socket copies in runtime_assembly (private_on_message
+and public_listen_order_book) and their fake-host scenarios are removed.
+Production private dispatch remains in sockets::PrivateProtocol; public book
+subscriptions remain in ws_public::MexcPublicSocket. The assembly oracle now
+covers only its seven live exchange-body groups (61 source cases). Manifest
+rows cite those live owners and retain explicit coverage findings.
+
+The constructed ticker corpus in `tests/exchange_trait.rs` covers 160 cases / 480 frames with every numeric alias, distinct fallback values and per-market contract sizes. Source Date parsing and native local-time conversion use the explicit UTC host profile.
+It drives the production constructor/socket protocol and actual DefaultStore,
+checking native number bits against maintained TS classes and DefaultStore.
+Independent null, string, NaN-producing, object, overflow, signed-zero and false
+inputs accompany distinct good rows, with finite Store resets before every case.
+The shared `ticker-native-controls.py` compiles live field-publication faults,
+requires named native failures, restores exact bytes and requires passing tests.

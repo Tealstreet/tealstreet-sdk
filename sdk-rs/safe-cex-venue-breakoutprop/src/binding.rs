@@ -14,11 +14,11 @@ use safe_cex_exchange::{
         promise::{Promise, await_js},
         value::{Js, Thrown, arg, from_typed, to_typed},
     },
-    runtime::{ExchangeError, ExchangeFuture},
+    runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
 };
 use safe_cex_types::{
-    ExchangeAccount, Market, Order, PlaceOrderOpts, Position, PositionSide, PublicTrade, Ticker,
-    UpdateOrderOpts, ValidateAccountResult,
+    Candle, ExchangeAccount, Market, OHLCVOptions, Order, OrderBook, PlaceOrderOpts, Position,
+    PositionSide, PublicTrade, Ticker, UpdateOrderOpts, ValidateAccountResult,
 };
 use std::rc::Rc;
 
@@ -57,6 +57,7 @@ pub(crate) fn instance(exchange: &Rc<BreakoutpropExchange>) -> Result<Js, Exchan
         "fetchOrders",
         "fetchMarkets",
         "fetchTickers",
+        "fetchOHLCV",
         "fetchSymbolMaxLeverage",
         "setLeverage",
         "changePositionMode",
@@ -141,6 +142,11 @@ fn native_call(
             let pending = reads.fetch_markets();
             Box::pin(async move { wire(&pending.await?) })
         }
+        "fetchOHLCV" => {
+            let opts = decoded(&arg(&args, 0));
+            let pending = opts.map(|opts| reads.fetch_ohlcv(opts));
+            Box::pin(async move { wire(&pending?.await?) })
+        }
         "fetchTickers" => {
             let pending = reads.fetch_tickers();
             Box::pin(async move { wire(&pending.await?) })
@@ -159,6 +165,7 @@ fn native_call(
                     exchange.base.store.as_ref(),
                     &utc,
                     symbols.as_deref(),
+                    &|message| report(&exchange, message),
                     |e| e,
                 )
                 .await?;
@@ -331,6 +338,37 @@ impl Exchange for BreakoutpropExchange {
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
         self.invoke("fetchMarkets", Ok(vec![]))
+    }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let cleanup = self.socket()?.listen_ohlcv(
+            options,
+            Rc::new(move |row| {
+                callback(row.borrow().clone());
+                Ok(())
+            }),
+        );
+        Ok(Box::new(move || cleanup()))
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let cleanup = self.socket()?.listen_order_book(
+            symbol,
+            Rc::new(move |book| {
+                callback(book.borrow().clone());
+                Ok(())
+            }),
+        );
+        Ok(Box::new(move || cleanup()))
+    }
+    fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        self.invoke("fetchOHLCV", wire(&options).map(|options| vec![options]))
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
         self.invoke("fetchTickers", Ok(vec![]))

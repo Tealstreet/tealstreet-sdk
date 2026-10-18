@@ -87,13 +87,29 @@ impl crate::public_stream::PublicStreamParent for Parent {
         symbol: &Value,
         ticker: &Ticker,
     ) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit(event, json!([symbol, ticker]))
+        self.rt()?.base().emit_args(
+            event,
+            &[
+                safe_cex_exchange::js_runtime::value::from_json(symbol),
+                safe_cex_exchange::js_runtime::value::from_typed(ticker)?,
+            ],
+        )
     }
     fn emit_trade(
         &self,
         trade: &crate::ws_helpers::PublicStreamTradeEvent,
     ) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("trade",json!([{"symbol":trade.symbol,"price":trade.price,"qty":trade.qty,"timestamp":trade.timestamp,"side":trade.side}]))
+        use safe_cex_exchange::js_runtime::value::{Js, from_typed};
+        self.rt()?.base().emit(
+            "trade",
+            Js::object(vec![
+                ("symbol", Js::str(&trade.symbol)),
+                ("price", Js::Number(trade.price)),
+                ("qty", Js::Number(trade.qty)),
+                ("timestamp", Js::Number(trade.timestamp)),
+                ("side", from_typed(&trade.side)?),
+            ]),
+        )
     }
 }
 impl crate::private_repairs::RepairParent for Parent {
@@ -212,16 +228,45 @@ impl crate::private_stream::PrivateStreamParent for Parent {
             .unwrap_or(0.0)
     }
     fn emit_order(&self, order: &Order) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("order", json!([order]))
+        self.rt()?.base().emit_args(
+            "order",
+            &[
+                safe_cex_exchange::js_runtime::value::Js::str(&order.id),
+                safe_cex_exchange::js_runtime::value::from_typed(order)?,
+            ],
+        )
     }
     fn emit_fill(&self, fill: &crate::private_stream::PrivateFill) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("fill",json!([{"id":fill.id,"orderId":fill.order_id,"symbol":fill.symbol,"side":fill.side,"price":fill.price,"amount":fill.amount}]))
+        use safe_cex_exchange::js_runtime::value::{Js, from_typed};
+        self.rt()?.base().emit(
+            "fill",
+            Js::object(vec![
+                ("id", fill.id.as_deref().map_or(Js::Undefined, Js::str)),
+                (
+                    "orderId",
+                    fill.order_id.as_deref().map_or(Js::Undefined, Js::str),
+                ),
+                (
+                    "symbol",
+                    fill.symbol.as_deref().map_or(Js::Undefined, Js::str),
+                ),
+                ("side", from_typed(&fill.side)?),
+                ("price", Js::Number(fill.price)),
+                ("amount", Js::Number(fill.amount)),
+            ]),
+        )
     }
     fn emit_positions(&self, positions: &[Position]) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("positions", json!([positions]))
+        self.rt()?.base().emit(
+            "positions",
+            safe_cex_exchange::js_runtime::value::from_typed(positions)?,
+        )
     }
     fn emit_account(&self, data: &Value) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("account", json!([data]))
+        self.rt()?.base().emit(
+            "account",
+            safe_cex_exchange::js_runtime::value::from_json(data),
+        )
     }
 }
 

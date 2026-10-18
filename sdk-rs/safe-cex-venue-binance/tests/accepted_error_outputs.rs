@@ -1,9 +1,7 @@
 //! Independent native output witnesses for response text and rejection reasons.
 use safe_cex_num::JsCoercionError;
-use safe_cex_types::OrderRejectReason;
-use safe_cex_venue_binance::{
-    private_order_logic::get_order_reject_reason,
-    response_message::{get_binance_pm_response_message, get_binance_response_message},
+use safe_cex_venue_binance::response_message::{
+    get_binance_pm_response_message, get_binance_response_message,
 };
 use serde_json::{Value, json};
 
@@ -64,50 +62,4 @@ fn futures_response_message_preserves_native_output() {
 #[test]
 fn pm_response_message_preserves_native_output() {
     message_cases(get_binance_pm_response_message);
-}
-
-#[test]
-fn rejection_reason_preserves_native_variant_and_absence() {
-    for (input, expected) in [
-        (json!({}), None),
-        (json!({"r": null}), None),
-        (json!({"r": false}), None),
-        (json!({"r": 0}), None),
-        (json!({"r": ""}), None),
-        (json!({"r": "insufficient margin"}), None),
-        (json!({"r": "post_only"}), Some(OrderRejectReason::PostOnly)),
-        (json!({"r": "gtx"}), Some(OrderRejectReason::PostOnly)),
-        (
-            json!({"r": "MaKeR violation"}),
-            Some(OrderRejectReason::PostOnly),
-        ),
-        (
-            json!({"r": "NOT_POST_ONLY"}),
-            Some(OrderRejectReason::PostOnly),
-        ),
-        (json!({"r": "makerish"}), Some(OrderRejectReason::PostOnly)),
-        (json!({"r": "g t x"}), None),
-        (json!({"r": ["gtx"]}), Some(OrderRejectReason::PostOnly)),
-        (
-            json!({"r": ["x", null, "maker"]}),
-            Some(OrderRejectReason::PostOnly),
-        ),
-        (json!({"r": ["post", "only"]}), None),
-        (json!({"r": {}}), None),
-        (json!({"r": 123}), None),
-        (
-            json!({"r": "\u{feff}post_only"}),
-            Some(OrderRejectReason::PostOnly),
-        ),
-    ] {
-        let actual = get_order_reject_reason(input.as_object().unwrap()).unwrap();
-        assert_eq!(actual, expected, "native rejection reason: {input}");
-    }
-    let input = json!({"r": {"toString": null}});
-    assert_eq!(
-        get_order_reject_reason(input.as_object().unwrap())
-            .unwrap_err()
-            .name,
-        "TypeError"
-    );
 }

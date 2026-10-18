@@ -56,7 +56,7 @@ kind = "type"
 layer = "adapted"
 rs = "safe-cex-types/src/gateway.rs::GatewayMessage"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#public-data-provider-choice, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. The public envelope decoder rejects whole frames for malformed unused fields, required-field omission, unknown enum values and typed optional nulls; unknown top-level properties are discarded. Literal reserved-looking info objects and numeric ingress are repaired, not excluded. This full-envelope boundary is distinct from provider on_message channel decoding. Targets: safe-cex-types/src/gateway.rs::GatewayMessage"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#public-data-provider-choice, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. The public envelope decoder rejects whole frames for malformed unused fields, required-field omission, unknown enum values and typed optional nulls; unknown top-level properties are discarded. Literal reserved-looking info objects and numeric ingress are repaired, not excluded. This full-envelope boundary is distinct from provider on_message channel decoding. Runtime interval adaptation uses the existing AnyTimeframe union so worker OHLCV options preserve all 27 maintained chart intervals through subscribe, reconnect, delivery and unsubscribe; source forwards these values despite its narrower Timeframe annotation. tests/public_data_providers.rs and tests/gateway-interval-source.cjs execute these paths. Targets: safe-cex-types/src/gateway.rs::GatewayMessage"
 
 [[symbol]]
 ts = "GatewayTickerUpdate"

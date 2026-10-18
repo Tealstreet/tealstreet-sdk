@@ -255,17 +255,18 @@ pub const DEFAULT_ASTER_BUILDER_FEE_RATE_TAKER: &str = "0.0001";
 pub const ASTER_BUILDER_FEE_RATE_CAP: &str = "0.001";
 
 pub fn is_aster_maker_only_order(
-    opts: &safe_cex_types::PlaceOrderOpts,
+    opts: impl Into<safe_cex_types::PreparedOrderOpts>,
     post_only: Option<bool>,
     api_order_type: &str,
 ) -> bool {
+    let opts = opts.into();
     opts.r#type == safe_cex_types::OrderType::Limit
         && matches!(api_order_type, "LIMIT" | "STOP" | "TAKE_PROFIT")
         && (opts.time_in_force == Some(safe_cex_types::OrderTimeInForce::PostOnly)
             || post_only == Some(true))
 }
 pub fn get_aster_builder_fee_rate_for_order<'a>(
-    opts: &safe_cex_types::PlaceOrderOpts,
+    opts: impl Into<safe_cex_types::PreparedOrderOpts>,
     post_only: Option<bool>,
     api_order_type: &str,
     config: &'a AsterBuilderFeeConfig,

@@ -2,8 +2,7 @@
 use indexmap::IndexMap;
 use safe_cex_venue_mexc::{
     exchange_runtime::*,
-    private_session::{Completion, SessionRuntime, TaskHost},
-    public_subscriptions::Runtime,
+    method_tasks::{Completion, Runtime, SessionRuntime, TaskHost},
 };
 use serde_json::{Value, json};
 use std::{

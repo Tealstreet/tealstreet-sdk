@@ -6,6 +6,8 @@ import { parseJsonWithSource } from './accepted-json-source.mjs';
 
 export const defaultContractDirectory = new URL('../accepted-set/contracts/', import.meta.url);
 
+export { stringifyJsonWithSource as contractJson } from './accepted-json-source.mjs';
+
 function readObject(file) {
   const value = parseJsonWithSource(fs.readFileSync(file, 'utf8'));
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), `accepted-set: contracts must be an object: ${file}`);

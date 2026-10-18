@@ -1,3 +1,6 @@
+#[path = "support/oracle_clock.rs"]
+mod oracle_clock;
+
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -70,20 +73,20 @@ fn book_value(b: &OrderBook) -> Value {
     json!({"bids":levels(&b.bids),"asks":levels(&b.asks)})
 }
 fn order_value(o: &Order) -> Value {
-    let mut v = json!({"id":o.id,"symbol":o.symbol,"status":o.status,"type":o.r#type,"side":o.side,"price":number(o.price),"amount":number(o.amount),"remaining":number(o.remaining),"filled":number(o.filled),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
-    if let Some(b) = o.close {
+    let mut v = json!({"id":o.id,"symbol":o.symbol,"status":o.status,"type":o.r#type,"side":o.side,"price":number((o.price).to_number()),"amount":number(o.amount),"remaining":number(o.remaining),"filled":number(o.filled),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
+    if let Some(b) = o.close.into_value() {
         v["close"] = json!(b);
     }
-    if let Some(t) = o.time_in_force {
+    if let Some(t) = o.time_in_force.into_value() {
         v["timeInForce"] = json!(t);
     }
-    if let Some(info) = &o.info {
+    if let Some(info) = o.info.as_ref() {
         v["info"] = observe(info);
     }
-    if let Some(t) = o.sl_trigger_type {
+    if let Some(t) = o.sl_trigger_type.into_value() {
         v["slTriggerType"] = json!(t);
     }
-    if let Some(t) = o.tp_trigger_type {
+    if let Some(t) = o.tp_trigger_type.into_value() {
         v["tpTriggerType"] = json!(t);
     }
     v
@@ -654,6 +657,7 @@ fn check(case: &Value) {
     let input = &case["input"];
     let (h, s, store, host) = fixture(input.clone());
     let method = case["method"].as_str().unwrap();
+    let clock = oracle_clock::ClockWindow::start();
     let invocation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         invoke(&h, &s, &host, method, input)
     }));
@@ -661,18 +665,23 @@ fn check(case: &Value) {
         invocation.is_ok(),
         "BINGX-RS native call completed {method}"
     );
-    let output = match invocation.unwrap() {
+    let clock = clock.finish();
+    let mut output = match invocation.unwrap() {
         Ok(v) => json!({"ok":v}),
         Err(e) => json!({"error":{"name":e.name,"message":e.message}}),
     };
+    if method == "fetchOrders" && output.get("ok").is_some() {
+        clock.normalize_orders(&mut output["ok"], &case["output"]["ok"]);
+    }
+    let mut native_state = state(&store);
+    clock.normalize_orders(&mut native_state["orders"], &case["state"]["orders"]);
     assert_eq!(
         output, case["output"],
         "BINGX-RS decoded native output {method} {}",
         case["variant"]
     );
     assert_eq!(
-        state(&store),
-        case["state"],
+        native_state, case["state"],
         "BINGX-RS decoded Store {method}"
     );
     assert_eq!(
@@ -936,10 +945,12 @@ fn stream_representation_boundaries_are_explicit() {
     );
     let mut opts = corpus()["cases"][20]["input"]["opts"].clone();
     opts["interval"] = json!("1M");
-    assert!(
-        serde_json::from_value::<OHLCVOptions>(opts).is_err(),
-        "BINGX-RS closed native timeframe refuses monthly interval"
-    );
+    let monthly = serde_json::from_value::<OHLCVOptions>(opts)
+        .expect("BINGX-RS native timeframe admits the source monthly interval");
+    assert!(matches!(
+        monthly.interval,
+        AnyTimeframe::Variant2(ExtendedTimeframe::MN1)
+    ));
 }
 #[test]
 fn polling_owner_release_is_visible() {

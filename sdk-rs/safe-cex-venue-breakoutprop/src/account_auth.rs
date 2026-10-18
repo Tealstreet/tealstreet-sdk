@@ -1,7 +1,13 @@
 //! Account lookup and validation over the existing session/transport seams.
-use crate::types::UserResponse;
-use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::{js_truthy, numeric_ingress::JsNumberInput};
+
+use safe_cex_exchange::{
+    js_runtime::value::{Js, Thrown, from_retained_input, to_typed},
+    runtime::ExchangeError,
+};
+use safe_cex_num::{
+    js_truthy,
+    numeric_ingress::{JsNumberInput, js_capture_output},
+};
 use safe_cex_transport::provider::RestRequest;
 use serde_json::{Value, json};
 use std::{cell::RefCell, future::Future};
@@ -68,37 +74,56 @@ where
                 ..RestRequest::default()
             })
             .await?;
-            // CHOSEN shared declared wire shape rather than a parallel dynamic user graph.
-            let data: UserResponse = input
-                .decode()
-                .map_err(|e| ExchangeError::new(e.to_string()))?;
-            let user = data.user_details.first().ok_or_else(|| {
-                let mut e =
-                    ExchangeError::new("Cannot read properties of undefined (reading 'accounts')");
-                e.name = "TypeError".into();
-                e
-            })?;
-            let valid: Vec<_> = user
-                .accounts
-                .iter()
-                .filter(|a| a.account_status == "FULL_TRADING")
-                .collect();
-            let selected = if valid.is_empty() {
+            let data = from_retained_input(
+                js_capture_output(&input).map_err(|e| ExchangeError::new(e.to_string()))?,
+            );
+            let accounts = data.get("userDetails")?.get("0")?.get("accounts")?;
+            let filter = accounts.get("filter")?;
+            if !filter.is_callable() {
+                return Err(
+                    Thrown::type_error("userDetail.accounts.filter is not a function").into(),
+                );
+            }
+            let valid = filter.call(
+                accounts,
+                vec![Js::function("filter", |_, args| {
+                    Ok(Js::Bool(
+                        args[0]
+                            .get("accountStatus")?
+                            .strict_equals(&Js::str("FULL_TRADING")),
+                    ))
+                })],
+            )?;
+            let count = valid.get("length")?.to_number()?;
+            let selected = if count == 0.0 {
                 return Err(ExchangeError::new("No valid accounts found"));
-            } else if valid.len() > 1 {
+            } else if count > 1.0 {
                 let subaccount = subaccount.filter(|s| !s.is_empty()).ok_or_else(|| {
                     ExchangeError::new("Multiple accounts found. Please specify subaccount number ")
                 })?;
-                valid
-                    .iter()
-                    .find(|a| a.account.contains(&subaccount))
-                    .copied()
-                    .ok_or_else(|| ExchangeError::new("Subaccount for number not found"))?
+                let selected = valid.call_method(
+                    "find",
+                    vec![Js::function("find", move |_, args| {
+                        let account = args[0].get("account")?;
+                        let includes = account.get("includes")?;
+                        if !includes.is_callable() {
+                            return Err(Thrown::type_error(
+                                "account.account.includes is not a function",
+                            ));
+                        }
+                        includes.call(account, vec![Js::str(&subaccount)])
+                    })],
+                )?;
+                if !selected.truthy() {
+                    return Err(ExchangeError::new("Subaccount for number not found"));
+                }
+                selected
             } else {
-                valid[0]
+                valid.get("0")?
             };
-            *cache.borrow_mut() = Some(selected.account.clone());
-            Ok(selected.account.clone())
+            let account: String = to_typed(&selected.get("account")?)?;
+            *cache.borrow_mut() = Some(account.clone());
+            Ok(account)
         }
         .await;
         if let Err(error) = &result {

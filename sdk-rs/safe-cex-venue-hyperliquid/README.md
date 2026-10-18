@@ -6,6 +6,20 @@ remains the behavioral reference. The frozen e6a8ffaf13 census is425ported,
 `sdk-rs/parity/HYPERLIQUID_DIVERGENCE_RESOLUTION.md`; older evidence/claim audits
 record their original trees and do not describe the current backlog.
 
+The standalone DTO cleanup removes declarations with no production Rust
+consumer from `types.rs`, `spot_models.rs` and `spot_types.rs`. The current
+554-row census is 390 ported, 87 divergent and 77 not-applicable. The latter
+rows retain their TypeScript identity with empty Rust mappings. Production
+exchange and socket bindings consume realm values; retained event models and
+order aliases keep their existing native contracts.
+
+`not-modeled-types.cjs` excludes the removed core roots from model and corpus
+regeneration. Spot model generation retains four user-event roots. Their current
+corpora cover 32 strict source cases; core corpora cover five literal roots,
+43 records and 29 numeric roots (680 number cases). Native bit, field and
+accepted-set assertions remain fixed for the retained roots. Earlier audit
+reports and their original counts are historical evidence, not this census.
+
 This crate contains typed payloads, action composition, L1/user EIP-712 signing,
 order interpretation, pacing, API processing and host-bound exchange/socket
 algorithms. Raw class construction and arrow dispatch retain opaque native

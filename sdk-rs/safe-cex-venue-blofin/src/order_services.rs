@@ -34,9 +34,10 @@ pub struct ServiceHost<'a, E> {
 pub(crate) fn body<E>(body: &RestResponseBody) -> Result<UtilityInput, ServiceError<E>> {
     match body {
         RestResponseBody::Encoded(bytes) => js_from_str(&String::from_utf8_lossy(bytes)),
-        RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-            js_from_value_ref(value)
-        }
+        RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => value
+            .clone()
+            .into_value()
+            .and_then(|value| js_from_value_ref(&value)),
     }
     .map_err(ServiceError::Ingress)
 }
@@ -54,7 +55,11 @@ pub(crate) async fn request<E>(
             .expect("static endpoint")
             .into(),
         params,
-        body: payload.map(RestBody::Untransformed),
+        body: payload
+            .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+            .transpose()
+            .map_err(ServiceError::Ingress)?
+            .map(RestBody::Untransformed),
         ..Default::default()
     };
     let response = xhr
@@ -104,7 +109,7 @@ pub async fn get_or_fetch_position_mode<E>(
             .positions()
             .iter()
             .find(|p| p.symbol == symbol)
-            .and_then(|p| p.position_mode)
+            .and_then(|p| (p.position_mode).into_value())
     {
         return Ok(mode);
     }
@@ -141,7 +146,7 @@ pub async fn get_or_fetch_margin_type<E>(
             .positions()
             .iter()
             .find(|p| p.symbol == symbol && p.contracts > 0.0)
-            .and_then(|p| p.margin_type)
+            .and_then(|p| (p.margin_type).into_value())
     {
         return Ok(mode);
     }

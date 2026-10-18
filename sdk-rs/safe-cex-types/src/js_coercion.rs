@@ -41,16 +41,55 @@ pub fn js_string(value: Option<&Value>) -> Result<String, JsCoercionError> {
             })
             .collect::<Result<Vec<_>, _>>()?
             .join(","),
-        Value::Object(values) => {
-            if values.contains_key("toString") {
-                return Err(JsCoercionError {
-                    name: "TypeError",
-                    message: "Cannot convert object to primitive value",
-                });
-            }
-            "[object Object]".into()
-        }
+        Value::Object(values) => object_string(values.contains_key("toString"))?.into(),
     })
+}
+
+fn object_string(has_own_to_string: bool) -> Result<&'static str, JsCoercionError> {
+    if has_own_to_string {
+        return Err(JsCoercionError {
+            name: "TypeError",
+            message: "Cannot convert object to primitive value",
+        });
+    }
+    Ok("[object Object]")
+}
+
+/// String(any) on retained data, before an HTTP/form encoder chooses UTF-8.
+pub fn js_retained_string_utf16(
+    value: &crate::retained_json::RetainedJsonInput,
+) -> Result<Vec<u16>, JsCoercionError> {
+    use crate::retained_json::RetainedJsonInput as Input;
+    let text = match value {
+        Input::Undefined => "undefined".into(),
+        Input::Null => "null".into(),
+        Input::Bool(value) => value.to_string(),
+        Input::Float(value) => js_number_string(*value),
+        Input::Lexeme(value) => js_number_string(value.parse().map_err(|_| JsCoercionError {
+            name: "TypeError",
+            message: "Invalid retained numeric lexeme",
+        })?),
+        Input::Text(value) => return Ok(value.clone()),
+        Input::Array(values) => {
+            let mut result = Vec::new();
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    result.push(u16::from(b','));
+                }
+                if !matches!(value, Input::Null | Input::Undefined) {
+                    result.extend(js_retained_string_utf16(value)?);
+                }
+            }
+            return Ok(result);
+        }
+        Input::Object(values) => object_string(
+            values
+                .iter()
+                .any(|(key, _)| key.iter().copied().eq("toString".encode_utf16())),
+        )?
+        .into(),
+    };
+    Ok(text.encode_utf16().collect())
 }
 
 /// String-pattern replacement over ECMAScript UTF-16 code units.
@@ -146,6 +185,46 @@ pub fn normalize_json_order(value: &mut serde_json::Value) {
         }
         _ => {}
     }
+}
+
+/// Well-formed JSON quoting of UTF-16, including escaped lone surrogates.
+pub fn json_quote_utf16(text: &[u16], out: &mut Vec<u16>) {
+    out.push(b'"' as u16);
+    for (i, &c) in text.iter().enumerate() {
+        let lone = match c {
+            0xD800..=0xDBFF => !matches!(text.get(i + 1), Some(0xDC00..=0xDFFF)),
+            0xDC00..=0xDFFF => i == 0 || !matches!(text[i - 1], 0xD800..=0xDBFF),
+            _ => false,
+        };
+        let escaped = match c {
+            0x22 => "\\\"".to_owned(),
+            0x5C => "\\\\".to_owned(),
+            0x08 => "\\b".to_owned(),
+            0x0C => "\\f".to_owned(),
+            0x0A => "\\n".to_owned(),
+            0x0D => "\\r".to_owned(),
+            0x09 => "\\t".to_owned(),
+            c if c < 0x20 || lone => format!("\\u{c:04x}"),
+            c => {
+                out.push(c);
+                continue;
+            }
+        };
+        out.extend(escaped.encode_utf16());
+    }
+    out.push(b'"' as u16);
+}
+
+/// OrdinaryOwnPropertyKeys for retained UTF-16 keys; lone units are ordinary names.
+pub fn js_own_keys_utf16<'a>(keys: impl IntoIterator<Item = &'a [u16]>) -> Vec<&'a [u16]> {
+    let mut keys: Vec<_> = keys.into_iter().collect();
+    keys.sort_by_key(|key| {
+        String::from_utf16(key)
+            .ok()
+            .and_then(|key| js_array_index(&key))
+            .map_or((1, 0), |index| (0, index))
+    });
+    keys
 }
 
 #[cfg(test)]

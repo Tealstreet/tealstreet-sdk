@@ -49,6 +49,176 @@ const BATCH: &str = "/api/v1/trade/batch-orders";
 const CANCEL: &str = "/api/v1/trade/cancel-batch-orders";
 
 #[test]
+fn public_frames_preserve_book_sequences_and_candle_volume() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    use std::cell::RefCell;
+    let (venue, rt, store, _) = support::fixture();
+    let mut loaded = store.loaded().clone();
+    loaded.markets = true;
+    Store::update(store.as_ref(), StoreUpdate {
+        markets: Some(vec![serde_json::from_value(json!({"id":"BTC-USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.1,"price":0.1},"limits":{"amount":{"min":0.0001,"max":10000},"leverage":{"min":1,"max":150}},"contractSize":0.001})).unwrap()]),
+        tickers: Some(vec![serde_json::from_value(json!({"id":"BTC-USDT","symbol":"BTCUSDT","bid":99,"ask":101,"last":100,"mark":100,"index":100,"percentage":0,"openInterest":0,"fundingRate":0,"fundingTime":0,"volume":0,"quoteVolume":0})).unwrap()]),
+        loaded: Some(loaded), ..Default::default()
+    }, false).unwrap();
+    rt.open.set(true);
+    let core = venue.base().get_socket(SocketSlot::Public).unwrap();
+    drive(
+        &rt,
+        core.create_websocket("ws://market-fixture".into(), vec![], None),
+    )
+    .unwrap();
+    let pump = || {
+        for _ in 0..12 {
+            rt.pump();
+        }
+    };
+    pump();
+    let socket = rt.opened.borrow()[0].clone();
+    let frame = |channel: &str, action: &str, data: Value| {
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({"arg":{"channel":channel,"instId":"BTC-USDT"},"action":action,"data":data})
+                    .to_string(),
+            )));
+        pump();
+        assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    };
+    let books = Rc::new(RefCell::new(Vec::new()));
+    let seen = books.clone();
+    let close_book = venue
+        .listen_order_book(
+            "BTCUSDT".into(),
+            Rc::new(move |book| seen.borrow_mut().push(book)),
+        )
+        .unwrap();
+    frame(
+        "books",
+        "snapshot",
+        json!([{"seqId":100,"bids":[["99","2"],["98","3"]],"asks":[["101","2"]]}]),
+    );
+    assert_eq!(books.borrow().len(), 1);
+    assert_eq!(books.borrow()[0].bids[1].total, 5.0);
+    frame(
+        "books",
+        "update",
+        json!([{"prevSeqId":100,"seqId":101,"bids":[["99","0"],["98","7"]],"asks":[["101","4"]]}]),
+    );
+    assert_eq!(books.borrow().len(), 2);
+    assert_eq!(
+        (
+            books.borrow()[1].bids.len(),
+            books.borrow()[1].bids[0].amount
+        ),
+        (1, 7.0)
+    );
+    let sent = socket.sent.borrow().len();
+    frame(
+        "books",
+        "update",
+        json!([{"prevSeqId":102,"seqId":103,"bids":[["99","9"]],"asks":[]} ]),
+    );
+    assert_eq!(books.borrow().len(), 2, "gap suppresses callback");
+    assert_eq!(
+        socket.sent.borrow().len(),
+        sent + 2,
+        "gap unsubscribes/resubscribes once"
+    );
+    frame(
+        "books",
+        "snapshot",
+        json!([{"seqId":200,"bids":[["99","2"],["98","3"]],"asks":[["101","2"]]}]),
+    );
+    frame(
+        "books5",
+        "snapshot",
+        json!([{"bids":[["99.5","1"]],"asks":[["100.5","1"]]}]),
+    );
+    assert_eq!(books.borrow().len(), 4);
+    assert_eq!(
+        (
+            books.borrow()[3].bids[0].price,
+            books.borrow()[3].bids[1].price,
+            books.borrow()[3].bids[1].total
+        ),
+        (99.5, 98.0, 4.0)
+    );
+    frame(
+        "tickers",
+        "snapshot",
+        json!([{"instId":"BTC-USDT","last":"100","open24h":"80","bidPrice":"99","askPrice":"101","volCurrency24h":"8","vol24h":"9"}]),
+    );
+    assert_eq!(
+        (
+            store.tickers()[0].last,
+            store.tickers()[0].percentage,
+            store.tickers()[0].volume,
+            store.tickers()[0].quote_volume
+        ),
+        (100.0, 25.0, 8.0, 9.0)
+    );
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let seen = candles.clone();
+    let close_candle = venue
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(),
+            Rc::new(move |candle| seen.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    frame(
+        "candle1m",
+        "snapshot",
+        json!([[
+            1700000000000u64,
+            "99",
+            "103",
+            "98",
+            "101",
+            "111",
+            "222",
+            "7"
+        ]]),
+    );
+    assert_eq!(candles.borrow().len(), 1);
+    assert_eq!(
+        (
+            candles.borrow()[0].timestamp,
+            candles.borrow()[0].close,
+            candles.borrow()[0].volume
+        ),
+        (1700000000.0, 101.0, 7.0)
+    );
+    close_book().unwrap();
+    close_candle().unwrap();
+    frame(
+        "candle1m",
+        "snapshot",
+        json!([[
+            1700000060000u64,
+            "99",
+            "103",
+            "98",
+            "101",
+            "111",
+            "222",
+            "7"
+        ]]),
+    );
+    assert_eq!(candles.borrow().len(), 1);
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|frame| frame.contains("unsubscribe") && frame.contains("books5"))
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
 fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     let (o, rt, store, wire) = support::fixture();
     let venue: Rc<dyn Exchange> = o.clone();
@@ -192,7 +362,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         .cloned();
     let body = placed
         .and_then(|r| r.body)
-        .map(|b| b.untransformed().unwrap().clone());
+        .map(|b| b.untransformed().unwrap().clone().into_value().unwrap());
     assert_eq!(
         body.as_ref().map(|b| &b[0]["instId"]),
         Some(&json!("BTC-USDT"))
@@ -308,4 +478,50 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     );
     venue.dispose().unwrap();
     assert!(venue.base().is_disposed());
+}
+
+#[test]
+fn amendment_omits_undefined_type_and_side_on_the_signed_wire() {
+    use safe_cex_store::Store;
+    let (concrete, rt, store, wire) = support::fixture();
+    let venue: Rc<dyn Exchange> = concrete;
+    let market = serde_json::from_value(json!({"id":"BTC-USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.1,"price":0.1},"limits":{"amount":{"min":0.1,"max":1000},"leverage":{"min":1,"max":150}},"info":{"lotSize":"0.1"}})).unwrap();
+    Store::update(
+        store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(vec![market]),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    script(&wire, MARGIN_MODE, ok(json!({"marginMode":"cross"})));
+    script(&wire, POSITION_MODE, ok(json!({"positionMode":"net_mode"})));
+    script(
+        &wire,
+        CANCEL,
+        ok(json!([{"orderId":"o1","clientOrderId":"","code":"0","msg":"success"}])),
+    );
+    script(
+        &wire,
+        BATCH,
+        ok(json!([{"orderId":"n1","clientOrderId":"c1","msg":"success","code":"0"}])),
+    );
+    let opts = serde_json::from_value(json!({"order":{"id":"o1","symbol":"BTCUSDT","status":"open","price":100,"amount":2,"filled":0,"remaining":2,"reduceOnly":false,"lastUpdate":1},"update":{"price":101}})).unwrap();
+    assert_eq!(drive(&rt, venue.update_order(opts)).unwrap(), ["n1"]);
+    let requests = wire.requests.borrow();
+    let placed = requests.iter().find(|r| r.url == BATCH).unwrap();
+    let body = placed
+        .body
+        .as_ref()
+        .unwrap()
+        .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
+        .unwrap();
+    let row = body[0].as_object().unwrap();
+    assert!(!row.contains_key("side") && !row.contains_key("orderType"));
+    drop(requests);
+    venue.dispose().unwrap();
 }

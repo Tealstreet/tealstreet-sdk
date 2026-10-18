@@ -158,7 +158,7 @@ impl BingxSubscriptions {
         opts: &OHLCVOptions,
         callback: CandleCallback,
     ) -> Result<Cleanup, ExchangeError> {
-        let interval = timeframe_name(opts.interval);
+        let interval = timeframe_name(opts.interval.clone());
         let unit = match interval {
             "1m" => "1min",
             "3m" => "3min",

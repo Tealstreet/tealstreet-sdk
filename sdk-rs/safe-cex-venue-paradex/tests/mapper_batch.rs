@@ -273,11 +273,24 @@ fn assert_order(order: &Order, source: &Value) {
         source_field(source, "symbol"),
         "order_native_symbol",
     );
-    let side = match order.side {
-        OrderSide::Buy => "buy",
-        OrderSide::Sell => "sell",
-    };
-    let kind = match order.r#type {
+    if order.side.is_undefined() {
+        assert_eq!(
+            source_field(source, "side")["kind"],
+            "undefined",
+            "order_native_undefined_side"
+        );
+    } else {
+        let side = match order.side.value().expect("present source enum in fixture") {
+            OrderSide::Buy => "buy",
+            OrderSide::Sell => "sell",
+        };
+        assert_string(side, source_field(source, "side"), "order_native_side");
+    }
+    let kind = match order
+        .r#type
+        .value()
+        .expect("present source enum in fixture")
+    {
         OrderType::Market => "market",
         OrderType::Limit => "limit",
         OrderType::Conditional => "conditional",
@@ -285,7 +298,11 @@ fn assert_order(order: &Order, source: &Value) {
         OrderType::TakeProfit => "take_profit_market",
         OrderType::TrailingStopLoss => "trailing_stop_market",
     };
-    let status = match order.status {
+    let status = match order
+        .status
+        .value()
+        .expect("present source enum in fixture")
+    {
         OrderStatus::Open => "open",
         OrderStatus::Closed => "closed",
         OrderStatus::Canceled => "canceled",
@@ -293,7 +310,6 @@ fn assert_order(order: &Order, source: &Value) {
         OrderStatus::Updating => "updating",
         OrderStatus::Canceling => "canceling",
     };
-    assert_string(side, source_field(source, "side"), "order_native_side");
     assert_string(kind, source_field(source, "type"), "order_native_type");
     assert_string(
         status,
@@ -301,7 +317,7 @@ fn assert_order(order: &Order, source: &Value) {
         "order_native_status",
     );
     for (key, value) in [
-        ("price", order.price),
+        ("price", order.price.to_number()),
         ("amount", order.amount),
         ("filled", order.filled),
         ("remaining", order.remaining),
@@ -316,7 +332,7 @@ fn assert_order(order: &Order, source: &Value) {
     let reduce = source_field(source, "reduceOnly");
     assert_eq!(reduce["kind"], "boolean");
     assert_eq!(
-        Some(order.reduce_only),
+        order.reduce_only.into_value(),
         reduce["value"].as_bool(),
         "order_native_reduce_only"
     );
@@ -366,7 +382,7 @@ fn actual_typescript_mapper_batch() {
     assert_eq!(expected.len(), 152, "batch_independent_fixture_count");
     let orders = corpus["orders"].as_array().unwrap();
     assert_eq!(orders.len(), 152, "batch_source_order_count");
-    let (mut mapped, mut refused, mut local_dates) = (0, 0, 0);
+    let (mut mapped, mut refused, mut local_dates, mut recovered_sides) = (0, 0, 0, 0);
     for (i, (raw, reject)) in expected.iter().enumerate() {
         let case = &orders[i];
         assert_eq!(
@@ -382,12 +398,29 @@ fn actual_typescript_mapper_batch() {
             local_calls.set(local_calls.get() + 1);
             ms
         });
+        // The frozen source corpus retains its original refusal labels. These
+        // two source-undefined cases now inhabit the existing ModelField carrier.
+        let recovered_side = (112..114).contains(&i);
+        if recovered_side {
+            assert_eq!(row["side"], if i == 112 { "unknown" } else { "" });
+            assert_eq!(
+                source_field(&case["output"], "side")["kind"],
+                "undefined",
+                "order_source_unknown_side"
+            );
+            assert!(
+                result.as_ref().unwrap().side.is_undefined(),
+                "order_native_unknown_side"
+            );
+            recovered_sides += 1;
+        }
+        let native_reject = *reject && !recovered_side;
         assert_eq!(
             result.is_err(),
-            *reject,
+            native_reject,
             "order_native_boundary_refusal {i}"
         );
-        if *reject {
+        if native_reject {
             assert!(!result.unwrap_err().is_empty(), "order_visible_refusal");
             let source = &case["output"];
             if i < 112 {
@@ -398,12 +431,6 @@ fn actual_typescript_mapper_batch() {
                         Some("function" | "object")
                     ),
                     "order_source_prototype_boundary"
-                );
-            } else if i < 114 {
-                assert_eq!(
-                    source_field(source, "side")["kind"],
-                    "undefined",
-                    "order_source_unknown_side"
                 );
             } else {
                 assert_eq!(
@@ -432,8 +459,9 @@ fn actual_typescript_mapper_batch() {
         );
         local_dates += local_calls.get();
     }
-    assert_eq!(mapped, 113, "batch_completed_native_orders");
-    assert_eq!(refused, 39, "batch_completed_refusals");
+    assert_eq!(mapped, 115, "batch_completed_native_orders");
+    assert_eq!(refused, 37, "batch_completed_refusals");
+    assert_eq!(recovered_sides, 2, "batch_completed_undefined_sides");
     assert_eq!(local_dates, 1, "batch_completed_local_dates");
     let mut tif_keys = vec![None, Some("")];
     tif_keys.extend(

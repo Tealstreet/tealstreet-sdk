@@ -853,3 +853,25 @@ also passed its complete 53-case source comparison after restoration. Full scope
 suite, host/WASM lint, formatting and parity results are recorded in the PR.
 The other five harness migrations and missing API/history intrinsic names are
 separate remaining audit work.
+
+### Terminal Store bridge and production private frames
+
+The original real-binding order witness failed with native status Open instead
+of Closed when the JS Store facade lacked `markOrdersTerminal`. The bridge now
+calls the existing native terminal-memory operation. Source authority is
+`store/store.base.ts:517-529` and `okx/okx.ws-private.ts:229-254`.
+
+Three production-binding tests pass through actual private socket dispatch:
+orders/final fills (all filled, canceled and mmp-canceled states), positions and
+account balance. They pin terminal commit before fill, the exact bare fill object
+and converted amount/price, duplicate suppression, no canceled/account/position
+fill, and stale REST snapshot refusal. Three direct native Store/facade tests
+pass for absent-ID memory, subscriber error metadata and typed UTF-16 refusal.
+The shared emitter behavior is inherited from #425, not reimplemented here.
+
+`python3 tests/terminal_store_controls.py` completed five compiled, named REDs
+(exit 101) followed by exact-byte restored PASS runs: missing bridge, ordinary
+status update without terminal memory, empty-Store shortcut, discarded subscriber
+error and lossy terminal-ID replacement. Receipts are written to
+`sdk-rs/target/okx-terminal-store-controls/`. The source is restored after each
+fault. These controls exercise the production facade, not test-only collaborators.

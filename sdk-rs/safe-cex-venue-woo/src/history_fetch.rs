@@ -9,16 +9,25 @@ async fn request_rows(
     query: &WooLegacyFillsQuery,
     symbol: Option<String>,
 ) -> Result<Vec<Value>, RestFailure> {
-    let mut values = vec![("limit".into(), RetainedJsonInput::Float(query.limit))];
+    let mut values = vec![(
+        "limit".encode_utf16().collect(),
+        RetainedJsonInput::Float(query.limit),
+    )];
     if let Some(symbol) = symbol.filter(|s| !s.is_empty()) {
-        values.push(("symbol".into(), RetainedJsonInput::Text(symbol)));
+        values.push((
+            "symbol".encode_utf16().collect(),
+            RetainedJsonInput::Text(symbol.encode_utf16().collect()),
+        ));
     }
     for (key, value) in [
         ("startTime", query.from_milliseconds),
         ("endTime", query.to_milliseconds),
     ] {
         if let Some(value) = value {
-            values.push((key.into(), RetainedJsonInput::Float(value)));
+            values.push((
+                key.encode_utf16().collect(),
+                RetainedJsonInput::Float(value),
+            ));
         }
     }
     let mut request = RestRequest {
@@ -30,11 +39,16 @@ async fn request_rows(
         Ok(params) => params,
         Err(error) => return Err(RestFailure::pre_transmit(error.to_string(), request)),
     });
-    let response = adapter.execute(request).await?;
+    let response = adapter.execute(request.clone()).await?;
     let data = match response.body.into_data() {
-        Value::String(text) => safe_cex_transport::how::json_parse(&text),
+        RetainedJsonInput::Text(text) => {
+            RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Null)
+        }
         native => native,
     };
+    let data = data
+        .into_value()
+        .map_err(|error| RestFailure::pre_transmit(error.to_string(), request))?;
     Ok(crate::response::parse_transaction_rows_from_response(&data).to_vec())
 }
 

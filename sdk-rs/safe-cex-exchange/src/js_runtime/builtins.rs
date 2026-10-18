@@ -15,13 +15,18 @@ fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
 }
 
-fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+fn require_callback(callback: &Js) -> Result<(), Thrown> {
     if !callback.is_callable() {
         return Err(Thrown::type_error(&format!(
             "{} is not a function",
             callback.to_display()
         )));
     }
+    Ok(())
+}
+
+fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+    require_callback(callback)?;
     callback.call(Js::Undefined, args)
 }
 
@@ -58,12 +63,26 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
         Js::Number(n) => {
             let n = *n;
             match name.as_str() {
-                "toString" => Some(method("toString", move |_| {
-                    Ok(Js::str(&safe_cex_num::js_number_string(n)))
+                "toString" => Some(method("toString", move |args| {
+                    let requested = arg(&args, 0);
+                    let radix = if requested.is_undefined() {
+                        10.0
+                    } else {
+                        requested.to_number()?.trunc()
+                    };
+                    if !(2.0..=36.0).contains(&radix) {
+                        return Err(Thrown::error(
+                            "RangeError",
+                            "toString() radix argument must be between 2 and 36",
+                        ));
+                    }
+                    Ok(Js::str(&super::number_radix::format(n, radix as u32)))
                 })),
                 "toFixed" => Some(method("toFixed", move |a| {
-                    let digits = arg(&a, 0).to_number()?.max(0.0) as usize;
-                    Ok(Js::str(&format!("{n:.digits$}")))
+                    let digits = arg(&a, 0).to_number()?;
+                    safe_cex_num::js_to_fixed(n, digits)
+                        .map(|text| Js::str(&text))
+                        .map_err(|message| Thrown::error("RangeError", message))
                 })),
                 _ => None,
             }
@@ -144,22 +163,45 @@ fn plain_string_member(s: Str, name: &str) -> Option<Js> {
         "toLowerCase" => method(name, move |_| Ok(Js::str(&st.to_lowercase()))),
         "trim" => method(name, move |_| Ok(Js::str(safe_cex_num::js_trim(&st)))),
         "toString" | "valueOf" => method(name, move |_| Ok(Js::String(s.clone()))),
-        "includes" => method(name, move |a| {
-            Ok(Js::Bool(st.contains(&text(&arg(&a, 0))?)))
+        "localeCompare" => method(name, move |a| {
+            let right = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
+            let collator = safe_cex_num::JsRootCollator::try_new()
+                .map_err(|error| Thrown::error(error.name, error.message))?;
+            Ok(Js::Number(collator.compare(&st, &right) as i8 as f64))
         }),
-        "startsWith" => method(name, move |a| {
-            Ok(Js::Bool(st.starts_with(&text(&arg(&a, 0))?)))
-        }),
-        "endsWith" => method(name, move |a| {
-            Ok(Js::Bool(st.ends_with(&text(&arg(&a, 0))?)))
-        }),
-        "indexOf" => method(name, move |a| {
-            let needle = text(&arg(&a, 0))?;
-            Ok(Js::Number(
-                st.find(&needle)
-                    .map_or(-1.0, |i| st[..i].encode_utf16().count() as f64),
-            ))
-        }),
+        "indexOf" | "lastIndexOf" | "includes" | "startsWith" | "endsWith" => {
+            let operation = name.to_owned();
+            method(name, move |a| {
+                let needle = arg(&a, 0).to_js_string()?;
+                let position = arg(&a, 1);
+                let number = position.to_number()?;
+                let position = if (operation == "endsWith" && position.is_undefined())
+                    || (operation == "lastIndexOf" && number.is_nan())
+                {
+                    s.len()
+                } else {
+                    string_position(number, s.len())
+                };
+                Ok(match operation.as_str() {
+                    "includes" => Js::Bool(find_utf16(&s[position..], &needle).is_some()),
+                    "startsWith" => Js::Bool(s[position..].starts_with(&needle)),
+                    "endsWith" => Js::Bool(s[..position].ends_with(&needle)),
+                    "lastIndexOf" => {
+                        let found = if needle.len() > s.len() {
+                            None
+                        } else {
+                            let last = position.min(s.len() - needle.len());
+                            (0..=last).rev().find(|at| s[*at..].starts_with(&needle))
+                        };
+                        Js::Number(found.map_or(-1.0, |at| at as f64))
+                    }
+                    _ => Js::Number(
+                        find_utf16(&s[position..], &needle)
+                            .map_or(-1.0, |at| (position + at) as f64),
+                    ),
+                })
+            })
+        }
         "replace" => method(name, move |a| {
             let needle: Vec<u16> = arg(&a, 0).to_js_string()?.to_vec();
             let replacement = arg(&a, 1);
@@ -183,16 +225,33 @@ fn plain_string_member(s: Str, name: &str) -> Option<Js> {
             Ok(Js::utf16(&out))
         }),
         "split" => method(name, move |a| {
-            let sep = arg(&a, 0);
-            if sep.is_undefined() {
+            let separator = arg(&a, 0);
+            let limit = super::regexp::split_limit(&arg(&a, 1))?;
+            // Source coercion order is limit, then separator, even at limit 0.
+            let sep = separator.to_js_string()?;
+            if limit == 0 {
+                return Ok(Js::array(vec![]));
+            }
+            if separator.is_undefined() {
                 return Ok(Js::array(vec![Js::String(s.clone())]));
             }
-            let sep = text(&sep)?;
-            Ok(Js::array(if sep.is_empty() {
-                s.iter().map(|c| Js::utf16(&[*c])).collect()
-            } else {
-                st.split(&sep).map(Js::str).collect()
-            }))
+            if sep.is_empty() {
+                return Ok(Js::array(
+                    s.iter().take(limit).map(|c| Js::utf16(&[*c])).collect(),
+                ));
+            }
+            let mut out = vec![];
+            let mut start = 0;
+            while let Some(offset) = find_utf16(&s[start..], &sep) {
+                let end = start + offset;
+                out.push(Js::utf16(&s[start..end]));
+                if out.len() == limit {
+                    return Ok(Js::array(out));
+                }
+                start = end + sep.len();
+            }
+            out.push(Js::utf16(&s[start..]));
+            Ok(Js::array(out))
         }),
         "slice" | "substring" => {
             let sub = name == "substring";
@@ -240,6 +299,14 @@ fn find_utf16(haystack: &[u16], needle: &[u16]) -> Option<usize> {
         return Some(0);
     }
     haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn string_position(value: f64, length: usize) -> usize {
+    if value.is_nan() {
+        0
+    } else {
+        value.clamp(0.0, length as f64) as usize
+    }
 }
 
 fn items(this: &Js) -> Vec<Option<Js>> {
@@ -293,6 +360,7 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
                     return Ok(d as usize);
                 }
                 let n = v.to_number()?.trunc();
+                let n = if n.is_nan() { 0.0 } else { n };
                 Ok(if n < 0.0 {
                     (len + n).max(0.0)
                 } else {
@@ -432,39 +500,24 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
             };
             let mut values: Vec<Js> = cells.borrow().iter().flatten().cloned().collect();
             let holes = cells.borrow().len() - values.len();
-            let mut failure = None;
-            values.sort_by(|x, y| {
-                if failure.is_some() {
-                    return std::cmp::Ordering::Equal;
-                }
-                let order = if x.is_undefined() || y.is_undefined() {
-                    Ok(f64::from(u8::from(x.is_undefined()))
-                        - f64::from(u8::from(y.is_undefined())))
-                } else if f.is_callable() {
-                    f.call(Js::Undefined, vec![x.clone(), y.clone()])
-                        .and_then(|v| v.to_number())
-                } else {
-                    (|| {
-                        Ok(match text(x)?.encode_utf16().cmp(text(y)?.encode_utf16()) {
-                            std::cmp::Ordering::Less => -1.0,
-                            std::cmp::Ordering::Equal => 0.0,
-                            std::cmp::Ordering::Greater => 1.0,
-                        })
-                    })()
-                };
-                match order {
-                    Ok(n) if n < 0.0 => std::cmp::Ordering::Less,
-                    Ok(n) if n > 0.0 => std::cmp::Ordering::Greater,
-                    Ok(_) => std::cmp::Ordering::Equal,
-                    Err(e) => {
-                        failure = Some(e);
-                        std::cmp::Ordering::Equal
-                    }
-                }
-            });
-            if let Some(e) = failure {
-                return Err(e);
+            if !f.is_undefined() && !f.is_callable() {
+                return Err(Thrown::type_error(
+                    "The comparison function must be either a function or undefined",
+                ));
             }
+            super::sorting::stable_sort(&mut values, |x, y| {
+                if x.is_undefined() || y.is_undefined() {
+                    return Ok(x.is_undefined().cmp(&y.is_undefined()));
+                }
+                if f.is_callable() {
+                    let n = f
+                        .call(Js::Undefined, vec![x.clone(), y.clone()])?
+                        .to_number()?;
+                    Ok(n.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal))
+                } else {
+                    Ok(x.to_js_string()?.cmp(&y.to_js_string()?))
+                }
+            })?;
             let mut sorted: Vec<Option<Js>> = values.into_iter().map(Some).collect();
             sorted.extend(std::iter::repeat_n(None, holes));
             *cells.borrow_mut() = sorted;
@@ -602,9 +655,19 @@ fn map_member(this: Js, name: &str) -> Option<Js> {
         }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
-            let snapshot = m.borrow().clone();
-            for (k, v) in snapshot {
-                callback_call(&f, vec![v, k, this.clone()])?;
+            require_callback(&f)?;
+            let receiver = arg(&a, 1);
+            let mut position = 0;
+            loop {
+                let item = m
+                    .borrow()
+                    .following(position)
+                    .map(|(at, entry)| (at, entry.clone()));
+                let Some((at, (key, value))) = item else {
+                    break;
+                };
+                position = at + 1;
+                f.call(receiver.clone(), vec![value, key, this.clone()])?;
             }
             Ok(Js::Undefined)
         }),
@@ -672,8 +735,17 @@ fn set_member(this: Js, name: &str) -> Option<Js> {
         }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
-            for v in s.borrow().clone() {
-                callback_call(&f, vec![v.clone(), v, this.clone()])?;
+            require_callback(&f)?;
+            let receiver = arg(&a, 1);
+            let mut position = 0;
+            loop {
+                let item = s
+                    .borrow()
+                    .following(position)
+                    .map(|(at, value)| (at, value.clone()));
+                let Some((at, value)) = item else { break };
+                position = at + 1;
+                f.call(receiver.clone(), vec![value.clone(), value, this.clone()])?;
             }
             Ok(Js::Undefined)
         }),
@@ -690,13 +762,9 @@ fn promise_member(p: Promise, name: &str) -> Option<Js> {
             &rt,
             Box::pin(async move {
                 match p.wait().await {
-                    Ok(v) if on_ok.is_callable() => {
-                        await_js(on_ok.call(Js::Undefined, vec![v])?).await
-                    }
+                    Ok(v) if on_ok.is_callable() => on_ok.call(Js::Undefined, vec![v]),
                     Ok(v) => Ok(v),
-                    Err(e) if on_err.is_callable() => {
-                        await_js(on_err.call(Js::Undefined, vec![e.value])?).await
-                    }
+                    Err(e) if on_err.is_callable() => on_err.call(Js::Undefined, vec![e.value]),
                     Err(e) => Err(e),
                 }
             }),

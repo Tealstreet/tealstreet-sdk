@@ -25,6 +25,7 @@ pub struct JsNumberInput(Node);
 
 #[derive(Debug, Clone)]
 enum Node {
+    Undefined,
     Null,
     Bool(bool),
     Text(String),
@@ -48,7 +49,7 @@ pub fn js_from_str<T: DeserializeOwned + Serialize + JsNumberOutput>(
 pub fn js_from_value<T: DeserializeOwned + Serialize + JsNumberOutput>(
     value: Value,
 ) -> Result<T, Error> {
-    JsNumberInput::from_retained(RetainedJsonInput::from_value(value)?).decode()
+    JsNumberInput::from_retained(RetainedJsonInput::from_value(value)?)?.decode()
 }
 
 /// Decode a borrowed Value, preserving its lexical numbers; output is owned.
@@ -70,29 +71,41 @@ pub fn js_value_as_f64(value: &Value) -> Option<f64> {
 // The lower types layer owns capture so shared model info fields and this
 // typed adapter use exactly the same lexeme and native-event visitor.
 impl JsNumberInput {
-    fn from_retained(input: RetainedJsonInput) -> Self {
-        Self(match input {
+    fn from_retained(input: RetainedJsonInput) -> Result<Self, Error> {
+        Ok(Self(match input {
+            RetainedJsonInput::Undefined => Node::Undefined,
             RetainedJsonInput::Null => Node::Null,
             RetainedJsonInput::Bool(value) => Node::Bool(value),
-            RetainedJsonInput::Text(value) => Node::Text(value),
+            RetainedJsonInput::Text(value) => {
+                Node::Text(String::from_utf16(&value).map_err(de::Error::custom)?)
+            }
             RetainedJsonInput::Lexeme(value) => Node::Lexeme(value),
             RetainedJsonInput::Float(value) => Node::Float(value),
-            RetainedJsonInput::Array(values) => {
-                Node::Array(values.into_iter().map(Self::from_retained).collect())
-            }
+            RetainedJsonInput::Array(values) => Node::Array(
+                values
+                    .into_iter()
+                    .map(Self::from_retained)
+                    .collect::<Result<_, _>>()?,
+            ),
             RetainedJsonInput::Object(values) => Node::Object(
                 values
                     .into_iter()
-                    .map(|(key, value)| (key, Self::from_retained(value)))
-                    .collect(),
+                    .map(|(key, value)| {
+                        Ok((
+                            String::from_utf16(&key).map_err(de::Error::custom)?,
+                            Self::from_retained(value)?,
+                        ))
+                    })
+                    .collect::<Result<_, Error>>()?,
             ),
-        })
+        }))
     }
 }
 
 impl<'de> Deserialize<'de> for JsNumberInput {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        RetainedJsonInput::deserialize(deserializer).map(Self::from_retained)
+        Self::from_retained(RetainedJsonInput::deserialize(deserializer)?)
+            .map_err(de::Error::custom)
     }
 }
 
@@ -158,7 +171,7 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
             ));
         }
         match self.0 {
-            Node::Null => visitor.visit_unit(),
+            Node::Undefined | Node::Null => visitor.visit_unit(),
             Node::Bool(value) => visitor.visit_bool(value),
             Node::Text(value) => visitor.visit_string(value),
             Node::Float(value) => visitor.visit_f64(value),
@@ -199,7 +212,7 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
         }
     }
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        if matches!(self.0, Node::Null) {
+        if matches!(self.0, Node::Null | Node::Undefined) {
             visitor.visit_none()
         } else {
             visitor.visit_some(self)
@@ -207,10 +220,14 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
     }
     fn deserialize_newtype_struct<V: Visitor<'de>>(
         self,
-        _: &'static str,
+        name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
-        visitor.visit_newtype_struct(self)
+        if name == safe_cex_types::model_field::MODEL_FIELD && matches!(self.0, Node::Undefined) {
+            visitor.visit_unit()
+        } else {
+            visitor.visit_newtype_struct(self)
+        }
     }
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         if !matches!(self.0, Node::Object(_)) {
@@ -326,6 +343,9 @@ fn check_numbers(
 impl Serialize for JsNumberInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match &self.0 {
+            Node::Undefined => {
+                serializer.serialize_unit_struct(safe_cex_types::model_field::UNDEFINED)
+            }
             Node::Null => serializer.serialize_unit(),
             Node::Bool(v) => serializer.serialize_bool(*v),
             Node::Text(v) => serializer.serialize_str(v),
@@ -355,9 +375,10 @@ impl Serialize for JsNumberInput {
 pub fn js_capture_output<T: Serialize + ?Sized>(value: &T) -> Result<RetainedJsonInput, Error> {
     fn retained(value: JsNumberInput) -> RetainedJsonInput {
         match value.0 {
+            Node::Undefined => RetainedJsonInput::Undefined,
             Node::Null => RetainedJsonInput::Null,
             Node::Bool(value) => RetainedJsonInput::Bool(value),
-            Node::Text(value) => RetainedJsonInput::Text(value),
+            Node::Text(value) => RetainedJsonInput::Text(value.encode_utf16().collect()),
             Node::Lexeme(value) => RetainedJsonInput::Lexeme(value),
             Node::Float(value) => RetainedJsonInput::Float(value),
             Node::Array(values) => {
@@ -366,7 +387,7 @@ pub fn js_capture_output<T: Serialize + ?Sized>(value: &T) -> Result<RetainedJso
             Node::Object(values) => RetainedJsonInput::Object(
                 values
                     .into_iter()
-                    .map(|(key, value)| (key, retained(value)))
+                    .map(|(key, value)| (key.encode_utf16().collect(), retained(value)))
                     .collect(),
             ),
         }

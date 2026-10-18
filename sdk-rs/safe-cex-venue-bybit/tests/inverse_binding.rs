@@ -521,7 +521,7 @@ fn inverse_public_topics_follow_active_and_market_callbacks_on_the_secondary_slo
         &json!(["tickers.ETHUSD"]),
         "dedicated inverse active callback uses its secondary socket"
     );
-    h.venue().base().emit("markets:changed",json!({"added":[{"symbol":"DOGEUSD","quote":"USD"},{"symbol":"DOGEUSD","quote":"USD"}],"removed":[]})).unwrap();
+    h.venue().base().emit("markets:changed",safe_cex_exchange::js_runtime::value::from_json(&json!({"added":[{"symbol":"DOGEUSD","quote":"USD"},{"symbol":"DOGEUSD","quote":"USD"}],"removed":[]}))).unwrap();
     assert_eq!(
         subscriptions().last().unwrap(),
         &json!(["tickers.DOGEUSD", "tickers.DOGEUSD"]),
@@ -553,7 +553,8 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
-            sink.borrow_mut().push(value[0].clone());
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
+            sink.borrow_mut().push(value.clone());
             Ok(())
         }),
     );
@@ -574,7 +575,7 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
     fill["cumExecValue"] = json!("0.025");
     fill["avgPrice"] = json!("20000");
     fill["rejectReason"] = json!("EC_NoError");
-    feed(json!({"topic":"order","data":[fill]}));
+    feed(json!({"topic":"order","data":[fill.clone()]}));
     assert_eq!(h.store.orders().len(), 1);
     assert_eq!(h.store.orders()[0].remaining, 0.025);
     assert_eq!(
@@ -586,6 +587,31 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
         fills.borrow()[0]["price"],
         20000.,
         "inverse fill uses cumulative qty divided by BTC value"
+    );
+    feed(json!({"topic":"order","data":[fill.clone()]}));
+    assert_eq!(
+        fills.borrow().len(),
+        1,
+        "inverse duplicate cumulative update emits no fill"
+    );
+    fill["cumExecQty"] = json!("750");
+    fill["cumExecValue"] = json!("0.035");
+    fill["avgPrice"] = json!("19000");
+    feed(json!({"topic":"order","data":[fill]}));
+    assert_eq!(
+        fills.borrow().len(),
+        2,
+        "advancing cumulative update emits one delta fill"
+    );
+    assert_eq!(
+        fills.borrow()[1]["amount"],
+        250.0,
+        "inverse incremental USD quantity"
+    );
+    assert_eq!(
+        fills.borrow()[1]["price"],
+        25000.0,
+        "inverse price uses incremental qty/value, not averages"
     );
     feed(json!({"topic":"position","data":[position("NaN")]}));
     assert!(

@@ -157,6 +157,18 @@ mod accepted_scalar_helper_tests {
     }
     #[test]
     fn character_at_native_output() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/accepted-character-source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "actual d8 character fixtures: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         check("exchange_utils::character_at", 11, |value| {
             serde_json::json!(character_at(
                 value["alphabet"].as_str().unwrap(),

@@ -7,22 +7,42 @@ use safe_cex_num::{
     TableHit, js_date_parse, js_string, js_table_lookup, js_time_clip, js_truthy,
     numeric_ingress::js_value_as_f64, parse_float,
 };
-use safe_cex_types::Order;
+use safe_cex_types::{ModelField, Order};
 use serde_json::{Map, Value};
+
+#[derive(Debug)]
+pub(crate) struct OrderProjectionRefusal {
+    pub field: &'static str,
+    pub value: Option<Value>,
+    pub message: String,
+}
 
 // ts: ParadexExchange#mapOrder
 pub fn map_order(
     row: &Map<String, Value>,
     local_to_utc: impl FnOnce(f64) -> f64,
 ) -> Result<Order, String> {
+    map_order_row(row, local_to_utc)?.map_err(|refusal| refusal.message)
+}
+
+// Source evaluation errors remain distinct from the batch's strict identity
+// refusals. The standalone utility retains the original refusal error.
+pub(crate) fn map_order_row(
+    row: &Map<String, Value>,
+    local_to_utc: impl FnOnce(f64) -> f64,
+) -> Result<Result<Order, OrderProjectionRefusal>, String> {
     let text = |field| {
         row.get(field)
             .and_then(Value::as_str)
             .ok_or_else(|| format!("Paradex order field {field} must be a string"))
     };
-    let side = match js_table_lookup(ORDER_SIDE, text("side")?) {
-        TableHit::Mapped(value) => *value,
-        _ => return Err("Paradex order side is outside the shared OrderSide domain".into()),
+    let side_key = js_string(row.get("side")).map_err(|error| error.to_string())?;
+    let side = match js_table_lookup(ORDER_SIDE, &side_key) {
+        TableHit::Mapped(value) => ModelField::Value(*value),
+        TableHit::Missing => ModelField::Undefined,
+        TableHit::Inherited(_) => {
+            return Err("Paradex order side is outside the shared OrderSide domain".into());
+        }
     };
     let reduce_only = row
         .get("reduce_only")
@@ -59,46 +79,62 @@ pub fn map_order(
     let amount = parse_float(&js_string(row.get("size")).map_err(|error| error.to_string())?);
     let remaining =
         parse_float(&js_string(row.get("remaining_size")).map_err(|error| error.to_string())?);
-    Ok(Order {
-        client_order_id: None,
-        id: text("id")?.to_owned(),
-        parent_id: None,
-        symbol: text("market")?.to_owned(),
+    let last_update = match row.get("created_at") {
+        None => f64::NAN,
+        Some(Value::Null) => 0.0,
+        Some(Value::Bool(value)) => {
+            if *value {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        Some(value) => match js_value_as_f64(value) {
+            Some(number) => js_time_clip(number),
+            None => js_date_parse(
+                &js_string(Some(value)).map_err(|error| error.to_string())?,
+                local_to_utc,
+            ),
+        },
+    };
+    let identity = |field: &'static str| {
+        row.get(field)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| OrderProjectionRefusal {
+                field,
+                value: row.get(field).cloned(),
+                message: format!("Paradex order field {field} must be a string"),
+            })
+    };
+    let identities = (|| Ok((identity("id")?, identity("market")?)))();
+    let (id, symbol) = match identities {
+        Ok(fields) => fields,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    Ok(Ok(Order {
+        client_order_id: (None).into(),
+        id,
+        parent_id: (None).into(),
+        symbol,
         side,
-        r#type: kind,
-        status,
-        price,
+        r#type: (kind).into(),
+        status: status.into(),
+        price: price.into(),
         amount,
         filled: amount - remaining,
         remaining,
-        reduce_only,
-        time_in_force: None,
+        reduce_only: reduce_only.into(),
+        time_in_force: None.into(),
         // Date distinguishes missing, null and booleans before primitive/string parsing.
-        last_update: match row.get("created_at") {
-            None => f64::NAN,
-            Some(Value::Null) => 0.0,
-            Some(Value::Bool(value)) => {
-                if *value {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            Some(value) => match js_value_as_f64(value) {
-                Some(number) => js_time_clip(number),
-                None => js_date_parse(
-                    &js_string(Some(value)).map_err(|error| error.to_string())?,
-                    local_to_utc,
-                ),
-            },
-        },
-        info: Some(Value::Object(row.clone())),
-        close: None,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
-    })
+        last_update,
+        info: (Some(Value::Object(row.clone()))).into(),
+        close: (None).into(),
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
+    }))
 }

@@ -107,22 +107,26 @@ pub fn map_coinbase_rest_order(
     let filled = multiply(filled_native, contract_size);
     let remaining = multiply(remaining_native, contract_size);
     Some(Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id: raw_order.get("order_id")?.as_str()?.to_owned(),
-        parent_id: Some(raw_order.get("client_order_id")?.as_str()?.to_owned()),
-        status,
+        parent_id: match raw_order.get("client_order_id") {
+            None | Some(Value::Null) => None,
+            Some(id) => Some(id.as_str()?.to_owned()),
+        }
+        .into(),
+        status: status.into(),
         symbol: market.symbol.clone(),
-        r#type: resolved.kind,
+        r#type: (resolved.kind).into(),
         side: if raw_order.get("side").and_then(Value::as_str) == Some("BUY") {
-            OrderSide::Buy
+            safe_cex_types::ModelField::Value(OrderSide::Buy)
         } else {
-            OrderSide::Sell
+            safe_cex_types::ModelField::Value(OrderSide::Sell)
         },
-        price: parse_unsigned_decimal(resolved.price).unwrap_or(0.0),
+        price: (parse_unsigned_decimal(resolved.price).unwrap_or(0.0)).into(),
         amount: add(filled, remaining),
         filled,
         remaining,
-        extra: Some(OrderExtra {
+        extra: (Some(OrderExtra {
             remaining_native: Some(remaining_native),
             filled_in_placement_units: None,
             remaining_notional: None,
@@ -132,16 +136,17 @@ pub fn map_coinbase_rest_order(
             chaser_id: None,
             chaser_attempts: None,
             chaser_max_attempts: None,
-        }),
-        reduce_only: false,
-        info: Some(raw_order.clone()),
+        }))
+        .into(),
+        reduce_only: false.into(),
+        info: (Some(raw_order.clone())).into(),
         last_update,
-        close: None,
-        time_in_force: None,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
+        close: (None).into(),
+        time_in_force: (None).into(),
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
     })
 }

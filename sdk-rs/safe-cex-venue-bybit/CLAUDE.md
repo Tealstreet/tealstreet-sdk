@@ -402,17 +402,12 @@ Opposite-position size checks use signed contracts, strict nonzero and >= amount
 with some/any selection rather than exactly-one matching. Keep malformed typed
 ingress separate from the numeric predicate; placement does not call this helper yet.
 
-The public journal_fold module now constructs shared PositionRecord values from
-closed-PnL partials. It preserves the source numeric-entry grouping heuristic,
-including identical-entry reopens merging. Resolve the leg once while bucketing
-and again on the sorted first row; optional resolver absence must skip orderId
-coercion. Funding context precedes settlement lookup, and gross is net + fees -
-funding. Inherited CLOSE_REASON values refuse the closed enum after remaining
-source effects; aggregation continues later buckets so later coercion failures
-retain precedence. The live record oracle observes every native field and
-callback before JSON (595-case floor plus 20 numeric inputs). Typed callbacks
-are infallible and enum-constrained; arbitrary host objects/getters and non-UTF8
-strings are outside this slice. No fetchHistoricalPositions composition is claimed.
+The public `journal_fold` adapter now retains native Js rows, dependency callbacks
+and records through the actual primary/demo historical-position reader. Closed
+rows join the historical-order hedge axis before grouping, and each quote resolves
+from the live Store. The 595 source-case corpus compares native number bits and
+callback traces, including inherited close reasons and optional context. The
+real signed-HTTP binding tests cover both families and source variant refusals.
 
 exchange_helpers ports the pure mode/cancel predicates and balance scalar/fold
 helpers. Preserve strict string guards, whitespace-only Number zero versus
@@ -531,8 +526,8 @@ clears recently-placed snapshot grace on sighting, maintains one canonical
 incremental-fill tracker per protocol, publishes terminal rows, and updates
 positions/balance in source order. Primary/Demo filter categories by the account
 switches. Dedicated Spot omits positions; dedicated Inverse preserves its
-qty/value fill pricing and [position, position] Store update pairs. Spot and dedicated Inverse constructors are now bound; HyroTrader
-constructor/session binding remains separate work. Execution and wallet
+qty/value fill pricing and [position, position] Store update pairs. Spot, dedicated Inverse and HyroTrader constructors are bound; Hyro uses its
+acknowledged private session and USDT-only reconciliation. Execution and wallet
 topics are ignored in maintained TS and remain ignored here.
 `tests/private_event_delivery.rs` feeds the actual core socket pump. Its source
 oracle executes maintained handler, mapper, fill helper, selectors and Store
@@ -572,6 +567,15 @@ special orders before regular category groups, preserve TP/SL on every request,
 and keep the original batch for individual fallback. Successful result indices
 refer to the filtered formatter entries. The pure formatter receives the awaited
 canonical 0/1/2 position index; other request numerics are source string fields.
+Spot and inverse install the same native recent-order recorder: cache the order
+and optionally publish Brazil REST fallback without primary reconciliation timers.
+Spot previously inherited the primary recorder; its compiled master-red HTTP
+probe regression now passes, with inverse and primary/demo timer controls.
+
+The unused typed local_order_cache facade, its fake-host oracle and its mutation
+runner are removed. Spot/inverse cache manifest rows name the live native
+lifecycle handlers; the canonical PrimaryOrderState owns the actual cache.
+
 Spot and dedicated Inverse keep their own `placeOrders` overrides.
 Native promise tails belong to Scope and stop on disposal. The batch source
 oracle executes the actual five member bodies with maintained helpers; the
@@ -631,9 +635,12 @@ axios-retry, plus two native clock-reentry profiles. The private adapter witness
 checks zero and omitted namespaces. `scripts/request-retry-controls.py` restores
 the fixed budget and dropped namespace independently; each must compile and fail
 its named runtime assertion, then exact restored bytes must pass. Its subprocesses
-have timeouts and private temporary logs. This evidence covers JSON-shaped retry
-configuration; it does not claim executable per-request retry callbacks or the
-source's arbitrary live Axios configuration objects.
+have timeouts and private temporary logs. The retained-config supplement now
+covers own `retries: undefined` and NaN through the constructed venue's actual TypedHttpHost, BybitApi and terminal
+adapter. Both match the maintained Axios/axios-retry one-attempt outcome; native
+NaN and own undefined are observed before any JSON projection. Missing retries
+still defaults to three. Executable per-request retry callbacks and arbitrary
+live Axios configuration objects remain outside the data-only typed profile.
 
 The Exchange cancellation surface invokes the venue `cancelSymbolOrders` member,
 so an empty local order cache still sends `/v5/order/cancel-all` through the
@@ -643,3 +650,215 @@ Spot retains its existing spot-only body. Retirement consumes only `id` and
 `symbol`, including cancellation snapshots, and reports resolved venue rejection
 without throwing or retiring rows. `tests/cancel_all_binding.rs` exercises all
 four production constructors and the real retained receiver/HTTP client path.
+
+Retry-condition coverage uses the real HTTP factory in `tests/api_factory.rs`.
+The dead `api::should_retry_bybit_request` copy and its fake-only optional-config
+supplement were removed. Keep the factory attempt, HMAC, effective error-config
+and retained-error assertions. `scripts/factory-retry-condition-control.py`
+inverts the production instruments-info exclusion, requires a compiled attempt
+count failure and restores exact source bytes before requiring a passing run.
+
+The Exchange candle-read override reaches the concrete receiver for all four bound
+families. `binding/members/ohlcv.rs` preserves primary validation/errors and the
+dedicated Spot/Inverse optional list mapping over the shared date/tuple mapper.
+`candle_read_binding` supplies four compiled master-fail controls and six HTTP
+witnesses. `private_frame_binding` sends order/fill/position/balance-related frames
+through each family's real private protocol and Store bridge.
+
+The unused `inverse_socket_bodies` adapter and its fake realm/oracle are removed.
+Inverse socket manifest rows point to the live `ws_private` and `ws_public`
+bodies. The real inverse socket witness replays a cumulative fill frame and then
+advances it, checking suppression, USD delta and inverse qty/value price.
+`scripts/inverse-private-tracker-control.py` resets the production tracker per
+frame, requires the duplicate-fill assertion to fail after compilation, restores
+the exact source bytes and requires the same witness to pass. Historical socket
+body evidence describes the removed adapter, not production coverage.
+
+Primary placement preserves Lodash `times` count admission before materializing
+lots. A zero market maximum produces Infinity and no payloads, as in TypeScript.
+`tests/zero_order_max_binding.rs` drives both actual primary/demo placement paths
+in bounded child processes so the pre-fix infinite loop fails safely.
+
+The Spot binding installs its source `omit` import over native object-literal
+requests, so later split lots drop SL/TP fields without mutating the first lot.
+`spot_binding::split_spot_orders_omit_brackets_only_after_the_first_lot` proves the
+pre-fix missing-import rejection and validates both signed placement payloads.
+
+Private reopen snapshots now dispatch through the actual venue receiver for all four
+families. Primary/Demo tick uses BaseExchange's real remote-signer gate, and omitted
+fetchOrders arguments retain the source true default. `private_refresh_binding`
+and the two periodic `exchange_binding` witnesses drive signed HTTP and Store
+publication; the source single-attempt snapshot policy ignores the retry argument.
+
+The Exchange order-book listener now selects the source public socket and installs
+real snapshot/delta subscriptions: depth 200 for Spot and 1000 for derivatives.
+Core-owned retry/resync timers and retained topic maps preserve delayed connection,
+sequence-gap recovery, reconnect and cleanup. `public_stream_binding` exercises all
+four families; the maintained source book oracle includes array-like level lists.
+
+Closed-PnL reads now dispatch through Exchange for primary/demo and dedicated
+inverse, preserving each source category/refusal policy; Spot keeps Base's empty
+history. Native mapper/iterator values survive until typed output. The actual
+signed-client tests cover windows, cursors, cap warnings, malformed rows and the
+shared signing virtual clock; do not replace it with the runtime wall clock.
+
+Bulk candle streaming now binds primary/demo and dedicated Inverse Exchange calls
+to their live public socket handlers. The maintained Spot Exchange inherits the
+base bulk no-op, although its socket declares a separate bulk member. Source
+subscriptions retain topics across reopen, replace the generic kline handler and
+send chunks of 50; delayed connections use core-owned retries. Callback metadata
+uses the shared String search position implementation. The output interval is
+ModelField<AnyTimeframe>, retaining monthly and own-undefined source values while
+public OHLCV(S) request intervals retain their existing strict type.
+
+Single-candle listeners now bind all four Exchange families to real kline/trade
+handlers. The live mapper consumes native Js values and preserves source numeric
+coercions. Primary/Demo own a shared per-socket 25-second silence watchdog and
+10-second recovery cooldown over the maintained recovery operations. Reopen
+rearms existing handlers, and final cleanup cancels the primary timer/retry.
+Dedicated Spot/Inverse retain their delayed-retry and topic/stats cleanup quirks.
+The sequence oracle replays 72 maintained source frames through actual bindings;
+the wired kline mapper retains its 2172-outcome source corpus.
+
+Income history and range reads now bind primary/demo and dedicated inverse to the
+maintained transaction-log helpers. Spot retains inherited empty history. Keep
+linear/inverse context order, source combined-category sort/limit rules, inclusive
+windows and repeated IDs. The mapper stays native until the typed public output;
+its ordinary lookup tables retain actual Object.prototype members.
+
+Spot's missing-market intrinsic constructs the source message before the caller
+wraps it in Error. Real placement witnesses cover ordinary limit and full-position
+SL/TP routes. The REST/private-frame unknown stopOrderType witness retains all
+three unlisted stop kinds as own Undefined through the ModelField Store bridge.
+
+Spot trailing-order placement retains the source `Ticker <symbol> not found`
+error when market or ticker data is missing. The SessionHost intrinsic builds
+the source template in UTF-16 before the existing Error construction. The real
+Spot binding witness seeds a market without tickers and verifies no order write.
+
+Historical order reads now bind primary/demo to the native mapper and signed
+history client. Dedicated Spot/Inverse keep Base's empty method. Keep ascending
+inclusive windows, category order and first-seen ID deduplication before sorting
+and limits. All three ledger mappers share native numeric coercion.
+
+Historical fills now bind primary/demo and dedicated inverse through their real
+receiver, signed clients and native execution/fallback mappers. Keep the primary
+valid prefix on mapping errors, but discard a failed recovery accumulator. Source
+primary short/extended recovery differs from dedicated inverse single recovery;
+Spot inherits empty history. The full reader source corpus covers requests, results
+and diagnostics; mapper source corpora retain their separate scalar contracts.
+
+Primary/demo option reads now bind the chain, expiry and account-Greeks receiver
+members, including the source account opt-in guard. Quotes stay native through
+numeric coercion, duplicate-symbol joins and sorting against live Store markets.
+Dedicated Spot/Inverse retain the base options refusals. The actual HTTP/source
+comparison has 79 passing cases, including tied-right sorting through the
+canonical shared String.prototype.localeCompare implementation.
+
+## Native HyroTrader composition
+
+`BybitExchange::create(Hyrotrader, ...)` selects its explicit simulator origin,
+source receiver overrides and private acknowledgement/reconciliation protocol.
+The registry reuses the existing Bybit dependency edge. Missing build-time REST
+configuration returns the source error before IO; public/private WS origins use
+the existing build-time tables and REST-derived defaults. Never route Hyro to
+Bybit or Demo as a configuration fallback.
+
+`binding/members/hyro_recovery.rs` keeps native Js recovery groups, original
+submission IDs and publication boundaries. Creates use the existing per-request
+zero retry budget; the shared API factory remains unchanged. Complete realtime
+and history absence permits reuse of an uncertain identity; failed/incomplete
+lookups preserve uncertainty. Authoritative terminal recovery returns its ID
+without recording a new open order. Concurrent identical lists share one
+sequence, and constructor disposal clears pending state. The old uncalled
+`failure_diagnostics` rejection class/predicate and their 18 fake-only cases
+were retired; the live recovery owns the retained Error brand and RegExp body.
+All other diagnostic source groups and controls remain.
+
+Hyro inherits dynamic closed PnL, fill and order history plus the closed-row/order
+join for journal positions. Its income reads retain the source empty capability brand. Candle snapshots
+use authoritative kline volume, never subscribe to publicTrade, and reject
+seconds through the source validator. Existing typed interval/model ingress
+bounds remain separate from the runtime body claim.
+
+`tests/hyro_binding.rs` drives the actual constructor/receiver, signed client,
+core socket pump and Store, including hosted WS signing, stale ACK/frame guards,
+malformed snapshots, revision races, generated IDs and order reconciliation.
+`safe-cex-registry/tests/native_host_hyrotrader.rs` constructs through the real
+native host and verifies the transmitted HTTP HMAC on loopback. Configure the
+existing `NEXT_PUBLIC_HYROTRADER_SIMULATOR_*` Cargo build-time origins for the
+configured witnesses; the ordinary test also checks unconfigured refusal.
+Constructor and native-registry refusals were compiled on master before repairs;
+the added source policy witnesses also compiled/fail before their own repairs.
+These local fixtures do not claim live simulator-account acceptance.
+
+Dynamic history capabilities delegate to the same live Exchange methods: fills,
+income/range and closed PnL for primary/demo/inverse, historical orders for
+primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
+order history. `history_capability_binding` exercises the actual capability calls
+and signed HTTP; direct trait coverage alone does not witness this dispatch path.
+
+HyroTrader inherits all three option-read methods but its optionsEnabled override
+always returns false. Route those trait and dynamic calls through the inherited
+receiver so they preserve the source options-disabled Error before HTTP, including
+when the account option-market flag is true. hyro_binding compares all six paths
+with maintained Bybit methods and the actual Hyro guard; spot/inverse family
+routing remains independently defined.
+
+API response diagnostics can invoke fallible error listeners. Preserve the original
+name/message/code through the canonical owned callback transport cause and the
+Bybit HTTP receiver; do not stringify this rejection or attach a replacement
+request config. The owned-value capture profile explicitly refuses unsupported
+code values. `native_host_bybit` drives this path through signed native HTTP for
+all four account constructors, including NaN and own undefined inside code. The
+response-boundaries source oracle executes maintained createAPI with actual
+Axios/retry/qs and asserts the injected diagnostic throw is the identical final
+rejection after one physical attempt.
+
+Margin and position-mode control bodies forward the generic fetched batch without
+inspecting it. The production binding carries Js directly into Store publication;
+never serialize these intermediates through JSON, which erases native NaN and
+infinities. Real HTTP control-switch regressions cover primary and demo accounts.
+
+Public ticker callbacks retain their socket category: primary/demo inverse streams
+map turnover24h to coin volume and volume24h to quote volume. Dedicated inverse
+and Spot retain their own source layouts. Real socket regressions cover all four
+account constructors and partial updates; the maintained-source ticker corpus
+now covers both primary categories in 1,944 cases and 21,384 field comparisons.
+
+Market id/symbol/base/quote remain strict strings under the approved row-admission policy.
+Primary/demo and Spot defer typed string refusals until source mapping completes;
+dedicated inverse admits strings after building its native rows. Each refused row
+reports its identity and field values, while valid siblings survive fetch/refresh.
+This intentionally differs from TS retaining malformed string fields. Fee joins compare primitive symbol values strictly; distinct
+JSON objects/arrays never match by contents. Source numeric/property errors retain
+priority over typed row refusals.
+
+Primary/demo single-order routing rechecks truthiness after price/trigger rounding.
+A conditional trigger rounded to zero rejects before placement; a zero-rounded
+conditional price selects Market and omits price/TIF. Adjusted NaN also skips
+trigger-direction ticker reads. Raw option gates still send
+zero-rounded bracket/trigger strings, and plain limit orders retain price zero.
+`adjusted_order_binding` covers both real class bindings and those payload controls.
+
+Submission checks unknown outcome only for one payload carrying a caller client ID.
+The real HTTP regression sends a rejected first split lot with a non-coercible
+error code and verifies later lots still place; a single order without a caller
+ID also skips classification, while a caller-ID control still reaches it.
+
+The retained HTTP body carries lone UTF-16 surrogate units through the common
+response hook. The legacy api_factory typed response view still refuses those
+strings visibly under the strict-output decision; its RestFailure retains the
+original response and effective request. This is a post-response consumer
+refusal, not a network failure. The native factory observer records canonical
+retained input, and its compiled control fails if the original response is lost.
+Numeric fixture comparisons check exact binary64 bits and source JSON spelling,
+rather than serde number lexemes.
+
+The remaining generic callback dispatchers take closed per-module `Callback`
+selectors. Native routing converts only the original fixed factory tags; all
+matches are exhaustive. Their former unknown-callback intrinsic arms had no
+production route and are deleted. Hyro socket disposal uses the existing concrete
+PrivateProtocol hook followed by shared BaseWebSocket cleanup; the uncalled
+generic dispose wrapper and its three synthetic-only cases are removed. Preserve
+the actual constructor/socket/Store witnesses and the remaining439 session cases.

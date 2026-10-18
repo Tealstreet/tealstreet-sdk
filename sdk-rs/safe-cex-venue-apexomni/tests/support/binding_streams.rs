@@ -104,6 +104,105 @@ fn private_login_precedes_subscribe_and_ping_frames_are_answered() {
     );
     done(&h);
 }
+
+#[test]
+fn unknown_market_private_position_aborts_the_entire_frame() {
+    let h = fixture();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let mut positions = h.drive(h.venue().fetch_positions(None)).unwrap();
+    for position in &mut positions {
+        position.id = safe_cex_types::model_utils::create_position_id(
+            "BTC-USDC",
+            position.side.into_value(),
+            Some(PositionMode::Hedged),
+        );
+    }
+    h.store.add_or_update_positions(positions).unwrap();
+    let before = h.store.positions().to_vec();
+    let private = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("private"))
+        .unwrap()
+        .1
+        .clone();
+    private.sent.borrow_mut().clear();
+    let result = h.exchange.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private).unwrap().on_message(&safe_cex_transport::socket::SocketFrame::Text(json!({
+        "topic":"ws_zk_accounts_v3", "op":"ping", "args":["same-frame"],
+        "contents":{"positions":[
+            {"symbol":"BTC-USDC","side":"LONG","size":"3","entryPrice":"123","customImr":"0.1"},
+            {"symbol":"DELISTED-USDC","side":"LONG","size":"1"}
+        ]}
+    }).to_string()));
+    result.expect("socket dispatch reports the listener exception to the host");
+    assert_eq!(*h.runtime.report_names.borrow(), ["TypeError"]);
+    assert_eq!(*h.runtime.reports.borrow(), ["this.log is not a function"]);
+    assert_eq!(
+        h.store.positions().as_ref(),
+        before.as_slice(),
+        "all row mapping finishes before Store writes"
+    );
+    assert!(
+        !private
+            .sent
+            .borrow()
+            .iter()
+            .any(|text| text.contains("same-frame")),
+        "mapping error skips the same frame's pong"
+    );
+    done(&h);
+}
+
+#[test]
+fn known_market_private_position_updates_store_and_answers_ping() {
+    let h = fixture();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let mut positions = h.drive(h.venue().fetch_positions(None)).unwrap();
+    for position in &mut positions {
+        position.id = safe_cex_types::model_utils::create_position_id(
+            "BTC-USDC",
+            position.side.into_value(),
+            Some(PositionMode::Hedged),
+        );
+    }
+    h.store.add_or_update_positions(positions).unwrap();
+    let private = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("private"))
+        .unwrap()
+        .1
+        .clone();
+    frame(
+        &private,
+        json!({"topic":"ws_zk_accounts_v3","op":"ping","args":["valid-frame"],"contents":{"positions":[{"symbol":"BTC-USDC","side":"LONG","size":"3","entryPrice":"123","customImr":"0.1"}]}}),
+    );
+    h.runtime.pump();
+    assert_eq!(
+        h.store
+            .positions()
+            .iter()
+            .find(|p| p.id == "BTC-USDC:long")
+            .unwrap()
+            .contracts,
+        3.0
+    );
+    assert!(
+        private
+            .sent
+            .borrow()
+            .iter()
+            .any(|text| text.contains("valid-frame"))
+    );
+    assert!(h.runtime.reports.borrow().is_empty());
+    done(&h);
+}
 #[test]
 fn invalid_caller_id_fails_before_network() {
     let h = fixture();

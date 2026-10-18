@@ -1,3 +1,7 @@
+The Realm iterator entrypoint uses its existing property/call/iterator-record
+operations for every value. It honors iterator overrides independently of function
+names and refuses primitive iterator results before reading next.
+
 # Hyperliquid Rust venue
 
 Behavioral authority: [Hyperliquid guidance](../../packages/safe-cex/src/exchanges/hyperliquid/CLAUDE.md).
@@ -95,11 +99,13 @@ every notifying path must be added to STORE_NOTIFICATION_AUDIT.md.
 
 **Notification cutover.** Production helpers remain read-only. The test-only Store observer forwards all 26 notifying results as StoreMutationError and retains StoreSubscriber unchanged; fixture mutations assert success. STORE_NOTIFICATION_AUDIT.md inventories the two fixture writes separately from production reachability.
 
-**Public subscription slice.** ws_public retains insertion order in active subscriptions, inserts/deletes before the injected sender, and releases every borrow before callbacks. SubscriptionInput evaluates independently for key and envelope; prepared JsJsonValue supplies owned snapshots, while fallible adapters can expose distinct read effects. Stringify remains shared js_json_stringify. Native collision assertions inspect Number/Null and bits before wire comparisons. Prepared JsJsonValue excludes getters/toJSON/cycles; sender/diagnostic and shared socket lifecycle composition remain FINDING, not runtime parity. The source program emits all twenty-three cases in one process; native tests inspect callback-time state and synchronous reentry.
-
-**Public topic ordering.** subscribe_public_topics directly sends allMids then fastAssetCtxs, bypassing active subscription deduplication, then calls the required fallible user-topic callback. Every failure stops later effects. A separate five-case actual-source program checks repeated sends and callback-time state/reentry; concrete topic enumeration/sender/lifecycle composition remains incomplete.
-
-**User-topic dispatch.** subscribe_user_topics consumes an owned own-key snapshot before callbacks; values and dictionary-write semantics are outside this adapter. It preserves explicit Undefined for missing coin/interval, distinguishes empty segments, ignores tail segments and false returns, and propagates callback errors. Native field descriptors precede serialization; a separate 32-case source program uses the actual pinned lodash runtime beside the selected compiler. Registry and concrete socket composition remain incomplete.
+**Public subscriptions.** The production class installs ws_emission's live-receiver
+subscription bodies. They retain Set changes before sending, independent key and
+envelope stringification, fixed-feed ordering, and candle/depth/BBO enumeration.
+`finding_public_class` compares installed native arrows and state/effects against
+actual TS; `binding` covers real book/candle subscription and cleanup frames.
+The unused prepared-value adapter, its standalone tests and three source scripts
+were removed. Historical row-disposition receipts describe their earlier snapshot.
 
 **Corpus cardinality (in progress).** API field identity fixes four native cases; numeric ingress fixes53 root inventories,2380 source cases and16660 entry comparisons, with separate per-root totals. The scalar nonce target fixes15 cases and30 returned/stored bit comparisons. State tests fix533 cases across seven categories and563 native field comparisons. Placement tests fix30 cases across price/TPSL and60 native value/read-effect comparisons. Source-count assertions do not replace fixed native index coverage. Original source-first artifacts remain unchanged. Other targets and collection paths retain an open audit; do not infer whole-venue coverage from these controls.
 
@@ -113,7 +119,10 @@ retains its string value. This model read does not install a response parser.
 
 **Accepted-set receipts.** Literal and record consumers bind every root input to the unchanged source fixture and invoke fresh AST regeneration once per test binary. Record checks retain all77 qualified positional calls plus seven fixed native receipts per root; literals retain distinct accepted, rejected and qualified-rejected receipts. Counters do not replace receipt assertions or source-content checks.
 
-**Open audit inventory.** CARDINALITY_AUDIT.md lists the iteration floor and residual consumers; ROW_DISPOSITIONS.json maps all191 implemented rows to source-level four-class witnesses and preserves all13 original findings individually. Regenerate/check the inventory with Python3.11+ scripts/audit-row-dispositions.py; it never writes manifests. Accepted-set control runner mutates only test consumers, invokes Cargo sequentially, reports the literal content-guard-bypass survivor as FINDING, and measures restoration. File-level witness inventory is not per-row proof; the broad sweep remains OPEN.
+**Audit inventory.** CARDINALITY_AUDIT.md records bounded evidence and residual
+consumers. ROW_DISPOSITIONS.json and audit-row-dispositions.py preserve an earlier
+fixed manifest snapshot; they are historical receipts, not a current-master gate.
+File-level witness inventory is not per-row proof; the broader sweep remains open.
 
 **Survivor classification.** HyperliquidUserAbstractionMode empty string/null both fail actual strict declared-type assignability (2322); their values and diagnostic messages differ. The boolean rejection receipt legitimately cannot distinguish them. Keep that original survivor and its call site inventoried; the separate empty-string/unifiedAccount replacement crosses the accepted-set boundary and must fail the native rejection assertion with the content guard bypassed. literal-rejection-equivalence.cjs checks the source pair plus positive once per process; its permanent native test reads UnifiedAccount directly. Further old-row audit matrices are paused under the porting-first priority.
 
@@ -159,6 +168,10 @@ Venue census159ported/106divergent/266pending. Original13FINDINGs remain named.
 15rows pending->ported:8json_models.rs declarations +7json_boundaries.rs leaves.
 json_values.rs supplies owned UTF-16-key/string and binary64 raw JSON snapshots,
 last duplicate selection before typed value decoding and JS integer-key order.
+The shared `RetainedJsonInput` capture preserves surviving lone UTF-16 code units
+like JSON.parse; its explicit UTF-8 Value projection refuses them. The duplicate
+selection control in `tests/divergence_types.rs` compares actual retained units
+against Node and separately requires projection refusal and syntax validation.
 Any-indexed UserRateLimit/OrderStatus also accept arrays in strict TypeScript.
 The helpers bind opaque JavaScript host primitive operations and preserve native
 object/error identity, receivers and catch boundaries, including revoked proxies.
@@ -328,3 +341,83 @@ callback dispatcher. Default journal bounds use realm Date.now (integer ms) and
 the source 30-day window, with shared 14-day straddle lookback. Returned journal
 records retain the shared typed output boundary. This is distinct from the
 venue's `deriveClosedPositions` and `fetchClosedPnl` capability.
+
+
+### Standalone declaration cleanup
+
+Unused standalone DTOs and their generated children are removed. Keep
+`scripts/not-modeled-types.cjs` aligned with the core generators; the spot model
+writer/oracle retain WsFill, WsUserFunding, WsLiquidation and WsNonUserCancel.
+Five spot order aliases still resolve through `spot_types` to core models; deleting
+their duplicate spot_models definitions does not make those rows not-applicable.
+The current census and reduced fixed corpus counts are in README.md. Historical
+controls for deleted owners are removed from active scripts and contract/schema
+files; earlier audit documents retain their measured trees and original counts.
+
+The unused `spot_rate_limiter` duplicate and its fake-host fixture/oracle are
+removed. Spot limiter rows now name only the production `spot_client` bodies.
+`realm::spot_limiter_tests` constructs the class with the concrete Realm host and
+checks per-instance tokens, default weight, the exact minute refill and recursive
+Promise/timer acquisition. Historical SPOT_LIMITER_BODIES_EVIDENCE.json records
+the removed adapter; it does not establish production binding coverage.
+
+The accepted request-weight contract includes cancelByCloid batches of 39, 40 and
+80 for both raw and native JSON bodies. `rate_encoded` compares the actual TS
+weights and the production ApiClient.prepare_request limiter reservations. The
+cloid-weight binding control deletes each classifier arm independently, requires
+a compiled pacing assertion failure, restores exact bytes and reruns the witness.
+
+The realm Store patch bridge uses the existing ModelPatch carrier for own
+undefined properties and native scalar numbers. Opaque info retains its JSON
+boundary. REST order reconciliation must clear an undefined mapped timeInForce
+once; repeating the same snapshot must not notify or advance the order revision.
+The production binding regression covers this path, including cloid restoration.
+
+The realm's imported `virtualClock.getCurrentTimeMs` reads the shared synced
+singleton for both family constructors, matching TS. Realm `Date.now`, nonce
+helpers that explicitly use it, and monotonic pacing keep their runtime clocks.
+Registry `native_host_hyperliquid_clock` performs a real signed leverage update,
+checks the transmitted action/signature, and requires its nonce to reflect a
+90-second server correction. The binding schedule-cancel fixture uses a deadline
+relative to that synced clock; the fractional Date nonce regression stays raw.
+
+ApiClient.build_request uses the effective safeCexAxiosCreate timeout of20_000ms
+before read-retry classification. extra.recvWindow remains account configuration;
+it must not become a per-request timeout override. The native registry timeout
+witness verifies terminal deadlines and signed HTTP; the Node info-read witness
+requires a delayed real response to arrive before method acknowledgement.
+
+The unused hyperliquidspot.api factory/interceptors and their fake HTTP fixtures
+are removed. Source Spot construction imports the perp API, as does the native
+binding; the Spot API module has only a TS test consumer and no package export.
+Keep the separate RateLimiter class and its real Realm witness. spot_runtime
+retains23 source cases across8 files after removing only7 API cases and1 source.
+
+The public socket subscription bodies live only in ws_emission.rs and are installed
+by public_class.rs on the production Realm. The unused ws_public prepared-value
+copy and its standalone tests/oracle were removed; real listener coverage remains.
+
+The concrete resolveHyperliquidBuilder import returns a configured native value
+unchanged and samples testnet only for a nullish fallback. The actual builder
+consumer keeps feeTenthsBps as supplied in the signed action; it lowercases the
+address at the source callsite. Configured identity, lazy default getter reads,
+fresh fallback objects and action fee types have real Realm/source witnesses.
+No shared ExchangeOptions field types or Realm carriers are widened.
+
+
+The production orderRequestToOrderWire import reads native Realm fields directly.
+It formats price, size and trigger price before the HTTP JSON boundary, so NaN
+and infinities become the maintained wire strings rather than null. floatToWire
+uses the installed numeric/string operations, including source exponent-zero
+stripping; order-type limit objects and undefined fields retain their identities.
+The separate prepared signing API keeps its documented typed snapshot boundary.
+The actual constructed Exchange placement regression and native/source import
+matrix cover this adapter; no shared body or Realm carrier migration is implied.
+
+The constructed native ticker census tests in `binding` and `spot_binding`
+compare all Ticker numbers, including optional midPrice, with the maintained
+constructed TS exchanges and real DefaultStores. Futures covers eight mids
+and sixteen compressed fast-context frames; Spot covers eight mids frames.
+Malformed input sits between distinct good rows, with finite Store resets.
+The shared control runner misroutes midPrice independently in both live socket
+bodies and requires compiled native failures followed by exact-restored passes.

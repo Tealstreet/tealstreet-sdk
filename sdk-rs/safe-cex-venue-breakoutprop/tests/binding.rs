@@ -4,7 +4,7 @@
 mod clock {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../safe-cex-webworker/tests/support/runtime.rs"
+        "/../safe-cex-exchange/tests/support/runtime.rs"
     ));
 }
 use safe_cex_exchange::{
@@ -74,8 +74,10 @@ impl WsRuntime for clock::Runtime {
 struct Wire {
     runtime: Rc<clock::Runtime>,
     requests: RefCell<Vec<Value>>,
+    native_requests: RefCell<Vec<Js>>,
     faults: RefCell<VecDeque<(String, u16, Value)>>,
     errors: RefCell<VecDeque<(String, Js)>>,
+    candle_response: RefCell<Option<Value>>,
 }
 fn instrument() -> Value {
     json!({"type":"FOREX","symbol":"BTCUSD","version":1,"description":"Bitcoin","priceIncrement":0.1,"pipSize":0.01,"currency":"USD","lotSize":1,"multiplier":1,"firstCurrency":"BTC"})
@@ -99,6 +101,7 @@ impl JsHttpHost for Wire {
             .to_display()
             .to_ascii_uppercase();
         self.requests.borrow_mut().push(observed);
+        self.native_requests.borrow_mut().push(config.clone());
         if self
             .errors
             .borrow()
@@ -122,7 +125,7 @@ impl JsHttpHost for Wire {
         } else {
             match (method.as_str(), url.as_str()) {
                 ("POST", "/login") => json!({"sessionToken":"token","timeout":"1:00:00"}),
-                ("GET", "/users/k") => {
+                ("GET", "/users/k" | "/users/Infinity") => {
                     json!({"userDetails":[{"login":"k","domain":"default","version":1,"fullName":"Trader","username":"k","accounts":[{"owner":"k","account":"default:A","version":1,"baseCurrency":"USD","registrationTime":"2026-01-01T00:00:00Z","accountStatus":"FULL_TRADING","pricingStream":"quote","positionBased":false}]}]})
                 }
                 ("GET", "instruments/query") => json!({"instruments":[instrument()]}),
@@ -131,7 +134,8 @@ impl JsHttpHost for Wire {
                 }
                 ("GET", "accounts/default:A/portfolio") => portfolio(),
                 ("POST", "marketdata") => {
-                    json!({"events":[{"symbol":"BTCUSD","type":"Quote","bid":99,"ask":101,"time":"2026-01-01T00:00:00Z"}]})
+                    self.candle_response.borrow().clone().unwrap_or_else(||
+                        json!({"events":[{"symbol":"BTCUSD","type":"Quote","bid":99,"ask":101,"time":"2026-01-01T00:00:00Z"}]}))
                 }
                 ("POST", "accounts/default:A/orders") => json!({"orderId":"placed"}),
                 ("DELETE", path) if path.starts_with("accounts/default:A/orders/") => json!({}),
@@ -208,7 +212,6 @@ fn fixture() -> Fixture {
         runtime: runtime.clone(),
         http: wire.clone(),
         external_public_data: None,
-        install_transport: Rc::new(|_| Err(ExchangeError::new("fixture has no tunnel transport"))),
         local_to_utc: Rc::new(|value| value),
     });
     let exchange = BreakoutpropExchange::new(
@@ -452,7 +455,10 @@ fn http_failure_preserves_axios_code_and_config() {
         }))
         .unwrap_err();
     assert_eq!(failure.name, "AxiosError");
-    assert_eq!(failure.code, Some(json!("ECONNABORTED")));
+    assert_eq!(
+        observed_error_code(&failure.code),
+        Some(json!("ECONNABORTED"))
+    );
     assert!(failure.is_axios_error);
     assert_eq!(failure.config.as_ref().unwrap()["url"], "instruments/query");
 }
@@ -743,4 +749,1006 @@ pub fn accepted_typed_refusal(
 ) -> Value {
     let f = refusal_fixture(input);
     observe_refusal(&f, || f.run(invoke(f.exchange.clone())))
+}
+
+fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
+    let f = fixture();
+    f.fetch_markets();
+    let cached = f.store.markets().to_vec();
+    let mut row = detail();
+    row[field] = value;
+    f.wire.faults.borrow_mut().push_back((
+        "accounts/default:A/instruments/query".into(),
+        200,
+        json!({"instrumentDetails":[detail(),row]}),
+    ));
+    let errors = Rc::new(RefCell::new(Vec::<Value>::new()));
+    let observed = errors.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let result = f.run(f.exchange.fetch_markets());
+    assert!(
+        result.is_ok(),
+        "production malformed mapping must return cached markets: {result:?}"
+    );
+    assert_eq!(
+        result.unwrap(),
+        cached,
+        "a valid prefix must not replace the cached markets"
+    );
+    assert_eq!(&*f.store.markets(), cached.as_slice());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0].to_string().contains(cause),
+        "source mapping failure cause is visible: {:?}",
+        errors.borrow()
+    );
+}
+#[test]
+fn markets_null_margin_rate_reports_and_preserves_cache() {
+    malformed_market_mapping(
+        "marginRate",
+        Value::Null,
+        "Cannot read properties of null (reading 'tiers')",
+    );
+}
+#[test]
+fn markets_null_tiers_reports_and_preserves_cache() {
+    malformed_market_mapping(
+        "marginRate",
+        json!({"tiers":null}),
+        "Cannot read properties of null (reading '0')",
+    );
+}
+#[test]
+fn markets_null_maximum_reports_and_preserves_cache() {
+    malformed_market_mapping(
+        "maxOrderSize",
+        Value::Null,
+        "Cannot read properties of null (reading 'value')",
+    );
+}
+#[test]
+fn markets_ignore_unused_instrument_fields() {
+    let f = fixture();
+    let mut row = instrument();
+    row.as_object_mut().unwrap().remove("description");
+    row["priceIncrement"] = json!(0.25);
+    f.wire.faults.borrow_mut().push_back((
+        "instruments/query".into(),
+        200,
+        json!({"instruments":[row]}),
+    ));
+    let result = f.run(f.exchange.fetch_markets());
+    assert!(
+        result.is_ok(),
+        "production market mapping must only read source fields: {result:?}"
+    );
+    let markets = result.unwrap();
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].precision.price, 0.25);
+}
+
+fn unknown_enum_portfolio(field: &str) -> Value {
+    let mut data = portfolio();
+    data["portfolios"][0]["orders"] = json!([{
+        "account":"default:A", "version":1, "orderId":7, "orderCode":"unknown-enum",
+        "clientOrderId":"", "actionCode":"NEW", "legCount":1, "type":"LIMIT",
+        "instrument":"BTCUSD", "status":"WORKING", "finalStatus":false,
+        "legs":[{"instrument":"BTCUSD", "positionEffect":"OPEN", "positionCode":"p",
+            "side":"BUY", "price":100, "legRatio":1, "quantity":2,
+            "filledQuantity":0, "remainingQuantity":2, "averagePrice":0}],
+        "side":"BUY", "tif":"GTC", "marginRate":0.05,
+        "issueTime":"2026-01-01T00:00:00Z", "transactionTime":"2026-01-01T00:00:00Z",
+        "executions":[], "cashTransactions":[]
+    }]);
+    if field == "positionSide" {
+        data["portfolios"][0]["positions"] = json!([{
+            "account":"default:A", "version":1, "positionCode":"p", "symbol":"BTCUSD",
+            "quantity":2, "side":"UNKNOWN", "quantityNotional":200,
+            "openTime":"2026-01-01T00:00:00Z", "openPrice":100,
+            "lastUpdateTime":"2026-01-01T00:00:00Z", "marginRate":0.05
+        }]);
+    } else if field == "side" {
+        data["portfolios"][0]["orders"][0]["legs"][0]["side"] = json!("UNKNOWN");
+    } else {
+        data["portfolios"][0]["orders"][0][field] = json!("UNKNOWN");
+    }
+    data
+}
+
+fn assert_unknown_enum_survives_start(field: &str) {
+    let f = fixture();
+    let data = unknown_enum_portfolio(field);
+    // Startup reads the portfolio once, then starts its first polling tick.
+    for _ in 0..2 {
+        f.wire.faults.borrow_mut().push_back((
+            "accounts/default:A/portfolio".into(),
+            200,
+            data.clone(),
+        ));
+    }
+    f.run(f.exchange.start())
+        .expect("unknown enum must not abort production startup");
+    assert!(f.store.loaded().balance && f.store.loaded().positions && f.store.loaded().orders);
+    assert_eq!(f.store.orders().len(), 1, "unknown rows must be retained");
+    let row = if field == "positionSide" {
+        serde_json::to_value(&f.store.positions()[0]).unwrap()
+    } else {
+        serde_json::to_value(&f.store.orders()[0]).unwrap()
+    };
+    let omitted = if field == "positionSide" {
+        "side"
+    } else {
+        field
+    };
+    assert!(
+        !row.as_object().unwrap().contains_key(omitted),
+        "undefined must be omitted, not replaced: {row}"
+    );
+    assert!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "marketdata")
+            .count()
+            >= 2,
+        "unknown portfolio rows must not skip ticker polling"
+    );
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn unknown_order_type_keeps_production_startup_and_polling_alive() {
+    assert_unknown_enum_survives_start("type");
+}
+#[test]
+fn unknown_order_status_keeps_production_startup_and_polling_alive() {
+    assert_unknown_enum_survives_start("status");
+}
+#[test]
+fn unknown_order_side_keeps_production_startup_and_polling_alive() {
+    assert_unknown_enum_survives_start("side");
+}
+#[test]
+fn unknown_position_side_keeps_production_startup_and_polling_alive() {
+    assert_unknown_enum_survives_start("positionSide");
+}
+
+fn fetch_unknown_enum_order(f: &Fixture, field: &str) -> Order {
+    f.fetch_markets();
+    f.wire.faults.borrow_mut().push_back((
+        "accounts/default:A/portfolio".into(),
+        200,
+        unknown_enum_portfolio(field),
+    ));
+    f.run(f.exchange.fetch_orders(None))
+        .expect("unknown enum replacement row must survive real fetch")
+        .remove(0)
+}
+#[test]
+fn unknown_order_side_is_omitted_from_the_production_replacement_payload() {
+    let f = fixture();
+    let order = fetch_unknown_enum_order(&f, "side");
+    let update = serde_json::from_value(json!({"price":102.16})).unwrap();
+    assert_eq!(
+        f.run(f.exchange.update_order(UpdateOrderOpts { order, update }))
+            .unwrap(),
+        vec!["placed"]
+    );
+    let requests = f.wire.requests.borrow();
+    let payload = &requests
+        .iter()
+        .find(|r| r["method"] == "POST" && r["url"] == "accounts/default:A/orders")
+        .unwrap()["data"];
+    assert!(
+        !payload.as_object().unwrap().contains_key("side"),
+        "copied undefined side must stay omitted: {payload}"
+    );
+    assert_eq!(payload["type"], "LIMIT");
+}
+#[test]
+fn unknown_order_type_replacement_reports_undefined_after_cancellation() {
+    let f = fixture();
+    let order = fetch_unknown_enum_order(&f, "type");
+    let update = serde_json::from_value(json!({"price":102.16})).unwrap();
+    let error = f
+        .run(f.exchange.update_order(UpdateOrderOpts { order, update }))
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "Breakout Prop does not support undefined orders"
+    );
+    assert!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .any(|r| r["method"] == "DELETE")
+    );
+    assert!(
+        !f.wire
+            .requests
+            .borrow()
+            .iter()
+            .any(|r| r["method"] == "POST" && r["url"] == "accounts/default:A/orders")
+    );
+}
+
+#[test]
+fn generated_order_code_strips_nanoid_separators() {
+    let f = fixture();
+    f.fetch_markets();
+    *f.runtime.id.borrow_mut() = Some("A_b-cD_e-fG_h-iJ_k-lM".into());
+    assert_eq!(
+        f.run(f.exchange.base.place_order(f.exchange.as_ref(), opts()))
+            .unwrap(),
+        ["placed"]
+    );
+    let request = f.request("POST", "accounts/default:A/orders");
+    assert_eq!(
+        request["data"]["orderCode"], "tealstreet-AbcDefGhiJklM",
+        "production UUID strips both nanoid separators before prefixing"
+    );
+    assert_eq!(request["headers"]["Coinbase-Authorization"], "DXAPI token");
+}
+
+#[test]
+fn real_trait_candles_reach_signed_post_and_preserve_both_rows() {
+    let f = fixture();
+    f.fetch_markets();
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[
+        {"symbol":"BTCUSD","type":"Candle","candleType":"m","open":11,"high":15,"low":10,"close":14,"volume":7,"time":"2024-01-01T00:00:00Z"},
+        {"symbol":"BTCUSD","type":"Candle","candleType":"m","open":21,"high":25,"low":20,"close":24,"volume":9,"time":"2024-01-01T00:01:00Z"}
+    ]}));
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let rows=f.run(venue.fetch_ohlcv(serde_json::from_value(json!({"symbol":"BTCUSD","interval":"1m","from":1704067200123.0,"to":1704067260456.0,"limit":1})).unwrap())).unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "source ignores limit and retains all returned candles"
+    );
+    assert_eq!(
+        (
+            rows[0].timestamp,
+            rows[0].open,
+            rows[0].high,
+            rows[0].low,
+            rows[0].close,
+            rows[0].volume
+        ),
+        (1704067200.0, 11.0, 15.0, 10.0, 14.0, 7.0)
+    );
+    assert_eq!(
+        (rows[1].timestamp, rows[1].close, rows[1].volume),
+        (1704067260.0, 24.0, 9.0)
+    );
+    let request = f.request("POST", "marketdata");
+    let body: Value =
+        serde_json::from_str(request["data"].as_str().expect("encoded candle JSON")).unwrap();
+    assert_eq!(
+        body,
+        json!({"eventTypes":[{"type":"Candle","candleType":"m","fromTime":"2024-01-01T00:00:00.123Z","toTime":"2024-01-01T00:01:00.456Z"}],"symbols":["BTCUSD"],"account":"default:A"})
+    );
+    assert_eq!(request["headers"]["Coinbase-Authorization"], "DXAPI token");
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn real_trait_candles_propagate_original_http_failure() {
+    let f = fixture();
+    f.wire.faults.borrow_mut().push_back((
+        "marketdata".into(),
+        400,
+        json!({"msg":"candle refusal"}),
+    ));
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let error = f
+        .run(venue.fetch_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSD","interval":"1m"})).unwrap(),
+        ))
+        .expect_err("source rethrows the candle refusal");
+    assert_eq!(
+        error.response.as_ref().unwrap()["status"].as_f64(),
+        Some(400.0)
+    );
+    assert_eq!(
+        error.response.as_ref().unwrap()["data"]["msg"],
+        "candle refusal"
+    );
+    assert_eq!(error.config.as_ref().unwrap()["url"], "marketdata");
+    f.exchange.dispose().unwrap();
+}
+
+fn advance_real_poll(f: &Fixture) {
+    for _ in 0..24 {
+        f.runtime.advance(f.runtime.now.get() + 500);
+    }
+}
+
+#[test]
+fn real_trait_book_receives_polling_ticks_then_cleanup_removes_handler() {
+    let f = fixture();
+    let seen = Rc::new(RefCell::new(Vec::<OrderBook>::new()));
+    let sink = seen.clone();
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let cleanup = venue
+        .listen_order_book(
+            "BTCUSD".into(),
+            Rc::new(move |book| sink.borrow_mut().push(book)),
+        )
+        .unwrap();
+    f.run(venue.start()).unwrap();
+    advance_real_poll(&f);
+    assert!(!seen.borrow().is_empty(), "actual quote loop delivers book");
+    let book = seen.borrow().last().unwrap().clone();
+    assert_eq!((book.bids.len(), book.asks.len()), (2, 2));
+    assert_eq!(
+        (
+            book.bids[0].price,
+            book.bids[1].price,
+            book.asks[0].price,
+            book.asks[1].price
+        ),
+        (99.0, 99.0, 101.0, 101.0)
+    );
+    assert_eq!((book.bids[0].amount, book.bids[0].total), (1.0, 1.0));
+    cleanup().unwrap();
+    let count = seen.borrow().len();
+    advance_real_poll(&f);
+    assert_eq!(
+        seen.borrow().len(),
+        count,
+        "cleanup removes the source polling parser"
+    );
+    assert!(
+        f.exchange
+            .socket()
+            .unwrap()
+            .handlers("poll_book.BTCUSD")
+            .unwrap()
+            .borrow()
+            .is_empty()
+    );
+    f.exchange.dispose().unwrap();
+    assert!(f.runtime.exceptions.borrow().is_empty());
+}
+
+#[test]
+fn real_trait_candle_listener_receives_polling_ticks_then_cleans_up() {
+    let f = fixture();
+    f.runtime.now.set(61_000);
+    let seen = Rc::new(RefCell::new(Vec::<Candle>::new()));
+    let sink = seen.clone();
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let cleanup = venue
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSD","interval":"1m"})).unwrap(),
+            Rc::new(move |row| sink.borrow_mut().push(row)),
+        )
+        .unwrap();
+    f.run(venue.start()).unwrap();
+    advance_real_poll(&f);
+    assert!(
+        !seen.borrow().is_empty(),
+        "actual quote loop delivers candle"
+    );
+    let row = seen.borrow().last().unwrap().clone();
+    assert_eq!(
+        (row.open, row.high, row.low, row.close, row.volume),
+        (99.0, 99.0, 99.0, 99.0, 0.0)
+    );
+    assert_eq!(
+        row.timestamp, 60.0,
+        "clock-aligned minute from real polling host"
+    );
+    cleanup().unwrap();
+    let count = seen.borrow().len();
+    advance_real_poll(&f);
+    assert_eq!(
+        seen.borrow().len(),
+        count,
+        "cleanup removes source candle parser"
+    );
+    assert!(
+        f.exchange
+            .socket()
+            .unwrap()
+            .handlers("poll_kline.BTCUSD")
+            .unwrap()
+            .borrow()
+            .is_empty()
+    );
+    f.exchange.dispose().unwrap();
+    assert!(f.runtime.exceptions.borrow().is_empty());
+}
+
+#[test]
+fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
+    let f = fixture();
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let error = f
+        .run(
+            venue.fetch_ohlcv(
+                serde_json::from_value(
+                    json!({"symbol":"BTCUSD","interval":"1m","from":8640000000000001.0}),
+                )
+                .unwrap(),
+            ),
+        )
+        .expect_err("source Date.toISOString refuses outside TimeClip");
+    assert_eq!(error.name, "RangeError");
+    assert_eq!(error.message, "Invalid time value");
+    assert!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .all(|request| request["url"] != "marketdata")
+    );
+    f.exchange.dispose().unwrap();
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
+}
+
+#[test]
+fn ticker_reads_ignore_missing_unused_declaration_fields() {
+    let f = fixture();
+    f.fetch_markets();
+    let row = json!({"symbol":"BTCUSD","bid":91.25,"ask":94.5});
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[row.clone()]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].bid, rows[0].ask, rows[0].last),
+        (91.25, 94.5, 91.25)
+    );
+    assert_eq!(rows[0].info, Some(row));
+}
+
+#[test]
+fn ticker_reads_ignore_malformed_unused_declaration_fields() {
+    let f = fixture();
+    f.fetch_markets();
+    let row = json!({"symbol":"BTCUSD","bid":81.25,"ask":84.5,"type":{},"time":null});
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[row.clone()]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].bid, rows[0].ask, rows[0].mark),
+        (81.25, 84.5, 81.25)
+    );
+    assert_eq!(rows[0].info, Some(row));
+}
+
+fn malformed_ticker_fallback(prefix: Value) {
+    let f = fixture();
+    f.fetch_markets();
+    let cached = f.run(f.exchange.fetch_tickers()).unwrap();
+    Store::update(
+        f.store.as_ref(),
+        StoreUpdate {
+            tickers: Some(cached.clone()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let cached = f.store.tickers().to_vec();
+    let errors = Rc::new(RefCell::new(Vec::<Js>::new()));
+    let observed = errors.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[
+        prefix,null
+    ]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows, cached);
+    assert_eq!(f.store.tickers().as_ref(), cached.as_slice());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'symbol')")
+    );
+}
+
+#[test]
+fn account_lookup_reads_only_selected_account_fields() {
+    let f = fixture();
+    f.wire.faults.borrow_mut().push_back((
+        "/users/k".into(),
+        200,
+        json!({"userDetails":[{"accounts":[
+            {"accountStatus":"DISABLED"},
+            {"account":"default:A","accountStatus":"FULL_TRADING"}
+        ]}]}),
+    ));
+    f.run(f.exchange.start()).unwrap();
+    assert_eq!(
+        f.exchange.account_code.borrow().as_deref(),
+        Some("default:A")
+    );
+    assert!(f.store.loaded().orders && f.store.loaded().positions && f.store.loaded().balance);
+    f.request("GET", "accounts/default:A/portfolio");
+    f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn account_lookup_ignores_unused_metadata_and_later_users() {
+    let f = fixture();
+    f.wire.faults.borrow_mut().push_back((
+        "/users/k".into(),
+        200,
+        json!({"userDetails":[{
+            "login":null,"domain":[],"version":{},"fullName":false,"username":12,
+            "accounts":[{"account":"default:A","accountStatus":"FULL_TRADING",
+                "owner":[],"version":null,"baseCurrency":{},"registrationTime":false,
+                "pricingStream":12,"positionBased":"unused"}]
+        },null,{"accounts":"ignored"}]}),
+    ));
+    f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(
+        f.exchange.account_code.borrow().as_deref(),
+        Some("default:A")
+    );
+    f.request("GET", "accounts/default:A/portfolio");
+}
+
+fn source_only_portfolio() -> Value {
+    json!({"portfolios":[{
+        "balances":[{"currency":"USD","value":50.25}],
+        "positions":[{"symbol":"BTCUSD","side":"BUY","openPrice":100.0,
+            "quantity":2.0,"quantityNotional":200.0,"marginRate":0.05,
+            "lastUpdateTime":"2026-01-01T00:00:00Z"}],
+        "orders":[{"orderCode":"source-order","status":"WORKING","instrument":"BTCUSD",
+            "type":"LIMIT","transactionTime":"2026-01-01T00:00:00Z",
+            "legs":[{"side":"BUY","price":101.25,"quantity":3.0,"filledQuantity":1.0,
+                "remainingQuantity":2.0,"positionEffect":"OPEN"}]}]
+    }]})
+}
+fn queue_portfolio(f: &Fixture, value: Value) {
+    f.wire
+        .faults
+        .borrow_mut()
+        .push_back(("accounts/default:A/portfolio".into(), 200, value));
+}
+#[test]
+fn portfolio_orders_ignore_unused_declaration_fields_and_unread_collections() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["balances"] = json!([null]);
+    data["portfolios"][0]["positions"] = json!([null]);
+    queue_portfolio(&f, data.clone());
+    let orders = f
+        .run(f.exchange.fetch_orders(None))
+        .expect("TS reads only orders here");
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].id, "source-order");
+    assert_eq!(orders[0].amount, 3.0);
+    assert_eq!(orders[0].price.value(), Some(&101.25));
+    assert_eq!(
+        orders[0].info.value(),
+        Some(&data["portfolios"][0]["orders"][0])
+    );
+}
+#[test]
+fn portfolio_positions_ignore_unused_declaration_fields_and_unread_collections() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["balances"] = json!([null]);
+    data["portfolios"][0]["orders"] = json!([null]);
+    queue_portfolio(&f, data.clone());
+    let positions = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .expect("TS reads only positions here");
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].symbol, "BTCUSD");
+    assert_eq!(positions[0].contracts, 2.0);
+    assert_eq!(positions[0].margin_size.value(), Some(&10.0));
+    assert_eq!(
+        positions[0].info.value(),
+        Some(&data["portfolios"][0]["positions"][0])
+    );
+}
+#[test]
+fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["orders"] = json!([null]);
+    queue_portfolio(&f, data.clone());
+    queue_portfolio(&f, data.clone());
+    f.run(f.exchange.start())
+        .expect("TS balance ignores order rows");
+    let balance = f.store.balance().clone();
+    assert_eq!(balance.total, 48.25);
+    assert_eq!(balance.upnl, -2.0);
+    assert_eq!(balance.used, 10.0);
+    assert_eq!(balance.free, 38.25);
+    assert_eq!(balance.info, Some(data));
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn portfolio_array_like_root_retains_order_and_position_info() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    let portfolio = data["portfolios"][0].clone();
+    data["portfolios"] = json!({"0":portfolio});
+    queue_portfolio(&f, data.clone());
+    let orders = f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(orders.len(), 1);
+    assert_eq!(
+        orders[0].info.value(),
+        Some(&data["portfolios"]["0"]["orders"][0])
+    );
+    queue_portfolio(&f, data.clone());
+    let positions = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .unwrap();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(
+        positions[0].info.value(),
+        Some(&data["portfolios"]["0"]["positions"][0])
+    );
+}
+
+#[test]
+fn portfolio_absent_open_positions_retains_filter_type_error() {
+    let f = fixture();
+    queue_portfolio(&f, json!({"portfolios":[]}));
+    let error = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .unwrap_err();
+    assert_eq!(error.name, "TypeError");
+    assert_eq!(
+        error.message,
+        "Cannot read properties of undefined (reading 'filter')"
+    );
+}
+
+#[test]
+fn ticker_reads_report_consumed_field_failure_and_return_cached_tickers() {
+    malformed_ticker_fallback(
+        json!({"symbol":"BTCUSD","type":"Quote","time":"unused","bid":1,"ask":2}),
+    );
+}
+
+#[test]
+fn ticker_reads_defer_scalar_projection_until_source_mapping_completes() {
+    malformed_ticker_fallback(
+        json!({"symbol":"BTCUSD","type":"Quote","time":"unused","bid":"13","ask":14}),
+    );
+}
+
+fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Js>>> {
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let observed = errors.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    errors
+}
+
+#[test]
+fn portfolio_orders_defer_projection_until_source_mapping_completes() {
+    let f = fixture();
+    let errors = portfolio_error_log(&f);
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["orders"][0]["legs"][0]["price"] = json!("13");
+    data["portfolios"][0]["orders"]
+        .as_array_mut()
+        .unwrap()
+        .push(Value::Null);
+    queue_portfolio(&f, data);
+    let rows = f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert!(rows.is_empty());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'orderCode')")
+    );
+}
+
+#[test]
+fn portfolio_positions_defer_projection_until_source_mapping_completes() {
+    let f = fixture();
+    let errors = portfolio_error_log(&f);
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["positions"][0]["openPrice"] = json!("100");
+    data["portfolios"][0]["positions"]
+        .as_array_mut()
+        .unwrap()
+        .push(Value::Null);
+    queue_portfolio(&f, data);
+    let rows = f.run(f.exchange.fetch_positions(Some(vec![]))).unwrap();
+    assert!(rows.is_empty());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'side')")
+    );
+}
+
+#[test]
+fn portfolio_balance_and_filtered_positions_accept_native_intermediate_scalars() {
+    for side in ["BUY", "constructor"] {
+        let f = fixture();
+        let mut data = source_only_portfolio();
+        let position = &mut data["portfolios"][0]["positions"][0];
+        position["symbol"] = json!("EXCLUDED");
+        position["openPrice"] = json!("100");
+        position["quantity"] = json!("2");
+        position["side"] = json!(side);
+        queue_portfolio(&f, data.clone());
+        queue_portfolio(&f, data);
+        f.run(f.exchange.start()).unwrap();
+        assert_eq!(
+            (
+                f.store.balance().total,
+                f.store.balance().used,
+                f.store.balance().free
+            ),
+            (50.25, 10.0, 40.25)
+        );
+        assert_eq!(f.store.positions().len(), 1);
+        assert_eq!(f.store.positions()[0].symbol, "BTCUSD");
+        assert_eq!(f.store.positions()[0].contracts, 0.0);
+        f.exchange.dispose().unwrap();
+    }
+}
+
+fn auth_request() -> safe_cex_transport::RestRequest {
+    safe_cex_transport::RestRequest {
+        method: "GET".into(),
+        url: "/users/k".into(),
+        ..Default::default()
+    }
+}
+fn pump_pending<T>(f: &Fixture, future: &mut std::pin::Pin<Box<impl Future<Output = T>>>) {
+    for _ in 0..32 {
+        assert!(
+            future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        f.runtime.advance(f.runtime.now.get());
+    }
+}
+#[test]
+fn auth_pipeline_checks_session_after_rate_limit_dequeue() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    f.run(client.request(auth_request())).unwrap();
+    let mut queued = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut queued);
+    f.exchange.invalidate_session();
+    let error = f.run(queued).unwrap_err();
+    assert_eq!(error.message, "No session token");
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+}
+#[test]
+fn auth_pipeline_reads_replacement_token_after_dequeue() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    f.run(client.request(auth_request())).unwrap();
+    let mut queued = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut queued);
+    *f.exchange.session_token.borrow_mut() = Some("replacement".into());
+    f.run(queued).unwrap();
+    assert_eq!(
+        f.request("GET", "/users/k")["headers"]["Coinbase-Authorization"],
+        "DXAPI replacement"
+    );
+}
+#[test]
+fn auth_pipeline_reauthenticates_network_retry() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    let error = safe_cex_exchange::js_runtime::value::error_object("Error", "Network Error");
+    error.define("code", Js::str("ERR_NETWORK")).unwrap();
+    f.wire
+        .errors
+        .borrow_mut()
+        .push_back(("/users/k".into(), error));
+    let mut retrying = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut retrying);
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+    *f.exchange.session_token.borrow_mut() = Some("replacement".into());
+    f.run(retrying).unwrap();
+    assert_eq!(
+        f.request("GET", "/users/k")["headers"]["Coinbase-Authorization"],
+        "DXAPI replacement"
+    );
+}
+
+#[test]
+fn auth_pipeline_preserves_overflow_url_params() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    let mut request = auth_request();
+    request.url = "/users/{username}".into();
+    request.params = Some(serde_json::from_str(r#"{"username":1e400,"untouched":1e400}"#).unwrap());
+    f.run(client.request(request)).unwrap();
+    let sent = f.request("GET", "/users/Infinity");
+    assert_eq!(sent["params"]["untouched"], Value::Null);
+    let requests = f.wire.native_requests.borrow();
+    let native = requests.last().unwrap();
+    assert_eq!(
+        native
+            .get("params")
+            .unwrap()
+            .get("untouched")
+            .unwrap()
+            .as_f64(),
+        Some(f64::INFINITY)
+    );
+    assert!(sent["params"].get("username").is_none());
+}
+
+#[test]
+fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/final_runtime_oracle.mjs"
+        ))
+        .arg("amendmentCallerId")
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let cases = source["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 4, "actual source caller-ID presence floor");
+    for case in cases {
+        let label = case["label"].as_str().unwrap();
+        let f = fixture();
+        f.fetch_markets();
+        f.wire.requests.borrow_mut().clear();
+        let emitted = Rc::new(RefCell::new(Vec::new()));
+        let seen = emitted.clone();
+        f.exchange.base.on_args(
+            "error",
+            Rc::new(move |_, args| {
+                seen.borrow_mut().push(args.to_vec());
+                Ok(())
+            }),
+        );
+        let mut order = order();
+        order.client_order_id = match label {
+            "absent" => ModelField::Absent,
+            "undefined" => ModelField::Undefined,
+            "value" => ModelField::Value("caller-id".into()),
+            "empty" => ModelField::Value(String::new()),
+            _ => panic!("unexpected source case"),
+        };
+        let result = f.run(f.exchange.update_order(UpdateOrderOpts {
+            order,
+            update: serde_json::from_value(json!({"amount":2.345,"price":102.16})).unwrap(),
+        }));
+        let refused = case["result"].get("error").is_some();
+        assert_eq!(
+            result.is_err(),
+            refused,
+            "replacement refusal {label}: {result:?}"
+        );
+        if refused {
+            assert_eq!(
+                result.unwrap_err().message,
+                case["result"]["error"].as_str().unwrap(),
+                "original preflight error {label}"
+            );
+            let emitted = emitted.borrow();
+            assert_eq!(emitted.len(), 1, "one visible refusal {label}");
+            assert!(
+                String::from_utf16(emitted[0][0].as_str().unwrap().as_ref())
+                    .unwrap()
+                    .contains(case["result"]["error"].as_str().unwrap()),
+                "visible caller-ID refusal {label}: {emitted:?}"
+            );
+        } else {
+            assert_eq!(result.unwrap(), ["placed"], "accepted replacement {label}");
+            assert!(emitted.borrow().is_empty());
+        }
+        let requests = f.wire.requests.borrow();
+        let money_methods: Vec<_> = requests
+            .iter()
+            .filter(|r| {
+                r["url"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("accounts/default:A/orders")
+            })
+            .map(|r| r["method"].as_str().unwrap())
+            .collect();
+        let expected: Vec<_> = case["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            money_methods, expected,
+            "cancel then guarded replacement {label}"
+        );
+    }
 }

@@ -96,7 +96,7 @@ fn option_fields_survive_shared_store_patches_merges_and_source_facade_reads() {
             .call_method(
                 "updateMarket",
                 vec![
-                    Js::str("m"),
+                    Js::object(vec![("id", Js::str("m"))]),
                     Js::object(vec![("option", from_typed(&terms).unwrap())]),
                 ],
             )
@@ -106,7 +106,7 @@ fn option_fields_survive_shared_store_patches_merges_and_source_facade_reads() {
             .call_method(
                 "updatePosition",
                 vec![
-                    Js::str("p"),
+                    Js::object(vec![("id", Js::str("p"))]),
                     Js::object(vec![("option", from_typed(&option).unwrap())]),
                 ],
             )
@@ -117,7 +117,7 @@ fn option_fields_survive_shared_store_patches_merges_and_source_facade_reads() {
             .call_method(
                 "updatePositions",
                 vec![Js::array(vec![Js::array(vec![
-                    Js::str("p"),
+                    Js::object(vec![("id", Js::str("p"))]),
                     Js::object(vec![("option", from_typed(&option).unwrap())]),
                 ])])],
             )
@@ -150,7 +150,7 @@ fn option_fields_survive_shared_store_patches_merges_and_source_facade_reads() {
             .call_method(
                 "updatePosition",
                 vec![
-                    Js::str("p"),
+                    Js::object(vec![("id", Js::str("p"))]),
                     Js::object(vec![("option", Js::object(vec![]))]),
                 ],
             )

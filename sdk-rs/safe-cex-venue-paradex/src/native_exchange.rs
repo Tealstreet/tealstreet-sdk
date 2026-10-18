@@ -9,9 +9,9 @@ use safe_cex_exchange::{
         base_exchange::{BaseExchangeParts, ExternalPublicDataFactory},
         client::JsHttpHost,
         promise::await_js,
-        value::{Js, from_typed, to_typed},
+        value::{Js, arg, from_typed, to_typed},
     },
-    runtime::{ExchangeError, ExchangeFuture},
+    runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -23,6 +23,8 @@ pub struct ParadexDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub http: ParadexHttpFactory,
     pub external_public_data: Option<ExternalPublicDataFactory>,
+    /// Host timezone conversion for offset-less local Date strings.
+    pub local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
 }
 pub struct ParadexExchange {
     rt: Rt,
@@ -77,6 +79,18 @@ impl ParadexExchange {
             rt,
             capabilities: ExchangeCapabilities {
                 start: CapabilityBinding::implemented(|v, ()| v.start()),
+                fetch_historical_fills: CapabilityBinding::implemented(|v, o| {
+                    v.fetch_historical_fills(o)
+                }),
+                fetch_income_history: CapabilityBinding::implemented(|v, o| {
+                    v.fetch_income_history(o)
+                }),
+                fetch_income_history_range: CapabilityBinding::implemented(
+                    |v, (from, to, kind)| v.fetch_income_history_range(from, to, kind),
+                ),
+                fetch_historical_orders: CapabilityBinding::implemented(|v, o| {
+                    v.fetch_historical_orders(o)
+                }),
                 place_order: PlaceOrderBinding::implemented::<Self>(Exchange::place_order),
                 place_orders: PlaceOrdersBinding::implemented::<Self>(Exchange::place_orders),
                 ..Default::default()
@@ -93,6 +107,22 @@ impl ParadexExchange {
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt.this.clone();
         Box::pin(async move { Ok(to_typed(&await_js(this.call_method(n, a)?).await?)?) })
+    }
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        name: &'static str,
+        first: Js,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let listener = Js::function("callback", move |_, args| {
+            callback(to_typed(&arg(&args, 0))?);
+            Ok(Js::Undefined)
+        });
+        let cleanup = self.rt.this.call_method(name, vec![first, listener])?;
+        Ok(Box::new(move || {
+            cleanup.call(Js::Undefined, vec![])?;
+            Ok(())
+        }))
     }
     fn unit(&self, n: &'static str, a: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
@@ -192,6 +222,65 @@ impl Exchange for ParadexExchange {
     fn fetch_ohlcv(&self, o: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         self.invoke("fetchOHLCV", args!(js(&o)))
     }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOHLCV", js(&options)?, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOrderBook", Js::str(&symbol), callback)
+    }
+    fn fetch_historical_fills(
+        &self,
+        options: ExecutionsOptions,
+    ) -> ExchangeFuture<'_, Vec<Execution>> {
+        self.invoke("fetchHistoricalFills", args!(js(&options)))
+    }
+    fn fetch_income_history(
+        &self,
+        options: Option<IncomeHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        self.invoke("fetchIncomeHistory", args!(js(&options)))
+    }
+    fn fetch_income_history_range(
+        &self,
+        from: f64,
+        to: f64,
+        kind: Option<String>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        self.invoke(
+            "fetchIncomeHistoryRange",
+            args!(js(&from), js(&to), js(&kind)),
+        )
+    }
+    fn fetch_historical_orders(
+        &self,
+        options: Option<OrderHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<HistoricalOrder>> {
+        self.invoke("fetchHistoricalOrders", args!(js(&options)))
+    }
+    fn fetch_historical_positions(
+        &self,
+        options: safe_cex_exchange::journal::HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        Box::pin(crate::state_operations::fetch_historical_positions(
+            options,
+            |options, scoped| {
+                Ok(safe_cex_exchange::journal::fold_closed_position_records(
+                    self,
+                    &NativeJournal,
+                    options,
+                    scoped,
+                ))
+            },
+        ))
+    }
     fn dispose(&self) -> Result<(), ExchangeError> {
         self.rt.this.call_method("dispose", vec![])?;
         Ok(())
@@ -213,3 +302,59 @@ impl Drop for ParadexExchange {
         self.rt.shared.sockets.cores.borrow_mut().clear();
     }
 }
+
+// Bind the existing core journal reader to this constructed Exchange's real reads.
+struct NativeJournal;
+impl safe_cex_exchange::journal::JournalFolder for NativeJournal {
+    fn build_folded_position_records<'a>(
+        &'a self,
+        exchange: &'a dyn Exchange,
+        account: &'a str,
+        from: f64,
+        to: f64,
+        symbol_scoped: bool,
+        resolve_settle_currency: Box<dyn Fn(&str) -> String + 'a>,
+    ) -> ExchangeFuture<'a, Vec<serde_json::Value>> {
+        Box::pin(async move {
+            use safe_cex_exchange::build_records::{
+                BuildRecordsOptions, FoldableExchange, build_folded_position_records,
+            };
+            let mut fills = |opts| exchange.fetch_historical_fills(opts);
+            let mut income = |start, end| exchange.fetch_income_history_range(start, end, None);
+            let mut settle = |symbol: &str| resolve_settle_currency(symbol);
+            let result = build_folded_position_records(
+                &mut FoldableExchange {
+                    fetch_historical_fills: &mut fills,
+                    fetch_income_history_range: Some(&mut income),
+                },
+                &mut BuildRecordsOptions {
+                    account,
+                    from,
+                    to,
+                    symbol_scoped,
+                    resolve_settle_currency: &mut settle,
+                },
+            )
+            .await
+            .map_err(|failure| {
+                let mut error = failure.error;
+                if let Some(cause) = failure.cause {
+                    error.origin =
+                        Some(safe_cex_exchange::runtime::ExchangeErrorOrigin::new(*cause));
+                }
+                error
+            })?;
+            result
+                .records
+                .into_iter()
+                .map(|row| {
+                    serde_json::to_value(row).map_err(|error| ExchangeError::new(error.to_string()))
+                })
+                .collect()
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "sdk_quantum_probe.rs"]
+mod sdk_quantum_probe;

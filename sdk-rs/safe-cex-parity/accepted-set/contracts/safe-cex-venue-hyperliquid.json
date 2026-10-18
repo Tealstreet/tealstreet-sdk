@@ -4668,87 +4668,6 @@
       ]
     }
   },
-  "safe_cex_venue_hyperliquid::types::ScheduleCancelActionType": {
-    "shape": "string",
-    "literals": [
-      "scheduleCancel"
-    ],
-    "entrypoints": [],
-    "evidence": "Reviewed concrete types.rs ScheduleCancelActionType, private remote metadata, the String::deserialize admission and maintained hyperliquid.types.ts declaration (Tif/Tpsl/Grouping lines82-86; ScheduleCancelAction type line548). Exactly these tags are admitted. Independent native variant/ordinal expectations and exact serialization are checked through text, qualified owned/borrowed Value and all three shared numeric ingress routes; every valid externally tagged map must be rejected. The owner has no indexed raw entrypoint beyond Deserialize. This is an individual native/default owner review, preserving every private/local/alias and target-matrix obligation; no blanket literal exemption.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::ScheduleCancel => serde_json::json!({\"ok\":true,\"variant\":\"ScheduleCancel\",\"ordinal\":0})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"scheduleCancel\"",
-          "output": {
-            "ok": true,
-            "variant": "ScheduleCancel",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": " \n\"scheduleCancel\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "ScheduleCancel",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"scheduleCancel\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
   "safe_cex_venue_hyperliquid::types::HyperliquidUserAbstractionMode": {
     "shape": "string",
     "literals": [
@@ -4856,405 +4775,6 @@
         },
         {
           "input": "{\"standard\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::MetaUniverseItemMarginMode": {
-    "shape": "string",
-    "literals": [
-      "strictIsolated",
-      "noCross"
-    ],
-    "entrypoints": [],
-    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines104, concrete MetaUniverseItemMarginMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::StrictIsolated => serde_json::json!({\"ok\":true,\"variant\":\"StrictIsolated\",\"ordinal\":0}), $type::NoCross => serde_json::json!({\"ok\":true,\"variant\":\"NoCross\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"strictIsolated\"",
-          "output": {
-            "ok": true,
-            "variant": "StrictIsolated",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "\"noCross\"",
-          "output": {
-            "ok": true,
-            "variant": "NoCross",
-            "ordinal": 1
-          }
-        },
-        {
-          "input": " \n\"strictIsolated\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "StrictIsolated",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"strictIsolated\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"noCross\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::MetaUniverseItemGrowthMode": {
-    "shape": "string",
-    "literals": [
-      "enabled",
-      "disabled"
-    ],
-    "entrypoints": [],
-    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines105, concrete MetaUniverseItemGrowthMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Enabled => serde_json::json!({\"ok\":true,\"variant\":\"Enabled\",\"ordinal\":0}), $type::Disabled => serde_json::json!({\"ok\":true,\"variant\":\"Disabled\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"enabled\"",
-          "output": {
-            "ok": true,
-            "variant": "Enabled",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "\"disabled\"",
-          "output": {
-            "ok": true,
-            "variant": "Disabled",
-            "ordinal": 1
-          }
-        },
-        {
-          "input": " \n\"enabled\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "Enabled",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"enabled\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"disabled\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::UserFundingDeltaType": {
-    "shape": "string",
-    "literals": [
-      "funding"
-    ],
-    "entrypoints": [],
-    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines396, concrete UserFundingDeltaType native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Funding => serde_json::json!({\"ok\":true,\"variant\":\"Funding\",\"ordinal\":0})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"funding\"",
-          "output": {
-            "ok": true,
-            "variant": "Funding",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": " \n\"funding\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "Funding",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"funding\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::UserNonFundingLedgerDeltaType": {
-    "shape": "string",
-    "literals": [
-      "deposit",
-      "withdraw",
-      "transfer",
-      "liquidation"
-    ],
-    "entrypoints": [],
-    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines410, concrete UserNonFundingLedgerDeltaType native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Deposit => serde_json::json!({\"ok\":true,\"variant\":\"Deposit\",\"ordinal\":0}), $type::Withdraw => serde_json::json!({\"ok\":true,\"variant\":\"Withdraw\",\"ordinal\":1}), $type::Transfer => serde_json::json!({\"ok\":true,\"variant\":\"Transfer\",\"ordinal\":2}), $type::Liquidation => serde_json::json!({\"ok\":true,\"variant\":\"Liquidation\",\"ordinal\":3})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"deposit\"",
-          "output": {
-            "ok": true,
-            "variant": "Deposit",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "\"withdraw\"",
-          "output": {
-            "ok": true,
-            "variant": "Withdraw",
-            "ordinal": 1
-          }
-        },
-        {
-          "input": "\"transfer\"",
-          "output": {
-            "ok": true,
-            "variant": "Transfer",
-            "ordinal": 2
-          }
-        },
-        {
-          "input": "\"liquidation\"",
-          "output": {
-            "ok": true,
-            "variant": "Liquidation",
-            "ordinal": 3
-          }
-        },
-        {
-          "input": " \n\"deposit\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "Deposit",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"deposit\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"withdraw\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"transfer\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"liquidation\": null}",
           "output": {
             "ok": false
           }
@@ -5423,372 +4943,6 @@
         },
         {
           "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::Hip3MarketInfoMarginMode": {
-    "shape": "string",
-    "literals": [
-      "strictIsolated",
-      "noCross"
-    ],
-    "entrypoints": [],
-    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines666, concrete Hip3MarketInfoMarginMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::StrictIsolated => serde_json::json!({\"ok\":true,\"variant\":\"StrictIsolated\",\"ordinal\":0}), $type::NoCross => serde_json::json!({\"ok\":true,\"variant\":\"NoCross\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"strictIsolated\"",
-          "output": {
-            "ok": true,
-            "variant": "StrictIsolated",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "\"noCross\"",
-          "output": {
-            "ok": true,
-            "variant": "NoCross",
-            "ordinal": 1
-          }
-        },
-        {
-          "input": " \n\"strictIsolated\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "StrictIsolated",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"strictIsolated\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"noCross\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::Hip3MarketInfoGrowthMode": {
-    "shape": "string",
-    "literals": [
-      "enabled",
-      "disabled"
-    ],
-    "entrypoints": [],
-    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines667, concrete Hip3MarketInfoGrowthMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Enabled => serde_json::json!({\"ok\":true,\"variant\":\"Enabled\",\"ordinal\":0}), $type::Disabled => serde_json::json!({\"ok\":true,\"variant\":\"Disabled\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"enabled\"",
-          "output": {
-            "ok": true,
-            "variant": "Enabled",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "\"disabled\"",
-          "output": {
-            "ok": true,
-            "variant": "Disabled",
-            "ordinal": 1
-          }
-        },
-        {
-          "input": " \n\"enabled\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "Enabled",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"enabled\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"disabled\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::OrderResponseStatusCase3": {
-    "shape": "string",
-    "literals": [
-      "waitingForFill"
-    ],
-    "entrypoints": [],
-    "evidence": "Individually reviewed the OrderResponseStatus union branch at hyperliquid.types.ts line 190, native OrderResponseStatusCase3::WaitingForFill, its exact private remote wire rename and public String admission. Only waitingForFill is accepted by this concrete owner. Native tests inspect the fixed enum variant before serialization, preserve its wire spelling and reject the other waiting status, the valid tagged-unit object and seven other invalid values through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract expressions compare native variants and ordinals before serialization. This reviews only this native/default owner; the outer status union, private schema, local helpers and target/feature obligations remain separate.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored status JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::WaitingForFill => serde_json::json!({\"ok\":true,\"variant\":\"WaitingForFill\",\"ordinal\":0})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"status decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"waitingForFill\"",
-          "output": {
-            "ok": true,
-            "variant": "WaitingForFill",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": " \n\"waitingForFill\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "WaitingForFill",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"waitingForFill\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"waitingForTrigger\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::OrderResponseStatusCase4": {
-    "shape": "string",
-    "literals": [
-      "waitingForTrigger"
-    ],
-    "entrypoints": [],
-    "evidence": "Individually reviewed the OrderResponseStatus union branch at hyperliquid.types.ts line 191, native OrderResponseStatusCase4::WaitingForTrigger, its exact private remote wire rename and public String admission. Only waitingForTrigger is accepted by this concrete owner. Native tests inspect the fixed enum variant before serialization, preserve its wire spelling and reject the other waiting status, the valid tagged-unit object and seven other invalid values through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract expressions compare native variants and ordinals before serialization. This reviews only this native/default owner; the outer status union, private schema, local helpers and target/feature obligations remain separate.",
-    "nativeObservation": {
-      "nativeFields": [
-        "variant",
-        "ordinal"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored status JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::WaitingForTrigger => serde_json::json!({\"ok\":true,\"variant\":\"WaitingForTrigger\",\"ordinal\":0})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"status decoder paths disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "\"waitingForTrigger\"",
-          "output": {
-            "ok": true,
-            "variant": "WaitingForTrigger",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": " \n\"waitingForTrigger\"\t ",
-          "output": {
-            "ok": true,
-            "variant": "WaitingForTrigger",
-            "ordinal": 0
-          }
-        },
-        {
-          "input": "{\"waitingForTrigger\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"waitingForFill\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"__INVALID__\"",
           "output": {
             "ok": false
           }
@@ -6925,190 +6079,6 @@
         },
         {
           "input": "[\"first:accountValue:\\u03b1\", \"first:totalMarginUsed:\\u03b1\", \"first:totalNtlPos:\\u03b1\", \"first:totalRawUsd:\\u03b1\"]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "false",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"record\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::OrderResponseStatusCase2": {
-    "shape": "map",
-    "sample": {
-      "error": "first:error:α"
-    },
-    "entrypoints": [],
-    "evidence": "Individually reviewed maintained hyperliquid.types.ts OrderResponseStatus error branch, concrete OrderResponseStatusCase2 fields, every private remote rename/required-field attribute, and its public JsNumberInput capture plus OnlyMap visitor. All 1 declared fields are required and non-nullable at this concrete owner. Native field observations read each actual typed member before owner serialization, with distinct per-field values and exact binary64 bits. Cases separately cover field omission/null/wrong primitive, Unicode/boolean variants, object key order, unknown fields, complete valid declaration-order array rejection and scalar roots; each numeric member additionally has negative-zero, positive-overflow and negative-underflow observations. String members use the maintained scalar-Unicode native boundary. This classifies only this concrete native/default record; nested/helper/private-schema, serializer, other owners and feature/target obligations remain separate.",
-    "nativeObservation": {
-      "nativeFields": [
-        "error",
-        "errorUtf16"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored record JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)]; let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{let units=decoded.error.encode_utf16().collect::<Vec<_>>();serde_json::json!({\"ok\":true,\"error\":serde_json::json!({\"kind\":\"string\",\"value\":decoded.error}),\"errorUtf16\":units})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>(); for row in &observations[1..]{assert_eq!(row,&observations[0],\"record ingress paths disagree\");} observations[0].clone() }",
-      "cases": [
-        {
-          "input": "{\"error\": \"first:error:\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "error": {
-              "kind": "string",
-              "value": "first:error:α"
-            },
-            "errorUtf16": [
-              102,
-              105,
-              114,
-              115,
-              116,
-              58,
-              101,
-              114,
-              114,
-              111,
-              114,
-              58,
-              945
-            ]
-          }
-        },
-        {
-          "input": "{\"error\": \"other:error:\\ud83e\\udd80\"}",
-          "output": {
-            "ok": true,
-            "error": {
-              "kind": "string",
-              "value": "other:error:🦀"
-            },
-            "errorUtf16": [
-              111,
-              116,
-              104,
-              101,
-              114,
-              58,
-              101,
-              114,
-              114,
-              111,
-              114,
-              58,
-              55358,
-              56704
-            ]
-          }
-        },
-        {
-          "input": "{\"error\": \"first:error:\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "error": {
-              "kind": "string",
-              "value": "first:error:α"
-            },
-            "errorUtf16": [
-              102,
-              105,
-              114,
-              115,
-              116,
-              58,
-              101,
-              114,
-              114,
-              111,
-              114,
-              58,
-              945
-            ]
-          }
-        },
-        {
-          "input": "{\"error\": \"first:error:\\u03b1\", \"__unmodeled\": {\"nested\": [null, true, 3]}}",
-          "output": {
-            "ok": true,
-            "error": {
-              "kind": "string",
-              "value": "first:error:α"
-            },
-            "errorUtf16": [
-              102,
-              105,
-              114,
-              115,
-              116,
-              58,
-              101,
-              114,
-              114,
-              111,
-              114,
-              58,
-              945
-            ]
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"error\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"error\": 12}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[\"first:error:\\u03b1\"]",
           "output": {
             "ok": false
           }
@@ -10121,206 +9091,6 @@
         },
         {
           "input": "[\"first:coin:\\u03b1\", \"first:fundingRate:\\u03b1\", \"first:premium:\\u03b1\", 4.25]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "true",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "false",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "0",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"record\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "[]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_venue_hyperliquid::types::SpotTokenEvmContract": {
-    "shape": "map",
-    "sample": {
-      "address": "first:address:α",
-      "evm_extra_wei_decimals": 2.25
-    },
-    "entrypoints": [],
-    "evidence": "Individually reviewed maintained hyperliquid.types.ts SpotToken.evmContract concrete object branch, concrete SpotTokenEvmContract fields, every private remote rename/required-field attribute, and its public JsNumberInput capture plus OnlyMap visitor. All 2 declared fields are required and non-nullable at this concrete owner. Native field observations read each actual typed member before owner serialization, with distinct per-field values and exact binary64 bits. Cases separately cover field omission/null/wrong primitive, Unicode/boolean variants, object key order, unknown fields, complete valid declaration-order array rejection and scalar roots; each numeric member additionally has negative-zero, positive-overflow and negative-underflow observations. String members use the maintained scalar-Unicode native boundary. This classifies only this concrete native/default record; nested/helper/private-schema, serializer, other owners and feature/target obligations remain separate.",
-    "nativeObservation": {
-      "nativeFields": [
-        "address",
-        "evm_extra_wei_decimals"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"independently authored record JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)]; let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{serde_json::json!({\"ok\":true,\"address\":serde_json::json!({\"kind\":\"string\",\"value\":decoded.address}),\"evm_extra_wei_decimals\":serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",decoded.evm_extra_wei_decimals.to_bits())})})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>(); for row in &observations[1..]{assert_eq!(row,&observations[0],\"record ingress paths disagree\");} observations[0].clone() }",
-      "cases": [
-        {
-          "input": "{\"address\": \"first:address:\\u03b1\", \"evm_extra_wei_decimals\": 2.25}",
-          "output": {
-            "ok": true,
-            "address": {
-              "kind": "string",
-              "value": "first:address:α"
-            },
-            "evm_extra_wei_decimals": {
-              "kind": "number",
-              "bits": "4002000000000000"
-            }
-          }
-        },
-        {
-          "input": "{\"address\": \"other:address:\\ud83e\\udd80\", \"evm_extra_wei_decimals\": -2.5}",
-          "output": {
-            "ok": true,
-            "address": {
-              "kind": "string",
-              "value": "other:address:🦀"
-            },
-            "evm_extra_wei_decimals": {
-              "kind": "number",
-              "bits": "c004000000000000"
-            }
-          }
-        },
-        {
-          "input": "{\"evm_extra_wei_decimals\": 2.25, \"address\": \"first:address:\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "address": {
-              "kind": "string",
-              "value": "first:address:α"
-            },
-            "evm_extra_wei_decimals": {
-              "kind": "number",
-              "bits": "4002000000000000"
-            }
-          }
-        },
-        {
-          "input": "{\"address\": \"first:address:\\u03b1\", \"evm_extra_wei_decimals\": 2.25, \"__unmodeled\": {\"nested\": [null, true, 3]}}",
-          "output": {
-            "ok": true,
-            "address": {
-              "kind": "string",
-              "value": "first:address:α"
-            },
-            "evm_extra_wei_decimals": {
-              "kind": "number",
-              "bits": "4002000000000000"
-            }
-          }
-        },
-        {
-          "input": "{\"evm_extra_wei_decimals\": 2.25}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"address\": null, \"evm_extra_wei_decimals\": 2.25}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"address\": 12, \"evm_extra_wei_decimals\": 2.25}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"address\": \"first:address:\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"address\": \"first:address:\\u03b1\", \"evm_extra_wei_decimals\": null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"address\": \"first:address:\\u03b1\", \"evm_extra_wei_decimals\": \"12\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"address\": \"first:address:\\u03b1\", \"evm_extra_wei_decimals\": -0.0}",
-          "output": {
-            "ok": true,
-            "address": {
-              "kind": "string",
-              "value": "first:address:α"
-            },
-            "evm_extra_wei_decimals": {
-              "kind": "number",
-              "bits": "8000000000000000"
-            }
-          }
-        },
-        {
-          "input": "{\"address\": \"first:address:\\u03b1\", \"evm_extra_wei_decimals\": 1e400}",
-          "output": {
-            "ok": true,
-            "address": {
-              "kind": "string",
-              "value": "first:address:α"
-            },
-            "evm_extra_wei_decimals": {
-              "kind": "number",
-              "bits": "7ff0000000000000"
-            }
-          }
-        },
-        {
-          "input": "{\"address\": \"first:address:\\u03b1\", \"evm_extra_wei_decimals\": -1e-400}",
-          "output": {
-            "ok": true,
-            "address": {
-              "kind": "string",
-              "value": "first:address:α"
-            },
-            "evm_extra_wei_decimals": {
-              "kind": "number",
-              "bits": "8000000000000000"
-            }
-          }
-        },
-        {
-          "input": "[\"first:address:\\u03b1\", 2.25]",
           "output": {
             "ok": false
           }
@@ -60448,578 +59218,6 @@
       ]
     }
   },
-  "safe_cex_venue_hyperliquid::types::SpotClearinghouseBalance": {
-    "shape": "map",
-    "sample": {
-      "coin": "first:SpotClearinghouseBalance.coinα",
-      "token": 44.25,
-      "hold": "first:SpotClearinghouseBalance.holdα",
-      "total": "first:SpotClearinghouseBalance.totalα",
-      "entryNtl": "first:SpotClearinghouseBalance.entryNtlα"
-    },
-    "entrypoints": [],
-    "evidence": "Reviewed maintained hyperliquid.types.ts SpotClearinghouseBalance declarations (including merged interface declarations when present), every native member and private remote rename/presence attribute. Direct typed projections recursively observe nested native fields, enum variant identity, collection order and cardinality, Option presence and exact numeric bits before owner serialization. The independently authored corpus varies every object member presence/null/shape, nested map guards, valid full positional arrays, scalar roots, enum string/object admission, numeric special values and collection lengths/order. Only this concrete native/default owner is reviewed; private companions, local helpers, nested owners and other target/feature configurations remain separate obligations.",
-    "nativeObservation": {
-      "nativeFields": [
-        "coin",
-        "token",
-        "hold",
-        "total",
-        "entryNtl"
-      ],
-      "call": "{ let raw=$value.as_str().expect(\"authored nested record JSON\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)]; let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{serde_json::json!({\"ok\":true,\"coin\":serde_json::json!({\"kind\":\"string\",\"value\":&decoded.coin}),\"token\":match &decoded.token {Some(item)=>serde_json::json!({\"present\":true,\"value\":serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",(item).to_bits())})}),None=>serde_json::json!({\"present\":false})},\"hold\":serde_json::json!({\"kind\":\"string\",\"value\":&decoded.hold}),\"total\":serde_json::json!({\"kind\":\"string\",\"value\":&decoded.total}),\"entryNtl\":match &decoded.entry_ntl {Some(item)=>serde_json::json!({\"present\":true,\"value\":serde_json::json!({\"kind\":\"string\",\"value\":item})}),None=>serde_json::json!({\"present\":false})}})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"nested record routes disagree\");}observations[0].clone() }",
-      "cases": [
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "4046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"other:SpotClearinghouseBalance.coin\\ud83e\\udd80\",\"token\":-44.25,\"hold\":\"other:SpotClearinghouseBalance.hold\\ud83e\\udd80\",\"total\":\"other:SpotClearinghouseBalance.total\\ud83e\\udd80\",\"entryNtl\":\"other:SpotClearinghouseBalance.entryNtl\\ud83e\\udd80\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "other:SpotClearinghouseBalance.coin🦀"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "c046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "other:SpotClearinghouseBalance.hold🦀"
-            },
-            "total": {
-              "kind": "string",
-              "value": "other:SpotClearinghouseBalance.total🦀"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "other:SpotClearinghouseBalance.entryNtl🦀"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"token\":44.25,\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "4046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\",\"ignoredExtra\":\"ignored\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "4046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "[\"first:SpotClearinghouseBalance.coin\\u03b1\",44.25,\"first:SpotClearinghouseBalance.hold\\u03b1\",\"first:SpotClearinghouseBalance.total\\u03b1\",\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "false",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "7",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "\"root\"",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":null,\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":17,\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"changed-one-leaf:coin\\ud83e\\udd80\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "changed-one-leaf:coin🦀"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "4046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": false
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":null,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":false,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":-44.75,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "c046600000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":-0.0,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "8000000000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":1e400,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "7ff0000000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":-1e-400,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "8000000000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":null,\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":17,\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"changed-one-leaf:hold\\ud83e\\udd80\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "4046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "changed-one-leaf:hold🦀"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":null,\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":17,\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"changed-one-leaf:total\\ud83e\\udd80\",\"entryNtl\":\"first:SpotClearinghouseBalance.entryNtl\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "4046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "changed-one-leaf:total🦀"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "first:SpotClearinghouseBalance.entryNtlα"
-              }
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "4046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": false
-            }
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":false}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"coin\":\"first:SpotClearinghouseBalance.coin\\u03b1\",\"token\":44.25,\"hold\":\"first:SpotClearinghouseBalance.hold\\u03b1\",\"total\":\"first:SpotClearinghouseBalance.total\\u03b1\",\"entryNtl\":\"changed-one-leaf:entryNtl\\ud83e\\udd80\"}",
-          "output": {
-            "ok": true,
-            "coin": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.coinα"
-            },
-            "token": {
-              "present": true,
-              "value": {
-                "kind": "number",
-                "bits": "4046200000000000"
-              }
-            },
-            "hold": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.holdα"
-            },
-            "total": {
-              "kind": "string",
-              "value": "first:SpotClearinghouseBalance.totalα"
-            },
-            "entryNtl": {
-              "present": true,
-              "value": {
-                "kind": "string",
-                "value": "changed-one-leaf:entryNtl🦀"
-              }
-            }
-          }
-        }
-      ]
-    }
-  },
   "safe_cex_venue_hyperliquid::rate_limit::get_hyperliquid_rest_request_weight": {
     "api": {
       "kind": "function",
@@ -61853,6 +60051,261 @@
           "ok": true,
           "weightText": "2",
           "weightBits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid raw boundary 39",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "1",
+          "weightBits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid raw boundary 40",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "2",
+          "weightBits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid raw boundary 80",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "3",
+          "weightBits": "4008000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid value boundary 39",
+          "url": "/exchange",
+          "mode": "value",
+          "data": {
+            "action": {
+              "type": "cancelByCloid",
+              "cancels": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "1",
+          "weightBits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid value boundary 40",
+          "url": "/exchange",
+          "mode": "value",
+          "data": {
+            "action": {
+              "type": "cancelByCloid",
+              "cancels": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "2",
+          "weightBits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid value boundary 80",
+          "url": "/exchange",
+          "mode": "value",
+          "data": {
+            "action": {
+              "type": "cancelByCloid",
+              "cancels": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "3",
+          "weightBits": "4008000000000000"
         }
       }
     ],

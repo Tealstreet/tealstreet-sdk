@@ -424,3 +424,15 @@ impl JsNumberOutput for safe_cex_types::Balance {
         crate::js_number_output!(self, struct { used, free, total, upnl, currencies, coins } passthrough { info });
     }
 }
+
+impl<T: JsNumberOutput> JsNumberOutput for safe_cex_types::ModelField<T> {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, enum { Absent, Undefined, Value(value) });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::PreparedOrderOpts {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, struct { symbol, r#type, side, amount, price, trigger_price, stop_loss, take_profit, reduce_only, time_in_force, trigger_type, tp_trigger_type, sl_trigger_type, client_order_id, max_slippage_pct, close, implied_volatility });
+    }
+}

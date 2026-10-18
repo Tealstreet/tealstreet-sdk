@@ -249,7 +249,7 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
         );
         let fees = to_json(&fees)?;
         let fees = fees.as_array().cloned().unwrap_or_default();
-        let mut markets = Vec::with_capacity(rows.len());
+        let mut mapped = Vec::with_capacity(rows.len());
         for row in rows {
             let market = crate::market_mapping::map_market(
                 &to_json(&row)?,
@@ -258,7 +258,14 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
                 crate::market_mapping::Family::Linear,
             )
             .map_err(|m| Thrown::error("TypeError", &m))?;
-            markets.push(market);
+            mapped.push(market);
+        }
+        let mut markets = Vec::with_capacity(mapped.len());
+        for market in mapped {
+            match market {
+                Ok(market) => markets.push(market),
+                Err(message) => log(&rt, &message, "warning")?,
+            }
         }
         from_typed(&markets)
     };

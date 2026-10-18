@@ -105,7 +105,7 @@ pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>,
     } else {
         table(&constants::TIME_IN_FORCE, &text(raw_tif)?)?.or_else(|| {
             if raw_tif.is_none() {
-                existing.and_then(|o| o.time_in_force)
+                existing.and_then(|o| (o.time_in_force).into_value())
             } else {
                 Some(OrderTimeInForce::GoodTillCancel)
             }
@@ -120,42 +120,42 @@ pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>,
         None
     };
     Ok(Some(Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id,
-        parent_id: None,
-        status,
+        parent_id: (None).into(),
+        status: status.into(),
         symbol,
-        r#type: kind,
-        side,
+        r#type: (kind).into(),
+        side: side.into(),
         price: if price.is_finite() && price > 0.0 {
-            price
+            (price).into()
         } else if stop.is_finite() {
-            stop
+            (stop).into()
         } else {
-            0.0
+            (0.0).into()
         },
         amount,
         filled,
         remaining: subtract(amount, filled),
-        reduce_only: strict_true(first(o, &["reduceOnly", "ro", "R"])),
-        close: Some(close),
-        info: Some(o.clone()),
-        time_in_force: tif,
+        reduce_only: strict_true(first(o, &["reduceOnly", "ro", "R"])).into(),
+        close: (Some(close)).into(),
+        info: (Some(o.clone())).into(),
+        time_in_force: (tif).into(),
         last_update: now,
-        trigger_type: None,
+        trigger_type: (None).into(),
         tp_trigger_type: if kind == OrderType::TakeProfit {
-            trigger
+            (trigger).into()
         } else {
-            None
+            (None).into()
         },
         sl_trigger_type: if kind == OrderType::StopLoss {
-            trigger
+            (trigger).into()
         } else {
-            None
+            (None).into()
         },
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
     }))
 }
 /// Generic imported operations preserve every thrown-value identity in the source body.
@@ -391,7 +391,7 @@ impl BingxPrivateEvents {
             let order = map_order(
                 data,
                 &self.parent.base.store.orders(),
-                self.parent.base.runtime.now_ms(),
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )?;
             if let Some(order) = order
                 && order.status == OrderStatus::Open
@@ -481,7 +481,7 @@ impl BingxPrivateEvents {
                     None
                 };
                 let side = if mode == PositionMode::OneWay {
-                    inferred.or_else(|| for_symbol.first().map(|p| p.side))
+                    inferred.or_else(|| for_symbol.first().and_then(|p| p.side.into_value()))
                 } else {
                     mapped.or(inferred)
                 };
@@ -541,32 +541,33 @@ impl BingxPrivateEvents {
                     .unwrap_or_else(|| {
                         existing
                             .as_ref()
-                            .and_then(|p| p.margin_type)
+                            .and_then(|p| (p.margin_type).into_value())
                             .unwrap_or(MarginType::Cross)
                     });
                 let position = Position {
                     id: existing.as_ref().map_or(id, |p| p.id.clone()),
                     symbol,
-                    side,
+                    side: side.into(),
                     entry_price: entry,
                     notional: contracts * entry + upnl,
                     leverage: existing.as_ref().map_or(1.0, |p| p.leverage),
-                    margin_type: Some(margin),
-                    position_mode: Some(
+                    margin_type: (Some(margin)).into(),
+                    position_mode: (Some(
                         existing
                             .as_ref()
-                            .and_then(|p| p.position_mode)
+                            .and_then(|p| (p.position_mode).into_value())
                             .unwrap_or(mode),
-                    ),
+                    ))
+                    .into(),
                     unrealized_pnl: upnl,
-                    realized_pnl: None,
+                    realized_pnl: (None).into(),
                     contracts,
                     liquidation_price: liq,
-                    margin_size: None,
-                    info: Some(update),
-                    extra: None,
-                    last_update: None,
-                    option: None,
+                    margin_size: (None).into(),
+                    info: (Some(update)).into(),
+                    extra: (None).into(),
+                    last_update: (None).into(),
+                    option: (None).into(),
                 };
                 self.parent
                     .base

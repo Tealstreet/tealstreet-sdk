@@ -1,11 +1,8 @@
-//! Portfolio selection and balance field bodies over typed portfolios and plain JSON replies.
+//! Portfolio selection and balance field bodies over observed portfolio fields and JSON replies.
 //! Full exchange construction and HTTP binding remain separate. Hosts drive hot promises.
-use crate::{
-    starbase_auth::{CoinbaseStarbasePromise, CoinbaseStarbasePromiseSpawner},
-    types::ListPortfoliosResponsePortfoliosItem,
-};
+use crate::starbase_auth::{CoinbaseStarbasePromise, CoinbaseStarbasePromiseSpawner};
 use indexmap::IndexMap;
-use safe_cex_num::{js_number, js_truthy, parse_float};
+use safe_cex_num::{js_number, js_string, js_truthy, parse_float};
 use safe_cex_types::object_map::JsObjectMap;
 use serde_json::{Value, json};
 use std::{
@@ -15,7 +12,17 @@ use std::{
 
 /// A fulfilled source Promise retains its one mutable returned array.
 pub type SupportedTypes = Rc<RefCell<Vec<String>>>;
-pub type Portfolio = Rc<RefCell<ListPortfoliosResponsePortfoliosItem>>;
+/// Mutable selection state, projected at the HTTP boundary to the two fields the
+/// source reads. Unobserved metadata is retained without applying the wire DTO's
+/// declaration-time requirements to a runtime response.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PortfolioState {
+    pub uuid: String,
+    pub r#type: String,
+    #[serde(flatten)]
+    pub metadata: serde_json::Map<String, Value>,
+}
+pub type Portfolio = Rc<RefCell<PortfolioState>>;
 pub type Portfolios = Rc<RefCell<Vec<Portfolio>>>;
 pub type PortfolioFailure = Rc<PortfolioThrown>;
 /// A thrown JSON value or an original native Store failure, shared by all callers.
@@ -40,13 +47,23 @@ impl PortfolioThrown {
             ("name".into(), Value::String(error.name.clone())),
             ("message".into(), Value::String(error.message.clone())),
         ]);
-        for (key, field) in [
-            ("response", &error.response),
-            ("code", &error.code),
-            ("config", &error.config),
-        ] {
+        for (key, field) in [("response", &error.response), ("config", &error.config)] {
             if let Some(field) = field {
                 value.insert(key.into(), field.clone());
+            }
+        }
+        if let Some(code) = &error.code {
+            match safe_cex_exchange::js_runtime::value::to_json(code) {
+                Ok(code) => {
+                    value.insert("code".into(), code);
+                }
+                Err(cause) => {
+                    return Self {
+                        value: None,
+                        store_mutation: None,
+                        native: Some(Rc::new(cause.to_exchange_error())),
+                    };
+                }
             }
         }
         Self {
@@ -541,16 +558,14 @@ pub fn fetch_spot_currencies<H: PortfolioHost + 'static>(
                 })?;
                 let mut currencies = PortfolioCurrencies::default();
                 for p in positions {
-                    // Source response DTO has numeric crypto fields and string asset keys.
-                    let free = p["available_to_trade_crypto"]
-                        .as_f64()
-                        .expect("typed crypto amount");
-                    let total = p["total_balance_crypto"]
-                        .as_f64()
-                        .expect("typed crypto amount");
+                    // TS subtracts and keys by these wire fields with JS coercion, never throwing.
+                    let coerce = |e: safe_cex_num::JsCoercionError| error(&e.name, &e.message);
+                    let free = js_number(p.get("available_to_trade_crypto")).map_err(coerce)?;
+                    let total = js_number(p.get("total_balance_crypto")).map_err(coerce)?;
                     let balance = scalar_balance(free, free, 0.0);
                     balance.borrow_mut().used = total - free;
-                    let asset = p["asset"].as_str().expect("typed asset");
+                    let asset = js_string(p.get("asset")).map_err(coerce)?;
+                    let asset = asset.as_str();
                     if asset == "__proto__" {
                         currencies.prototype = Some(balance);
                     } else {

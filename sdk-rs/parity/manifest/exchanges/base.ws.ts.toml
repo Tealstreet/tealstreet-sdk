@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/base.ws.ts"
-rust_files = [ "safe-cex-exchange/src/websocket.rs", "safe-cex-exchange/src/runtime.rs", "safe-cex-num/src/prototype_realm.rs", "safe-cex-transport/src/native.rs" ]
+rust_files = [ "safe-cex-exchange/src/js_runtime/sockets.rs", "safe-cex-exchange/src/websocket.rs", "safe-cex-exchange/src/runtime.rs", "safe-cex-num/src/prototype_realm.rs", "safe-cex-transport/src/native.rs" ]
 
 [[symbol]]
 ts = "runReopenResync"
@@ -198,9 +198,9 @@ note = "Adapted shared socket split: concrete lifecycle and state projections, p
 ts = "BaseWebSocket.handlePongEvent"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_pong_event", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::mark_ping_sent", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_ping_at" ]
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_pong_event", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::mark_ping_sent", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_ping_at", "safe-cex-exchange/src/websocket.rs::SocketTimeout", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::timeout_id", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::cancel_timeout", "safe-cex-exchange/src/js_runtime/sockets.rs::SocketCore::timeout_handle", "safe-cex-exchange/src/js_runtime/sockets.rs::SocketCore::set_timeout_handle", "safe-cex-exchange/src/js_runtime/sockets.rs::JsSocketContext::clear_timeout" ]
 status = "ported"
-note = "Adapted shared socket split: concrete lifecycle and state projections, protocol override hooks and guarded auth/dispatch helpers implement the same source contract. safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_pong_event safe-cex-exchange/src/websocket.rs::BaseWebSocket::mark_ping_sent Split member `safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_ping_at` writes the ping time a venue assigns to its own pingAt field, so handlePongEvent measures latency from the ping the venue sent."
+note = "Adapted shared socket split: concrete lifecycle and state projections, protocol override hooks and guarded auth/dispatch helpers implement the same source contract. safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_pong_event safe-cex-exchange/src/websocket.rs::BaseWebSocket::mark_ping_sent Split member `safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_ping_at` writes the ping time a venue assigns to its own pingAt field, so handlePongEvent measures latency from the ping the venue sent. Source heartbeat and receive fields expose stable Timeout objects for the actual core slots; Scope.clear_timeout cancels only their matching current identities, including venue-owned close cleanup. Split member `safe-cex-exchange/src/websocket.rs::SocketTimeout` names the three source timeout slots. `safe-cex-exchange/src/websocket.rs::BaseWebSocket::timeout_id` reads their owned identities and `safe-cex-exchange/src/websocket.rs::BaseWebSocket::cancel_timeout` cancels only a matching identity. `safe-cex-exchange/src/js_runtime/sockets.rs::SocketCore::timeout_handle` and `safe-cex-exchange/src/js_runtime/sockets.rs::SocketCore::set_timeout_handle` project the assignable source fields. `safe-cex-exchange/src/js_runtime/sockets.rs::JsSocketContext::clear_timeout` forwards source clearTimeout to the matching owned socket deadline."
 
 [[symbol]]
 ts = "BaseWebSocket.recordMessageHandlerStats"
@@ -534,9 +534,9 @@ note = "Preserves disposed/forceClosed early return, independent first-failure a
 ts = "BaseWebSocket.recoverAfterOffline"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::recover_after_offline", "safe-cex-exchange/src/websocket.rs::WsProtocol::recovers_after_offline" ]
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::recover_after_offline", "safe-cex-exchange/src/websocket.rs::WsProtocol::recovers_after_offline", "safe-cex-exchange/src/js_runtime/sockets.rs::JsProtocol::recovers_after_offline" ]
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice. The selected unit-return socket close/reconnect ABI excludes synchronous custom-host throws; native cannot short-circuit later actions on that excluded failure. Explicit subclass policy and positive timer identities are separately priced at the same anchor. Managed/ordinary readyState0/1/2/3, omitted close code and timer cancellation have bounded native/source witnesses, not native host-throw parity. Targets: safe_cex_exchange::websocket::BaseWebSocket::recover_after_offline Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::recovers_after_offline`; the protected readonly recoversAfterOffline field (default true) that guards this body; a subclass overrides it through its WsProtocol."
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice. The selected unit-return socket close/reconnect ABI excludes synchronous custom-host throws; native cannot short-circuit later actions on that excluded failure. Explicit subclass policy and positive timer identities are separately priced at the same anchor. Managed/ordinary readyState0/1/2/3, omitted close code and timer cancellation have bounded native/source witnesses, not native host-throw parity. Targets: safe_cex_exchange::websocket::BaseWebSocket::recover_after_offline Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::recovers_after_offline`; the protected readonly recoversAfterOffline field (default true) that guards this body; a subclass overrides it through its WsProtocol. The JS facade initializes the base field to true. Split member `safe-cex-exchange/src/js_runtime/sockets.rs::JsProtocol::recovers_after_offline` implements the live receiver policy read; WsProtocol delegates to that inherent implementation, retaining Lighter and Polymarket false policies through native Exchange recovery."
 
 [[symbol]]
 ts = "BaseWebSocket.get isForceClosed"
@@ -574,6 +574,6 @@ note = ""
 ts = "BaseWebSocket.checkLastReceived"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::check_last_received"
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::check_last_received", "safe-cex-exchange/src/websocket.rs::WsProtocol::check_last_received" ]
 status = "ported"
-note = ""
+note = "Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::check_last_received` dispatches a source receiver override before the base watchdog body, preserving the Lighter and GRVT own methods."

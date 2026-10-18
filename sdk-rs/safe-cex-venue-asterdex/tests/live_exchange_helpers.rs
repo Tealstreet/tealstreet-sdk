@@ -555,7 +555,10 @@ fn fetch_ohlcv_matches_typescript() {
                 )
             })
             .collect::<Vec<safe_cex_venue_asterdex::types::AsterDEXKlineResponse>>();
-        let candles = transform_klines(&rows);
+        let rows = safe_cex_exchange::js_runtime::value::from_typed(&rows).unwrap();
+        let candles: Vec<safe_cex_types::Candle> =
+            safe_cex_exchange::js_runtime::value::to_typed(&transform_klines(&rows).unwrap())
+                .unwrap();
         let actual = serde_json::to_value(&candles).unwrap();
         same(
             &actual,
@@ -1345,10 +1348,9 @@ fn exchange_helpers_match_typescript() {
                 assert_eq!(output.info.as_ref().unwrap()["symbol"], "INFO_AFTER");
             }
             "position" => {
-                let mut input: safe_cex_venue_asterdex::types::AsterDEXPositionResponse =
-                    serde_json::from_value(c["input"].clone()).unwrap();
+                let mut input = c["input"].clone();
                 let mut output = transform_position(&input, &[]).unwrap();
-                input.symbol = "SOURCE_AFTER".to_owned();
+                input["symbol"] = json!("SOURCE_AFTER");
                 assert_eq!(output.symbol, "BTC", "{kind} mapped scalar snapshot");
                 assert_eq!(
                     output.info.as_ref().unwrap()["symbol"],
@@ -1357,7 +1359,7 @@ fn exchange_helpers_match_typescript() {
                 );
                 output.info.as_mut().unwrap()["symbol"] = json!("INFO_AFTER");
                 assert_eq!(
-                    input.symbol, "SOURCE_AFTER",
+                    input["symbol"], "SOURCE_AFTER",
                     "{kind} typed info mutation cannot reach source"
                 );
                 assert_eq!(output.info.as_ref().unwrap()["symbol"], "INFO_AFTER");
@@ -1378,7 +1380,10 @@ fn exchange_helpers_match_typescript() {
                     v => panic!("unknown number {v}"),
                 }
             });
-            brackets.insert("BTC".to_owned(), value);
+            brackets.insert(
+                "BTC".to_owned(),
+                safe_cex_exchange::js_runtime::value::Js::Number(value),
+            );
         }
         let market = transform_market(&input, &brackets).unwrap();
         let mut actual = json!(market);
@@ -1478,12 +1483,19 @@ fn exchange_helpers_match_typescript() {
             let mut input: safe_cex_venue_asterdex::types::AsterDEXTickerResponse =
                 serde_json::from_value(wire).unwrap();
             input.close_time = value;
-            transform_ticker(&input, None).map(|output| output.info.unwrap())
+            transform_ticker(&input, None)
+                .map(|output| output.info.unwrap())
+                .map_err(|e| e.to_string())
         } else {
-            let mut input: safe_cex_venue_asterdex::types::AsterDEXPositionResponse =
-                serde_json::from_value(wire).unwrap();
-            input.update_time = value;
-            transform_position(&input, &[]).map(|output| output.info.unwrap())
+            safe_cex_types::retained_json::RetainedJsonInput::Float(value)
+                .into_value()
+                .map_err(|e| e.to_string())
+                .and_then(|raw| {
+                    wire[field] = raw;
+                    transform_position(&wire, &[])
+                        .map(|output| output.info.unwrap())
+                        .map_err(|e| e.1)
+                })
         };
         assert_eq!(
             c["raw"],
@@ -1543,7 +1555,7 @@ fn exchange_helpers_match_typescript() {
             .map(|value| {
                 let mut p = base.clone();
                 p.id = value["id"].as_str().unwrap().to_owned();
-                p.realized_pnl = value["realizedPnl"].as_f64();
+                p.realized_pnl = (value["realizedPnl"].as_f64()).into();
                 p
             })
             .collect::<Vec<_>>();
@@ -1655,7 +1667,8 @@ fn exchange_helpers_match_typescript() {
         );
     }
     for c in data["side"].as_array().unwrap() {
-        let opts = serde_json::from_value(c["opts"].clone()).unwrap();
+        let opts: safe_cex_types::PlaceOrderOpts =
+            serde_json::from_value(c["opts"].clone()).unwrap();
         assert_eq!(
             json!(get_order_position_side(
                 &opts,
@@ -2165,7 +2178,7 @@ fn account_mode_oracle_rejects_inverted_flag() {
 fn tagged_order(order: &safe_cex_types::Order) -> Value {
     let mut value = json!(order);
     for (key, number_value) in [
-        ("price", order.price),
+        ("price", order.price.to_number()),
         ("amount", order.amount),
         ("filled", order.filled),
         ("remaining", order.remaining),
@@ -2589,9 +2602,15 @@ fn mapper_metadata_retains_native_numbers() {
             "ticker" => mapped!(AsterDEXTickerResponse, input,
                 transform_ticker(&input,None).map(|o|o.info.unwrap()).map_err(|e|e.to_string()),
                 "/openTime"=>open_time, "/closeTime"=>close_time, "/firstId"=>first_id, "/lastId"=>last_id, "/count"=>count),
-            "position" => mapped!(AsterDEXPositionResponse, input,
-                transform_position(&input,&[]).map(|o|o.info.unwrap()).map_err(|e|e.to_string()),
-                "/updateTime"=>update_time),
+            "position" => safe_cex_types::retained_json::RetainedJsonInput::Float(value)
+                .into_value()
+                .map_err(|e| e.to_string())
+                .and_then(|raw| {
+                    *wire.pointer_mut(pointer).unwrap() = raw;
+                    transform_position(&wire, &[])
+                        .map(|o| o.info.unwrap())
+                        .map_err(|e| e.1)
+                }),
             "order" => mapped!(AsterDEXOrderResponse, input,
                 transform_order(&input).map(|o|o.info.unwrap()).map_err(|e|e.1),
                 "/orderId"=>order_id, "/time"=>time, "/updateTime"=>update_time, "/workingTime"=>working_time),

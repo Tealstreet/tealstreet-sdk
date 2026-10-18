@@ -29,7 +29,9 @@ function visit(n,name) {
   values.forEach((t,i)=>visit(t,name+'Case'+i));
  }
 }
+const notModeled=require('./not-modeled-types.cjs');
 for(const n of ast.statements) {
+ if((ts.isTypeAliasDeclaration(n)||ts.isInterfaceDeclaration(n))&&notModeled.has(n.name.text)) continue;
  if(ts.isTypeAliasDeclaration(n)) visit(n.type,n.name.text);
  if(ts.isInterfaceDeclaration(n)) {
   const peers=ast.statements.filter(p=>ts.isInterfaceDeclaration(p)&&p.name.text===n.name.text), merged=new Map();

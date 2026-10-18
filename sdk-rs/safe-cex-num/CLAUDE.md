@@ -345,3 +345,29 @@ forwards to visit_map and cannot decode these variants. Require exactly one tag
 before dispatch; the bridge alone need not consume extra keys. Raw/owned/borrowed
 regressions inspect unit/newtype/tuple/record variants and numeric bits, while
 shared string-union front guards still reject tagged maps.
+
+
+`js_date_to_iso_string` applies the existing TimeClip boundary and returns the
+native RangeError name/message for invalid dates. It renders UTC milliseconds,
+including year zero and signed six-digit extended years, without a local timezone
+adapter. The formatter is shared with websocket diagnostics and native DXtrade
+candle bounds; no venue-local calendar copy is introduced. `tests/date_iso.rs`
+compares 1,044 independently counted native bit inputs with actual JavaScript
+Date construction/toISOString, including fractional, nonfinite and clip-edge
+values. It does not implement object-to-primitive Date constructor coercion.
+
+The retained JSON writer traverses the canonical UTF-16 carrier directly. It
+shares the lower quotation helper and numeric/key-order primitives with prepared
+JSON rendering. Undefined and nonfinite numbers remain native until the final
+wire projection; typed Rust String/Value adapters explicitly reject lone units.
+The retained_json_writer target compares every UTF-16 unit and a native object
+containing duplicate/index/lone-unit keys, undefined, infinities and signed zero
+with Node JSON.stringify. It also observes the retained input after rendering.
+`python3 scripts/retained-json-controls.py` runs exclusively, injecting the former
+string refusal, former key replacement, writer text replacement and a truncated
+writer array. Each compiled fault must fail its named production boundary or
+Node comparison and pass again after exact source restoration.
+`node ../safe-cex-parity/scripts/retained-json-contracts.mjs --package=safe-cex-num`
+checks the six compiler-owned writer APIs: one native prepared-value conversion
+and five specific outbound classifications. Those classifications are separate
+from the executed Node comparisons and corruption controls above.

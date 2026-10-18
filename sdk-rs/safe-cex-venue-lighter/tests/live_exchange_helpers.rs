@@ -153,7 +153,7 @@ fn lighter_exchange_helpers_match_live_typescript() {
         let mut order_json = case["order"].clone();
         order_json["price"] = serde_json::json!(0);
         let mut order: safe_cex_types::Order = serde_json::from_value(order_json).unwrap();
-        order.price = tagged_number(&case["order"]["price"]);
+        order.price = (tagged_number(&case["order"]["price"])).into();
         let ticker = case.get("ticker").map(|p| {
             let mut clean = p.clone();
             for key in ["mark", "last", "index"] {

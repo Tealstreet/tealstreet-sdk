@@ -428,7 +428,7 @@ impl ReadHost for Rt {
         Ok(())
     }
     fn now(&self) -> ReadResult<Self, f64> {
-        Ok(self.now())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn read(
         &self,
@@ -645,9 +645,11 @@ impl TradingHost for Rt {
         };
         Ok(safe_cex_num::adjust(value.to_number()?, step))
     }
-    // ts: `uuid()` (v4) from the `uuid` package.
+    // ts: utils/uuid removes the nanoid URL separators.
     fn uuid(&self) -> ReadResult<Self, Vec<u16>> {
-        Ok(units(&self.shared.runtime.unique_id()))
+        Ok(units(
+            &self.shared.runtime.unique_id().replace(['-', '_'], ""),
+        ))
     }
     fn spot_client_id(&self) -> ReadResult<Self, Handle<Self>> {
         let id = (self.shared.extra.spot_ids.borrow_mut())().map_err(Thrown::from)?;
@@ -655,13 +657,9 @@ impl TradingHost for Rt {
     }
     fn iterable(&self, value: &Js, expression: &str) -> ReadResult<Self, Vec<Handle<Self>>> {
         match value {
-            Js::Array(_) => Ok(value
-                .array_values()
-                .unwrap_or_default()
-                .into_iter()
-                .map(h)
-                .collect()),
-            Js::String(s) => Ok(s.iter().map(|u| h(Js::utf16(&[*u]))).collect()),
+            Js::Array(_) | Js::String(_) => {
+                Ok(value.iterable_values()?.into_iter().map(h).collect())
+            }
             _ => Err(Thrown::type_error(&if expression == "txids" {
                 "txids is not iterable".to_owned()
             } else {
@@ -761,11 +759,11 @@ impl TradingHost for Rt {
         let promise = self.this.call_method("fetchPositions", vec![])?;
         Ok(async move { Ok(h(await_js(promise).await?)) })
     }
+    // ts: `this.store.addOrUpdatePositions(positions)` — an upsert, not a replacement.
     fn add_positions(&self, positions: Handle<Self>) -> ReadResult<Self, ()> {
-        self.this.get("store")?.call_method(
-            "update",
-            vec![Js::object(vec![("positions", (*positions).clone())])],
-        )?;
+        self.this
+            .get("store")?
+            .call_method("addOrUpdatePositions", vec![(*positions).clone()])?;
         Ok(())
     }
 }
@@ -780,13 +778,16 @@ impl ApiHost for Rt {
     fn create_client(
         &self,
         config: Handle<Self>,
-        _options: Handle<Self>,
+        options: Handle<Self>,
         _exchange: Handle<Self>,
     ) -> ReadResult<Self, Handle<Self>> {
-        Ok(h(client::create(
+        Ok(h(client::factory::create(
             self.shared.http.clone(),
+            self.shared.runtime.transport().as_ref(),
             (*config).clone(),
-        )))
+            &options,
+            self.base(),
+        )?))
     }
     // ts: utils/retryReadsOnly networkErrorOnRead(isRead): reads (and the listed
     // posted reads) retried on axios-retry's isNetworkError only.
@@ -866,14 +867,21 @@ impl ApiHost for Rt {
         let pending = client.call_method("request", vec![(*config).clone()])?;
         Ok(async move { Ok(h(await_js(pending).await?)) })
     }
-    // ts: installTransportAdapter — the binding's JsHttpHost owns transport selection.
+    // ts: installTransportAdapter(xhr, options, exchange.name).
     fn install_transport(
         &self,
-        _client: Handle<Self>,
-        _options: Handle<Self>,
-        _name: Handle<Self>,
+        client: Handle<Self>,
+        options: Handle<Self>,
+        name: Handle<Self>,
     ) -> ReadResult<Self, ()> {
-        Ok(())
+        client::factory::install_transport_adapter(
+            self.shared.http.clone(),
+            self.shared.runtime.transport().as_ref(),
+            &client,
+            &options,
+            super::value::to_typed(&name)?,
+            safe_cex_transport::RestAdapterVariant::Default,
+        )
     }
     fn request_use(&self, client: Handle<Self>, api: Rc<Api<Self>>) -> ReadResult<Self, ()> {
         let interceptor = Js::function("krakenRequest", move |_, a| {
@@ -959,9 +967,11 @@ impl ApiHost for Rt {
     }
     // ts: `encodeURIComponent(JSON.stringify(dataObj))`.
     fn json_component(&self, value: Handle<Self>) -> ReadResult<Self, Handle<Self>> {
-        let json = serde_json::to_string(&super::value::to_json(&value)?)
-            .map_err(|e| Thrown::type_error(&e.to_string()))?;
-        Ok(h(Js::str(&encode_uri_component(&json))))
+        let json = self
+            .global("JSON.stringify")?
+            .call(Js::Undefined, vec![(*value).clone()])?
+            .to_js_string()?;
+        Ok(h(Js::str(&encode_uri_component(&lossy(&json)))))
     }
     fn sha256(&self, value: Handle<Self>) -> ReadResult<Self, Handle<Self>> {
         use sha2::Digest;
@@ -1016,14 +1026,6 @@ impl ConstructorHost for Rt {
             vec![(*name).clone(), (*options).clone(), (*store).clone()],
         )?))
     }
-    fn initialize(&self, venue: Venue, receiver: Handle<Self>) -> ReadResult<Self, ()> {
-        let kind = match venue {
-            Venue::Futures => crate::classes::Kind::FuturesExchange,
-            Venue::Spot => crate::classes::Kind::SpotExchange,
-        };
-        crate::classes::initialize(self, kind, receiver)
-    }
-    // ts: BaseExchange.createXhrWithSecondaryKey(opts, createAPI, { rateLimit }).
     fn secondary_client<'a>(
         &'a self,
         options: Handle<Self>,

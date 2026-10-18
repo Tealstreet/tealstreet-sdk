@@ -129,7 +129,7 @@ fn live_typescript_risk_and_returns() {
                 let mut copy = raw.clone();
                 copy["price"] = serde_json::json!(0.0);
                 let mut order: Order = serde_json::from_value(copy).unwrap();
-                order.price = number(&raw["price"]);
+                order.price = (number(&raw["price"])).into();
                 order
             })
             .collect();

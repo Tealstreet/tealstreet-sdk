@@ -365,7 +365,7 @@ pub(super) fn quantum(rt: &Rt, value: &Js, field: &Js) -> Result<Js, Thrown> {
                 && number.call_method("eq", vec![Js::Number(0.)])?.truthy();
             Ok::<_, Thrown>((number, negative_zero))
         },
-        |(number, _)| Ok(!number.call_method("isNaN", vec![])?.truthy()),
+        |(number, _)| Ok(number.call_method("isFinite", vec![])?.truthy()),
         |(number, _)| Ok(number.call_method("isNaN", vec![])?.truthy()),
         |(number, negative_zero)| {
             Ok(*negative_zero || number.call_method("lt", vec![Js::Number(0.)])?.truthy())

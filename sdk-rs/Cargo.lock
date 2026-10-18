@@ -2903,6 +2903,8 @@ dependencies = [
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -3944,9 +3946,16 @@ name = "safe-cex-parity"
 version = "0.1.0"
 dependencies = [
  "proc-macro2 1.0.107",
+ "safe-cex-exchange",
+ "safe-cex-store",
+ "safe-cex-transport",
+ "safe-cex-types",
+ "safe-cex-venue-asterdex",
+ "safe-cex-webworker",
  "serde",
  "serde_json",
  "syn 3.0.7",
+ "tokio",
  "toml",
 ]
 
@@ -4079,6 +4088,7 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4202,6 +4212,7 @@ dependencies = [
 name = "safe-cex-venue-bybit"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-candle-cache",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
@@ -4250,6 +4261,7 @@ name = "safe-cex-venue-grvt"
 version = "0.1.0"
 dependencies = [
  "indexmap 2.14.2",
+ "num-bigint 0.4.6",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
@@ -4478,6 +4490,7 @@ name = "safe-cex-webworker"
 version = "0.1.0"
 dependencies = [
  "indexmap 2.14.2",
+ "js-sys",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
@@ -4485,6 +4498,7 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]

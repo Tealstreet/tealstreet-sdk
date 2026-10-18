@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-coinbase/src/private_health.rs::CoinbasePrivateUserStreamHealth::mark_private_user_stream_degraded"
 status = "ported"
-note = "MIXED: renamed to safe-cex-venue-coinbase/src/private_health.rs::CoinbasePrivateUserStreamHealth::mark_private_user_stream_degraded. Store::update_socket_health now returns Result<(), StoreMutationError>; the handler propagates notification failure after commit and before logging or the once-only forced warning, retaining the Store-local subscriber ID and original cause; ExchangeError conversion appends that ID to metadata. Live-source ordering and subscriber-failure behavior are tested. Call site: CoinbaseExchange.markPrivateUserStreamDegraded."
+note = "MIXED: renamed to safe-cex-venue-coinbase/src/private_health.rs::CoinbasePrivateUserStreamHealth::mark_private_user_stream_degraded. Store::update_socket_health now returns Result<(), StoreMutationError>; the handler propagates notification failure after commit and before logging or the once-only forced warning, retaining the Store-local subscriber ID and original cause; ExchangeError conversion appends that ID to metadata. Live-source ordering and subscriber-failure behavior are tested. The production binding retains both warning arguments (reason and forceToast:true); real order-write timeout and private-frame recovery witnesses cover the once-only latch. Call site: CoinbaseExchange.markPrivateUserStreamDegraded. Concrete log/warning failures propagate through the existing PortfolioFailure carrier with original native cause; original StoreMutationError stays retained without JSON conversion. Real private-write timer, retry-latch and authentication-frame witnesses compare source ordering and preserve callback origin."
 
 [[symbol]]
 ts = "CoinbaseExchange.markPrivateUserStreamAuthFailed"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-coinbase/src/private_health.rs::CoinbasePrivateUserStreamHealth::mark_private_user_stream_auth_failed"
 status = "ported"
-note = "MIXED: renamed to safe-cex-venue-coinbase/src/private_health.rs::CoinbasePrivateUserStreamHealth::mark_private_user_stream_auth_failed. Delegates and propagates StoreMutationError from Store::update_socket_health; failure occurs after committed privateDegradedReason and before logging, retaining the Store-local subscriber ID and original cause; ExchangeError conversion appends that ID to metadata. The live-source oracle covers non-empty, empty and absent auth messages and delegated effect order. Call site: CoinbaseExchange.markPrivateUserStreamAuthFailed."
+note = "MIXED: renamed to safe-cex-venue-coinbase/src/private_health.rs::CoinbasePrivateUserStreamHealth::mark_private_user_stream_auth_failed. Delegates and propagates StoreMutationError from Store::update_socket_health; failure occurs after committed privateDegradedReason and before logging, retaining the Store-local subscriber ID and original cause; ExchangeError conversion appends that ID to metadata. The live-source oracle covers non-empty, empty and absent auth messages and delegated effect order. Call site: CoinbaseExchange.markPrivateUserStreamAuthFailed. Concrete log/warning failures propagate through the existing PortfolioFailure carrier with original native cause; original StoreMutationError stays retained without JSON conversion. Real private-write timer, retry-latch and authentication-frame witnesses compare source ordering and preserve callback origin."
 
 [[symbol]]
 ts = "CoinbaseExchange#schedulePrivateUserStreamWriteCheck"
@@ -192,7 +192,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-coinbase/src/portfolios_balances.rs::get_supported_types", "safe-cex-venue-coinbase/src/classes.rs::CoinbaseExchange::supported_types" ]
 status = "ported"
-note = "Native field body on typed portfolio DTOs, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange runtime composition remains unresolved under the separate class FINDING. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::get_supported_types. The mapped base supported-types body remains separate from the shared concrete-class slot invocation. It reads current live class policy and finder fields, while a captured old base arrow keeps its own body. Base/Spot share the invocation entry, not their algorithms; Promise values retain the native mutable array. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Native mapping targets: safe-cex-venue-coinbase/src/classes.rs::CoinbaseExchange::supported_types."
+note = "Native field body on observed uuid/type portfolio state with retained unvalidated metadata, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange runtime composition remains unresolved under the separate class FINDING. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::get_supported_types. The mapped base supported-types body remains separate from the shared concrete-class slot invocation. It reads current live class policy and finder fields, while a captured old base arrow keeps its own body. Base/Spot share the invocation entry, not their algorithms; Promise values retain the native mutable array. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Native mapping targets: safe-cex-venue-coinbase/src/classes.rs::CoinbaseExchange::supported_types."
 
 [[symbol]]
 ts = "CoinbaseExchange.fetchBalance"
@@ -200,7 +200,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance", "safe-cex-venue-coinbase/src/binding/exchange.rs::CoinbaseExchange::fetch_balance" ]
 status = "ported"
-note = "Native field body on typed portfolio DTOs, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance."
+note = "Native field body on observed uuid/type portfolio state with retained unvalidated metadata, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance."
 
 [[symbol]]
 ts = "CoinbaseExchange.fetchSpotCurrencies"
@@ -208,7 +208,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_spot_currencies"
 status = "ported"
-note = "Native field body on typed portfolio DTOs, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_spot_currencies."
+note = "Native field body on observed uuid/type portfolio state with retained unvalidated metadata, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_spot_currencies."
 
 [[symbol]]
 ts = "CoinbaseExchange.fetchBalanceCfm"
@@ -216,7 +216,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance_cfm"
 status = "ported"
-note = "Native field body on typed portfolio DTOs, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance_cfm."
+note = "Native field body on observed uuid/type portfolio state with retained unvalidated metadata, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance_cfm."
 
 [[symbol]]
 ts = "CoinbaseExchange.fetchBalanceIntx"
@@ -224,7 +224,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance_intx"
 status = "ported"
-note = "Native field body on typed portfolio DTOs, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance_intx."
+note = "Native field body on observed uuid/type portfolio state with retained unvalidated metadata, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_balance_intx."
 
 [[symbol]]
 ts = "CoinbaseExchange.fetchMarkets"
@@ -296,7 +296,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_portfolios"
 status = "ported"
-note = "Native field body on typed portfolio DTOs, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_portfolios."
+note = "Native field body on observed uuid/type portfolio state with retained unvalidated metadata, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange construction stays separately pending. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::fetch_portfolios."
 
 [[symbol]]
 ts = "CoinbaseExchange.findSelectedPortfolio"
@@ -304,7 +304,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-coinbase/src/portfolios_balances.rs::find_selected_portfolio", "safe-cex-venue-coinbase/src/classes.rs::CoinbaseExchange::find_selected" ]
 status = "ported"
-note = "Native field body on typed portfolio DTOs, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange runtime composition remains unresolved under the separate class FINDING. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::find_selected_portfolio. The mapped base finder body remains separate from the shared concrete-class slot invocation. The invocation reads the current bound field and is also used by Spot; retaining an older base arrow preserves its original body. This is a shared entry, not a replacement for the distinct base/Spot algorithms. Native mapping targets: safe-cex-venue-coinbase/src/classes.rs::CoinbaseExchange::find_selected."
+note = "Native field body on observed uuid/type portfolio state with retained unvalidated metadata, declared numeric crypto fields, inert plain JSON response/error records, and retained portfolio/balance/currency roots. Supplied HTTP, Store and logging operations preserve source call sites; full exchange runtime composition remains unresolved under the separate class FINDING. Concurrent base probes versus sequential spot probes, errors, fallback identity and shallow aliases are native asserted against live TypeScript. Mapped field body renamed to safe-cex-venue-coinbase/src/portfolios_balances.rs::find_selected_portfolio. The mapped base finder body remains separate from the shared concrete-class slot invocation. The invocation reads the current bound field and is also used by Spot; retaining an older base arrow preserves its original body. This is a shared entry, not a replacement for the distinct base/Spot algorithms. Native mapping targets: safe-cex-venue-coinbase/src/classes.rs::CoinbaseExchange::find_selected."
 
 [[symbol]]
 ts = "CoinbaseExchange.fetchPositions"

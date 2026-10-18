@@ -1,6 +1,7 @@
 //! Parent ownership bridge for the concrete Backpack sockets.
 use crate::adapter::BackpackExchange;
 use safe_cex_exchange::{
+    exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture, LogSeverity},
     websocket::{BaseWebSocket, ReopenResync, WsParent},
 };
@@ -57,17 +58,17 @@ impl WsParent for Parent {
         let owner = self.live();
         Box::pin(async move {
             let owner = owner?;
-            owner
-                .base
-                .fetch_and_set_private_snapshot(owner.as_ref(), tries as u32)
-                .await
+            owner.fetch_and_set_private_snapshot(tries as u32).await
         })
     }
     fn log(&self, message: &str, severity: LogSeverity) -> Result<(), ExchangeError> {
         self.live()?.base.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.live()?.base.emit(event, Value::String(message.into()))
+        self.live()?.base.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.live()?.base.sync_socket_health_to_store()

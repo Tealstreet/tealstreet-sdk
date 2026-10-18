@@ -3,6 +3,14 @@
     dead_code,
     reason = "each test binary uses a different part of the harness"
 )]
+#[path = "../../../test-support/release.rs"]
+pub mod release;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::{
     exchange::Exchange,
     http::{HttpFailure, HttpFuture, HttpHost},
@@ -36,12 +44,15 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
 #[derive(Default)]
 pub struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     next_id: Cell<u64>,
     pub now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
     pub logs: RefCell<Vec<String>>,
+    /// Optional deterministic entropy stream for session/identity race witnesses.
+    pub random_sequence: Cell<Option<u64>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -51,12 +62,15 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     pub fn pump(&self) {
+        self.sleep_wakers.wake_due(self.now.get());
         for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let signal = std::sync::Arc::new(virtual_time::WakeSignal::default());
+            let waker = signal.waker();
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -71,7 +85,7 @@ impl Runtime {
             }
             let added = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !added {
+            if !progressed && !added && !signal.take() {
                 return;
             }
         }
@@ -87,10 +101,12 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleeper = self.sleep_wakers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -112,7 +128,12 @@ impl ExchangeRuntime for Runtime {
         false
     }
     fn random(&self) -> f64 {
-        0.5
+        if let Some(next) = self.random_sequence.get() {
+            self.random_sequence.set(Some(next.wrapping_add(1)));
+            (next % 64) as f64 / 64.0
+        } else {
+            0.5
+        }
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         self.reports.borrow_mut().push(error.message.clone());
@@ -201,6 +222,7 @@ impl WsRuntime for Runtime {
 /// One request as it reached the wire, after signing.
 #[derive(Clone, Debug)]
 pub struct Request {
+    pub config: RestRequest,
     pub method: String,
     pub url: String,
     pub params: Value,
@@ -211,10 +233,14 @@ pub struct Request {
 /// Scripted wire: (METHOD, path) -> queue of bodies; the last one repeats.
 #[derive(Default)]
 pub struct Wire {
+    pub network_failures: RefCell<Vec<String>>,
+    pub reject_http_errors: Cell<bool>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(u16, Value)>)>>,
     /// (METHOD, path, query key, query value) routes, checked before the plain ones.
     pub param_routes: RefCell<Vec<(String, String, String, String, (u16, Value))>>,
     pub requests: RefCell<Vec<Request>>,
+    /// Hold selected responses after dispatch; release explicitly from the test.
+    pub response_gates: RefCell<Vec<(String, Rc<release::Release>)>>,
 }
 impl Wire {
     pub fn route(&self, method: &str, path: &str, status: u16, body: Value) {
@@ -275,6 +301,7 @@ impl RestAdapter for Wire {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or(Value::Null);
         self.requests.borrow_mut().push(Request {
+            config: request.clone(),
             method: method.clone(),
             url: path.clone(),
             params: request
@@ -284,6 +311,19 @@ impl RestAdapter for Wire {
             body,
             headers: json!(request.headers),
         });
+        if self.network_failures.borrow().contains(&path) {
+            return Box::pin(async move {
+                Err(safe_cex_transport::RestFailure::from_transport(
+                    safe_cex_transport::TransportError::Network(
+                        safe_cex_transport::NetworkFailure::from_code(
+                            "scripted network".into(),
+                            Some("ERR_NETWORK".into()),
+                        ),
+                    ),
+                    request,
+                ))
+            });
+        }
         let params = request
             .params
             .clone()
@@ -307,8 +347,33 @@ impl RestAdapter for Wire {
                     }
                 })
         });
+        let gate = self
+            .response_gates
+            .borrow()
+            .iter()
+            .find(|(gated_path, _)| *gated_path == path)
+            .map(|(_, gate)| gate.clone());
+        let reject_http_errors = self.reject_http_errors.get();
         Box::pin(async move {
+            if let Some(gate) = gate {
+                gate.wait().await;
+            }
             match reply {
+                Some((status, body)) if reject_http_errors && status >= 400 => {
+                    Err(safe_cex_transport::RestFailure {
+                        code: Some("ERR_BAD_REQUEST".into()),
+                        transport_error: None,
+                        message: format!("Request failed with status code {status}"),
+                        response: Some(Box::new(RestResponse {
+                            status,
+                            reason: None,
+                            headers: Default::default(),
+                            body: RestResponseBody::Encoded(body.to_string().into_bytes()),
+                        })),
+                        request: Box::new(request),
+                        context: None,
+                    })
+                }
                 Some((status, body)) => Ok(RestResponse {
                     status,
                     reason: None,
@@ -389,7 +454,25 @@ pub fn harness_as(
     options: ExchangeOptions,
     script: impl FnOnce(&Wire),
 ) -> Harness {
-    configured_harness(name, options, None, script)
+    configured_harness(name, options, None, None, script)
+        .expect("BybitExchange constructs from real options")
+}
+
+pub fn try_harness_as(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    script: impl FnOnce(&Wire),
+) -> Result<Harness, ExchangeError> {
+    configured_harness(name, options, None, None, script)
+}
+
+pub fn harness_with_signer(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    signer: safe_cex_exchange::js_runtime::base_exchange::HostedSigner,
+    script: impl FnOnce(&Wire),
+) -> Harness {
+    configured_harness(name, options, None, Some(signer), script).expect("hosted Bybit constructs")
 }
 
 pub fn harness_with_external(
@@ -397,7 +480,8 @@ pub fn harness_with_external(
     factory: safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
     script: impl FnOnce(&Wire),
 ) -> Harness {
-    configured_harness(ExchangeName::Bybit, options, Some(factory), script)
+    configured_harness(ExchangeName::Bybit, options, Some(factory), None, script)
+        .expect("BybitExchange constructs from real options")
 }
 
 #[allow(
@@ -410,8 +494,9 @@ fn configured_harness(
     external_public_data: Option<
         safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
     >,
+    remote_signer: Option<safe_cex_exchange::js_runtime::base_exchange::HostedSigner>,
     script: impl FnOnce(&Wire),
-) -> Harness {
+) -> Result<Harness, ExchangeError> {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(START_MS);
     let wire = Arc::new(Wire::default());
@@ -426,7 +511,7 @@ fn configured_harness(
         store.clone(),
         BybitDependencies {
             runtime: runtime.clone(),
-            remote_signer: None,
+            remote_signer,
             wire: wire.clone(),
             http_host: Rc::new(Host),
             rate_limit_clock: Arc::new(Clock(runtime.now.clone())),
@@ -435,14 +520,13 @@ fn configured_harness(
             external_public_data,
             relay_enabled: false,
         },
-    )
-    .expect("BybitExchange constructs from real options");
-    Harness {
+    )?;
+    Ok(Harness {
         runtime,
         wire,
         store,
         exchange,
-    }
+    })
 }
 
 impl Harness {
@@ -472,4 +556,53 @@ impl Harness {
     pub fn venue(&self) -> &dyn Exchange {
         self.exchange.as_ref()
     }
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Runtime::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.now.set(runtime.now.get() + 9.0);
+    runtime.pump();
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.now.set(runtime.now.get() + 1.0);
+    runtime.pump();
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.now.set(runtime.now.get() + 10.0);
+    runtime.pump();
+    assert!(!latest.take(), "dropped sleep must not wake");
 }

@@ -57,6 +57,37 @@ fn batch_cancel_success_checks_envelope_not_order_rows() {
 }
 
 #[test]
+fn symbol_cancel_uses_the_live_store_filter_and_real_cancellation_client() {
+    let h = venue();
+    let mut orders = orders(3);
+    orders[1].symbol = "ETHUSDT".into();
+    seed(&h, &orders);
+    h.http.ok("DELETE", "/g-orders/cancel", json!({"code":0}));
+    h.http
+        .ok("DELETE", "/g-orders", json!({"code":0,"data":[]}));
+    // Invoke the member installed on the actual PhemexExchange receiver.
+    h.drive(
+        h.exchange
+            .invoke_unit("cancelSymbolOrders", vec![from_json(&json!("BTCUSDT"))]),
+    )
+    .expect("symbol cancellation completes");
+    let requests = h.http.calls("/g-orders");
+    assert_eq!(requests.len(), 1, "one real matching-symbol batch");
+    assert_eq!(requests[0].method.to_uppercase(), "DELETE");
+    assert_eq!(requests[0].params["symbol"], "BTCUSDT");
+    assert_eq!(requests[0].params["orderID"], "order-0,order-2");
+    let stored = h.store.orders();
+    assert_eq!(stored.len(), 3);
+    assert_eq!(stored[0].status, OrderStatus::Canceled);
+    assert_eq!(
+        stored[1].status,
+        OrderStatus::Open,
+        "other symbol stays open"
+    );
+    assert_eq!(stored[2].status, OrderStatus::Canceled);
+}
+
+#[test]
 fn batch_cancel_rejection_preserves_live_orders_and_message() {
     for data in [json!([]), json!(null), json!([{"code":0}])] {
         let h = venue();

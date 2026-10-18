@@ -1,3 +1,7 @@
+Every concrete mapOrder caller uses the shared synchronized VirtualClock: REST
+reads, private order frames, accepted placements and cancel-replace replies. The
+real binding clock regression checks all four; fetch throttle clocks stay Date.now.
+
 # BingX venue port
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/bingx/CLAUDE.md).
@@ -214,3 +218,43 @@ failure sends nothing; a submission rejection still allows later payloads to be
 attempted before the final error is thrown. Real binding regressions verify a
 rejected take profit does not suppress the stop loss, and a later invalid full
 stop prevents an earlier entry from being submitted.
+
+The binding witnesses now cover a replacement listen-key request held across an
+old socket Close event: only one replacement request/socket is created. The shared
+close-listener ownership provides this behavior; no venue fallback
+or replacement reconnect path is needed. Private text frames cover order Store
+writes, terminal fill emission/status, and position writes before REST healing.
+Balance-only account rows remain ignored as in TS; this socket has no balance
+handler and the REST balance stays unchanged. Approved strict-asset market row
+refusals include base/quote and nonnumeric leverage maxima. They emit the row,
+symbol, field and value while retaining valid siblings.
+Source/transport failures retain the stored snapshot; all refused rows return
+an empty fresh result.
+
+REST signature timestamps read the shared synced `VIRTUAL_CLOCK`, matching
+`bingx.api.ts`. Registry `native_host_bingx_clock` offsets server time by 90 seconds,
+performs a real signed account read, verifies the transmitted HMAC, and requires
+the timestamp to fall inside the synced interval. Raw runtime time remains the
+clock for source `Date.now()` paths.
+
+The concrete API serializer forwards the source's repeat-array and pinned
+localeCompare sort options to the shared qs binding for both signing and final
+wire serialization. The final sort includes the newly appended signature key.
+`safe-cex-registry/tests/native_host_bingx.rs` proves the account GET sends
+signature before timestamp and independently verifies its HMAC. Shared option
+corpora cover nested and 12-element array key sorting and comma/form encoding.
+
+Signature-predicate coercion failures retain their TypeError name and unprefixed
+message through the shared ExchangeError conversion. The real native receiver
+regressions cover both resolved and rejected HTTP responses without a resend.
+
+Historical fill ISO dates without an offset use the required
+`BingxDependencies.local_wall_time_to_utc` callback; explicit offsets bypass it.
+The native registry supplies its UTC profile explicitly. The real binding test
+compares actual TS executions in Singapore and New York (winter and summer).
+
+Amendment copies preserve Order.reduceOnly presence through PreparedOrderOpts;
+undefined is not reconciled as false. The real native updateOrder test supplies
+own undefined without a raw reduce-only alias, exercises position-side lookup,
+and compares the entire signed cancel-replace body to the maintained TypeScript
+class plus actual API signer/qs/HMAC. Undefined reduceOnly is omitted at the wire.

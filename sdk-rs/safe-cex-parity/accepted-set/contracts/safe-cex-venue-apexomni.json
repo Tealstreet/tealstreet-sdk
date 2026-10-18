@@ -1,4 +1,132 @@
 {
+  "safe_cex_venue_apexomni::order_records::Iso8601": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      "2026-10-18T12:34:56.789Z",
+      "not-a-date",
+      "",
+      1700000000000,
+      -2,
+      1.25
+    ],
+    "negative": [
+      null,
+      true,
+      false,
+      [],
+      {},
+      {
+        "String": "time"
+      },
+      {
+        "Number": 1
+      }
+    ],
+    "entrypoints": [],
+    "evidence": "The maintained ApexOmni ISO8601 alias in packages/safe-cex/src/exchanges/apexomni/interface/apexomni.index.interface.ts is string | number, not a date validator. Valid ISO8601 text, malformed-date text and empty strings retain the String variant unchanged; binary64 timestamps retain the Number variant and exact bits. Null, booleans, arrays and tagged objects are outside that source union. Direct native observations invoke the production Iso8601 Deserialize implementation (including its local TimestampVisitor), observe the enum variant and payload rather than serializing the decoded owner, and include malformed JSON refusal. Node -e independently checked the current TS alias and every expected outcome; the existing real record oracle and scoped native regression enforce the same source union and observations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "value"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw timestamp input\")) { Ok(crate::order_records::Iso8601::String(value)) => serde_json::json!({\"ok\":true,\"variant\":\"String\",\"value\":value}), Ok(crate::order_records::Iso8601::Number(value)) => serde_json::json!({\"ok\":true,\"variant\":\"Number\",\"value\":format!(\"{:016x}\",value.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "\"2026-10-18T12:34:56.789Z\"",
+          "output": {
+            "ok": true,
+            "variant": "String",
+            "value": "2026-10-18T12:34:56.789Z"
+          }
+        },
+        {
+          "input": "\"not-a-date\"",
+          "output": {
+            "ok": true,
+            "variant": "String",
+            "value": "not-a-date"
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": true,
+            "variant": "String",
+            "value": ""
+          }
+        },
+        {
+          "input": "\"é-😀\"",
+          "output": {
+            "ok": true,
+            "variant": "String",
+            "value": "é-😀"
+          }
+        },
+        {
+          "input": "1700000000000",
+          "output": {
+            "ok": true,
+            "variant": "Number",
+            "value": "4278bcfe56800000"
+          }
+        },
+        {
+          "input": "-0",
+          "output": {
+            "ok": true,
+            "variant": "Number",
+            "value": "8000000000000000"
+          }
+        },
+        {
+          "input": "1.25",
+          "output": {
+            "ok": true,
+            "variant": "Number",
+            "value": "3ff4000000000000"
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"String\":\"time\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "not-json",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_venue_apexomni::public_records::TickerObject": {
     "category": "decoder",
     "shape": "map",
@@ -27211,8 +27339,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Individually reviewed full exchange_utils::character_at body and actual packages/safe-cex/src/exchanges/apexomni/apexomni.exchange.ts declaration; internal projection/ASCII indexing helpers were reviewed against their sole source-serving role. tests in exchange_utils::accepted_scalar_helper_tests::character_at_native_output directly execute the native API on 11 independently authored cases. Expected outcomes are never obtained through owner serialization or proposal tooling. This body's isolated mutation compiled and failed its exact named native-output assertion at exit101; all three source modules were restored byte-for-byte and all23 native witnesses passed. Its non-decoder receipt remains a classification; the separate native test executes the behavior. The final full restoration passed exact source bytes, all23 native tests, all16 runtime outputs and7 classifications with zero failures. Classification-only receipts are not executed decoder coverage. This covers only the native/default reviewed body; JS heap objects/prototypes/foreign realms, aliases, receivers, other helpers and feature/wasm accepted behavior remain independent obligations.",
-    "reason": "Bounds and indexes an already-typed byte alphabet using a typed f64 index. It returns a literal character/absence and parses no representation. Its sole production caller d8 supplies ASCII digit/hex alphabets; explicit native byte-index witnesses do not claim arbitrary Unicode JavaScript indexing parity."
+    "evidence": "Reviewed the private character_at body and its sole source-serving caller d8 in packages/safe-cex/src/exchanges/apexomni/apexomni.exchange.ts:91-100. Its11 independently authored native cases use ASCII alphabets; scripts/accepted-character-source.cjs executes the actual d8 element-access expression against every expectation before character_at_native_output compares real native outputs. The new source witness compiles and fails the former non-ASCII byte expectation on master, then all23 scoped native helper tests pass with the restricted corpus. This non-decoder row remains a classification; executed native/default behavior is reported separately and arbitrary Unicode indexing is outside this private helper domain.",
+    "reason": "Bounds and indexes the already-typed ASCII alphabets used by its sole production caller d8. It returns a character or absence and parses no representation. The native corpus stays in that source-serving domain and makes no arbitrary Unicode indexing claim."
   },
   "safe_cex_venue_apexomni::exchange_utils::d8": {
     "category": "non-decoder",

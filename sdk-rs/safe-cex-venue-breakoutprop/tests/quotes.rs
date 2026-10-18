@@ -173,7 +173,7 @@ fn actual_quote_reads() {
                 };
                 trace
                     .borrow_mut()
-                    .push(json!({"method":r.method,"url":r.url,"body":body}));
+                    .push(json!({"method":r.method,"url":r.url,"body":body.into_value().unwrap()}));
                 ready(
                     if ["http", "empty-msg", "object-msg", "logger"].contains(&name) {
                         Err(original.clone())
@@ -216,16 +216,6 @@ fn actual_quote_reads() {
                 )
             })
         };
-        if name == "missing-unused" {
-            assert!(result.is_err(), "QUOTES-VALIDATION {method}");
-            assert_eq!(
-                case["expected"]["ok"].as_array().unwrap().len(),
-                2,
-                "QUOTES-VALIDATION source accepted"
-            );
-            comparisons += 1;
-            continue;
-        }
         let actual = match result {
             Ok(value) => json!({"ok":value,"errors":errors.borrow().clone()}),
             Err(error) => {
@@ -398,7 +388,7 @@ fn quote_symbols_owned_input() {
             let Some(RestBody::Untransformed(body)) = r.body else {
                 panic!("body")
             };
-            *posted.borrow_mut() = body["symbols"].clone();
+            *posted.borrow_mut() = body.into_value().unwrap()["symbols"].clone();
             ready(Ok(js_from_str("{\"events\":[]}").unwrap()))
         },
         &store,
@@ -617,4 +607,83 @@ fn quotes_market_error_precedence() {
         case["expected"],
         "QUOTES-PRECEDENCE native fields and logger"
     );
+}
+
+#[test]
+fn quotes_consumed_fields_match_source() {
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/quotes_consumed_fields_oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    let names = [
+        "minimal",
+        "poisoned-unused",
+        "null-row",
+        "scalar-events",
+        "null-root",
+        "null-events",
+        "missing-events",
+        "empty",
+        "valid-then-null",
+        "projection-before-null",
+        "logger",
+    ];
+    assert_eq!(cases.len(), 22, "QUOTES-CONSUMED source census");
+    for (index, case) in cases.iter().enumerate() {
+        let method = if index < 11 {
+            "fetchTickersForSymbols"
+        } else {
+            "fetchTickers"
+        };
+        let name = names[index % 11];
+        assert_eq!(case["method"], method);
+        assert_eq!(case["name"], name);
+        let store = store(case);
+        let errors = RefCell::new(Vec::<Value>::new());
+        let mut reporter_error = ExchangeError::new("logger-rejection");
+        reporter_error.store_subscriber_ids = vec![29, 31];
+        let logger = |value| {
+            errors.borrow_mut().push(value);
+            if name == "logger" {
+                Err(reporter_error.clone())
+            } else {
+                Ok(())
+            }
+        };
+        let input = js_from_str::<JsNumberInput>(case["raw"].as_str().unwrap()).unwrap();
+        let fetch = |symbols| {
+            fetch_tickers_for_symbols(
+                symbols,
+                || ready(Ok("token".into())),
+                || ready(Ok("account".into())),
+                |_| ready(Ok(input)),
+                &store,
+                &logger,
+            )
+        };
+        let result = if method == "fetchTickers" {
+            run(fetch_tickers(&store, fetch))
+        } else {
+            run(fetch(vec!["A".into(), "B".into()]))
+        };
+        let actual = match result {
+            Ok(rows) => {
+                json!({"ok":rows.map_or_else(||json!({"$undefined":true}), |rows| Value::Array(rows.iter().map(ticker).collect())),"errors":*errors.borrow()})
+            }
+            Err(error) => {
+                assert_eq!(error, reporter_error, "QUOTES-CONSUMED reporter metadata");
+                json!({"error":error.message,"name":error.name,"errors":*errors.borrow()})
+            }
+        };
+        assert_eq!(actual, case["expected"], "QUOTES-CONSUMED {method} {name}");
+    }
 }

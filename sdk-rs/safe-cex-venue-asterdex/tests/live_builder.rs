@@ -222,7 +222,8 @@ fn builder_helpers_match_typescript() {
         );
     }
     for case in data["orders"].as_array().unwrap() {
-        let opts = serde_json::from_value(case["opts"].clone()).unwrap();
+        let opts: safe_cex_types::PlaceOrderOpts =
+            serde_json::from_value(case["opts"].clone()).unwrap();
         let post = case["opts"]["postOnly"].as_bool();
         let kind = case["apiOrderType"].as_str().unwrap();
         let config = serde_json::from_value(case["config"].clone()).unwrap();

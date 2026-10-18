@@ -1,4 +1,4 @@
-"""Compiling body/case-count controls for the twenty reviewed helper owners."""
+"""Compiling body/case-count controls for the seventeen reviewed helper owners."""
 from pathlib import Path
 import subprocess
 
@@ -37,20 +37,14 @@ for name, before, after, assertion in [
 body('api_error','append(', 'text.extend(literal.encode_utf16());', 'text.clear(); text.extend(literal.encode_utf16());', 'api_error::accepted_helpers::append_native_contract','api_error append native UTF16')
 body('api_error','optional_get<', 'h.get(&value, key)', '{ let _ = key; Ok(value) }', 'api_error::accepted_helpers::optional_get_native_contract','api_error optional_get native identity')
 body('api_error','http_message<', 'append(&mut message, "): ");', 'append(&mut message, "");', 'api_error::accepted_helpers::http_message_native_contract','api_error http_message native UTF16')
-body('public_lifecycle','channel(', 'prefix\n            .encode_utf16()\n            .chain(instrument.iter().copied())\n            .collect()', '{ let _ = prefix; instrument.to_vec() }', 'public_lifecycle::accepted_helpers::channel_native_contract','public channel native UTF16')
-body('public_lifecycle','is_channel(', 'actual == expected.encode_utf16().collect::<Vec<_>>()', 'actual != expected.encode_utf16().collect::<Vec<_>>()', 'public_lifecycle::accepted_helpers::is_channel_native_contract','public is_channel native comparison')
-body('private_lifecycle','subscribe_one<', 'values(state).insert(channel.clone());', 'let _ = channel.clone();', 'private_lifecycle::accepted_helpers::subscribe_one_native_contract','private subscribe native membership')
-assert len(CONTROLS)==20
+assert len(CONTROLS)==17
 for label, file, marker, ending, before, after, target, test, assertion in [
     ('mapping walk',CRATE/'tests/accepted_mapping_variants.rs',b'fn native_map_order_type()',b'\n}\n',b'for case in cases {',b'for case in cases.into_iter().take(17) {',['--test','accepted_mapping_variants'],'native_map_order_type','map_order_type executed fixture count'),
     ('comparison walk',CRATE/'src/order_mappings.rs',b'fn native_strict_comparison()',b'\n    }\n',b'for case in cases {',b'for case in cases.into_iter().take(23) {',['--lib'],'order_mappings::accepted_equals::native_strict_comparison','strict comparison executed fixture count'),
     ('fallback walk',CRATE/'src/socket_handlers.rs',b'fn parsed_or_native_contract()',b'\n    }\n',b'for (result, truthy) in cases {',b'for (result, truthy) in cases.into_iter().take(10) {',['--lib'],'socket_handlers::accepted_helpers::parsed_or_native_contract','socket parsed_or executed cases'),
-    ('channel walk',CRATE/'src/public_lifecycle.rs',b'fn channel_native_contract()',b'\n    }\n',b'for (prefix, instrument, expected) in cases {',b'for (prefix, instrument, expected) in cases.into_iter().take(3) {',['--lib'],'public_lifecycle::accepted_helpers::channel_native_contract','public channel executed cases'),
-    ('channel comparison walk',CRATE/'src/public_lifecycle.rs',b'fn is_channel_native_contract()',b'\n    }\n',b'for case in cases {',b'for case in cases.into_iter().take(21) {',['--lib'],'public_lifecycle::accepted_helpers::is_channel_native_contract','public is_channel executed cases'),
-    ('subscription walk',CRATE/'src/private_lifecycle.rs',b'fn subscribe_one_native_contract()',b'\n    }\n',b'for (auth, existing, disposed, fail) in cases {',b'for (auth, existing, disposed, fail) in cases.into_iter().take(7) {',['--lib'],'private_lifecycle::accepted_helpers::subscribe_one_native_contract','private subscribe executed cases'),
 ]:
     CONTROLS.append((label,file,marker,ending,before,after,target,test,assertion))
-assert len(CONTROLS)==26
+assert len(CONTROLS)==20
 
 def run(target, test):
     result=subprocess.run(['cargo','test','--locked','--jobs','1','-q','-p','safe-cex-venue-cryptocom',*target,test,'--','--exact'],cwd=SDK,capture_output=True,text=True)

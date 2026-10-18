@@ -123,6 +123,63 @@ impl SessionHost for Rt {
     }
     fn intrinsic(&self, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {
         match name {
+            "RegExp" => self.shared.globals.get("RegExp")?.call(Js::Undefined, args),
+            "String" => self.shared.globals.get("String")?.call(Js::Undefined, args),
+            "less than" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::less_than(
+                &arg(&args, 0),
+                &arg(&args, 1),
+            )?)),
+            "instanceof Error" => Ok(Js::Bool(
+                matches!(arg(&args, 0), Js::Object(ref object) if matches!(object.class, "Error" | "AxiosError")),
+            )),
+            "throw value" => Err(Thrown::new(arg(&args, 0))),
+            "property in" => {
+                let key = text(&arg(&args, 0))?;
+                let mut owner = arg(&args, 1);
+                if !owner.is_object() {
+                    return Err(Thrown::type_error("right operand of in is not an object"));
+                }
+                loop {
+                    if owner.has_own(&key) {
+                        return Ok(Js::Bool(true));
+                    }
+                    let next = match &owner {
+                        Js::Object(object) => object.proto.borrow().clone(),
+                        _ => None,
+                    };
+                    match next {
+                        Some(next) => owner = next,
+                        None => return Ok(Js::Bool(false)),
+                    }
+                }
+            }
+            "construct" => arg(&args, 0).call(Js::Undefined, args.into_iter().skip(1).collect()),
+            "iterable spread" => Ok(Js::array(arg(&args, 0).iterable_values()?)),
+            "Number.isFinite" => self
+                .shared
+                .globals
+                .get("Number")?
+                .call_method("isFinite", args),
+            "Number" => self.shared.globals.get("Number")?.call(Js::Undefined, args),
+            "new Map" => self.shared.globals.get("Map")?.call(Js::Undefined, args),
+            "Promise.resolve" => Ok(Js::Promise(Promise::settled(
+                &self.exchange_runtime(),
+                Ok(arg(&args, 0)),
+            ))),
+            "destructure three" => {
+                let values = arg(&args, 0)
+                    .array_values()
+                    .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
+                Ok(Js::array(
+                    (0..3)
+                        .map(|i| values.get(i).cloned().unwrap_or(Js::Undefined))
+                        .collect(),
+                ))
+            }
+            "new Set" => self.shared.globals.get("Set")?.call(Js::Undefined, args),
+            "super.mapPosition" => {
+                super::members::mapping::map_position(self, &arg(&args, 0), &arg(&args, 1))
+            }
             "null" => Ok(Js::Null),
             "template" => Ok(Js::String(arg(&args, 0).to_js_string()?)),
             "typeof" => Ok(Js::str(arg(&args, 0).type_of())),
@@ -162,11 +219,7 @@ impl SessionHost for Rt {
             "arraySpread" => {
                 let mut out = vec![];
                 for value in args {
-                    out.extend(
-                        value
-                            .array_values()
-                            .ok_or_else(|| Thrown::type_error("value is not iterable"))?,
-                    );
+                    out.extend(value.iterable_values()?);
                 }
                 Ok(Js::array(out))
             }
@@ -187,32 +240,26 @@ impl SessionHost for Rt {
                     .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
                 Ok(values.first().cloned().unwrap_or(Js::Undefined))
             }
-            "iterator" => {
-                // Read helpers spread decoded transport arrays. Retain the array
-                // and read its current length/index at each next(), preserving
-                // native values instead of projecting the batch through JSON.
-                let array = arg(&args, 0);
-                if !array.is_array() {
-                    return Err(Thrown::type_error("value is not iterable"));
+            "iterator" => arg(&args, 0).iterator(),
+            "IteratorClose normal" => {
+                let iterator = arg(&args, 0);
+                let method = iterator.get("return")?;
+                if !method.is_nullish() {
+                    let result = method.call(iterator, vec![])?;
+                    if !result.is_object() {
+                        return Err(Thrown::type_error("Iterator result is not an object"));
+                    }
                 }
-                let index = std::cell::Cell::new(0usize);
-                Ok(Js::object(vec![(
-                    "next",
-                    Js::function("wireArrayNext", move |_, _| {
-                        let at = index.get();
-                        if at as f64 >= array.get("length")?.to_number()? {
-                            return Ok(Js::object(vec![
-                                ("done", Js::Bool(true)),
-                                ("value", Js::Undefined),
-                            ]));
-                        }
-                        index.set(at + 1);
-                        Ok(Js::object(vec![
-                            ("done", Js::Bool(false)),
-                            ("value", array.get(&at.to_string())?),
-                        ]))
-                    }),
-                )]))
+                Ok(arg(&args, 1))
+            }
+            "IteratorClose abrupt" => {
+                let iterator = arg(&args, 0);
+                if let Ok(method) = iterator.get("return") {
+                    if !method.is_nullish() {
+                        let _ = method.call(iterator, vec![]);
+                    }
+                }
+                Err(Thrown::new(arg(&args, 1)))
             }
             "destructure2" => {
                 let values = arg(&args, 0)
@@ -231,7 +278,18 @@ impl SessionHost for Rt {
                 &r"(\d+)([a-zA-Z]+)".encode_utf16().collect::<Vec<_>>(),
                 &[],
             ),
-            "missingMarket" => Js::Undefined.get("limits"),
+            "missingTicker" => {
+                let mut message: Vec<u16> = "Ticker ".encode_utf16().collect();
+                message.extend_from_slice(&arg(&args, 0).to_js_string()?);
+                message.extend(" not found".encode_utf16());
+                Ok(Js::utf16(&message))
+            }
+            "missingMarket" => {
+                let mut message: Vec<u16> = "Market ".encode_utf16().collect();
+                message.extend_from_slice(&arg(&args, 0).to_js_string()?);
+                message.extend(" not found".encode_utf16());
+                Ok(Js::utf16(&message))
+            }
             "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" | "LogSeverity" => {
                 self.shared.globals.get(name)
             }
@@ -254,6 +312,19 @@ impl SessionHost for Rt {
         Ok(object)
     }
     fn callback(&self, owner: Js, code: &'static str, captures: Vec<Js>) -> Result<Js, Thrown> {
+        if matches!(
+            code,
+            "order"
+                | "connect"
+                | "close"
+                | "ping"
+                | "message"
+                | "timeout"
+                | "current"
+                | "reconnect"
+        ) {
+            return super::hyro_socket::callback(self, owner, code, captures);
+        }
         crate::core_snapshot_readers::SnapshotHost::callback(self, owner, code, captures)
     }
     fn promise(&self) -> Result<(Js, Js, Js), Thrown> {
@@ -354,11 +425,17 @@ impl SpotOrderHost for Rt {
     where
         F: FnMut(Js) -> Result<(), Thrown>,
     {
-        let items = values.array_values().ok_or_else(|| {
-            Thrown::type_error(&format!("{} is not iterable", values.to_display()))
-        })?;
-        for item in items {
-            body(item)?;
+        let iterator = values.iterator()?;
+        let next = iterator.get("next")?;
+        loop {
+            let step = next.call(iterator.clone(), vec![])?;
+            if !step.is_object() {
+                return Err(Thrown::type_error("Iterator result is not an object"));
+            }
+            if step.get("done")?.truthy() {
+                break;
+            }
+            body(step.get("value")?)?;
         }
         Ok(())
     }
@@ -397,7 +474,10 @@ impl crate::variant_account_refresh::AccountRefreshHost for Rt {
         promise.call_method("then", vec![fulfilled])
     }
     fn all(&self, promises: Vec<Js>) -> Result<Js, Thrown> {
-        Ok(self.spawn(Box::pin(super::promise::all(promises))))
+        Ok(Js::Promise(super::promise::all(
+            &self.exchange_runtime(),
+            promises,
+        )))
     }
 }
 

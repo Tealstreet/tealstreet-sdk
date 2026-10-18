@@ -48,7 +48,7 @@ pub(crate) fn trades_category_of(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
 
 impl PrivateProtocol {
     /// ts: BybitPrivateWebsocket.onMessage (Spot omits position handling).
-    pub(super) fn message(
+    pub(crate) fn message(
         &self,
         socket: &Rc<BaseWebSocket>,
         frame: &SocketFrame,
@@ -92,7 +92,13 @@ impl PrivateProtocol {
             socket.record_message_handler_stats("order")?;
             let rows = self.rows_this_connection_trades(parent, json.get("data")?)?;
             if spot || parent.base().name == ExchangeName::Bybitinverse || !rows.is_empty() {
-                self.handle_order_topic(parent, rows)?;
+                if parent.base().name == ExchangeName::Hyrotrader {
+                    rt.this
+                        .get("privateWebsocket")?
+                        .call_method("handleOrderTopic", vec![Js::array(rows)])?;
+                } else {
+                    self.handle_order_topic(parent, rows)?;
+                }
             }
         }
         if !spot && topic.strict_equals(&Js::str("position")) {
@@ -173,7 +179,11 @@ impl PrivateProtocol {
     }
 
     /// The three source variants share this order/fill body and use their own mapOrder.
-    fn handle_order_topic(&self, parent: &BybitExchange, rows: Vec<Js>) -> Result<(), Thrown> {
+    pub(crate) fn handle_order_topic(
+        &self,
+        parent: &BybitExchange,
+        rows: Vec<Js>,
+    ) -> Result<(), Thrown> {
         let rt = rt(parent)?;
         let this = &rt.this;
         for order in rows {

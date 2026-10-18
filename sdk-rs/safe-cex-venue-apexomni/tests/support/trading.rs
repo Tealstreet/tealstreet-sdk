@@ -10,6 +10,12 @@ fn trading_corpus() -> &'static Value {
         let o = Command::new("node")
             .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/trading.cjs"))
             .env("SAFE_CEX_RUST_ARCH", std::env::consts::ARCH)
+            .env(
+                "SAFE_CEX_VIRTUAL_TIME",
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK
+                    .get_current_time_ms()
+                    .to_string(),
+            )
             .output()
             .unwrap();
         assert!(
@@ -34,18 +40,6 @@ impl ZkLinkHost for Services {
         self.host().record("sdk:init", vec![]);
         Box::pin(async { Ok(()) })
     }
-    fn now_ms(&self) -> f64 {
-        1700001234567.
-    }
-    fn pack_amount(&self, _: &J) -> Result<J, ExchangeError> {
-        panic!("not used by contracts")
-    }
-    fn pack_fee(&self, _: &J) -> Result<J, ExchangeError> {
-        panic!("not used by contracts")
-    }
-    fn pubkey_hash(&self) -> Result<J, ExchangeError> {
-        panic!("not used by contracts")
-    }
     fn builder(&self, kind: TransactionKind, args: Vec<J>) -> Result<ZkLinkHandle, ExchangeError> {
         assert_eq!(kind, TransactionKind::Contract);
         self.host().record("contract:builder", args);
@@ -69,29 +63,17 @@ impl ZkLinkHost for Services {
             obj(vec![("signature", s("contract-signature"))]),
         )]))
     }
-    fn create_signed_order(&self, _: ZkLinkHandle) -> Result<J, ExchangeError> {
-        panic!("not used by contracts")
-    }
-    fn sign_transfer(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        panic!("not used by contracts")
-    }
-    fn sign_withdraw(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        panic!("not used by contracts")
-    }
-    fn sign_change_pubkey(&self, _: ZkLinkHandle, _: bool) -> ExchangeFuture<'_, J> {
-        panic!("not used by contracts")
-    }
 }
-fn place(p: &PlaceOrderOpts) -> J {
+fn place(p: &safe_cex_types::PreparedOrderOpts) -> J {
     let mut fields = vec![
         ("symbol", s(&p.symbol)),
         (
             "type",
-            s(match p.r#type {
-                OrderType::Limit => "limit",
-                OrderType::Market => "market",
-                OrderType::StopLoss => "stop_market",
-                OrderType::TakeProfit => "take_profit_market",
+            s(match p.r#type.into_value() {
+                Some(OrderType::Limit) => "limit",
+                Some(OrderType::Market) => "market",
+                Some(OrderType::StopLoss) => "stop_market",
+                Some(OrderType::TakeProfit) => "take_profit_market",
                 _ => panic!(),
             }),
         ),
@@ -108,8 +90,10 @@ fn place(p: &PlaceOrderOpts) -> J {
             fields.push((key, n(value)));
         }
     }
-    if let Some(value) = p.reduce_only {
-        fields.push(("reduceOnly", J::Bool(value)));
+    match p.reduce_only {
+        ModelField::Absent => {}
+        ModelField::Undefined => fields.push(("reduceOnly", J::Undefined)),
+        ModelField::Value(value) => fields.push(("reduceOnly", J::Bool(value))),
     }
     if let Some(value) = p.time_in_force {
         fields.push((
@@ -199,7 +183,10 @@ impl ApexServices for Services {
         self.host().record("socket:throttle-orders", vec![]);
         Ok(())
     }
-    fn place_orders(&self, orders: Vec<PlaceOrderOpts>) -> ExchangeFuture<'_, Vec<String>> {
+    fn place_orders(
+        &self,
+        orders: Vec<safe_cex_types::PreparedOrderOpts>,
+    ) -> ExchangeFuture<'_, Vec<String>> {
         self.host().record(
             "place:orders",
             vec![J::Array(orders.iter().map(place).collect())],

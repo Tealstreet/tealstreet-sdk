@@ -16,7 +16,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-webworker/src/subscriptions.rs::OHLCVSubscriptionsHandler::send_candle_update"
 status = "ported"
-note = "Renamed to safe-cex-webworker/src/subscriptions.rs::OHLCVSubscriptionsHandler::send_candle_update."
+note = "Renamed to safe-cex-webworker/src/subscriptions.rs::OHLCVSubscriptionsHandler::send_candle_update. The required WorkerDataPost receives existing runtime Js data; Candle uses shared native capture before any JSON projection. Actual source and constructed-handler witnesses inspect NaN, infinities, signed zero, fanout metadata and own properties. The concrete browser adapter posts direct JS values. The shared owned Candle listener ABI and incoming JSON metadata boundary remain separate limitations."
 
 [[symbol]]
 ts = "OHLCVSubscriptionsHandler#_getKey"

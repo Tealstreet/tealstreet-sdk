@@ -76,7 +76,7 @@ mod tests {
             }
         );
         let mut short = p.clone();
-        short.side = PositionSide::Short;
+        short.side = safe_cex_types::ModelField::Value(PositionSide::Short);
         assert_eq!(
             calculate_relative_returns(&short, 110.0),
             Returns {

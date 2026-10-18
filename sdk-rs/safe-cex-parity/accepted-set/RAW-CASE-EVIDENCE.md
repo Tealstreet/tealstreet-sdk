@@ -27,10 +27,22 @@ after value edits, and execute loader/dispatch metadata-removal controls.
 Programmatically constructed or reserialized fixtures cannot recover source
 order or numeric spelling they already discarded; see REVIEW-PROPOSALS.md.
 
-Executed validation: the maintained native control passes with 18 baseline and
+Original checkpoint validation: the maintained native control passes with 18 baseline and
 18 restored production receipts, and two expected runtime failures under the
 ordering mutation. The focused loader/contract suites pass 21 tests (including
 two executed metadata-removal controls); alias/policy regressions pass 13; CI
 wiring passes 368. Complete production serialization preserves the parsed values
 of 2,465 rows. The registry retains all earlier tests/mutations and adds five
 tests and three controls (145 tests, 176 controls total). Global parity passes.
+
+The refresh retains master’s duplicate decoded-key rejection, programmatic
+negative zero and authored integer-key order after value edits. Three additional
+named regressions fail against the original source serializer and pass after the
+composition. The generated primitive-token removal control uses an integer above
+2^53, since master’s independent negative-zero guard also preserves an untagged
+negative zero. Both metadata-removal controls still fail executed assertions.
+
+The current `contractJson` API delegates to the source serializer. Master’s Node
+addon probe path remains unchanged, and every existing registry test and mutation
+is retained. The combined registry names 158 tests and 184 mutation controls;
+these counts describe the registry, not a claim that its full suite ran locally.

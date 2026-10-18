@@ -3,6 +3,7 @@
 pub mod build_records;
 pub mod capabilities;
 pub mod client_order_id;
+pub mod delivery_timers;
 pub mod error_reporting;
 pub mod exchange;
 pub mod external;
@@ -14,6 +15,7 @@ pub mod income_paging;
 pub mod journal;
 pub mod js_runtime;
 pub mod lifecycle;
+pub mod message_stats;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub mod native;
 pub mod order_operations;
@@ -23,6 +25,9 @@ pub mod runtime;
 pub mod signing;
 pub mod snapshots;
 pub mod socket_lifecycle;
+pub mod store_delivery;
+pub mod store_payload;
+pub mod throttle;
 pub mod websocket;
 pub mod worker;
 pub mod ws_parent;
@@ -38,6 +43,7 @@ pub use safe_cex_transport::signing::{
 };
 pub use safe_cex_types::ws_auth::{WsAuth, WsAuthRequest, WsAuthResponse};
 
+mod subscribed_candle;
 mod waiters;
 
 mod owned_tasks;

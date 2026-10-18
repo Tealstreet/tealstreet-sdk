@@ -1,10 +1,42 @@
+Private-position freshness timestamps read the shared virtualClock, matching the
+REST request-start clock. The synced-clock private_binding_frames regression feeds
+an actual position frame and reconciles an older signed REST reply through Store.
+
+The concrete order and position mapper callbacks read the shared VirtualClock.
+`tests/native_clock.rs` checks synchronized timestamps through signed REST reads
+for Classic, USDC, inverse and both UTA routes; inverse positions already used it.
+
 # Bitget venue family
+
+The private-topic host consumes the shared iterator protocol instead of indexing
+Map/Set storage. It admits native iterator objects, caches the next method, keeps
+live insertion positions and propagates iterator errors with their original value.
+Private-topic loops close on body errors, preserving that throw over close errors;
+step/value errors do not close.
+The constructed-host `private_host_*` tests reproduce both iterator-object refusal
+and deletion skipping on master. Native references, signed zero, Unicode code
+points and permanent exhaustion stay in the runtime. Maintained wire frames remain
+JSON arrays; iterator-object cases cover the reachable host boundary, not a claimed
+current venue payload. `private_binding_frames` retains the four private topics.
+
+The typed `Exchange::cancel_all_orders` routes to the family's assembled override.
+Classic accounts send venue-wide cancellation even with an empty local order store;
+UTA sweeps venue normal and strategy orders before cancellation; inverse uses each
+unique market margin coin. Venue errors retain source emission and swallowing.
+`tests/cancellation_binding.rs` exercises real constructors/signing/HTTP, and
+`scripts/cancel-all-binding-controls.py` removes only the trait override to require
+four compiled named failures and exact restoration. The actual private socket
+witnesses cover Classic orders, fills, positions and account balances. Terminal
+order frames patch status only, as TS does; fill amounts come from the new frame.
 
 The concrete binding connects both signature-rejection retry imports to the
 shared client replay path and shared request-stamp key. Non-2xx refusals stamp
 the live config; resolved refusals copy and stamp it before re-entering request
 interceptors. Tests cover all three families, writes, fresh signing timestamps,
-the single-resend limit and unrelated failures. The signature predicate uses
+the single-resend limit and unrelated failures. The write-retry witness advances the
+shared VirtualClock between actual transport attempts, separately from the runtime
+timeout clock, and verifies each observed timestamp and its exact HMAC preimage.
+It must not depend on two wall-clock milliseconds happening to differ. The signature predicate uses
 shared string-hint coercion; its source witness compares all 22 outcomes, including
 custom hooks and getter throws. Older pending notes below describe standalone
 extraction stages.
@@ -104,6 +136,12 @@ Do not refuse those intermediate values early. The [refusal-timing audit](REFUSA
 whole mapping result, not just a field; source callable omission and prototype
 object serialization remain separate witnesses. `info` is an owned snapshot,
 with both directions of source alias mutation pinned independently of NaN loss.
+
+Missing Order status/type/side table entries project to own `ModelField::Undefined`;
+JSON omits those fields while the native Store retains their presence. Inherited
+values, unsupported raw side values and missing required IDs still refuse at the
+final projection. `algo_frame_binding` covers real private frames and REST pages
+across linear, USDC and inverse bindings, including later-row evaluation order.
 
 **Inverse order mapper:** `orders::map_inverse_order` is a distinct source body,
 not the linear mapper with a product flag. Keep its narrower aliases, absent
@@ -309,3 +347,38 @@ does. It allows the unreached part rather than pruning its half: keeping the two
 copies textually identical is the point of copying, and `V::Hole`/`V::U`/`V::Null`
 are the missing/undefined/null trichotomy the wire decoders turn on, so a harness
 that cannot spell null is weaker than its sibling in a way nothing would flag.
+
+The public `cancel_symbol_orders` trait hook invokes the assembled family member.
+Classic and USDC retain both the inner cancellation emission and the outer symbol
+catch emission before propagating the original refusal; inverse retains its inner
+swallowing behavior. The cancellation binding tests assert that distinction and
+the selected symbol/order IDs through the actual signed client.
+
+The shared ModelField cutover (#465) preserves missed mapOrder table lookups as
+own Undefined when the source assigns them. Missing raw side is Undefined;
+a present unsupported raw side and unreplaced inherited table members retain
+the explicit closed-model refusal. Algo frames still evaluate the mapper before
+branching on status. Do not skip mapping merely because status is unmapped.
+
+The order oracle checks native own-Undefined fields before JSON projection. It
+walks every output and checks native row counts before pairing with source rows:
+1,327 linear cases (1,263 source successes, 78 accepted own-Undefined cases) and
+1,166 inverse cases (1,095 source successes, 100 accepted own-Undefined cases).
+The field-identity supplement adds exactly one independently named successful
+case per family: 1,328/1,264 linear cases/successes and 1,167/1,096 inverse.
+Its own-Undefined counts remain 78 and 100. Each caller selects its expected
+profile explicitly; neither the base nor supplementary count is inferred from
+the generated corpus. Both profiles reject a missing or duplicate identity case.
+Representability checks visit every source row without short-circuiting.
+The actual socket/Store and authenticated REST witnesses additionally distinguish
+missing-side Undefined from absence across all three families, while unsupported
+raw side still refuses. `scripts/map-order-undefined-controls.py` compiles the old
+throw, absent-property and unsupported-side faults against both the real binding
+and frozen oracle, then requires exact restored passes. Run it exclusively.
+All three representation controls compile and fail named tests in both the
+constructed binding and frozen oracle; each exact restoration passes both.
+The actual TypeScript order oracle also passes without changing its fixture.
+
+The imported response-key helper preserves primitive `in` errors before account
+mapping and searches inherited native keys in original/snake/camel order. The
+signed-response and constructed-host regressions pin refusal timing and shadowing.

@@ -330,3 +330,95 @@ impl Exchange for GrvtExchange {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
 }
+
+#[cfg(test)]
+mod interval_binding_tests {
+    use super::*;
+    #[allow(dead_code)]
+    mod fixture {
+        use crate as safe_cex_venue_grvt;
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/binding_harness.rs"
+        ));
+    }
+    #[test]
+    fn assembled_convert_interval_preserves_all_inherited_source_members() {
+        let compiler = std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+        });
+        let source = std::process::Command::new("node")
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/interval.cjs"))
+            .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+            .output()
+            .unwrap();
+        assert!(
+            source.status.success(),
+            "{}",
+            String::from_utf8_lossy(&source.stderr)
+        );
+        let source: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+        assert_eq!(source["rows"].as_array().unwrap().len(), 93);
+        let h = fixture::harness(
+            safe_cex_types::ExchangeName::Grvt,
+            fixture::options(),
+            |_| {},
+        );
+        let mut inherited = 0;
+        for row in source["rows"].as_array().unwrap() {
+            let key = row["input"].as_str().unwrap();
+            let actual = h
+                .exchange
+                .rt
+                .0
+                .this
+                .call_method("convertInterval", vec![Js::str(key)])
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "assembled interval source member {key}: {}",
+                        e.to_exchange_error().message
+                    )
+                });
+            if let Some(mapped) = row["mapped"].as_str() {
+                assert_eq!(
+                    String::from_utf16_lossy(&actual.to_js_string().unwrap()),
+                    mapped
+                );
+            } else {
+                inherited += 1;
+                assert_eq!(
+                    String::from_utf16_lossy(&actual.to_js_string().unwrap()),
+                    row["string"].as_str().unwrap(),
+                    "assembled interval inherited text: {key}"
+                );
+                assert_eq!(
+                    actual.type_of(),
+                    row["type"].as_str().unwrap(),
+                    "assembled interval inherited kind: {key}"
+                );
+                let length = actual.get("length").unwrap();
+                if row["length"].is_null() {
+                    assert!(length.is_undefined());
+                } else {
+                    assert_eq!(length.to_number().unwrap(), row["length"].as_f64().unwrap());
+                }
+                let again = h
+                    .exchange
+                    .rt
+                    .0
+                    .this
+                    .call_method("convertInterval", vec![Js::str(key)])
+                    .unwrap();
+                assert!(
+                    actual.same_reference(&again),
+                    "inherited member identity: {key}"
+                );
+            }
+        }
+        assert_eq!(inherited, 12);
+    }
+}
+
+#[cfg(test)]
+#[path = "signing_admission_tests.rs"]
+mod signing_admission_tests;

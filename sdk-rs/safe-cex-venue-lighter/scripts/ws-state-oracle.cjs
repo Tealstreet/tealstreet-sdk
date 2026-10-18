@@ -56,6 +56,26 @@ for(const input of ['\uD800','\uDC00','😀','é','\uFEFF','\u0085']){
  const payload={b:[{id:input}],a:{id:input}};
  for(const include of [false,true])flattenBoundaries.push({inputJson:JSON.stringify(payload),inputUnits:Array.from({length:input.length},(_,i)=>input.charCodeAt(i)),include,expectedJson:JSON.stringify(privateWs.flattenByMarketPayload(payload,include)),ordersJson:JSON.stringify(privateWs.flattenOrdersByMarket(payload))});
 }
+const nativeFlatten=[];
+const bits=value=>{const bytes=new ArrayBuffer(8),view=new DataView(bytes);view.setFloat64(0,value);return view.getBigUint64(0).toString(16).padStart(16,'0');};
+for(const kind of ['object','function'])for(const include of [false,true]){
+ const bytes=new ArrayBuffer(8),view=new DataView(bytes);view.setBigUint64(0,0x7ff8000000000042n);
+ const row={price:view.getFloat64(0),amount:Infinity,zero:-0,label:'\ud800',missing:undefined};row.cycle=row;
+ const values=[,row,undefined,null];
+ const payload=kind==='object'?{2:values,1:row}:Object.assign(function(){},{rows:values});
+ const flattened=privateWs.flattenByMarketPayload(payload,include);
+ nativeFlatten.push({kind,include,expected:{tags:flattened.map(value=>value===row?'row':value===undefined?'undefined':value===null?'null':'other'),
+  dense:flattened.every((_,index)=>Object.hasOwn(flattened,index)),rowIdentity:flattened.filter(value=>value!=null).every(value=>value===row),
+  nanBits:bits(row.price),zeroBits:bits(row.zero),amount:String(row.amount),units:[row.label.charCodeAt(0)],
+  ownUndefined:Object.hasOwn(row,'missing')&&row.missing===undefined,cycle:row.cycle===row,
+  ordersLength:privateWs.flattenOrdersByMarket(payload).length}});
+}
+const savedFlatten=privateWs.flattenByMarketPayload;
+const dispatchPayload={},dispatchResult=[],dispatchCalls=[];
+privateWs.flattenByMarketPayload=function(payload,include){dispatchCalls.push({receiver:this===privateWs,payload:payload===dispatchPayload,include});return dispatchResult;};
+const flattenOrdersDispatch={same:privateWs.flattenOrdersByMarket(dispatchPayload)===dispatchResult,calls:dispatchCalls,
+ stringLength:privateWs.flattenOrdersByMarket('x').length,functionLength:privateWs.flattenOrdersByMarket(function(){}).length};
+privateWs.flattenByMarketPayload=savedFlatten;
 if(process.env.LIGHTER_WS_CARDINALITY_MUTATION==='empty') flatten.splice(0);
 if(process.env.LIGHTER_WS_CARDINALITY_MUTATION==='subset') flatten.splice(1);
-process.stdout.write(JSON.stringify({flags,deadlines,toasts,recent,hydration,flatten,flattenBoundaries,publicPong:publicWs.shouldEnforcePongMissReconnect(),publicWatchdog:publicWs.getWatchdogStaleThresholdMs()},(_k,v)=>typeof v==='number'&&(!Number.isFinite(v)||Object.is(v,-0))?{$number:Object.is(v,-0)?'-0':String(v)}:v));
+process.stdout.write(JSON.stringify({flags,deadlines,toasts,recent,hydration,flatten,flattenBoundaries,nativeFlatten,flattenOrdersDispatch,publicPong:publicWs.shouldEnforcePongMissReconnect(),publicWatchdog:publicWs.getWatchdogStaleThresholdMs()},(_k,v)=>typeof v==='number'&&(!Number.isFinite(v)||Object.is(v,-0))?{$number:Object.is(v,-0)?'-0':String(v)}:v));

@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+
 // Keep authored JSON tokens outside the contract schema. Native probes must see
 // the original key order and number spelling, even after JS validates a row.
 const sources = new WeakMap();
@@ -22,6 +24,7 @@ export function parseJsonWithSource(text) {
         let key;
         if (token === '{') {
           key = read().value;
+          assert.ok(!node.fields.has(key), `accepted-set: duplicate JSON key: ${key}`);
           space(); offset++; // Colon; the complete parse already validated it.
         } else key = String(value.length);
         const child = read();
@@ -77,14 +80,16 @@ export function stringifyJsonWithSource(value) {
   function write(value, original) {
     const node = original ?? (value && typeof value === 'object' ? sources.get(value) : undefined);
     if (node && unchanged(value, node)) return node.raw;
-    if (!value || typeof value !== 'object') return JSON.stringify(value);
+    if (!value || typeof value !== 'object') return Object.is(value, -0) ? '-0' : JSON.stringify(value);
     if (visiting.has(value)) throw new TypeError('Converting circular structure to JSON');
     visiting.add(value);
     const fields = copiedProperties.get(value);
     const member = key => write(value[key], fields?.get(key) ?? node?.fields?.get(key));
+    const originalKeys = node?.fields ? [...node.fields.keys()] : [];
+    const keys = [...originalKeys.filter(key => Object.hasOwn(value, key)), ...Object.keys(value).filter(key => !originalKeys.includes(key))];
     const result = Array.isArray(value)
       ? `[${Array.from({ length: value.length }, (_, i) => member(String(i)) ?? 'null').join(',')}]`
-      : `{${Object.keys(value).flatMap(key => {
+      : `{${keys.flatMap(key => {
         const raw = member(key);
         return raw === undefined ? [] : [`${JSON.stringify(key)}:${raw}`];
       }).join(',')}}`;

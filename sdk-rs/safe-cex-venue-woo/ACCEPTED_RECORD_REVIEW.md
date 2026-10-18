@@ -71,3 +71,11 @@ test, with restored passes. Poisoning the local sorter's policy hash stops the
 maintained runner at its named source-pin assertion before runtime probes.
 Nine scoped tests (including the 2,184-case corpus and field-identity checks),
 strict native/Wasm Clippy, formatting, and full parity also pass.
+
+
+The later wave4 audit removed the unused WooxOrder, FetchOrderResponseMeta and
+FetchOrderResponse DTOs and their contract rows. The selected retained cohort is
+27 owners. Historical counts above describe the original review. The live
+legacy-orders binding now covers the documented amount/client_order_id/
+realized_pnl/average_executed_price nulls, which the erased declaration decoder
+rejected. No runtime decoder was widened and no production request path changed.

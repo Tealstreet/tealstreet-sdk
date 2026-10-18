@@ -27,8 +27,12 @@ pub fn extract_domain_from_url(url: &str) -> Option<String> {
 }
 
 pub(crate) fn parse_relay_url(url: &str) -> Result<(String, String), TransportError> {
-    let mut parsed =
-        Url::parse(url).map_err(|_| TransportError::Host(format!("not a relay url: {url}")))?;
+    let mut parsed = Url::parse(url).map_err(|_| {
+        TransportError::JavaScript(safe_cex_num::JsCoercionError {
+            name: "TypeError",
+            message: "Invalid URL",
+        })
+    })?;
     let upstream = parsed
         .query_pairs()
         .find(|(key, _)| key == "ts-relay")

@@ -108,9 +108,10 @@ fn has_length(value: Option<&Value>) -> bool {
     }
 }
 fn float(value: Option<&Value>) -> Result<f64, PortfolioFailure> {
-    js_string(value)
-        .map(|v| parse_float(&v))
-        .map_err(|e| error(&e.name, &e.message))
+    text(value).map(|v| parse_float(&v))
+}
+fn text(value: Option<&Value>) -> Result<String, PortfolioFailure> {
+    js_string(value).map_err(|e| error(&e.name, &e.message))
 }
 fn or<'a>(value: Option<&'a Value>, fallback: &'a Value) -> Option<&'a Value> {
     if js_truthy(value) {
@@ -153,21 +154,21 @@ fn position(symbol: String) -> Position {
     Position {
         id: create_position_id(&symbol, None, None),
         symbol,
-        side: PositionSide::Long,
+        side: safe_cex_types::ModelField::Value(PositionSide::Long),
         entry_price: 0.0,
         notional: 0.0,
         leverage: 10.0,
-        margin_type: Some(MarginType::Cross),
-        position_mode: Some(PositionMode::OneWay),
+        margin_type: (Some(MarginType::Cross)).into(),
+        position_mode: (Some(PositionMode::OneWay)).into(),
         unrealized_pnl: 0.0,
-        realized_pnl: None,
+        realized_pnl: (None).into(),
         contracts: 0.0,
         liquidation_price: 0.0,
-        margin_size: None,
-        info: None,
-        extra: None,
-        last_update: None,
-        option: None,
+        margin_size: (None).into(),
+        info: (None).into(),
+        extra: (None).into(),
+        last_update: (None).into(),
+        option: (None).into(),
     }
 }
 fn all<T: Clone + 'static>(
@@ -316,23 +317,23 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                     if m["trading_state"] != "TRADING" || m["type"] != "PERP" {
                         continue;
                     }
-                    let symbol = format!("{}-INTX", m["symbol"].as_str().expect("typed symbol"));
+                    let symbol = format!("{}-INTX", text(m.get("symbol"))?);
                     let raw = markets.get(&symbol).and_then(|m| m.borrow().info.clone());
                     let zero = json!("0");
                     let interval = float(or(m.get("funding_interval"), &zero))? / 1000.0 / 1000.0;
-                    let quote = &m["quote"];
+                    let quote = m.get("quote");
                     let mut fields = ticker(symbol);
-                    fields.bid = float(quote.get("best_bid_price"))?;
-                    fields.ask = float(quote.get("best_ask_price"))?;
-                    fields.last = float(quote.get("trade_price"))?;
-                    fields.mark = float(quote.get("mark_price"))?;
-                    fields.index = float(quote.get("index_price"))?;
+                    fields.bid = float(prop(quote, "best_bid_price")?)?;
+                    fields.ask = float(prop(quote, "best_ask_price")?)?;
+                    fields.last = float(prop(quote, "trade_price")?)?;
+                    fields.mark = float(prop(quote, "mark_price")?)?;
+                    fields.index = float(prop(quote, "index_price")?)?;
                     fields.percentage = float(or(
                         raw.as_ref()
                             .and_then(|v| v.get("price_percentage_change_24h")),
                         &zero,
                     ))?;
-                    fields.funding_rate = float(quote.get("predicted_funding"))?;
+                    fields.funding_rate = float(prop(quote, "predicted_funding")?)?;
                     fields.funding_time = date(
                         &r.host,
                         raw.as_ref()
@@ -484,28 +485,28 @@ pub fn fetch_open_positions_cfm<H: MarketPositionHost + 'static>(
                 let next=reply.items.borrow().get(index).cloned();
                 let Some(item)=next else {break;};
                 index+=1;
-                let lookup_id = item.borrow()["product_id"].as_str().expect("typed product_id").to_owned();
+                let lookup_id = text(item.borrow().get("product_id"))?;
                 let market = r.host.market_by_id(&lookup_id);
                 let contract = market.and_then(|m| {
                     let m = m.borrow();
                     if m.is_expiring == Some(true) {normalize_cfm_contract_size(&json!(m.contract_size))} else {None}
                 });
                 let Some(contract) = contract else {
-                    let symbol=item.borrow()["product_id"].as_str().expect("typed product_id").to_owned();
+                    let symbol = text(item.borrow().get("product_id"))?;
                     let message = format!("Coinbase CFM position skipped: missing or invalid contract size for {symbol}");
                     r.host.emit_and_log_error(&[Some(Value::String(message))])?;
                     continue;
                 };
                 let p = item.borrow();
-                let mut fields = position(p["product_id"].as_str().expect("typed product_id").into());
-                fields.side = if p["side"] == "LONG" {PositionSide::Long} else {PositionSide::Short};
+                let mut fields = position(text(p.get("product_id"))?);
+                fields.side = if p["side"] == "LONG" {safe_cex_types::ModelField::Value(PositionSide::Long)} else {safe_cex_types::ModelField::Value(PositionSide::Short)};
                 fields.entry_price = float(p.get("avg_entry_price"))?;
                 let mark = float(p.get("current_price"))?;
                 let size = float(p.get("number_of_contracts"))?.abs();
                 fields.unrealized_pnl = float(p.get("unrealized_pnl"))?;
                 fields.notional = size * mark * contract;
                 fields.contracts = multiply(size, contract);
-                fields.extra = Some(PositionExtra {contracts_native: Some(size), unrealized_pnl_native: None});
+                fields.extra = (Some(PositionExtra {contracts_native: Some(size), unrealized_pnl_native: None})).into();
                 positions.push(Rc::new(ReadPosition {fields, info: Some(item.clone())}));
             }
             Ok(Rc::new(RefCell::new(positions)))
@@ -544,14 +545,14 @@ pub fn fetch_open_positions_intx<H: MarketPositionHost + 'static>(
                 let ten = json!("10");
                 for item in reply.items.borrow().clone() {
                     let p = item.borrow();
-                    let mut fields = position(p["symbol"].as_str().expect("typed symbol").into());
+                    let mut fields = position(text(p.get("symbol"))?);
                     fields.side = if p["position_side"] == "POSITION_SIDE_LONG" {
-                        PositionSide::Long
+                        safe_cex_types::ModelField::Value(PositionSide::Long)
                     } else {
-                        PositionSide::Short
+                        safe_cex_types::ModelField::Value(PositionSide::Short)
                     };
-                    fields.entry_price = float(p["entry_vwap"].get("value"))?;
-                    let mark = float(p["mark_price"].get("value"))?;
+                    fields.entry_price = float(prop(p.get("entry_vwap"), "value")?)?;
+                    let mark = float(prop(p.get("mark_price"), "value")?)?;
                     let size = float(p.get("net_size"))?.abs();
                     fields.unrealized_pnl = (if fields.side == PositionSide::Long {
                         1.0
@@ -562,7 +563,7 @@ pub fn fetch_open_positions_intx<H: MarketPositionHost + 'static>(
                     fields.notional = size * mark;
                     fields.contracts = size;
                     fields.leverage = float(or(p.get("leverage"), &ten))?;
-                    fields.liquidation_price = float(p["liquidation_price"].get("value"))?;
+                    fields.liquidation_price = float(prop(p.get("liquidation_price"), "value")?)?;
                     positions.push(Rc::new(ReadPosition {
                         fields,
                         info: Some(item.clone()),

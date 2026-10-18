@@ -40,7 +40,7 @@ pub fn derive_symbol_config(
         .collect();
     let position = positions.first().copied();
     let position_mode = position
-        .and_then(|p| p.position_mode)
+        .and_then(|p| (p.position_mode).into_value())
         .or_else(|| existing.map(|c| c.position_mode))
         .unwrap_or(account_mode);
     let long = positions.iter().find(|p| p.side == PositionSide::Long);
@@ -51,7 +51,7 @@ pub fn derive_symbol_config(
         None
     };
     let margin = position
-        .and_then(|p| p.margin_type)
+        .and_then(|p| (p.margin_type).into_value())
         .or_else(|| existing.map(|c| c.margin_type))
         .map(|margin| {
             Value::String(

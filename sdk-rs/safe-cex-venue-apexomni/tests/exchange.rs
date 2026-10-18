@@ -43,11 +43,31 @@ fn s(value: impl Into<String>) -> J {
 fn n(value: f64) -> J {
     J::Number(value)
 }
-fn side(value: OrderSide) -> J {
-    s(match value {
-        OrderSide::Buy => "buy",
-        OrderSide::Sell => "sell",
-    })
+fn side(value: impl Into<safe_cex_types::ModelField<OrderSide>>) -> J {
+    match value.into().into_value() {
+        Some(OrderSide::Buy) => s("buy"),
+        Some(OrderSide::Sell) => s("sell"),
+        None => J::Undefined,
+    }
+}
+thread_local! {
+    static FIXTURE_STAMPS: RefCell<Vec<(f64, f64)>> = const { RefCell::new(Vec::new()) };
+}
+fn source_clock_stamp(value: f64) -> J {
+    let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
+    assert!(
+        (now - 5_000.0..=now).contains(&value),
+        "model timestamp must read the live virtual clock: {value} vs {now}"
+    );
+    // The source oracle freezes its virtual clock; compare its other fields exactly.
+    let source = FIXTURE_STAMPS.with(|stamps| {
+        stamps
+            .borrow()
+            .iter()
+            .find(|(actual, _)| *actual == value)
+            .map(|(_, source)| *source)
+    });
+    n(source.unwrap_or(1700001234567.0))
 }
 fn position(value: &Position) -> J {
     let mut fields = vec![
@@ -68,25 +88,25 @@ fn position(value: &Position) -> J {
         ("contracts", n(value.contracts)),
         ("liquidationPrice", n(value.liquidation_price)),
     ];
-    if let Some(v) = value.margin_size {
+    if let Some(v) = value.margin_size.into_value() {
         fields.push(("marginSize", n(v)));
     }
-    if let Some(v) = value.realized_pnl {
+    if let Some(v) = value.realized_pnl.into_value() {
         fields.push(("realizedPnl", n(v)));
     }
-    if let Some(v) = value.position_mode {
+    if let Some(v) = value.position_mode.into_value() {
         assert_eq!(v, PositionMode::Hedged);
         fields.push(("positionMode", s("hedged")));
     }
-    if let Some(v) = value.margin_type {
+    if let Some(v) = value.margin_type.into_value() {
         assert_eq!(v, MarginType::Cross);
         fields.push(("marginType", s("cross")));
     }
-    if let Some(v) = &value.info {
+    if let Some(v) = value.info.as_ref() {
         fields.push(("info", J::from(v.clone())));
     }
-    if let Some(v) = value.last_update {
-        fields.push(("lastUpdate", n(v)));
+    if let Some(v) = value.last_update.into_value() {
+        fields.push(("lastUpdate", source_clock_stamp(v)));
     }
     obj(fields)
 }
@@ -95,34 +115,40 @@ fn order(value: &Order) -> J {
         ("id", s(&value.id)),
         (
             "status",
-            s(match value.status {
-                OrderStatus::Open => "open",
-                OrderStatus::Closed => "closed",
-                OrderStatus::Canceled => "canceled",
-                _ => panic!(),
-            }),
+            match value.status {
+                ModelField::Value(OrderStatus::Open) => s("open"),
+                ModelField::Value(OrderStatus::Closed) => s("closed"),
+                ModelField::Value(OrderStatus::Canceled) => s("canceled"),
+                ModelField::Undefined => J::Undefined,
+                _ => panic!("source order status fixture"),
+            },
         ),
         ("symbol", s(&value.symbol)),
         (
             "type",
-            s(match value.r#type {
-                OrderType::Limit => "limit",
-                OrderType::Market => "market",
-                OrderType::StopLoss => "stop_market",
-                OrderType::TakeProfit => "take_profit_market",
-                _ => panic!(),
-            }),
+            match value.r#type {
+                ModelField::Value(OrderType::Limit) => s("limit"),
+                ModelField::Value(OrderType::Market) => s("market"),
+                ModelField::Value(OrderType::StopLoss) => s("stop_market"),
+                ModelField::Value(OrderType::TakeProfit) => s("take_profit_market"),
+                ModelField::Undefined => J::Undefined,
+                _ => panic!("source order type fixture"),
+            },
         ),
         ("side", side(value.side)),
-        ("price", n(value.price)),
+        ("price", n((value.price).to_number())),
         ("amount", n(value.amount)),
         ("filled", n(value.filled)),
         ("remaining", n(value.remaining)),
-        ("reduceOnly", J::Bool(value.reduce_only)),
         ("info", J::from(value.info.clone().unwrap())),
-        ("lastUpdate", n(value.last_update)),
+        ("lastUpdate", source_clock_stamp(value.last_update)),
     ];
-    if let Some(v) = value.time_in_force {
+    match value.reduce_only {
+        ModelField::Absent => {}
+        ModelField::Undefined => fields.push(("reduceOnly", J::Undefined)),
+        ModelField::Value(value) => fields.push(("reduceOnly", J::Bool(value))),
+    }
+    if let Some(v) = value.time_in_force.into_value() {
         fields.push((
             "timeInForce",
             s(match v {
@@ -136,7 +162,7 @@ fn order(value: &Order) -> J {
         ("tpTriggerType", value.tp_trigger_type),
         ("slTriggerType", value.sl_trigger_type),
     ] {
-        if let Some(v) = v {
+        if let Some(v) = v.into_value() {
             fields.push((
                 key,
                 s(match v {
@@ -893,7 +919,11 @@ fn continuation_position_short_circuit_matches_source() {
                 )
             })
             .expect("APEX-CONT source position exists");
-        assert_eq!(host.now_calls.get(), 1, "APEX-CONT native position clock");
+        assert_eq!(
+            host.now_calls.get(),
+            0,
+            "APEX-CONT virtual clock must not read the raw runtime"
+        );
         native::check_fields(
             &position(&actual),
             &row["result"],

@@ -113,3 +113,37 @@ The symbol-scoped wire URL is /orders?market=BTC-USD-PERP; the unscoped URL is
 which must propagate through the existing source catch/log/rethrow behavior.
 All 12 constructed tests and both actual-source command tests pass. This adds
 cancellation entrypoint evidence; private frame/fill coverage is separate.
+
+
+## Native public streams and historical reads
+
+The constructed Exchange trait now reaches the existing venue bodies for public
+book and candle listeners, fills, income, income ranges and historical orders.
+The canonical shared journal reader receives the venue's branded fills axis and
+symbol-scoped option; its wrapped income failure retains the original cause.
+Book registration and cleanup share the same helpers as the standalone source
+port, with owned callbacks for the native binding. Cleanup removes the actual
+socket listener or polling timer.
+
+Seven new `real_trait_` tests use the production constructor, scripted signed HTTP
+and actual public socket frames. All seven fail against the original trait
+fallbacks and pass with the hooks. The full constructed target passes 20 tests;
+the standalone actual-source book oracle also passes. Wire query assertions
+inspect the shared adapter's serialized URLs.
+
+`scripts/trait-binding-controls.py` compiles independent faults in the trait
+hooks, history member dispatch, fills brand, journal scope, book callback field
+and candle cleanup. Two further faults empty or truncate actual returned fills.
+Every control requires named behavioral failures after compilation and exact
+source restoration, with all seven regressions passing afterward. It does not
+change the TypeScript reference or expected fixture values.
+
+Measured controls: all eight compiled faults fail their named regressions; every
+exact restoration passes all seven tests. The cleanup witness counts serialized
+query URLs and verifies that a changed post-cleanup candle is not delivered.
+
+Strict host all-target and WASM library clippy pass. Venue-local parity passes
+153 manifest rows and 508 public Rust items, retaining complete workspace target
+resolution. The override inventory adds fifteen reviewed Paradex hook edges:
+existing body ports, capability closures, and dynamic reads in the canonical
+journal adapter; no base-hook bypass or new exemption is introduced.
