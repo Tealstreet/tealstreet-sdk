@@ -62,24 +62,35 @@ impl AccountFetch {
         url: String,
         body: Option<Value>,
     ) -> Result<Value, ExchangeError> {
-        let response = adapter.execute(RestRequest { method: method.into(), url, body: body.map(RestBody::Untransformed), ..Default::default() }).await.map_err(|failure| {
-            // Preserve the available shared REST failure metadata, rather than
-            // inventing a JS Error object identity at the native boundary.
-            let mut error = ExchangeError::new(failure.message);
-            error.is_axios_error = true;
-            error.code = failure.code.map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
-            error.context = failure.context.map(|context| *context);
-            error.method = Some(failure.request.method);
-            error.url = Some(failure.request.url);
-            if let Some(response) = failure.response {
-                error.response = Some(json!({"status": response.status, "data": response.body.into_data(), "headers": response.headers}));
-            }
-            error
-        })?;
-        Ok(response
+        let response = adapter
+            .execute(RestRequest {
+                method: method.into(),
+                url,
+                body: body
+                    .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                    .transpose()
+                    .map_err(|error| ExchangeError::new(error.to_string()))?
+                    .map(RestBody::Untransformed),
+                ..Default::default()
+            })
+            .await
+            .map_err(|failure| {
+                // Preserve the available shared REST failure metadata, rather than
+                // inventing a JS Error object identity at the native boundary.
+                let method = failure.request.method.clone();
+                let url = failure.request.url.clone();
+                let mut error: ExchangeError = failure.into();
+                error.is_axios_error = true;
+                error.method = Some(method);
+                error.url = Some(url);
+                error
+            })?;
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     fn finish<T>(
         &self,

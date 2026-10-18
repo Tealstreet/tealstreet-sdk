@@ -968,7 +968,10 @@ fn create_api_routes_through_the_provider_and_tunnel_adapter() {
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(balance()),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(balance())
+                            .unwrap(),
+                    ),
                 })
             })
         }

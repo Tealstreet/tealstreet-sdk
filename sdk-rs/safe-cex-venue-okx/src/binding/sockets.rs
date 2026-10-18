@@ -80,9 +80,9 @@ fn region_and_testnet(this: &Js) -> Result<(OkxRegion, bool), Thrown> {
 
 /// `jsonParse(data)`.
 fn json_parse(data: &Js) -> Result<Js, Thrown> {
-    Ok(from_json(&safe_cex_transport::how::json_parse(&text(
-        data,
-    )?)))
+    Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+        safe_cex_transport::how::json_parse(&text(data)?),
+    ))
 }
 
 /// `error instanceof Error ? error : new Error(String(error))`.

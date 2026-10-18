@@ -174,7 +174,9 @@ pub(crate) fn on_message(socket: &Rc<BaseWebSocket>, data: &str) -> Result<(), E
         return Ok(());
     }
     socket.track_last_received()?;
-    let message = json_parse(data);
+    let message = json_parse(data)
+        .into_value()
+        .expect("bounded socket fixture JSON");
     if !js_truthy(Some(&message)) {
         return Ok(());
     }

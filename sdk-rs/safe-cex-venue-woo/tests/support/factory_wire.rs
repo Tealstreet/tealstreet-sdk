@@ -190,7 +190,11 @@ fn factory_wire_matches_actual_axios_captures() {
         let request = RestRequest {
             url: input["url"].as_str().unwrap().into(),
             method: input["method"].as_str().unwrap_or("get").into(),
-            body: input.get("data").cloned().map(RestBody::Untransformed),
+            body: input.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             params: input.get("params").cloned(),
             ..Default::default()
         };
@@ -245,9 +249,11 @@ fn signing_retains_core_transformed_body_phase() {
         Arc::new(Runtime),
     )
     .unwrap();
-    let body = RestBody::Untransformed(json!(" 1 "))
-        .transform(None)
-        .unwrap();
+    let body = RestBody::Untransformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(json!(" 1 ")).unwrap(),
+    )
+    .transform(None)
+    .unwrap();
     assert!(matches!(body, RestBody::Transformed(_)));
     run(api.execute(RestRequest {
         method: "get".into(),

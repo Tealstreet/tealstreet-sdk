@@ -181,7 +181,12 @@ impl RestAdapter for Adapter {
                 status: 200,
                 reason: Some("OK".into()),
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(next["data"].clone()),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        next["data"].clone(),
+                    )
+                    .unwrap(),
+                ),
             })
         })
     }
@@ -432,7 +437,7 @@ fn account_fetch_matches_source() {
                 panic!("missing leverage body")
             };
             assert_eq!(
-                body["leverage"].as_f64(),
+                body.clone().into_value().unwrap()["leverage"].as_f64(),
                 Some(3.0),
                 "leverage-in-range-half native rounded leverage"
             );
@@ -443,7 +448,10 @@ fn account_fetch_matches_source() {
                 panic!("missing leverage body")
             };
             assert_eq!(
-                body["leverage"].as_f64().unwrap().to_bits(),
+                body.clone().into_value().unwrap()["leverage"]
+                    .as_f64()
+                    .unwrap()
+                    .to_bits(),
                 (-0.0_f64).to_bits(),
                 "leverage-negative-half-zero native leverage bits"
             );
@@ -529,9 +537,11 @@ fn account_fetch_matches_source() {
                 "{name} request timeout"
             );
             match &request.body {
-                Some(RestBody::Untransformed(body)) => {
-                    assert_native_json(body, &source["body"], &format!("{name} untransformed body"))
-                }
+                Some(RestBody::Untransformed(body)) => assert_native_json(
+                    &body.clone().into_value().unwrap(),
+                    &source["body"],
+                    &format!("{name} untransformed body"),
+                ),
                 None => assert!(source.get("body").is_none(), "{name} absent body"),
                 _ => panic!("account body must remain untransformed"),
             }

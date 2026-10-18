@@ -174,13 +174,14 @@ pub struct Wire {
 impl RestAdapter for Wire {
     fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
         self.requests.lock().unwrap().push(r.clone());
-        let body = self
-            .bodies
-            .lock()
-            .unwrap()
-            .get(&r.url)
-            .cloned()
-            .unwrap_or(RestResponseBody::Untransformed(json!({"id":"native-id"})));
+        let body = self.bodies.lock().unwrap().get(&r.url).cloned().unwrap_or(
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    json!({"id":"native-id"}),
+                )
+                .unwrap(),
+            ),
+        );
         Box::pin(async move {
             Ok(RestResponse {
                 status: 200,

@@ -46,11 +46,13 @@ impl PrivateFixture {
         runtime.now.set(1_000.0);
         wire.bodies.lock().unwrap().insert(
             "/api/v1/position".into(),
-            RestResponseBody::Untransformed(json!([])),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([])).unwrap(),
+            ),
         );
         wire.bodies.lock().unwrap().insert(
             "/api/v1/capital/collateral".into(),
-            RestResponseBody::Untransformed(json!({"netEquity":"25","netEquityAvailable":"18","netEquityLocked":"7","pnlUnrealized":"3"})),
+            RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"netEquity":"25","netEquityAvailable":"18","netEquityLocked":"7","pnlUnrealized":"3"})).unwrap()),
         );
         let socket = Rc::new(private_socket::Socket::default());
         socket.events.borrow_mut().push_back(WsEvent::Open);
@@ -194,10 +196,12 @@ fn private_reopen_refreshes_orders_without_starting_another_polling_loop() {
         ),
         ("/api/v1/orders", json!([])),
     ] {
-        wire.bodies
-            .lock()
-            .unwrap()
-            .insert(path.into(), RestResponseBody::Untransformed(body));
+        wire.bodies.lock().unwrap().insert(
+            path.into(),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+            ),
+        );
     }
     // Start the single source tick chain that normal private startup owns.
     drive(&runtime, owner.tick()).unwrap();

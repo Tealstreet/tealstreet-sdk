@@ -1418,9 +1418,13 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
                             let RestResponseBody::Untransformed(body) = response.body else {
                                 panic!("adapter bodies are untransformed JSON");
                             };
-                            Ok(safe_cex_exchange::js_runtime::value::from_json(
-                                &json!({"status": response.status, "body": body}),
-                            ))
+                            Ok(Js::object(vec![
+                                ("status", Js::Number(response.status.into())),
+                                (
+                                    "body",
+                                    safe_cex_exchange::js_runtime::value::from_retained_input(body),
+                                ),
+                            ]))
                         }
                         Err(failure) => Err(adapter.thrown(failure)),
                     }
@@ -1655,7 +1659,9 @@ fn rest_http_host_text_response_preserves_raw_big_integer_tokens() {
     );
     assert_eq!(raw.to_display(), r#"{ "orderId":9007199254740993 }"#);
     assert_eq!(
-        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())["orderId"],
+        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())
+            .into_value()
+            .unwrap()["orderId"],
         "9007199254740993"
     );
     let failed = settle(
@@ -2946,7 +2952,12 @@ mod http_factory {
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"ok":true})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"ok":true}),
+                        )
+                        .unwrap(),
+                    ),
                 })
             })
         }
@@ -3561,13 +3572,25 @@ fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
             let RemoteSignerRequest::Http(request) = request else {
                 panic!("HTTP expected")
             };
-            self.0.borrow_mut().push(request.config.data.clone());
+            self.0.borrow_mut().push(
+                request
+                    .config
+                    .data
+                    .clone()
+                    .map(|value| value.into_value().unwrap()),
+            );
             let data = request.config.data.map(|value| {
-                if value.is_object() || value.is_array() {
-                    Value::String(
-                        safe_cex_num::js_json_stringify(&value.into())
+                if matches!(
+                    value,
+                    safe_cex_types::retained_json::RetainedJsonInput::Object(_)
+                        | safe_cex_types::retained_json::RetainedJsonInput::Array(_)
+                ) {
+                    safe_cex_types::retained_json::RetainedJsonInput::Text(
+                        safe_cex_num::js_retained_json_stringify(&value)
                             .unwrap()
-                            .unwrap(),
+                            .unwrap()
+                            .encode_utf16()
+                            .collect(),
                     )
                 } else {
                     value
@@ -4128,6 +4151,120 @@ fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_con
             assert_eq!(array.get("1").unwrap().as_f64(), Some(f64::NEG_INFINITY));
         }
     }
+}
+
+#[test]
+fn retained_rest_adapter_reaches_real_client_interceptor_before_json_projection() {
+    use safe_cex_exchange::js_runtime::value::{from_retained_input, to_retained_input};
+    use safe_cex_transport::{RestAdapter, RestBody, RestRequest};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    fn body() -> Input {
+        Input::Object(vec![
+            (
+                "nan".encode_utf16().collect(),
+                Input::Float(f64::from_bits(0x7ff8_0000_0000_0042)),
+            ),
+            ("zero".encode_utf16().collect(), Input::Float(-0.0)),
+            ("own".encode_utf16().collect(), Input::Undefined),
+            (vec![0xd800], Input::Text(vec![0xd801])),
+        ])
+    }
+    fn assert_body(input: Input) {
+        let Input::Object(fields) = input else {
+            panic!("retained adapter native object before JSON")
+        };
+        assert_eq!(fields.len(), 4, "retained adapter all own properties");
+        let Input::Float(nan) = fields[0].1 else {
+            panic!("retained adapter native NaN")
+        };
+        assert_eq!(
+            nan.to_bits(),
+            0x7ff8_0000_0000_0042,
+            "retained adapter exact NaN payload"
+        );
+        let Input::Float(zero) = fields[1].1 else {
+            panic!("retained adapter native zero")
+        };
+        assert_eq!(
+            zero.to_bits(),
+            (-0.0_f64).to_bits(),
+            "retained adapter signed zero"
+        );
+        assert_eq!(
+            fields[2].1,
+            Input::Undefined,
+            "retained adapter owns undefined"
+        );
+        assert_eq!(
+            fields[3],
+            (vec![0xd800], Input::Text(vec![0xd801])),
+            "retained adapter exact UTF16 key and value"
+        );
+    }
+    struct NativeHost(Rc<Runtime>);
+    impl JsHttpHost for NativeHost {
+        fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+            self.0.clone()
+        }
+        fn send(&self, config: Js) -> JsFuture<'static> {
+            // The real client delivers native data to its host after interception.
+            let data = to_retained_input(&config.get("data").unwrap()).unwrap();
+            assert_body(data.clone());
+            assert_eq!(
+                String::from_utf8(RestBody::Untransformed(data).wire_bytes().unwrap()).unwrap(),
+                r#"{"nan":null,"zero":0,"\ud800":"\ud801"}"#,
+                "retained adapter physical JSON projection"
+            );
+            Box::pin(async {
+                Ok(Js::object(vec![
+                    ("status", Js::Number(207.0)),
+                    ("data", from_retained_input(body())),
+                ]))
+            })
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let xhr = client::create(Rc::new(NativeHost(runtime.clone())), Js::object(vec![]));
+    let calls = Rc::new(std::cell::Cell::new(0));
+    let observed = calls.clone();
+    xhr.get("interceptors")
+        .unwrap()
+        .get("request")
+        .unwrap()
+        .call_method(
+            "use",
+            vec![Js::function("native signing observer", move |_, args| {
+                let config = arg(&args, 0);
+                assert_body(to_retained_input(&config.get("data")?)?);
+                observed.set(observed.get() + 1);
+                Ok(config)
+            })],
+        )
+        .unwrap();
+    let adapter = Rc::new(client::JsRestAdapter::new(xhr));
+    let worker_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
+    let pending = Js::Promise(Promise::spawn(
+        &worker_runtime,
+        Box::pin(async move {
+            let response = adapter
+                .execute(RestRequest {
+                    method: "post".into(),
+                    url: "/retained".into(),
+                    body: Some(RestBody::Untransformed(body())),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|failure| adapter.thrown(failure))?;
+            assert_eq!(
+                response.status, 207,
+                "retained adapter native response status"
+            );
+            Ok(from_retained_input(response.body.into_data()))
+        }),
+    ));
+    let output = settle(&runtime, pending).unwrap();
+    assert_eq!(calls.get(), 1, "retained adapter real interceptor count");
+    assert_body(to_retained_input(&output).unwrap());
 }
 
 #[path = "support/raw_error_reporting.rs"]

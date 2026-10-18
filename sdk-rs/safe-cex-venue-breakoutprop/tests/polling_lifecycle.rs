@@ -551,7 +551,7 @@ fn session_coalesces_expiry_retry_finally_and_reentrant_clock_values() {
         assert_eq!(r.url, "/login");
         assert!(r.params.is_none());
         assert!(
-            matches!(&r.body,Some(RestBody::Untransformed(v))if v==&json!({"domain":"default","username":"k","password":"s"}))
+            matches!(&r.body,Some(RestBody::Untransformed(v))if v==&safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"domain":"default","username":"k","password":"s"})).unwrap())
         );
     }
     s.ready.set(true);
@@ -1154,6 +1154,9 @@ fn final_cancel_batches_and_update() {
         .as_ref()
         .unwrap()
         .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
         .unwrap();
     assert_eq!(body["limitPrice"], 102.2, "UPDATE native patched price");
     assert_eq!(body["quantity"], 2.35, "UPDATE native patched amount");
@@ -1255,6 +1258,9 @@ fn final_place_native_numeric_payload_and_failures() {
         .as_ref()
         .unwrap()
         .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
         .unwrap();
     assert_eq!(body["instrument"], "BTC");
     assert_eq!(body["quantity"], 1.23);

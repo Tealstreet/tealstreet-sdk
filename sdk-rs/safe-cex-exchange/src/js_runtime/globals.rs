@@ -12,6 +12,16 @@ use std::{
 
 use safe_cex_types::js_coercion::json_quote_utf16 as json_quote;
 
+/// The shared JSON.stringify operation for native data without a replacer.
+pub fn stringify_json(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
+    json_stringify(
+        &Js::object(vec![("", value.clone())]),
+        &[],
+        None,
+        &mut Vec::new(),
+    )
+}
+
 /// SerializeJSONProperty with an optional callable replacer; `None` is undefined.
 fn json_stringify(
     holder: &Js,

@@ -749,7 +749,7 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "53dff7b21535effc79cc139c0b43dfb897ecd00a590a34334612224069af8b36",
+      "producer_sha256": "8f3a34d1349464b79de654bba3aa5dca6dd07abc9c031bdc8df740af621417ea",
       "classification": "no-owned-latch",
       "reason": "Signing input and response are request-local, with remote signing delegated to the host signer future."
     },
@@ -881,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "03a4d28f8d0e04c81a653f27209db2786915c793757f9afe2445cc550910f405"
+          "sha256": "dbb04988533d416a0cfea2df6330a8519940a5fcd1d43b5b25738403bed742c7"
         }
       ],
       "guards": [
@@ -1478,7 +1478,7 @@
         "await",
         "await"
       ],
-      "producer_sha256": "4dd4bce4ae855996b4ff9a5cfe6b2ce51f98f788782f4b4aec1fdc13b322e186",
+      "producer_sha256": "745724aec989c245f85aef17303b3fe9e19c48ca9fa8d87073724753d6f795ab",
       "classification": "no-owned-latch",
       "reason": "Pending authorization and host adapter stages own request values. Selected response transforms and effective-config hooks are synchronous after the response; statistics remain observations. No independent lifecycle slot or waiter registration is reserved. Receipt cutover reviewed at 88b2ffc150."
     },
@@ -1646,9 +1646,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "f1997ddcf13d1b6ae83ade69b57c34f1b2dc8683987cd3dbc957f2e42a4a316e",
+      "producer_sha256": "f71cf9275673b9522d067a5958828a32e0fd20e7e1a9e6c6514a0f1134ca1780",
       "classification": "no-owned-latch",
-      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added. RetainedJsonInput restoration replaces JSON projection synchronously before the same await; local config values own no new task, borrow, reservation or cancellation registration."
+      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added. RetainedJsonInput restoration replaces JSON projection synchronously before the same await; local config values own no new task, borrow, reservation or cancellation registration. Reviewed retained-body cutover: synchronous native body restoration replaces early wire JSON projection; the same xhr child Promise is awaited with no new waiter, task, timer or owned latch."
     },
     {
       "owner": "src/js_runtime/client.rs::RestHttpHost as JsHttpHost::send",
@@ -1672,6 +1672,16 @@
       "producer_sha256": "bda8589aabf7d246e20269c01a67453a2eb68b3954c5386bfb9c96ab30fde135",
       "classification": "no-owned-latch",
       "reason": "One caller-owned interceptor link awaits an optional JS callback and its returned promise. It owns the settlement value; no waiter registry, latch or reservation is added. Dropping it delegates a Promise wait to PromiseWait cleanup."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::create",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "ddd323bd834a008d7baa700bb3404901644a96ea74def6564d12f302a8762f1f",
+      "classification": "no-owned-latch",
+      "reason": "The rate-limit request interceptor returns an eager runtime-owned Promise. Its future owns config and client state, awaits the existing throttle, then returns config to the interceptor chain. No RefCell borrow spans the wait; window capacity is recorded only at successful dequeue. Dropping the JS waiter delegates to PromiseWait cleanup while the source Promise remains runtime-owned."
     },
     {
       "owner": "src/js_runtime/client.rs::dispatch",
@@ -1738,6 +1748,16 @@
       "producer_sha256": "64772fd8567f69e68a60fb54dd75d977a5748773b23ad0a6800310fa554d37ba",
       "classification": "no-owned-latch",
       "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send. Reviewed response interceptor ownership: synchronous outcome/error handlers retain only Weak<BaseExchange>; existing request authorization and its asynchronous boundaries are unchanged."
+    },
+    {
+      "owner": "src/js_runtime/globals.rs::resolve_promise",
+      "boundaries": [
+        "async-block"
+      ],
+      "producer_sha256": "3281225f36ba1c41a6fa78d30c1ea44767a3ae3dfc159fed230b8a011d8f1928",
+      "classification": "delegated",
+      "delegate": "src/js_runtime/jobs.rs::Jobs::spawn / OwnedTasks driver",
+      "reason": "The existing runtime Jobs FIFO owns the constructor thenable job independently of its observer and orders it beside Promise reactions. The job retains its target promise until settlement or source retention of its resolvers. No exchange/socket reservation is installed; shared Driver discard drops queued captures. Real NativeRuntime constructor witnesses prove observer-drop execution and Node FIFO ordering; existing microtask host-discard witnesses cover driver cleanup."
     },
     {
       "owner": "src/js_runtime/jobs.rs::Driver as Future::poll",
@@ -2331,7 +2351,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "03a4d28f8d0e04c81a653f27209db2786915c793757f9afe2445cc550910f405"
+          "sha256": "dbb04988533d416a0cfea2df6330a8519940a5fcd1d43b5b25738403bed742c7"
         }
       ],
       "guards": [
@@ -2612,6 +2632,43 @@
           "sha256": "8effe46cde1640e62fa0807d03d77c16b723ec0e5d933474583ecc2ec5e2e0fb"
         }
       ]
+    },
+    {
+      "owner": "src/throttle.rs::ThrottleManager < T >::call",
+      "boundaries": [
+        "owned-or-host-spawn",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "48daf09e9220d855256146620632c77e84404de838d9d12ed030a22a2df3d2db",
+      "classification": "guarded",
+      "reason": "Relocated existing keyed throttle: TimerGuard is constructed before spawn and drops only its matching entry/task when a timer future is discarded; callbacks retain Weak manager references. Existing source orphan-tail behavior and clear/Drop cancellation are unchanged.",
+      "witnesses": [
+        "tests/keyed_throttle.rs::discarded_timer_tasks_release_the_key_without_firing_a_tail"
+      ],
+      "source_dependencies": [
+        {
+          "file": "src/throttle.rs",
+          "sha256": "a80784314e8d780e863755f7a40dda5960af32ec519845a6ed23434c05d2c23c"
+        }
+      ],
+      "guards": [
+        {
+          "type": "TimerGuard",
+          "file": "src/throttle.rs"
+        }
+      ]
+    },
+    {
+      "owner": "src/throttle.rs::symbol_metadata_throttler",
+      "boundaries": [
+        "owned-or-host-spawn",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "fc9533e3f3ed154f8c5b8f4ea7e585e1408a0b0a3f4d1a71be8c9e77d8ec6b93",
+      "classification": "no-owned-latch",
+      "reason": "Relocated existing worker metadata callback spawns and awaits the venue operation without installing a waiter or reservation. Callers acknowledge immediately; detached errors are reported visibly through the exchange runtime."
     },
     {
       "owner": "src/websocket.rs::BaseWebSocket::authenticate_and_subscribe",
@@ -2941,63 +2998,6 @@
       "classification": "delegated",
       "delegate": "src/exchange.rs::Exchange::fetch_and_set_private_snapshot",
       "reason": "Weak WS bridge resolves the concrete venue then delegates the snapshot; it owns no second task or resync latch."
-    },
-    {
-      "owner": "src/js_runtime/client.rs::create",
-      "boundaries": [
-        "async-block",
-        "await"
-      ],
-      "producer_sha256": "ddd323bd834a008d7baa700bb3404901644a96ea74def6564d12f302a8762f1f",
-      "classification": "no-owned-latch",
-      "reason": "The rate-limit request interceptor returns an eager runtime-owned Promise. Its future owns config and client state, awaits the existing throttle, then returns config to the interceptor chain. No RefCell borrow spans the wait; window capacity is recorded only at successful dequeue. Dropping the JS waiter delegates to PromiseWait cleanup while the source Promise remains runtime-owned."
-    },
-    {
-      "owner": "src/js_runtime/globals.rs::resolve_promise",
-      "boundaries": [
-        "async-block"
-      ],
-      "producer_sha256": "3281225f36ba1c41a6fa78d30c1ea44767a3ae3dfc159fed230b8a011d8f1928",
-      "classification": "delegated",
-      "delegate": "src/js_runtime/jobs.rs::Jobs::spawn / OwnedTasks driver",
-      "reason": "The existing runtime Jobs FIFO owns the constructor thenable job independently of its observer and orders it beside Promise reactions. The job retains its target promise until settlement or source retention of its resolvers. No exchange/socket reservation is installed; shared Driver discard drops queued captures. Real NativeRuntime constructor witnesses prove observer-drop execution and Node FIFO ordering; existing microtask host-discard witnesses cover driver cleanup."
-    },
-    {
-      "owner": "src/throttle.rs::ThrottleManager < T >::call",
-      "boundaries": [
-        "owned-or-host-spawn",
-        "async-block",
-        "await"
-      ],
-      "producer_sha256": "48daf09e9220d855256146620632c77e84404de838d9d12ed030a22a2df3d2db",
-      "classification": "guarded",
-      "reason": "Relocated existing keyed throttle: TimerGuard is constructed before spawn and drops only its matching entry/task when a timer future is discarded; callbacks retain Weak manager references. Existing source orphan-tail behavior and clear/Drop cancellation are unchanged.",
-      "witnesses": [
-        "tests/keyed_throttle.rs::discarded_timer_tasks_release_the_key_without_firing_a_tail"
-      ],
-      "source_dependencies": [
-        {
-          "file": "src/throttle.rs",
-          "sha256": "a80784314e8d780e863755f7a40dda5960af32ec519845a6ed23434c05d2c23c"
-        }
-      ],
-      "guards": [
-        {
-          "type": "TimerGuard",
-          "file": "src/throttle.rs"
-        }
-      ]
-    },
-    {
-      "owner": "src/throttle.rs::symbol_metadata_throttler",
-      "boundaries": [
-        "owned-or-host-spawn",
-        "async-block",
-        "await"
-      ],
-      "producer_sha256": "fc9533e3f3ed154f8c5b8f4ea7e585e1408a0b0a3f4d1a71be8c9e77d8ec6b93",
-      "classification": "no-owned-latch",
-      "reason": "Relocated existing worker metadata callback spawns and awaits the venue operation without installing a waiter or reservation. Callers acknowledge immediately; detached errors are reported visibly through the exchange runtime."
     }
   ]
 }

@@ -2582,7 +2582,7 @@ impl BaseExchange {
         request.config.params = request
             .config
             .params
-            .map(safe_cex_transport::signing::try_parse_json);
+            .map(safe_cex_transport::signing::try_parse_params_json);
         request.config.data = request
             .config
             .data

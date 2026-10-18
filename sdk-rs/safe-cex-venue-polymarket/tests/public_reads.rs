@@ -179,8 +179,13 @@ fn server_time_actual_typescript() {
         let value: Value = serde_json::from_str(raw).unwrap();
         let bodies = [
             RestResponseBody::Encoded(raw.as_bytes().to_vec()),
-            RestResponseBody::Untransformed(value.clone()),
-            RestResponseBody::Transformed(value),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                    .unwrap(),
+            ),
+            RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+            ),
         ];
         let mut performed = 0;
         for body in bodies {
@@ -236,7 +241,12 @@ fn server_time_actual_typescript() {
             message: "fixture failure".into(),
             response: Some(Box::new(RestResponse {
                 status: 429,
-                ..response(RestResponseBody::Transformed(json!({"error":"limit"})))
+                ..response(RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"error":"limit"}),
+                    )
+                    .unwrap(),
+                ))
             })),
             request: Box::new(RestRequest {
                 url: "/changed".into(),

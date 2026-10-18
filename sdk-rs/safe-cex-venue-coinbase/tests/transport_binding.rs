@@ -125,7 +125,9 @@ impl RestAdapter for Adapter {
                 status: 200,
                 reason: None,
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(body),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+                ),
             })
         })
     }

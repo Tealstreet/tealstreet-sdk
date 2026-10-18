@@ -585,7 +585,13 @@ fn secondary_socket_matches_actual_class() {
 fn secondary_native_ingress_and_error_projection() {
     let (parent, store, runtime, socket) = fixture(ExchangeName::Bitget, false, 1.0);
     let raw = r#"{"arg":{"channel":"ticker"},"data":[{"instId":"BTC","lastPr":"93"},{"instId":"\ud800","lastPr":"1"}]}"#;
-    socket.on_message(&SocketFrame::Text(raw.into())).unwrap();
+    let error = socket
+        .on_message(&SocketFrame::Text(raw.into()))
+        .unwrap_err();
+    assert!(
+        error.message.contains("invalid utf-16"),
+        "SECONDARY explicit typed-frame UTF16 projection refusal"
+    );
     assert_eq!(
         store.tickers()[0].last,
         0.0,

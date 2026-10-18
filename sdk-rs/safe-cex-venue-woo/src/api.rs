@@ -1,181 +1,223 @@
-//! WOO signing views and typed transport-context projection.
+//! WOO signs the live native configuration; JSON projection occurs only in V3's preimage.
 use safe_cex_crypto::{Encoding, SigningOptions, sign_payload};
+use safe_cex_exchange::js_runtime::value::{Js, to_json, to_retained_input};
 use safe_cex_transport::{RestRequest, RestTransportContext, TransportProvider};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use serde_json::{Map, Value};
 
-/// Keeps the signed preimage distinct from the configuration handed to Axios.
 pub struct WooSignedRequest {
-    pub config: Value,
+    pub config: Js,
     pub preimage: String,
 }
-fn truthy(value: &Value) -> bool {
-    safe_cex_num::js_truthy(Some(value))
+fn get(config: &Js, key: &str) -> Result<Js, String> {
+    config.get(key).map_err(|error| error.message())
 }
-fn keys(map: &Map<String, Value>) -> Vec<&str> {
-    safe_cex_num::js_own_keys(map.keys().map(String::as_str))
+fn set(config: &Js, key: &str, value: Js) -> Result<(), String> {
+    config.set(key, value).map_err(|error| error.message())
 }
-fn json_text(value: &Value) -> Result<String, String> {
-    safe_cex_num::js_json_stringify(&safe_cex_num::JsJsonValue::from(value.clone()))
-        .map_err(|error| error.message.to_owned())?
-        .ok_or_else(|| "JSON value unexpectedly serialized as undefined".to_owned())
+fn string(value: &Js) -> Result<String, String> {
+    let units = value.to_js_string().map_err(|error| error.message())?;
+    String::from_utf16(&units).map_err(|error| error.to_string())
 }
-fn encode(value: &str) -> String {
-    let mut output = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-            output.push(char::from(byte));
-        } else {
-            output.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    output
-}
-fn query(value: &Value) -> Result<String, String> {
-    fn visit(value: &Value, prefix: &str, pairs: &mut Vec<String>) -> Result<(), String> {
-        match value {
-            Value::Array(values) => {
-                for (index, value) in values.iter().enumerate() {
-                    visit(value, &format!("{prefix}[{index}]"), pairs)?;
-                }
-            }
-            Value::Object(values) => {
-                for key in keys(values) {
-                    visit(&values[key], &format!("{prefix}[{key}]"), pairs)?;
-                }
-            }
-            Value::Null => pairs.push(format!("{}=", encode(prefix))),
-            other => pairs.push(format!(
-                "{}={}",
-                encode(prefix),
-                encode(&safe_cex_num::js_string(Some(other)).map_err(|e| e.message.to_owned())?)
-            )),
-        }
-        Ok(())
-    }
-    let mut pairs = Vec::new();
+fn method(config: &Js, expression: &str) -> Result<String, String> {
+    let value = get(config, "method")?;
     match value {
-        Value::Object(values) => {
-            for key in keys(values) {
-                visit(&values[key], key, &mut pairs)?;
-            }
+        Js::String(units) if !units.is_empty() => {
+            string(&Js::String(units)).map(|value| value.to_uppercase())
         }
-        Value::Array(values) => {
-            for (index, value) in values.iter().enumerate() {
-                visit(value, &index.to_string(), &mut pairs)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(pairs.join("&"))
-}
-fn request_method(config: &Map<String, Value>, expression: &str) -> Result<String, String> {
-    match config.get("method") {
-        Some(Value::String(value)) if !value.is_empty() => Ok(value.to_uppercase()),
-        Some(Value::Object(value)) if value.get("toUpperCase").is_some_and(|v| !v.is_null()) => {
+        Js::Object(_) if !get(&value, "toUpperCase")?.is_nullish() => {
             Err(format!("{expression} is not a function"))
         }
         _ => Ok("GET".into()),
     }
 }
-fn absolute_url(config: &Map<String, Value>) -> Result<Option<&str>, String> {
-    match config.get("url") {
-        Some(Value::String(url)) => Ok(url.starts_with("http").then_some(url.as_str())),
-        None | Some(Value::Null) => Ok(None),
-        _ => Err("nextConfig?.url?.startsWith is not a function".into()),
+fn query(data: &Js, repeat: bool, sorted: bool) -> Result<String, String> {
+    let options = Js::object(vec![(
+        "arrayFormat",
+        Js::str(if repeat { "repeat" } else { "indices" }),
+    )]);
+    if sorted {
+        let collator =
+            safe_cex_num::JsRootCollator::try_new().map_err(|error| error.message.to_owned())?;
+        let sort = Js::function("localeCompare", move |_, args| {
+            let left = safe_cex_exchange::js_runtime::value::arg(&args, 0);
+            let right = safe_cex_exchange::js_runtime::value::arg(&args, 1);
+            let left = String::from_utf16(&left.to_js_string()?).map_err(|_| {
+                safe_cex_exchange::js_runtime::value::Thrown::error(
+                    "RepresentationError",
+                    "query key is outside the shared string boundary",
+                )
+            })?;
+            let right = String::from_utf16(&right.to_js_string()?).map_err(|_| {
+                safe_cex_exchange::js_runtime::value::Thrown::error(
+                    "RepresentationError",
+                    "query key is outside the shared string boundary",
+                )
+            })?;
+            Ok(Js::Number(match collator.compare(&left, &right) {
+                std::cmp::Ordering::Less => -1.0,
+                std::cmp::Ordering::Equal => 0.0,
+                std::cmp::Ordering::Greater => 1.0,
+            }))
+        });
+        options.set("sort", sort).map_err(|error| error.message())?;
     }
+    safe_cex_exchange::js_runtime::library::qs_stringify(data, &options)
+        .map_err(|error| error.message())
 }
-fn proxy_request(config: &Map<String, Value>, url: &str) -> RestRequest {
-    let timeout_ms = config
-        .get("timeout")
-        .and_then(safe_cex_num::numeric_ingress::js_value_as_f64)
-        .filter(|v| {
-            v.is_finite()
-                && v.fract() == 0.
-                && *v >= -9_223_372_036_854_775_808.
-                && *v < 9_223_372_036_854_775_808.
+pub(crate) fn sorted_query(data: &Js, repeat: bool) -> Result<String, String> {
+    query(data, repeat, true)
+}
+fn proxy_request(config: &Js, url: &str) -> Result<RestRequest, String> {
+    let timeout = get(config, "timeout")?
+        .to_number()
+        .ok()
+        .filter(|value| {
+            value.is_finite()
+                && value.fract() == 0.0
+                && *value >= i64::MIN as f64
+                && *value < i64::MAX as f64
         })
-        .map(|v| v as i64);
-    RestRequest {
-        url: url.into(),
-        method: config
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or("GET")
-            .into(),
-        params: config.get("params").cloned(),
-        body: config
-            .get("data")
-            .cloned()
-            .map(safe_cex_transport::RestBody::Untransformed),
-        base_url: config
-            .get("baseURL")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        timeout_ms,
-        headers: config
-            .get("headers")
-            .and_then(Value::as_object)
-            .map(|headers| {
-                headers
-                    .iter()
-                    .filter_map(|(name, value)| value.as_str().map(|v| (name.clone(), v.into())))
-                    .collect()
+        .map(|value| value as i64);
+    let headers = get(config, "headers")?;
+    let headers = if headers.is_nullish() {
+        Default::default()
+    } else {
+        headers
+            .own_entries()
+            .map_err(|error| error.message())?
+            .into_iter()
+            .filter_map(|(key, value)| match value {
+                Js::String(units) => Some(
+                    String::from_utf16(&key)
+                        .and_then(|key| String::from_utf16(&units).map(|value| (key, value))),
+                ),
+                _ => None,
             })
-            .unwrap_or_default(),
-        ..Default::default()
-    }
-}
-
-// ts: signV3
-pub async fn sign_v3(
-    config: &Value,
-    options: &ExchangeOptions,
-    provider: &dyn TransportProvider,
-    timestamp: f64,
-) -> Result<WooSignedRequest, String> {
-    let mut next = config
-        .as_object()
-        .cloned()
-        .ok_or("WOO signing config must be an object")?;
-    let method = request_method(&next, "c.method?.toUpperCase")?;
-    next.insert("method".into(), Value::String(method.clone()));
-    if let Some(url) = absolute_url(&next)? {
-        let request = proxy_request(&next, url);
-        let prefix = provider.proxy_prefix(RestTransportContext {
-            exchange: &ExchangeName::Woo,
-            options,
-            config: &request,
-        });
-        if !prefix.is_empty() {
-            next.insert("url".into(), Value::String(format!("{prefix}/{url}")));
-        }
-    }
-    if let Some(params) = next.get("params").filter(|params| truthy(params)) {
-        let url = next
-            .get("url")
-            .map(|v| safe_cex_num::js_string(Some(v)))
-            .transpose()
-            .map_err(|e| e.message.to_owned())?
-            .unwrap_or_else(|| "undefined".into());
-        let url = format!("{url}?{}", query(params)?);
-        next.insert("url".into(), Value::String(url));
-        next.remove("params");
-    }
-    let url = match next.get("url") {
-        None | Some(Value::Null) => String::new(),
-        value => safe_cex_num::js_string(value).map_err(|e| e.message.to_owned())?,
+            .collect::<Result<_, _>>()
+            .map_err(|error| error.to_string())?
     };
-    let body = next
-        .get("data")
-        .filter(|data| truthy(data))
-        .map(json_text)
-        .transpose()?
-        .unwrap_or_default();
-    let preimage = format!(
-        "{}{method}{url}{body}",
-        safe_cex_num::js_number_string(timestamp)
-    );
+    let params = get(config, "params")?;
+    let data = get(config, "data")?;
+    Ok(RestRequest {
+        url: url.into(),
+        method: get(config, "method")?
+            .as_str()
+            .map(|units| String::from_utf16(units))
+            .transpose()
+            .map_err(|error| error.to_string())?
+            .unwrap_or_else(|| "GET".into()),
+        // This legacy params view remains the separate declared query boundary.
+        params: if params.is_undefined() {
+            None
+        } else {
+            Some(to_json(&params).map_err(|error| error.message())?)
+        },
+        body: if data.is_undefined() {
+            None
+        } else {
+            Some(safe_cex_transport::RestBody::Untransformed(
+                to_retained_input(&data).map_err(|error| error.message())?,
+            ))
+        },
+        base_url: get(config, "baseURL")?
+            .as_str()
+            .map(|units| String::from_utf16(units))
+            .transpose()
+            .map_err(|error| error.to_string())?,
+        timeout_ms: timeout,
+        headers,
+        ..Default::default()
+    })
+}
+async fn sign(
+    config: &Js,
+    options: &ExchangeOptions,
+    provider: &dyn TransportProvider,
+    timestamp: f64,
+    v3: bool,
+) -> Result<WooSignedRequest, String> {
+    let next = config.spread_object().map_err(|error| error.message())?;
+    let method = method(
+        &next,
+        if v3 {
+            "c.method?.toUpperCase"
+        } else {
+            "nextConfig.method?.toUpperCase"
+        },
+    )?;
+    if v3 {
+        set(&next, "method", Js::str(&method))?;
+    }
+    let url = get(&next, "url")?;
+    if !url.is_nullish() {
+        if !url.is_string() {
+            return Err("nextConfig?.url?.startsWith is not a function".into());
+        }
+        let url = string(&url)?;
+        if url.starts_with("http") {
+            let request = proxy_request(&next, &url)?;
+            let prefix = provider.proxy_prefix(RestTransportContext {
+                exchange: &ExchangeName::Woo,
+                options,
+                config: &request,
+            });
+            if !prefix.is_empty() {
+                set(&next, "url", Js::str(&format!("{prefix}/{url}")))?;
+            }
+        }
+    }
+    let mutation = matches!(method.as_str(), "DELETE" | "POST" | "PUT");
+    let params = get(&next, "params")?;
+    let data = get(&next, "data")?;
+    let query = if v3 {
+        if params.truthy() {
+            Some(query(&params, false, false)?)
+        } else {
+            None
+        }
+    } else {
+        Some(sorted_query(
+            if data.truthy() { &data } else { &params },
+            true,
+        )?)
+    };
+    if let Some(query) = query
+        .as_ref()
+        .filter(|query| v3 || (!query.is_empty() && !mutation))
+    {
+        set(
+            &next,
+            "url",
+            Js::str(&format!("{}?{query}", string(&get(&next, "url")?)?)),
+        )?;
+        next.delete(&"params".encode_utf16().collect::<Vec<_>>());
+    }
+    let preimage = if v3 {
+        let url = get(&next, "url")?;
+        let url = if url.is_nullish() {
+            String::new()
+        } else {
+            string(&url)?
+        };
+        let body = if data.truthy() {
+            let units = safe_cex_exchange::js_runtime::globals::stringify_json(&data)
+                .map_err(|error| error.message())?
+                .unwrap_or_default();
+            String::from_utf16(&units).map_err(|error| error.to_string())?
+        } else {
+            String::new()
+        };
+        format!(
+            "{}{method}{url}{body}",
+            safe_cex_num::js_number_string(timestamp)
+        )
+    } else {
+        format!(
+            "{}|{}",
+            query.as_deref().unwrap_or(""),
+            safe_cex_num::js_number_string(timestamp)
+        )
+    };
     let signature = sign_payload(
         &SigningOptions {
             key: &options.key,
@@ -188,177 +230,59 @@ pub async fn sign_v3(
     )
     .await?
     .signature;
-    let mut headers = next
-        .get("headers")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    for name in ["x-api-timestamp", "x-api-signature"] {
-        headers.retain(|key, _| !key.eq_ignore_ascii_case(name));
+    let headers = get(&next, "headers")?
+        .spread_object()
+        .map_err(|error| error.message())?;
+    for key in headers.own_keys() {
+        if let Ok(name) = String::from_utf16(&key)
+            && ["x-api-timestamp", "x-api-signature"]
+                .iter()
+                .any(|expected| name.eq_ignore_ascii_case(expected))
+        {
+            headers.delete(&key);
+        }
     }
-    headers.insert(
-        "x-api-timestamp".into(),
-        Value::String(safe_cex_num::js_number_string(timestamp)),
-    );
-    headers.insert("x-api-signature".into(), Value::String(signature));
-    next.insert("headers".into(), Value::Object(headers));
+    set(
+        &headers,
+        "x-api-timestamp",
+        Js::str(&safe_cex_num::js_number_string(timestamp)),
+    )?;
+    set(&headers, "x-api-signature", Js::str(&signature))?;
+    if !v3 && mutation {
+        set(&next, "data", Js::str(query.as_deref().unwrap_or("")))?;
+        next.delete(&"params".encode_utf16().collect::<Vec<_>>());
+        let key = headers.own_keys().into_iter().find(|key| {
+            String::from_utf16(key).is_ok_and(|key| key.eq_ignore_ascii_case("content-type"))
+        });
+        let key = key.unwrap_or_else(|| "Content-Type".encode_utf16().collect::<Vec<_>>().into());
+        if !matches!(
+            headers.get_key(&key).map_err(|error| error.message())?,
+            Js::Bool(false)
+        ) {
+            headers
+                .set_key(&key, Js::str("application/x-www-form-urlencoded"))
+                .map_err(|error| error.message())?;
+        }
+    }
+    set(&next, "headers", headers)?;
     Ok(WooSignedRequest {
-        config: Value::Object(next),
+        config: next,
         preimage,
     })
 }
-
-// ts: signV1
-pub(crate) fn sorted_query(data: &Value, repeat: bool) -> Result<String, String> {
-    let collator = safe_cex_num::JsRootCollator::try_new().map_err(|e| e.message.to_owned())?;
-    fn visit(
-        value: &Value,
-        prefix: &str,
-        pairs: &mut Vec<String>,
-        collator: &safe_cex_num::JsRootCollator,
-        repeat: bool,
-    ) -> Result<(), String> {
-        match value {
-            Value::Array(values) => {
-                let mut indices: Vec<_> = (0..values.len()).collect();
-                indices.sort_by(|a, b| collator.compare(&a.to_string(), &b.to_string()));
-                for index in indices {
-                    let child = if repeat {
-                        prefix.to_owned()
-                    } else {
-                        format!("{prefix}[{index}]")
-                    };
-                    visit(&values[index], &child, pairs, collator, repeat)?;
-                }
-            }
-            Value::Object(values) => {
-                let mut names = keys(values);
-                names.sort_by(|a, b| collator.compare(a, b));
-                for name in names {
-                    visit(
-                        &values[name],
-                        &format!("{prefix}[{name}]"),
-                        pairs,
-                        collator,
-                        repeat,
-                    )?;
-                }
-            }
-            Value::Null => pairs.push(format!("{}=", encode(prefix))),
-            value => pairs.push(format!(
-                "{}={}",
-                encode(prefix),
-                encode(&safe_cex_num::js_string(Some(value)).map_err(|e| e.message.to_owned())?)
-            )),
-        }
-        Ok(())
-    }
-    let mut pairs = Vec::new();
-    match data {
-        Value::Object(values) => {
-            let mut names = keys(values);
-            names.sort_by(|a, b| collator.compare(a, b));
-            for name in names {
-                visit(&values[name], name, &mut pairs, &collator, repeat)?;
-            }
-        }
-        Value::Array(values) => {
-            let mut indices: Vec<_> = (0..values.len()).collect();
-            indices.sort_by(|a, b| collator.compare(&a.to_string(), &b.to_string()));
-            for index in indices {
-                visit(
-                    &values[index],
-                    &index.to_string(),
-                    &mut pairs,
-                    &collator,
-                    repeat,
-                )?;
-            }
-        }
-        _ => {}
-    }
-    Ok(pairs.join("&"))
-}
-
 pub async fn sign_v1(
-    config: &Value,
+    config: &Js,
     options: &ExchangeOptions,
     provider: &dyn TransportProvider,
     timestamp: f64,
 ) -> Result<WooSignedRequest, String> {
-    let mut next = config
-        .as_object()
-        .cloned()
-        .ok_or("WOO signing config must be an object")?;
-    let method = request_method(&next, "nextConfig.method?.toUpperCase")?;
-    let mutation = matches!(method.as_str(), "DELETE" | "POST" | "PUT");
-    if let Some(url) = absolute_url(&next)? {
-        let request = proxy_request(&next, url);
-        let prefix = provider.proxy_prefix(RestTransportContext {
-            exchange: &ExchangeName::Woo,
-            options,
-            config: &request,
-        });
-        if !prefix.is_empty() {
-            next.insert("url".into(), Value::String(format!("{prefix}/{url}")));
-        }
-    }
-    let data = next
-        .get("data")
-        .filter(|v| truthy(v))
-        .or_else(|| next.get("params").filter(|v| truthy(v)));
-    let query = sorted_query(data.unwrap_or(&Value::Null), true)?;
-    if !query.is_empty() && !mutation {
-        let url = safe_cex_num::js_string(next.get("url")).map_err(|e| e.message.to_owned())?;
-        next.insert("url".into(), Value::String(format!("{url}?{query}")));
-        next.remove("params");
-    }
-    let preimage = format!("{query}|{}", safe_cex_num::js_number_string(timestamp));
-    let signature = sign_payload(
-        &SigningOptions {
-            key: &options.key,
-            secret: &options.secret,
-            payload_signer: None,
-        },
-        ExchangeName::Woo,
-        &preimage,
-        Encoding::Hex,
-    )
-    .await?
-    .signature;
-    let mut headers = next
-        .get("headers")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    for name in ["x-api-timestamp", "x-api-signature"] {
-        headers.retain(|key, _| !key.eq_ignore_ascii_case(name));
-    }
-    headers.insert(
-        "x-api-timestamp".into(),
-        Value::String(safe_cex_num::js_number_string(timestamp)),
-    );
-    headers.insert("x-api-signature".into(), Value::String(signature));
-    if mutation {
-        next.insert("data".into(), Value::String(query));
-        next.remove("params");
-        if !headers.iter().any(|(key, value)| {
-            key.eq_ignore_ascii_case("content-type") && value == &Value::Bool(false)
-        }) {
-            let key = headers
-                .keys()
-                .find(|key| key.eq_ignore_ascii_case("content-type"))
-                .cloned()
-                .unwrap_or_else(|| "Content-Type".into());
-            headers.insert(
-                key,
-                Value::String("application/x-www-form-urlencoded".into()),
-            );
-        }
-    }
-    next.insert("headers".into(), Value::Object(headers));
-    Ok(WooSignedRequest {
-        config: Value::Object(next),
-        preimage,
-    })
+    sign(config, options, provider, timestamp, false).await
+}
+pub async fn sign_v3(
+    config: &Js,
+    options: &ExchangeOptions,
+    provider: &dyn TransportProvider,
+    timestamp: f64,
+) -> Result<WooSignedRequest, String> {
+    sign(config, options, provider, timestamp, true).await
 }

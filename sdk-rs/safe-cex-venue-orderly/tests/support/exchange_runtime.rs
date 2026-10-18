@@ -237,7 +237,9 @@ impl RestAdapter for Wire {
                 status,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(data),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap(),
+                ),
             })
         })
     }

@@ -28,7 +28,13 @@ pub fn on_futures_private_message(
         methods.diagnostic(data.as_ref())?;
         let json = match data.as_ref() {
             Some(data) if data.borrow().is_string() => Some(Rc::new(RefCell::new(
-                big_int_as_string_json_parse(data.borrow().as_str().unwrap()),
+                big_int_as_string_json_parse(data.borrow().as_str().unwrap())
+                    .into_value()
+                    .map_err(|error| {
+                        Rc::new(safe_cex_exchange::runtime::ExchangeError::new(
+                            error.to_string(),
+                        ))
+                    })?,
             ))),
             // The actual bigint parser returns non-string input unchanged.
             _ => data,
@@ -70,7 +76,12 @@ pub fn on_pm_private_message(
         methods.diagnostic(data.as_ref())?;
         // The source jsonParse catches JSON.parse input-coercion errors too.
         let parsed = js_string(data.as_ref().map(|value| value.borrow()).as_deref())
-            .map_or(Value::Null, |text| json_parse(&text));
+            .map_or(Ok(Value::Null), |text| json_parse(&text).into_value())
+            .map_err(|error| {
+                Rc::new(safe_cex_exchange::runtime::ExchangeError::new(
+                    error.to_string(),
+                ))
+            })?;
         let json = Some(Rc::new(RefCell::new(parsed)));
         if event_is(&json, "ACCOUNT_UPDATE") {
             socket
