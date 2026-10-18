@@ -375,7 +375,15 @@ async fn dispatch(
         .await;
     match result {
         Ok(execution) => Ok((execution.response, execution.config)),
-        Err(error) => Err(Dispatch::Transport(error, raised.borrow_mut().take())),
+        Err(mut error) => {
+            if let Some(response) = error.response.as_mut() {
+                response.body = safe_cex_transport::RestResponseBody::Transformed(response_data(
+                    response,
+                    client.transform.get(),
+                ));
+            }
+            Err(Dispatch::Transport(error, raised.borrow_mut().take()))
+        }
     }
 }
 /// The axios config object request interceptors see.
@@ -539,14 +547,9 @@ async fn respond(
     let transform = client.transform.get();
     let mut state: Result<EventValue, Failure> = match outcome {
         Ok((response, config)) => response_value(&response, &config, transform),
-        Err(Dispatch::Transport(mut error, raised)) => Err(raised.unwrap_or_else(|| {
-            if let Some(response) = error.response.as_mut() {
-                response.body = safe_cex_transport::RestResponseBody::Transformed(response_data(
-                    response, transform,
-                ));
-            }
-            Rc::new(ExchangeError::from(error))
-        })),
+        Err(Dispatch::Transport(error, raised)) => {
+            Err(raised.unwrap_or_else(|| Rc::new(ExchangeError::from(error))))
+        }
     };
     let stages: Vec<_> = client
         .response

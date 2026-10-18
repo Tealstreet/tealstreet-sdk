@@ -120,7 +120,18 @@ pub struct ExchangeError {
 }
 impl ExchangeError {
     pub fn with_retained_response(mut self, response: RetainedJsonInput) -> Self {
-        let cause = self.origin.take();
+        let cause = self
+            .store_subscriber_cause
+            .as_ref()
+            .filter(|cause| std::error::Error::source(*cause).is_some())
+            .cloned()
+            .map(ExchangeErrorOrigin::new)
+            .or_else(|| self.origin.take())
+            .or_else(|| {
+                self.store_subscriber_cause
+                    .clone()
+                    .map(ExchangeErrorOrigin::new)
+            });
         self.origin = Some(ExchangeErrorOrigin::new(RetainedResponseOrigin {
             response,
             cause,

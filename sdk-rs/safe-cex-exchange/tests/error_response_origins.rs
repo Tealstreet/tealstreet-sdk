@@ -109,3 +109,29 @@ fn response_authority_is_nearest_origin_and_keeps_original_cause() {
             .is::<RestFailure>()
     );
 }
+
+#[test]
+fn api_response_wrapper_keeps_a_store_subscriber_cause_on_the_source_chain() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    use std::rc::Rc;
+    let original = Rc::new(std::io::Error::other("original subscriber failure"));
+    let mut error = ExchangeError::new("outer");
+    error.store_subscriber_cause =
+        Some(safe_cex_types::StoreSubscriberError::new("subscriber").with_cause(original.clone()));
+    let response = Input::Object(vec![("data".encode_utf16().collect(), Input::Float(-0.0))]);
+    let error = error.with_retained_response(response.clone());
+    assert_eq!(error.retained_response_input(), Some(response));
+    let mut source = error.source();
+    let mut retained = None;
+    while let Some(cause) = source {
+        if let Some(cause) = cause.downcast_ref::<std::io::Error>() {
+            retained = Some(cause);
+            break;
+        }
+        source = cause.source();
+    }
+    assert!(
+        retained.is_some_and(|cause| std::ptr::eq(cause, original.as_ref())),
+        "response wrapper must preserve the exact subscriber cause"
+    );
+}
