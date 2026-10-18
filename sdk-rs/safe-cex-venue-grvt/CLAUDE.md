@@ -206,8 +206,9 @@ are owned; the manifest names the measured difference from live JS aliases.
 Order controls now use src/order_controls.rs with bound SDK and socket hooks.
 Keep eager guard/log/first-call effects, sequential batch continuation, authentic
 builder-error short circuit, and replacement validation before cancellation.
-Missing/null trigger info keeps the source property-access error; typed update
-keys have an explicit diagnostic fieldCount difference in the manifest.
+Missing/null trigger info keeps the source property-access error; the constructed member captures raw enumerable update-key count before typed
+projection, preserving fieldCount even for extra own keys. The pure typed helper
+counts only represented fields because it has no raw caller object.
 These methods do not claim the SDK constructor or single-order placement path.
 
 GRVT public candles/books and account leverage are in `data_reads.rs`. Configured client hooks supply transformed HTTP data or SDK responses; KlineRequest keeps native f64 limits and optional IDs until serialization. Keep current-first order-book total accumulation and cache notification before the fresh position lookup. Leverage helpers declare owned Market/returned-cache alias boundaries in the manifest and assert corresponding source/native witnesses; the account getter is live after setter logging.
