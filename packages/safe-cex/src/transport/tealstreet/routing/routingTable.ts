@@ -64,6 +64,7 @@ const WS = {
 // /binance|okx|okex|bitget/ regex. grvt -> 'tiny'; everything else -> 'asia'.
 const REST_JP: ExchangeName[] = [
   'binance',
+  'binanceinverse',
   'binancepm',
   'binancespot',
   'okx',

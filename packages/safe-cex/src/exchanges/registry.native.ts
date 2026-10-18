@@ -15,6 +15,7 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   asterdex: load(() => require('./asterdex/asterdex.exchange').AsterDEXExchange),
   backpack: load(() => require('./backpack/backpack.exchange').BackpackExchange),
   binance: load(() => require('./binance/binance.exchange').BinanceExchange),
+  binanceinverse: load(() => require('./binance/binanceinverse.exchange').BinanceInverseExchange),
   binancepm: load(() => require('./binance/binancepm.exchange').BinancePMExchange),
   binancespot: load(() => require('./binance/binancespot.exchange').BinanceSpotExchange),
   bingx: load(() => require('./bingx/bingx.exchange').BingxExchange),

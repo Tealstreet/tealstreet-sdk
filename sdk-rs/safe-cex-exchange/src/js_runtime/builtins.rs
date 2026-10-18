@@ -39,36 +39,6 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
         Js::Map(_) => map_member(this, &name),
         Js::Set(_) => set_member(this, &name),
         Js::Promise(p) => promise_member(p.clone(), &name),
-        Js::Function(_) if name == "call" => Some(Js::function("call", |target, args| {
-            if !target.is_callable() {
-                return Err(Thrown::type_error(
-                    "Function.prototype.call requires a callable receiver",
-                ));
-            }
-            let this = arg(&args, 0);
-            target.call(this, args.into_iter().skip(1).collect())
-        })),
-        Js::Function(_) if name == "bind" => Some(Js::function("bind", |target, args| {
-            if !target.is_callable() {
-                return Err(Thrown::type_error("Bind must be called on a function"));
-            }
-            let bound_this = arg(&args, 0);
-            let bound_args: Vec<Js> = args.into_iter().skip(1).collect();
-            let target_name = target.get("name")?;
-            let mut name: Vec<u16> = "bound ".encode_utf16().collect();
-            if let Js::String(target_name) = target_name {
-                name.extend_from_slice(&target_name);
-            }
-            Ok(Js::Function(Rc::new(super::value::FunctionData {
-                name: name.into(),
-                call: Rc::new(move |_, args| {
-                    let mut combined = bound_args.clone();
-                    combined.extend(args);
-                    target.call(bound_this.clone(), combined)
-                }),
-                props: RefCell::default(),
-            })))
-        })),
         Js::Number(n) => {
             let n = *n;
             match name.as_str() {

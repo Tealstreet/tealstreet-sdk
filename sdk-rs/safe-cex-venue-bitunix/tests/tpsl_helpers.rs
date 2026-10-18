@@ -79,8 +79,8 @@ fn actual_typescript_tpsl_helpers() {
         };
         assert_eq!(
             string_result(get_tpsl_leg_order_id(
-                raw.as_ref(),
-                position.as_ref(),
+                raw.clone().map(Into::into).as_ref(),
+                position.clone().map(Into::into).as_ref(),
                 leg,
                 row["disambiguate"].as_bool().unwrap()
             )),
@@ -133,8 +133,12 @@ fn actual_typescript_tpsl_helpers() {
             refused[2] += 1;
             continue;
         };
-        let actual = match get_bitunix_reduce_only(raw.as_ref(), client.as_ref(), fallback, &cache)
-        {
+        let actual = match get_bitunix_reduce_only(
+            raw.map(Into::into).as_ref(),
+            client.map(Into::into).as_ref(),
+            fallback,
+            &cache,
+        ) {
             Ok(v) => json!({"type":"boolean","value":v}),
             Err(_) => json!({"error":"TypeError"}),
         };

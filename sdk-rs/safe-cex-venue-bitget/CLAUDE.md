@@ -392,3 +392,8 @@ against the maintained TS exchange and actual Store before JSON. The shared
 fault runner swaps the live bid lookup and requires compiled RED/restored GREEN.
 The native witness identifies shards by their actual subscription frames and
 asserts pairwise socket identity, so three labels cannot exercise one socket.
+
+Position freshness reads canonical retained info directly. Nullish aliases skip own
+undefined, while a present NaN blocks later aliases. The constructed private-receiver
+regression compares nine source timestamp cases across all three variants, including
+parseFloat prefixes before unpaired UTF-16 surrogates and signed-zero bits.

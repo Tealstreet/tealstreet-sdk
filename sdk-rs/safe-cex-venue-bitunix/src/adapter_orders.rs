@@ -1,14 +1,14 @@
 //! Order reads, placement, batching, cancellation and amendment hosts over the store.
 use crate::{
-    adapter::{BitunixVenue, Fault, coercion, from_value, reason, to_value, units, utf8},
+    adapter::{
+        BitunixVenue, Fault, coercion, from_input, from_value, reason, request_payload, to_input,
+        units, utf8,
+    },
     tpsl_helpers::TpslLeg,
 };
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
-use safe_cex_num::{
-    JsJsonValue, TableHit,
-    get_key::{GetKeyObject, GetKeyValue, v},
-    js_number_string, js_string, js_truthy,
-};
+use safe_cex_num::{JsJsonValue, js_number_string};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Order, OrderStatus, OrderStopTriggerType, OrderType, PlaceOrderOpts, Position,
     PreparedOrderOpts, UpdateOrderOpts,
@@ -23,20 +23,32 @@ fn leg(name: &str) -> TpslLeg {
         TpslLeg::Sl
     }
 }
-/// A canonical Order for helpers that read only id/type/amount/info of a JS order object.
-fn order_of(value: &Value) -> Result<Order, ExchangeError> {
-    let mut order = json!({"id":"","status":"open","symbol":"","type":"conditional","side":"buy","price":0,"amount":0,"filled":0,"remaining":0,"reduceOnly":false,"lastUpdate":0});
+fn order_of(value: &Input) -> Result<Order, ExchangeError> {
+    let mut order = to_input(&from_value::<Order>(
+        json!({"id":"","status":"open","symbol":"","type":"conditional","side":"buy","price":0,"amount":0,"filled":0,"remaining":0,"reduceOnly":false,"lastUpdate":0}),
+    )?)?;
     if let Some(fields) = value.as_object() {
-        for (k, field) in fields {
-            if !field.is_null() {
-                order[k] = field.clone();
+        let target = order.as_object_mut().expect("native order object");
+        for (key, value) in fields {
+            if !value.is_nullish() {
+                if let Some((_, field)) = target.iter_mut().find(|(name, _)| name == key) {
+                    *field = value.clone();
+                } else {
+                    target.push((key.clone(), value.clone()));
+                }
             }
         }
     }
-    if serde_json::from_value::<OrderType>(order["type"].clone()).is_err() {
-        order["type"] = json!("conditional");
+    if order
+        .get("type")
+        .cloned()
+        .and_then(|value| from_input::<OrderType>(value).ok())
+        .is_none()
+    {
+        *order.get_mut("type").expect("order type default") =
+            Input::Text("conditional".encode_utf16().collect());
     }
-    from_value(order)
+    from_input(order)
 }
 fn js_text(value: &JsJsonValue) -> String {
     match value {
@@ -83,12 +95,12 @@ impl BitunixVenue {
 }
 impl crate::order_models::OrderModelHost for OrderFrame {
     type Error = Fault;
-    fn caller_id(&mut self, options: &Value) -> Result<Option<String>, Fault> {
-        let opts: PreparedOrderOpts = from_value(options.clone())?;
+    fn caller_id(&mut self, options: &Input) -> Result<Option<String>, Fault> {
+        let opts: PreparedOrderOpts = from_input(options.clone())?;
         Ok(self.venue.base.resolve_caller_client_order_id(&opts)?)
     }
-    fn market(&mut self, symbol: &Value) -> Result<Option<Value>, Fault> {
-        let symbol = js_string(Some(symbol))?;
+    fn market(&mut self, symbol: &Input) -> Result<Option<Input>, Fault> {
+        let symbol = safe_cex_num::js_retained_string(Some(symbol))?;
         let market = self
             .venue
             .base
@@ -96,23 +108,27 @@ impl crate::order_models::OrderModelHost for OrderFrame {
             .markets_by_symbol()
             .get(&symbol)
             .cloned();
-        Ok(market.map(|m| to_value(&m)).transpose()?)
+        Ok(market.map(|m| to_input(&m)).transpose()?)
     }
-    fn positions(&mut self) -> Result<Vec<Value>, Fault> {
+    fn positions(&mut self) -> Result<Vec<Input>, Fault> {
         let positions = self.venue.base.store.positions().to_vec();
-        Ok(positions.iter().map(to_value).collect::<Result<_, _>>()?)
+        Ok(positions.iter().map(to_input).collect::<Result<_, _>>()?)
     }
-    fn orders(&mut self) -> Result<Vec<Value>, Fault> {
+    fn orders(&mut self) -> Result<Vec<Input>, Fault> {
         Ok(self
             .venue
             .store_orders()
             .iter()
-            .map(to_value)
+            .map(to_input)
             .collect::<Result<_, _>>()?)
     }
-    fn cached_position(&mut self, key: &str) -> Result<Option<Value>, Fault> {
+    fn cached_position(&mut self, key: &str) -> Result<Option<Input>, Fault> {
         let state = self.venue.state.borrow();
-        Ok(state.position_id_cache.get(key).cloned().map(Value::String))
+        Ok(state
+            .position_id_cache
+            .get(key)
+            .cloned()
+            .map(|value| Input::Text(value.encode_utf16().collect())))
     }
     fn uuid(&mut self) -> Result<String, Fault> {
         Ok(self.venue.runtime.unique_id().replace(['-', '_'], ""))
@@ -123,8 +139,8 @@ impl crate::order_models::OrderModelHost for OrderFrame {
             .base
             .assert_single_native_client_order_id(caller, count)?)
     }
-    fn cache_tif(&mut self, client_id: &str, tif: &Value) -> Result<(), Fault> {
-        let tif = js_string(Some(tif))?;
+    fn cache_tif(&mut self, client_id: &str, tif: &Input) -> Result<(), Fault> {
+        let tif = safe_cex_num::js_retained_string(Some(tif))?;
         self.venue
             .state
             .borrow_mut()
@@ -132,26 +148,34 @@ impl crate::order_models::OrderModelHost for OrderFrame {
             .insert(client_id.into(), tif);
         Ok(())
     }
-    fn cache_reduce_only(&mut self, client_id: &str, reduce_only: &Value) -> Result<(), Fault> {
+    fn cache_reduce_only(&mut self, client_id: &str, reduce_only: &Input) -> Result<(), Fault> {
         self.venue
             .state
             .borrow_mut()
             .order_reduce_only_cache
-            .insert(client_id.into(), js_truthy(Some(reduce_only)));
+            .insert(client_id.into(), reduce_only.is_truthy());
         Ok(())
     }
-    fn emit(&mut self, message: JsJsonValue) -> Result<(), Fault> {
-        Ok(self.venue.emit_error(&js_text(&message))?)
+    fn emit(&mut self, message: Input) -> Result<(), Fault> {
+        Ok(self
+            .venue
+            .emit_error(&safe_cex_num::js_retained_string(Some(&message))?)?)
     }
-    fn error(&mut self, message: JsJsonValue) -> Result<Fault, Fault> {
-        Ok(Fault(ExchangeError::new(js_text(&message))))
+    fn error(&mut self, message: Input) -> Result<Fault, Fault> {
+        Ok(Fault(ExchangeError::new(safe_cex_num::js_retained_string(
+            Some(&message),
+        )?)))
     }
-    fn reason(&mut self, error: &Fault, fallback: Option<&str>) -> Result<JsJsonValue, Fault> {
+    fn reason(&mut self, error: &Fault, fallback: Option<&str>) -> Result<Input, Fault> {
         let message = reason(&error.0);
-        Ok(JsJsonValue::String(match fallback {
-            Some(f) if message.is_empty() => f.into(),
-            _ => message,
-        }))
+        Ok(Input::Text(
+            match fallback {
+                Some(f) if message.is_empty() => f.into(),
+                _ => message,
+            }
+            .encode_utf16()
+            .collect(),
+        ))
     }
     fn warning(&mut self, prefix: &'static str, error: &Fault) -> Result<(), Fault> {
         Ok(self
@@ -161,26 +185,47 @@ impl crate::order_models::OrderModelHost for OrderFrame {
     fn get(
         &mut self,
         endpoint: &'static str,
-        config: JsJsonValue,
-    ) -> impl Future<Output = Result<Value, Fault>> {
-        let f = self.venue.xhr().get(endpoint, config);
-        async move { Ok(json!({ "data": f.await? })) }
+        config: Input,
+    ) -> impl Future<Output = Result<Input, Fault>> {
+        let client = self.venue.xhr();
+        async move {
+            Ok(Input::Object(vec![(
+                "data".encode_utf16().collect(),
+                client.get(endpoint, request_payload(config)?).await?.into(),
+            )]))
+        }
     }
     fn post(
         &mut self,
         endpoint: &'static str,
-        payload: JsJsonValue,
-    ) -> impl Future<Output = Result<Value, Fault>> {
-        let f = self.venue.unlimited().post(endpoint, payload);
-        async move { Ok(json!({ "data": f.await? })) }
+        payload: Input,
+    ) -> impl Future<Output = Result<Input, Fault>> {
+        let client = self.venue.unlimited();
+        async move {
+            Ok(Input::Object(vec![(
+                "data".encode_utf16().collect(),
+                client
+                    .post(endpoint, request_payload(payload)?)
+                    .await?
+                    .into(),
+            )]))
+        }
     }
     fn post_limited(
         &mut self,
         endpoint: &'static str,
-        payload: JsJsonValue,
-    ) -> impl Future<Output = Result<Value, Fault>> {
-        let future = self.venue.xhr().post(endpoint, payload);
-        async move { Ok(json!({ "data": future.await? })) }
+        payload: Input,
+    ) -> impl Future<Output = Result<Input, Fault>> {
+        let client = self.venue.xhr();
+        async move {
+            Ok(Input::Object(vec![(
+                "data".encode_utf16().collect(),
+                client
+                    .post(endpoint, request_payload(payload)?)
+                    .await?
+                    .into(),
+            )]))
+        }
     }
     fn update_status(&mut self, ids: &[String]) -> Result<(), Fault> {
         let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
@@ -192,30 +237,30 @@ impl crate::order_models::OrderModelHost for OrderFrame {
     }
     fn place_replacement(
         &mut self,
-        options: Value,
+        options: Input,
     ) -> impl Future<Output = Result<Vec<String>, Fault>> {
         let venue = self.venue.clone();
         async move {
-            let options: PreparedOrderOpts = from_value(options)?;
+            let options: PreparedOrderOpts = from_input(options)?;
             Ok(venue.place_order(options).await?)
         }
     }
-    fn cached_tif(&mut self, client_id: Option<&Value>) -> Result<Option<Value>, Fault> {
+    fn cached_tif(&mut self, client_id: Option<&Input>) -> Result<Option<Input>, Fault> {
         let Some(client) = client_id.filter(|c| !c.is_null()) else {
             return Ok(None);
         };
-        let client = js_string(Some(client))?;
+        let client = safe_cex_num::js_retained_string(Some(client))?;
         let state = self.venue.state.borrow();
         Ok(state
             .order_tif_cache
             .get(&client)
             .cloned()
-            .map(Value::String))
+            .map(|value| Input::Text(value.encode_utf16().collect())))
     }
     fn reduce_only(
         &mut self,
-        raw: Option<&Value>,
-        client_id: Option<&Value>,
+        raw: Option<&Input>,
+        client_id: Option<&Input>,
     ) -> Result<bool, Fault> {
         let state = self.venue.state.borrow();
         Ok(crate::tpsl_helpers::get_bitunix_reduce_only(
@@ -225,13 +270,23 @@ impl crate::order_models::OrderModelHost for OrderFrame {
             &state.order_reduce_only_cache,
         )?)
     }
-    fn key(&mut self, row: &Value, key: &'static str) -> Result<Option<Value>, Fault> {
-        Ok(match v(row.as_object().map(GetKeyObject::Json), key) {
-            TableHit::Mapped(GetKeyValue::Json(value)) => Some(value.clone()),
-            _ => None,
-        })
+    fn key(&mut self, row: &Input, key: &'static str) -> Result<Option<Input>, Fault> {
+        for name in [
+            key.to_owned(),
+            safe_cex_num::lodash_snake_case(key),
+            safe_cex_num::lodash_camel_case(key),
+        ] {
+            if let Some(value) = row.get(&name) {
+                return Ok(Some(value.clone()));
+            }
+            if safe_cex_num::js_table_lookup::<&str, ()>(&[], &name).is_present() {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
-    fn raw_id(&mut self, order: &Value) -> Result<String, Fault> {
+
+    fn raw_id(&mut self, order: &Input) -> Result<String, Fault> {
         Ok(crate::order_links::get_tpsl_raw_order_id(&order_of(
             order,
         )?)?)
@@ -239,12 +294,12 @@ impl crate::order_models::OrderModelHost for OrderFrame {
     fn leg_id(
         &mut self,
         raw_id: &str,
-        position_id: Option<&Value>,
+        position_id: Option<&Input>,
         leg_name: &'static str,
         disambiguate: bool,
     ) -> Result<String, Fault> {
         Ok(crate::tpsl_helpers::get_tpsl_leg_order_id(
-            Some(&Value::String(raw_id.into())),
+            Some(&Input::Text(raw_id.encode_utf16().collect())),
             position_id,
             leg(leg_name),
             disambiguate,
@@ -256,28 +311,28 @@ impl crate::order_models::OrderModelHost for OrderFrame {
     fn fake_full_enabled(&mut self) -> Result<bool, Fault> {
         Ok(self.venue.state.borrow().enable_fake_full_tpsl)
     }
-    fn attached_leg(&mut self, order: &Value) -> Result<Option<&'static str>, Fault> {
+    fn attached_leg(&mut self, order: &Input) -> Result<Option<&'static str>, Fault> {
         let orders = self.venue.store_orders();
         Ok(crate::order_links::get_attached_virtual_tpsl_leg(
             &order_of(order)?,
             &orders,
         ))
     }
-    fn standalone(&mut self, order: &Value) -> Result<bool, Fault> {
+    fn standalone(&mut self, order: &Input) -> Result<bool, Fault> {
         let orders = self.venue.store_orders();
         Ok(crate::order_links::is_standalone_tpsl_order(
             &order_of(order)?,
             &orders,
         ))
     }
-    fn position_order(&mut self, order: &Value) -> Result<bool, Fault> {
+    fn position_order(&mut self, order: &Input) -> Result<bool, Fault> {
         Ok(crate::order_links::is_position_tpsl_order(&order_of(
             order,
         )?)?)
     }
     fn snapshot(
         &mut self,
-        order: &Value,
+        order: &Input,
         leg_name: &'static str,
     ) -> Result<Option<crate::order_state::TpslLegSnapshot>, Fault> {
         let orders = self.venue.store_orders();
@@ -287,20 +342,16 @@ impl crate::order_models::OrderModelHost for OrderFrame {
             &orders,
         )?)
     }
-    fn trigger(&mut self, trigger: Option<&Value>, raw: Option<&Value>) -> Result<String, Fault> {
+    fn trigger(&mut self, trigger: Option<&Input>, raw: Option<&Input>) -> Result<String, Fault> {
         let trigger = trigger
             .filter(|t| !t.is_null())
-            .and_then(|t| serde_json::from_value::<OrderStopTriggerType>(t.clone()).ok());
-        Ok(crate::tpsl_helpers::get_bitunix_trigger_type(
-            trigger,
-            raw.map(|value| value.clone().into()).as_ref(),
-        )?
-        .into())
+            .and_then(|t| from_input::<OrderStopTriggerType>(t.clone()).ok());
+        Ok(crate::tpsl_helpers::get_bitunix_trigger_type(trigger, raw)?.into())
     }
     fn update_standalone(
         &mut self,
-        order: &Value,
-        update: &Value,
+        order: &Input,
+        update: &Input,
     ) -> impl Future<Output = Result<Vec<String>, Fault>> {
         let venue = self.venue.clone();
         let (order, update) = (order.clone(), update.clone());
@@ -338,8 +389,11 @@ impl crate::order_placement::PlaceOrderHost for PlaceFrame {
         self.venue.hydrate(options.clone())
     }
     fn format(&mut self, options: &PreparedOrderOpts) -> Result<Vec<JsJsonValue>, ExchangeError> {
-        crate::order_models::format_create_order(&mut self.venue.order_frame(), &to_value(options)?)
-            .map_err(|e| e.0)
+        crate::order_models::format_create_order(&mut self.venue.order_frame(), &to_input(options)?)
+            .map_err(|e| e.0)?
+            .into_iter()
+            .map(request_payload)
+            .collect()
     }
     fn batch(
         &mut self,
@@ -723,8 +777,11 @@ impl BitunixVenue {
                     }
                 },
                 |o| {
-                    crate::order_models::format_create_order(&mut me.order_frame(), &to_value(&o)?)
-                        .map_err(|e| e.0)
+                    crate::order_models::format_create_order(&mut me.order_frame(), &to_input(&o)?)
+                        .map_err(|e| e.0)?
+                        .into_iter()
+                        .map(request_payload)
+                        .collect()
                 },
                 |payloads| me.place_order_batch(payloads),
             )
@@ -763,8 +820,8 @@ impl BitunixVenue {
     ) -> ExchangeFuture<'static, Vec<String>> {
         let me = self.clone();
         Box::pin(async move {
-            let order = to_value(&options.order)?;
-            let update = to_value(&options.update)?;
+            let order = to_input(&options.order)?;
+            let update = to_input(&options.update)?;
             crate::order_models::update_order(&mut me.order_frame(), &order, &update)
                 .await
                 .map_err(|e| e.0)

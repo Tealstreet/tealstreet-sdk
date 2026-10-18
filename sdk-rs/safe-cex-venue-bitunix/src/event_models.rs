@@ -1,51 +1,60 @@
 //! Historical fill and private-channel mappings over retained JSON records.
 use safe_cex_num::{
-    JsCoercionError, JsJsonValue as J, js_date_parse, js_number, js_number_string, js_string,
-    js_time_clip, js_truthy, parse_float,
+    JsCoercionError, js_date_parse, js_number_string, js_retained_number as js_number,
+    js_retained_parse_float, js_retained_string as js_string, js_time_clip,
 };
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use std::future::Future;
-fn j(v: Option<&Value>) -> J {
-    v.map_or(J::Undefined, |v| J::from(v.clone()))
+fn j(v: Option<&Input>) -> Input {
+    v.cloned().unwrap_or(Input::Undefined)
 }
-fn s(v: impl Into<String>) -> J {
-    J::String(v.into())
+fn s(v: impl Into<String>) -> Input {
+    Input::Text(v.into().encode_utf16().collect())
 }
-fn n(v: f64) -> J {
-    J::Number(v)
+fn n(v: f64) -> Input {
+    Input::Float(v)
 }
-fn o(fields: Vec<(&str, J)>) -> J {
-    J::Object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
+fn o(fields: Vec<(&str, Input)>) -> Input {
+    Input::Object(
+        fields
+            .into_iter()
+            .map(|(k, v)| (k.encode_utf16().collect(), v))
+            .collect(),
+    )
 }
-fn put(obj: &mut J, key: &str, value: J) {
-    let J::Object(fields) = obj else {
-        panic!("object required")
+fn put(obj: &mut Input, key: &str, value: Input) {
+    put_units(obj, &key.encode_utf16().collect::<Vec<_>>(), value);
+}
+fn put_units(obj: &mut Input, key: &[u16], value: Input) {
+    let Input::Object(fields) = obj else {
+        panic!("object required");
     };
-    if let Some((_, v)) = fields.iter_mut().find(|(k, _)| k == key) {
-        *v = value
+    if let Some((_, old)) = fields.iter_mut().find(|(name, _)| name == key) {
+        *old = value;
     } else {
-        fields.push((key.into(), value))
+        fields.push((key.to_vec(), value));
     }
 }
-fn truth(v: Option<&Value>) -> bool {
-    js_truthy(v)
+
+fn truth(v: Option<&Input>) -> bool {
+    v.is_some_and(Input::is_truthy)
 }
-fn string(v: Option<&Value>) -> Result<String, JsCoercionError> {
+fn string(v: Option<&Input>) -> Result<String, JsCoercionError> {
     js_string(v)
 }
-fn float(v: Option<&Value>) -> Result<f64, JsCoercionError> {
-    Ok(parse_float(&string(v)?))
+fn float(v: Option<&Input>) -> Result<f64, JsCoercionError> {
+    js_retained_parse_float(v)
 }
-fn first<'a>(row: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+fn first<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
         .find_map(|k| row.get(*k).filter(|v| truth(Some(v))))
 }
-fn or<'a>(v: Option<&'a Value>, fallback: &'a Value) -> Option<&'a Value> {
+fn or<'a>(v: Option<&'a Input>, fallback: &'a Input) -> Option<&'a Input> {
     Some(v.filter(|v| truth(Some(v))).unwrap_or(fallback))
 }
-fn record(v: &Value) -> Result<J, JsCoercionError> {
+fn record(v: &Input) -> Result<Input, JsCoercionError> {
     if v.is_object() {
-        Ok(J::from(v.clone()))
+        Ok(Input::from(v.clone()))
     } else {
         Err(JsCoercionError {
             name: "TypeError",
@@ -60,14 +69,20 @@ fn endpoint(name: &str) -> &'static str {
         .unwrap()
         .1
 }
-fn table<T: serde::Serialize>(table: &[(&str, T)], key: Option<&str>, fallback: J) -> J {
+fn table<T: serde::Serialize, K: AsRef<str>>(
+    table: &[(&str, T)],
+    key: Option<K>,
+    fallback: Input,
+) -> Input {
     table
         .iter()
-        .find(|(k, _)| Some(*k) == key)
-        .map_or(fallback, |(_, v)| J::from(serde_json::to_value(v).unwrap()))
+        .find(|(k, _)| key.as_ref().is_some_and(|value| value.as_ref() == *k))
+        .map_or(fallback, |(_, v)| {
+            Input::from(serde_json::to_value(v).unwrap())
+        })
 }
-fn ms(v: Option<&Value>) -> Option<f64> {
-    let num = v.and_then(Value::as_f64)?;
+fn ms(v: Option<&Input>) -> Option<f64> {
+    let num = v.and_then(Input::as_f64)?;
     if !num.is_finite() {
         return None;
     }
@@ -83,10 +98,10 @@ fn ms(v: Option<&Value>) -> Option<f64> {
     })
 }
 fn seconds(
-    v: Option<&Value>,
+    v: Option<&Input>,
     local: impl FnOnce(f64) -> f64,
 ) -> Result<Option<f64>, JsCoercionError> {
-    if v.is_none() || v.is_some_and(Value::is_null) {
+    if v.is_none() || v.is_some_and(Input::is_null) {
         return Ok(None);
     }
     let num = js_number(v)?;
@@ -105,32 +120,29 @@ fn seconds(
     let date = js_date_parse(&string(v)?, local);
     Ok((date.is_finite() && date > 0.0).then(|| (date / 1000.0).floor()))
 }
-fn normalized(v: Option<&Value>) -> Result<String, JsCoercionError> {
-    Ok(string(
-        v.filter(|v| !v.is_null())
-            .or(Some(&Value::String(String::new()))),
-    )?
-    .to_uppercase()
-    .chars()
-    .filter(char::is_ascii_alphanumeric)
-    .collect())
+fn normalized(v: Option<&Input>) -> Result<String, JsCoercionError> {
+    Ok(string(v.filter(|v| !v.is_null()).or(Some(&s(""))))?
+        .to_uppercase()
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect())
 }
 pub trait FillHistoryHost {
     type Error: From<JsCoercionError>;
     fn public_only(&mut self) -> Result<bool, Self::Error>;
-    fn market(&mut self, symbol: &Value) -> Result<Option<Value>, Self::Error>;
+    fn market(&mut self, symbol: &Input) -> Result<Option<Input>, Self::Error>;
     fn get(
         &mut self,
         endpoint: &'static str,
-        config: J,
-    ) -> impl Future<Output = Result<Value, Self::Error>>;
+        config: Input,
+    ) -> impl Future<Output = Result<Input, Self::Error>>;
     fn local_to_utc(&mut self, value: f64) -> f64;
     fn warning(&mut self, prefix: &'static str, error: &Self::Error) -> Result<(), Self::Error>;
 }
 pub async fn fetch_historical_fills<H: FillHistoryHost>(
     host: &mut H,
-    options: &Value,
-) -> Result<Vec<J>, H::Error> {
+    options: &Input,
+) -> Result<Vec<Input>, H::Error> {
     if host.public_only()? {
         return Ok(Vec::new());
     }
@@ -140,7 +152,7 @@ pub async fn fetch_historical_fills<H: FillHistoryHost>(
     let Some(market) = host.market(symbol)? else {
         return Ok(Vec::new());
     };
-    let limit = js_number(options.get("limit").or(Some(&Value::from(100))))?;
+    let limit = js_number(options.get("limit").or(Some(&n(100.0))))?;
     let limit = safe_cex_num::math_min(safe_cex_num::math_max(limit, 1.0), 100.0);
     let from = ms(options.get("from"));
     let to = ms(options.get("to"));
@@ -160,8 +172,8 @@ pub async fn fetch_historical_fills<H: FillHistoryHost>(
         params.push(("limit", n(limit)));
         let config = o(vec![
             ("params", o(params)),
-            ("__suppressExchangeError", J::Bool(true)),
-            ("__suppressExchangeRateLimitError", J::Bool(true)),
+            ("__suppressExchangeError", Input::Bool(true)),
+            ("__suppressExchangeRateLimitError", Input::Bool(true)),
             (
                 "headers",
                 o(vec![
@@ -200,7 +212,7 @@ pub async fn fetch_historical_fills<H: FillHistoryHost>(
                 }
             }
         }
-        let mut fills: Vec<(String, f64, J)> = Vec::new();
+        let mut fills: Vec<(String, f64, Input)> = Vec::new();
         for row in rows {
             if row.is_null() {
                 return Err(JsCoercionError {
@@ -216,22 +228,14 @@ pub async fn fetch_historical_fills<H: FillHistoryHost>(
             }
             let side = table(
                 crate::types::ORDER_SIDE,
-                Some(
-                    &string(first(row, &["side"]).or(Some(&Value::String(String::new()))))?
-                        .to_uppercase(),
-                ),
-                J::Undefined,
+                Some(&string(first(row, &["side"]).or(Some(&s(""))))?.to_uppercase()),
+                Input::Undefined,
             );
-            if matches!(side, J::Undefined) {
+            if matches!(side, Input::Undefined) {
                 continue;
             }
-            let price = float(
-                first(row, &["price", "avgPrice", "fillPrice"])
-                    .or(Some(&Value::String("0".into()))),
-            )?;
-            let qty = float(
-                first(row, &["qty", "tradeQty", "fillSize"]).or(Some(&Value::String("0".into()))),
-            )?;
+            let price = float(first(row, &["price", "avgPrice", "fillPrice"]).or(Some(&s("0"))))?;
+            let qty = float(first(row, &["qty", "tradeQty", "fillSize"]).or(Some(&s("0"))))?;
             if !price.is_finite() || !qty.is_finite() || price <= 0.0 || qty <= 0.0 {
                 continue;
             }
@@ -256,16 +260,15 @@ pub async fn fetch_historical_fills<H: FillHistoryHost>(
             if timestamp == 0.0 {
                 continue;
             }
-            let order_id =
-                string(first(row, &["orderId", "ordId"]).or(Some(&Value::String(String::new()))))?;
+            let order_id = string(first(row, &["orderId", "ordId"]).or(Some(&s(""))))?;
             if truth(request_id) && !order_id.is_empty() && order_id != string(request_id)? {
                 continue;
             }
-            let fee = float(first(row, &["fee", "execFee"]).or(Some(&Value::String("0".into()))))?;
+            let fee = float(first(row, &["fee", "execFee"]).or(Some(&s("0"))))?;
             let mut fill = Vec::new();
             if let Some(id) = row
                 .get("tradeId")
-                .filter(|v| !v.is_null() && !matches!(v,Value::String(s)if s.is_empty()))
+                .filter(|v| !v.is_null() && !matches!(v,Input::Text(s)if s.is_empty()))
             {
                 fill.push(("id", s(string(Some(id))?)))
             }
@@ -290,7 +293,7 @@ pub async fn fetch_historical_fills<H: FillHistoryHost>(
             {
                 continue;
             }
-            let J::String(side) = side else {
+            let Input::Text(side) = side else {
                 unreachable!()
             };
             let key = format!(
@@ -303,7 +306,7 @@ pub async fn fetch_historical_fills<H: FillHistoryHost>(
                 js_number_string(timestamp),
                 js_number_string(price),
                 js_number_string(qty),
-                side
+                String::from_utf16(&side).expect("closed side enum")
             );
             if let Some(old) = fills.iter_mut().find(|(k, _, _)| *k == key) {
                 *old = (key, timestamp, o(fill))
@@ -332,27 +335,27 @@ pub trait PrivateMessageHost {
     fn count(&mut self) -> Result<f64, Self::Error>;
     fn set_count(&mut self, value: f64) -> Result<(), Self::Error>;
     fn diagnostic(&mut self, raw: &Self::Raw) -> Result<(), Self::Error>;
-    fn parse(&mut self, raw: Self::Raw) -> Result<Value, Self::Error>;
-    fn balance_notice(&mut self, json: &Value) -> Result<(), Self::Error>;
+    fn parse(&mut self, raw: Self::Raw) -> Result<Input, Self::Error>;
+    fn balance_notice(&mut self, json: &Input) -> Result<(), Self::Error>;
     fn refresh(&mut self, kind: &'static str) -> Result<(), Self::Error>;
-    fn orders(&mut self) -> Result<Vec<Value>, Self::Error>;
-    fn positions(&mut self) -> Result<Vec<Value>, Self::Error>;
-    fn add_orders(&mut self, orders: Vec<J>) -> Result<(), Self::Error>;
-    fn key(&mut self, row: &Value, name: &'static str) -> Result<Option<Value>, Self::Error>;
+    fn orders(&mut self) -> Result<Vec<Input>, Self::Error>;
+    fn positions(&mut self) -> Result<Vec<Input>, Self::Error>;
+    fn add_orders(&mut self, orders: Vec<Input>) -> Result<(), Self::Error>;
+    fn key(&mut self, row: &Input, name: &'static str) -> Result<Option<Input>, Self::Error>;
     fn reduce_only(
         &mut self,
-        raw: Option<&Value>,
-        client: Option<&Value>,
-        fallback: Option<&Value>,
+        raw: Option<&Input>,
+        client: Option<&Input>,
+        fallback: Option<&Input>,
     ) -> Result<bool, Self::Error>;
-    fn cache_tif(&mut self, client: &Value, tif: J) -> Result<(), Self::Error>;
-    fn cache_position(&mut self, key: String, id: Option<&Value>) -> Result<(), Self::Error>;
-    fn update_position_info(&mut self, position: &Value, info: J) -> Result<(), Self::Error>;
+    fn cache_tif(&mut self, client: &Input, tif: Input) -> Result<(), Self::Error>;
+    fn cache_position(&mut self, key: String, id: Option<&Input>) -> Result<(), Self::Error>;
+    fn update_position_info(&mut self, position: &Input, info: Input) -> Result<(), Self::Error>;
     fn fake_full(&mut self) -> Result<bool, Self::Error>;
     fn leg_id(
         &mut self,
-        raw: Option<&Value>,
-        position: Option<&Value>,
+        raw: Option<&Input>,
+        position: Option<&Input>,
         leg: &'static str,
         disambiguate: bool,
     ) -> Result<String, Self::Error>;
@@ -378,34 +381,34 @@ pub async fn retry_login<H: LoginRetryHost>(host: &mut H) -> Result<(), H::Error
     host.sleep(2000.0).await?;
     host.launch_login()
 }
-fn upper(v: Option<&Value>) -> Result<Option<String>, JsCoercionError> {
+fn upper(v: Option<&Input>) -> Result<Option<String>, JsCoercionError> {
     match v {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(v)) => Ok(Some(v.to_uppercase())),
+        None | Some(Input::Null) => Ok(None),
+        Some(Input::Text(_)) => Ok(Some(string(v)?.to_uppercase())),
         _ => Err(JsCoercionError {
             name: "TypeError",
             message: "toUpperCase is not a function",
         }),
     }
 }
-fn date(v: Option<&Value>, local: impl FnOnce(f64) -> f64) -> Result<f64, JsCoercionError> {
+fn date(v: Option<&Input>, local: impl FnOnce(f64) -> f64) -> Result<f64, JsCoercionError> {
     Ok(match v {
         None => f64::NAN,
-        Some(Value::Null) => 0.0,
-        Some(Value::Number(_) | Value::Bool(_)) => js_time_clip(js_number(v)?),
+        Some(Input::Null) => 0.0,
+        Some(Input::Float(_) | Input::Lexeme(_) | Input::Bool(_)) => js_time_clip(js_number(v)?),
         _ => js_date_parse(&string(v)?, local),
     })
 }
-fn value_precision(v: Option<&Value>) -> Result<f64, JsCoercionError> {
+fn value_precision(v: Option<&Input>) -> Result<f64, JsCoercionError> {
     Ok(match v {
-        Some(Value::String(v)) => {
-            safe_cex_num::after_decimal(safe_cex_num::PrecisionInput::String(v.clone()))
+        Some(Input::Text(_)) => {
+            safe_cex_num::after_decimal(safe_cex_num::PrecisionInput::String(string(v)?))
         }
-        None | Some(Value::Null) => 2.0,
+        None | Some(Input::Null) => 2.0,
         _ => safe_cex_num::after_decimal(safe_cex_num::PrecisionInput::Number(js_number(v)?)),
     })
 }
-fn subtract(a: Option<&Value>, b: Option<&Value>) -> Result<f64, JsCoercionError> {
+fn subtract(a: Option<&Input>, b: Option<&Input>) -> Result<f64, JsCoercionError> {
     let factor = safe_cex_num::math_pow(
         10.0,
         safe_cex_num::math_max(value_precision(a)?, value_precision(b)?),
@@ -424,16 +427,24 @@ pub fn on_private_message<H: PrivateMessageHost>(
     host.set_count(count + 1.0)?;
     host.diagnostic(&raw)?;
     let json = host.parse(raw)?;
-    let channel = first(&json, &["op", "ch"]).and_then(Value::as_str);
-    let data = json.get("data").unwrap_or(&Value::Null);
-    let event = data.get("event").and_then(Value::as_str);
-    match channel {
+    let channel = first(&json, &["op", "ch"]).and_then(|value| {
+        value
+            .as_text()
+            .and_then(|units| String::from_utf16(units).ok())
+    });
+    let data = json.get("data").unwrap_or(&Input::Null);
+    let event = data.get("event").and_then(|value| {
+        value
+            .as_text()
+            .and_then(|units| String::from_utf16(units).ok())
+    });
+    match channel.as_deref() {
         Some("balance") => {
             host.balance_notice(&json)?;
             host.refresh("balance")?;
         }
         Some("order") => {
-            match event {
+            match event.as_deref() {
                 Some("CREATE") => {
                     let reduce = host.reduce_only(
                         data.get("reduceOnly")
@@ -451,11 +462,11 @@ pub fn on_private_message<H: PrivateMessageHost>(
                     } else {
                         None
                     };
-                    let zero = Value::String("0".into());
+                    let zero = s("0");
                     let qty = or(qty.as_ref(), &zero);
                     let dealt = or(dealt.as_ref(), &zero);
                     let mut info = record(data)?;
-                    put(&mut info, "reduceOnly", J::Bool(reduce));
+                    put(&mut info, "reduceOnly", Input::Bool(reduce));
                     let mut order = o(vec![
                         ("id", j(id.as_ref())),
                         ("status", s("open")),
@@ -465,7 +476,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             table(
                                 crate::types::ORDER_TYPE,
                                 upper(data.get("type"))?.as_deref(),
-                                J::Undefined,
+                                Input::Undefined,
                             ),
                         ),
                         (
@@ -473,12 +484,12 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             table(
                                 crate::types::ORDER_SIDE,
                                 upper(data.get("side"))?.as_deref(),
-                                J::Undefined,
+                                Input::Undefined,
                             ),
                         ),
                         ("price", n(float(or(data.get("price"), &zero))?)),
                         ("amount", n(float(qty)?)),
-                        ("reduceOnly", J::Bool(reduce)),
+                        ("reduceOnly", Input::Bool(reduce)),
                         ("filled", n(float(dealt)?)),
                         (
                             "lastUpdate",
@@ -510,8 +521,12 @@ pub fn on_private_message<H: PrivateMessageHost>(
                                 target,
                                 table(
                                     crate::types::ORDER_TRIGGER_TYPE,
-                                    val.as_ref().and_then(Value::as_str),
-                                    J::Undefined,
+                                    val.as_ref().and_then(|value| {
+                                        value
+                                            .as_text()
+                                            .and_then(|units| String::from_utf16(units).ok())
+                                    }),
+                                    Input::Undefined,
                                 ),
                             );
                         }
@@ -529,10 +544,10 @@ pub fn on_private_message<H: PrivateMessageHost>(
                         let tif = table(
                             crate::types::TIME_IN_FORCE,
                             upper(data.get("effect"))?.as_deref(),
-                            J::Undefined,
+                            Input::Undefined,
                         );
-                        if !matches!(tif, J::Undefined) {
-                            host.cache_tif(&data["clientId"], tif)?;
+                        if !matches!(tif, Input::Undefined) {
+                            host.cache_tif(data.get("clientId").unwrap_or(&Input::Undefined), tif)?;
                         }
                     }
                     host.add_orders(vec![order])?;
@@ -543,7 +558,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                         .into_iter()
                         .find(|o| o.get("id") == data.get("orderId"));
                     if let Some(existing) = existing {
-                        let updating = event == Some("UPDATE");
+                        let updating = event.as_deref() == Some("UPDATE");
                         let mut order = record(&existing)?;
                         let reduce = if updating {
                             Some(
@@ -565,8 +580,11 @@ pub fn on_private_message<H: PrivateMessageHost>(
                                 &mut order,
                                 "status",
                                 s(
-                                    if data.get("orderStatus").and_then(Value::as_str)
-                                        == Some("FILLED")
+                                    if data.get("orderStatus").and_then(|value| {
+                                        value
+                                            .as_text()
+                                            .and_then(|units| String::from_utf16(units).ok())
+                                    }) == Some("FILLED".to_owned())
                                     {
                                         "closed"
                                     } else {
@@ -579,7 +597,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             name: "TypeError",
                             message: "Missing existing price",
                         })?;
-                        let price_fallback = Value::String(string(Some(price))?);
+                        let price_fallback = s(string(Some(price))?);
                         put(
                             &mut order,
                             "price",
@@ -591,8 +609,8 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             None
                         };
                         let dealt = host.key(data, "dealAmount")?;
-                        let amount_fallback = Value::String(string(existing.get("amount"))?);
-                        let dealt_fallback = Value::String(string(existing.get("filled"))?);
+                        let amount_fallback = s(string(existing.get("amount"))?);
+                        let dealt_fallback = s(string(existing.get("filled"))?);
                         let qty = or(qty.as_ref(), &amount_fallback);
                         let dealt = or(dealt.as_ref(), &dealt_fallback);
                         if updating {
@@ -624,16 +642,16 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             },
                         );
                         if let Some(reduce) = reduce {
-                            put(&mut order, "reduceOnly", J::Bool(reduce));
+                            put(&mut order, "reduceOnly", Input::Bool(reduce));
                             let mut info = existing
                                 .get("info")
                                 .filter(|v| truth(Some(v)))
-                                .map_or(o(Vec::new()), |v| J::from(v.clone()));
-                            let J::Object(fields) = record(data)? else {
+                                .map_or(o(Vec::new()), |v| Input::from(v.clone()));
+                            let Input::Object(fields) = record(data)? else {
                                 unreachable!()
                             };
                             for (k, v) in fields {
-                                put(&mut info, &k, v)
+                                put_units(&mut info, &k, v)
                             }
                             put(
                                 &mut info,
@@ -643,7 +661,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                                     .filter(|v| truth(Some(v)))
                                     .or_else(|| existing.get("id"))),
                             );
-                            put(&mut info, "reduceOnly", J::Bool(reduce));
+                            put(&mut info, "reduceOnly", Input::Bool(reduce));
                             put(&mut order, "info", info);
                         } else {
                             put(&mut order, "info", j(Some(data)));
@@ -667,14 +685,14 @@ pub fn on_private_message<H: PrivateMessageHost>(
                 let key = format!("{}:{side}", string(data.get("symbol"))?);
                 host.cache_position(
                     key,
-                    if event == Some("CLOSE") {
+                    if event.as_deref() == Some("CLOSE") {
                         None
                     } else {
                         data.get("positionId")
                     },
                 )?;
             }
-            if matches!(event, Some("OPEN" | "UPDATE")) {
+            if matches!(event.as_deref(), Some("OPEN" | "UPDATE")) {
                 let side = upper(data.get("side"))?;
                 let side = if matches!(side.as_deref(), Some("LONG" | "BUY")) {
                     "long"
@@ -683,12 +701,16 @@ pub fn on_private_message<H: PrivateMessageHost>(
                 };
                 if let Some(pos) = host.positions()?.into_iter().find(|p| {
                     p.get("symbol") == data.get("symbol")
-                        && p.get("side").and_then(Value::as_str) == Some(side)
+                        && p.get("side").and_then(|value| {
+                            value
+                                .as_text()
+                                .and_then(|units| String::from_utf16(units).ok())
+                        }) == Some(side.to_owned())
                 }) {
                     if truth(data.get("positionId")) {
                         let mut info = pos
                             .get("info")
-                            .map_or(o(Vec::new()), |v| J::from(v.clone()));
+                            .map_or(o(Vec::new()), |v| Input::from(v.clone()));
                         put(&mut info, "positionId", j(data.get("positionId")));
                         host.update_position_info(&pos, info)?;
                     }
@@ -697,7 +719,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
             host.refresh("positions")?;
         }
         Some("tpsl") => {
-            match event {
+            match event.as_deref() {
                 Some("CREATE") => {
                     let position = host.positions()?.into_iter().find(|p| {
                         p.get("info").and_then(|i| i.get("positionId")) == data.get("positionId")
@@ -732,7 +754,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                         if !present {
                             continue;
                         }
-                        let zero = Value::String("0".into());
+                        let zero = s("0");
                         let qty = float(or(data.get(qty_key), &zero))?;
                         let full = position.as_ref().is_some_and(|p| {
                             js_number(p.get("contracts")).is_ok_and(|amount| amount == qty)
@@ -740,16 +762,23 @@ pub fn on_private_message<H: PrivateMessageHost>(
                         let id =
                             host.leg_id(raw_id.as_ref(), data.get("positionId"), leg, tp && sl)?;
                         let side = if let Some(p) = &position {
-                            s(if p.get("side").and_then(Value::as_str) == Some("long") {
-                                "sell"
-                            } else {
-                                "buy"
-                            })
+                            s(
+                                if p.get("side").and_then(|value| {
+                                    value
+                                        .as_text()
+                                        .and_then(|units| String::from_utf16(units).ok())
+                                }) == Some("long".to_owned())
+                                {
+                                    "sell"
+                                } else {
+                                    "buy"
+                                },
+                            )
                         } else {
                             table(
                                 crate::types::ORDER_SIDE,
                                 upper(data.get("side"))?.as_deref(),
-                                J::Undefined,
+                                Input::Undefined,
                             )
                         };
                         let amount = if host.fake_full()? && full { 0.0 } else { qty };
@@ -762,7 +791,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             ("side", side),
                             ("price", n(float(data.get(price_key))?)),
                             ("amount", n(amount)),
-                            ("reduceOnly", J::Bool(true)),
+                            ("reduceOnly", Input::Bool(true)),
                             ("filled", n(0.0)),
                             ("lastUpdate", n(time)),
                             ("remaining", n(qty)),
@@ -771,7 +800,11 @@ pub fn on_private_message<H: PrivateMessageHost>(
                                 trigger_key,
                                 table(
                                     crate::types::ORDER_TRIGGER_TYPE,
-                                    data.get(stop_key).and_then(Value::as_str),
+                                    data.get(stop_key).and_then(|value| {
+                                        value
+                                            .as_text()
+                                            .and_then(|units| String::from_utf16(units).ok())
+                                    }),
                                     s("mark_price"),
                                 ),
                             ),
@@ -791,12 +824,16 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             continue;
                         }
                         let mut order = record(&existing)?;
-                        if event == Some("CLOSE") {
+                        if event.as_deref() == Some("CLOSE") {
                             put(
                                 &mut order,
                                 "status",
                                 s(
-                                    if data.get("status").and_then(Value::as_str) == Some("FILLED")
+                                    if data.get("status").and_then(|value| {
+                                        value
+                                            .as_text()
+                                            .and_then(|units| String::from_utf16(units).ok())
+                                    }) == Some("FILLED".to_owned())
                                     {
                                         "closed"
                                     } else {
@@ -815,8 +852,11 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             } else {
                                 f64::NAN
                             };
-                            let price = if existing.get("type").and_then(Value::as_str)
-                                == Some("take_profit_market")
+                            let price = if existing.get("type").and_then(|value| {
+                                value
+                                    .as_text()
+                                    .and_then(|units| String::from_utf16(units).ok())
+                            }) == Some("take_profit_market".to_owned())
                             {
                                 tp
                             } else {
@@ -835,8 +875,12 @@ pub fn on_private_message<H: PrivateMessageHost>(
                                         target,
                                         table(
                                             crate::types::ORDER_TRIGGER_TYPE,
-                                            data.get(source).and_then(Value::as_str),
-                                            J::Undefined,
+                                            data.get(source).and_then(|value| {
+                                                value.as_text().and_then(|units| {
+                                                    String::from_utf16(units).ok()
+                                                })
+                                            }),
+                                            Input::Undefined,
                                         ),
                                     );
                                 }
@@ -844,7 +888,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                         }
                         orders.push(order);
                     }
-                    if event == Some("CLOSE") || !orders.is_empty() {
+                    if event.as_deref() == Some("CLOSE") || !orders.is_empty() {
                         host.add_orders(orders)?;
                     }
                 }
@@ -856,8 +900,8 @@ pub fn on_private_message<H: PrivateMessageHost>(
             if truth(data.get("result")) {
                 host.login_diagnostic("[bitunix login] success".into())?
             } else {
-                let wire = safe_cex_num::js_json_stringify(&J::from(json.clone()))?
-                    .unwrap_or("undefined".into());
+                let wire =
+                    safe_cex_num::js_retained_json_stringify(&json)?.unwrap_or("undefined".into());
                 host.login_diagnostic(format!("[bitunix login] failed {wire}"))?;
                 host.login_error(
                     "Bitunix private ws login failed, double check your key and secret",

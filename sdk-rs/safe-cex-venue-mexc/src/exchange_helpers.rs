@@ -163,7 +163,7 @@ pub fn get_replacement_order_amount(order: &Order) -> Result<f64, JsCoercionErro
     let info = order.info.as_ref();
     let raw = ["vol", "quantity", "origQty"]
         .iter()
-        .find_map(|key| info.and_then(|v| v.get(*key)).filter(|v| !v.is_null()));
+        .find_map(|key| info.and_then(|v| v.get(*key)).filter(|v| !v.is_nullish()));
     let native = if raw.is_none_or(|value| value.is_nullish() || value.text_equals("")) {
         f64::NAN
     } else {

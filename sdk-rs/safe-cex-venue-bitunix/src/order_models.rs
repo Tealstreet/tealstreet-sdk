@@ -1,89 +1,86 @@
 //! Live order reads, formatting and amendment over retained JSON models.
 use crate::order_state::TpslLegSnapshot;
 use safe_cex_num::{
-    JsCoercionError, JsJsonValue, PrecisionInput, adjust, after_decimal, js_number,
-    js_number_string, js_string, js_truthy, math_max, math_pow, math_round, parse_float,
+    JsCoercionError, PrecisionInput, adjust, after_decimal, js_number_string, js_retained_number,
+    js_retained_parse_float, js_retained_string, math_max, math_pow, math_round,
 };
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use std::future::Future;
 
 pub trait OrderModelHost {
     type Error: From<JsCoercionError>;
-    fn caller_id(&mut self, options: &Value) -> Result<Option<String>, Self::Error>;
-    fn market(&mut self, symbol: &Value) -> Result<Option<Value>, Self::Error>;
-    fn positions(&mut self) -> Result<Vec<Value>, Self::Error>;
-    fn orders(&mut self) -> Result<Vec<Value>, Self::Error>;
-    fn cached_position(&mut self, key: &str) -> Result<Option<Value>, Self::Error>;
+    fn caller_id(&mut self, options: &Input) -> Result<Option<String>, Self::Error>;
+    fn market(&mut self, symbol: &Input) -> Result<Option<Input>, Self::Error>;
+    fn positions(&mut self) -> Result<Vec<Input>, Self::Error>;
+    fn orders(&mut self) -> Result<Vec<Input>, Self::Error>;
+    fn cached_position(&mut self, key: &str) -> Result<Option<Input>, Self::Error>;
     fn uuid(&mut self) -> Result<String, Self::Error>;
     fn assert_single(&mut self, caller: Option<&str>, count: usize) -> Result<(), Self::Error>;
-    fn cache_tif(&mut self, client_id: &str, tif: &Value) -> Result<(), Self::Error>;
+    fn cache_tif(&mut self, client_id: &str, tif: &Input) -> Result<(), Self::Error>;
     fn cache_reduce_only(
         &mut self,
         client_id: &str,
-        reduce_only: &Value,
+        reduce_only: &Input,
     ) -> Result<(), Self::Error>;
-    fn emit(&mut self, message: JsJsonValue) -> Result<(), Self::Error>;
-    fn error(&mut self, message: JsJsonValue) -> Result<Self::Error, Self::Error>;
-    fn reason(
-        &mut self,
-        error: &Self::Error,
-        fallback: Option<&str>,
-    ) -> Result<JsJsonValue, Self::Error>;
+    fn emit(&mut self, message: Input) -> Result<(), Self::Error>;
+    fn error(&mut self, message: Input) -> Result<Self::Error, Self::Error>;
+    fn reason(&mut self, error: &Self::Error, fallback: Option<&str>)
+    -> Result<Input, Self::Error>;
     fn warning(&mut self, prefix: &'static str, error: &Self::Error) -> Result<(), Self::Error>;
     fn get(
         &mut self,
         endpoint: &'static str,
-        config: JsJsonValue,
-    ) -> impl Future<Output = Result<Value, Self::Error>>;
+        config: Input,
+    ) -> impl Future<Output = Result<Input, Self::Error>>;
     fn post(
         &mut self,
         endpoint: &'static str,
-        payload: JsJsonValue,
-    ) -> impl Future<Output = Result<Value, Self::Error>>;
+        payload: Input,
+    ) -> impl Future<Output = Result<Input, Self::Error>>;
     fn post_limited(
         &mut self,
         endpoint: &'static str,
-        payload: JsJsonValue,
-    ) -> impl Future<Output = Result<Value, Self::Error>>;
+        payload: Input,
+    ) -> impl Future<Output = Result<Input, Self::Error>>;
     fn update_status(&mut self, ids: &[String]) -> Result<(), Self::Error>;
     fn place_replacement(
         &mut self,
-        options: Value,
+        options: Input,
     ) -> impl Future<Output = Result<Vec<String>, Self::Error>>;
-    fn cached_tif(&mut self, client_id: Option<&Value>) -> Result<Option<Value>, Self::Error>;
+    fn cached_tif(&mut self, client_id: Option<&Input>) -> Result<Option<Input>, Self::Error>;
     fn reduce_only(
         &mut self,
-        raw: Option<&Value>,
-        client_id: Option<&Value>,
+        raw: Option<&Input>,
+        client_id: Option<&Input>,
     ) -> Result<bool, Self::Error>;
-    fn key(&mut self, row: &Value, key: &'static str) -> Result<Option<Value>, Self::Error>;
-    fn raw_id(&mut self, order: &Value) -> Result<String, Self::Error>;
+    fn key(&mut self, row: &Input, key: &'static str) -> Result<Option<Input>, Self::Error>;
+    fn raw_id(&mut self, order: &Input) -> Result<String, Self::Error>;
     fn leg_id(
         &mut self,
         raw_id: &str,
-        position_id: Option<&Value>,
+        position_id: Option<&Input>,
         leg: &'static str,
         disambiguate: bool,
     ) -> Result<String, Self::Error>;
     fn clock(&mut self) -> Result<f64, Self::Error>;
     fn fake_full_enabled(&mut self) -> Result<bool, Self::Error>;
-    fn attached_leg(&mut self, order: &Value) -> Result<Option<&'static str>, Self::Error>;
-    fn standalone(&mut self, order: &Value) -> Result<bool, Self::Error>;
-    fn position_order(&mut self, order: &Value) -> Result<bool, Self::Error>;
+    fn attached_leg(&mut self, order: &Input) -> Result<Option<&'static str>, Self::Error>;
+    fn standalone(&mut self, order: &Input) -> Result<bool, Self::Error>;
+    fn position_order(&mut self, order: &Input) -> Result<bool, Self::Error>;
     fn snapshot(
         &mut self,
-        order: &Value,
+        order: &Input,
         leg: &'static str,
     ) -> Result<Option<TpslLegSnapshot>, Self::Error>;
     fn trigger(
         &mut self,
-        trigger: Option<&Value>,
-        raw: Option<&Value>,
+        trigger: Option<&Input>,
+        raw: Option<&Input>,
     ) -> Result<String, Self::Error>;
     fn update_standalone(
         &mut self,
-        order: &Value,
-        update: &Value,
+        order: &Input,
+        update: &Input,
     ) -> impl Future<Output = Result<Vec<String>, Self::Error>>;
 }
 fn endpoint(name: &str) -> &'static str {
@@ -93,165 +90,179 @@ fn endpoint(name: &str) -> &'static str {
         .unwrap()
         .1
 }
-fn string(v: Option<&Value>) -> Result<String, JsCoercionError> {
-    js_string(v)
+fn string(v: Option<&Input>) -> Result<String, JsCoercionError> {
+    js_retained_string(v)
 }
-fn number(v: Option<&Value>) -> Result<f64, JsCoercionError> {
-    js_number(v)
+fn number(v: Option<&Input>) -> Result<f64, JsCoercionError> {
+    js_retained_number(v)
 }
-fn float(v: Option<&Value>) -> Result<f64, JsCoercionError> {
-    Ok(parse_float(&string(v)?))
+fn float(v: Option<&Input>) -> Result<f64, JsCoercionError> {
+    js_retained_parse_float(v)
 }
 
-fn truth(v: Option<&Value>) -> bool {
-    js_truthy(v)
+fn truth(v: Option<&Input>) -> bool {
+    v.is_some_and(Input::is_truthy)
 }
-fn j(v: Option<&Value>) -> JsJsonValue {
-    v.map_or(JsJsonValue::Undefined, |v| JsJsonValue::from(v.clone()))
+fn j(v: Option<&Input>) -> Input {
+    v.cloned().unwrap_or(Input::Undefined)
 }
-fn s(v: impl Into<String>) -> JsJsonValue {
-    JsJsonValue::String(v.into())
+fn s(v: impl Into<String>) -> Input {
+    Input::Text(v.into().encode_utf16().collect())
 }
-fn n(v: f64) -> JsJsonValue {
-    JsJsonValue::Number(v)
+fn n(v: f64) -> Input {
+    Input::Float(v)
 }
-fn object(fields: Vec<(&str, JsJsonValue)>) -> JsJsonValue {
-    JsJsonValue::Object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
+fn object(fields: Vec<(&str, Input)>) -> Input {
+    Input::Object(
+        fields
+            .into_iter()
+            .map(|(k, v)| (k.encode_utf16().collect(), v))
+            .collect(),
+    )
 }
-fn put(object: &mut JsJsonValue, key: &str, value: JsJsonValue) {
-    let JsJsonValue::Object(fields) = object else {
+fn put(object: &mut Input, key: &str, value: Input) {
+    let Input::Object(fields) = object else {
         panic!("native order object required")
     };
-    if let Some((_, old)) = fields.iter_mut().find(|(k, _)| k == key) {
+    if let Some((_, old)) = fields
+        .iter_mut()
+        .find(|(k, _)| k.iter().copied().eq(key.encode_utf16()))
+    {
         *old = value;
     } else {
-        fields.push((key.into(), value));
+        fields.push((key.encode_utf16().collect(), value));
     }
 }
-fn has(v: &Value, key: &str) -> bool {
-    v.as_object().is_some_and(|o| o.contains_key(key))
+fn has(v: &Input, key: &str) -> bool {
+    v.get(key).is_some()
 }
-fn kind(v: &Value, name: &str) -> bool {
-    v.get("type").and_then(Value::as_str) == Some(name)
+fn kind(v: &Input, name: &str) -> bool {
+    v.get("type").is_some_and(|v| v.text_equals(name))
 }
-fn side(opts: &Value) -> &'static str {
-    if opts.get("side").and_then(Value::as_str) == Some("buy") {
+fn side(opts: &Input) -> &'static str {
+    if opts.get("side").is_some_and(|v| v.text_equals("buy")) {
         "short"
     } else {
         "long"
     }
 }
-fn precision(v: Option<&Value>) -> Result<PrecisionInput, JsCoercionError> {
+fn precision(v: Option<&Input>) -> Result<PrecisionInput, JsCoercionError> {
     Ok(match v {
-        Some(Value::String(v)) => PrecisionInput::String(v.clone()),
+        Some(Input::Text(_)) => PrecisionInput::String(string(v)?),
         _ => PrecisionInput::Number(number(v)?),
     })
 }
-fn adjusted(value: Option<&Value>, step: Option<&Value>) -> Result<f64, JsCoercionError> {
+fn adjusted(value: Option<&Input>, step: Option<&Input>) -> Result<f64, JsCoercionError> {
     Ok(adjust(number(value)?, precision(step)?))
 }
-fn digits(v: Option<&Value>) -> Result<f64, JsCoercionError> {
-    Ok(if v.is_none() || v.is_some_and(Value::is_null) {
+fn digits(v: Option<&Input>) -> Result<f64, JsCoercionError> {
+    Ok(if v.is_none() || v.is_some_and(Input::is_null) {
         2.0
     } else {
         after_decimal(precision(v)?)
     })
 }
-fn subtract(a: Option<&Value>, b: Option<&Value>) -> Result<f64, JsCoercionError> {
+fn subtract(a: Option<&Input>, b: Option<&Input>) -> Result<f64, JsCoercionError> {
     let factor = math_pow(10.0, math_max(digits(a)?, digits(b)?));
     Ok(math_round((number(a)? - number(b)?) * factor) / factor)
 }
 
-fn stop(v: Option<&Value>) -> &'static str {
-    if v.and_then(Value::as_str) == Some("mark_price") {
+fn stop(v: Option<&Input>) -> &'static str {
+    if v.is_some_and(|v| v.text_equals("mark_price")) {
         "MARK_PRICE"
     } else {
         "LAST_PRICE"
     }
 }
-fn strict(a: Option<&Value>, b: Option<&Value>) -> bool {
+fn strict(a: Option<&Input>, b: Option<&Input>) -> bool {
     match (a, b) {
         (None, None) => true,
-        (Some(Value::Number(_)), Some(Value::Number(_))) => {
-            a.and_then(Value::as_f64) == b.and_then(Value::as_f64)
+        (Some(Input::Float(_) | Input::Lexeme(_)), Some(Input::Float(_) | Input::Lexeme(_))) => {
+            a.and_then(Input::as_f64) == b.and_then(Input::as_f64)
         }
-        (Some(Value::Array(_) | Value::Object(_)), Some(Value::Array(_) | Value::Object(_))) => {
+        (Some(Input::Array(_) | Input::Object(_)), Some(Input::Array(_) | Input::Object(_))) => {
             std::ptr::eq(a.unwrap(), b.unwrap())
         }
         _ => a == b,
     }
 }
-fn enum_value<T: serde::Serialize>(value: &T) -> Value {
-    serde_json::to_value(value).expect("Bitunix protocol enums serialize as strings")
+fn enum_value<T: serde::Serialize>(value: &T) -> Input {
+    Input::from(serde_json::to_value(value).expect("Bitunix protocol enums serialize as strings"))
 }
-fn inverse<T: serde::Serialize>(table: &[(&str, T)], value: Option<&Value>) -> JsJsonValue {
+fn inverse<T: serde::Serialize>(table: &[(&str, T)], value: Option<&Input>) -> Input {
     table
         .iter()
         .rev()
         .find(|(_, v)| Some(&enum_value(v)) == value)
-        .map_or(JsJsonValue::Undefined, |(key, _)| s(*key))
+        .map_or(Input::Undefined, |(key, _)| s(*key))
 }
 fn forward<T: serde::Serialize>(
     table: &[(&str, T)],
-    key: Option<&str>,
-    fallback: JsJsonValue,
-) -> JsJsonValue {
+    key: Option<&[u16]>,
+    fallback: Input,
+) -> Input {
     table
         .iter()
-        .find(|(k, _)| Some(*k) == key)
-        .map_or(fallback, |(_, value)| JsJsonValue::from(enum_value(value)))
+        .find(|(k, _)| key.is_some_and(|key| key.iter().copied().eq(k.encode_utf16())))
+        .map_or(fallback, |(_, value)| Input::from(enum_value(value)))
 }
-fn inverse_type(v: Option<&Value>) -> JsJsonValue {
+fn inverse_type(v: Option<&Input>) -> Input {
     inverse(crate::types::ORDER_TYPE, v)
 }
-fn inverse_side(v: Option<&Value>) -> JsJsonValue {
+fn inverse_side(v: Option<&Input>) -> Input {
     inverse(crate::types::ORDER_SIDE, v)
 }
-fn inverse_tif(v: Option<&Value>) -> JsJsonValue {
+fn inverse_tif(v: Option<&Input>) -> Input {
     inverse(crate::types::TIME_IN_FORCE, v)
 }
-fn forward_type(v: &str) -> JsJsonValue {
-    forward(crate::types::ORDER_TYPE, Some(v), JsJsonValue::Undefined)
-}
-fn forward_side(v: Option<&Value>) -> JsJsonValue {
+fn forward_type(v: &str) -> Input {
     forward(
-        crate::types::ORDER_SIDE,
-        v.and_then(Value::as_str),
-        JsJsonValue::Undefined,
+        crate::types::ORDER_TYPE,
+        Some(&v.encode_utf16().collect::<Vec<_>>()),
+        Input::Undefined,
     )
 }
-fn forward_tif(v: &str) -> JsJsonValue {
-    forward(crate::types::TIME_IN_FORCE, Some(v), s("GoodTillCancel"))
+fn forward_side(v: Option<&Input>) -> Input {
+    forward(
+        crate::types::ORDER_SIDE,
+        v.and_then(Input::as_text),
+        Input::Undefined,
+    )
 }
-fn forward_trigger(v: Option<&Value>) -> JsJsonValue {
+fn forward_tif(v: &str) -> Input {
+    forward(
+        crate::types::TIME_IN_FORCE,
+        Some(&v.encode_utf16().collect::<Vec<_>>()),
+        s("GoodTillCancel"),
+    )
+}
+fn forward_trigger(v: Option<&Input>) -> Input {
     forward(
         crate::types::ORDER_TRIGGER_TYPE,
-        v.and_then(Value::as_str),
+        v.and_then(Input::as_text),
         s("mark_price"),
     )
 }
-fn finite_trigger(v: Option<&Value>) -> Result<bool, JsCoercionError> {
-    Ok(!matches!(v, None | Some(Value::Null))
-        && !matches!(v,Some(Value::String(s)) if s.is_empty())
+fn finite_trigger(v: Option<&Input>) -> Result<bool, JsCoercionError> {
+    Ok(!matches!(v, None | Some(Input::Null))
+        && !matches!(v,Some(Input::Text(s)) if s.is_empty())
         && number(v)?.is_finite())
 }
-fn spread(v: &Value) -> JsJsonValue {
-    match v {
-        Value::Object(_) => {
-            let mut value = v.clone();
-            safe_cex_num::normalize_json_order(&mut value);
-            JsJsonValue::from(value)
-        }
-        _ => object(vec![]),
+fn spread(v: &Input) -> Input {
+    if v.is_object() {
+        v.clone()
+    } else {
+        object(vec![])
     }
 }
+
 fn position<'a>(
-    positions: &'a [Value],
-    opts: &Value,
-) -> Result<Option<&'a Value>, JsCoercionError> {
+    positions: &'a [Input],
+    opts: &Input,
+) -> Result<Option<&'a Input>, JsCoercionError> {
     for p in positions {
         if strict(p.get("symbol"), opts.get("symbol"))
-            && p.get("side").and_then(Value::as_str) == Some(side(opts))
+            && p.get("side").is_some_and(|v| v.text_equals(side(opts)))
             && number(p.get("contracts"))? > 0.0
         {
             return Ok(Some(p));
@@ -260,31 +271,31 @@ fn position<'a>(
     Ok(None)
 }
 
-fn pstep<'a>(market: &'a Value, key: &str) -> Option<&'a Value> {
+fn pstep<'a>(market: &'a Input, key: &str) -> Option<&'a Input> {
     market.get("precision").and_then(|p| p.get(key))
 }
-fn order_info<'a>(order: &'a Value, key: &str) -> Option<&'a Value> {
+fn order_info<'a>(order: &'a Input, key: &str) -> Option<&'a Input> {
     order.get("info").and_then(|i| i.get(key))
 }
-fn omit_undefined(value: &mut JsJsonValue) {
-    if let JsJsonValue::Object(fields) = value {
-        fields.retain(|(_, v)| !matches!(v, JsJsonValue::Undefined));
+fn omit_undefined(value: &mut Input) {
+    if let Input::Object(fields) = value {
+        fields.retain(|(_, v)| !matches!(v, Input::Undefined));
     }
 }
-fn row_list(reply: &Value) -> Vec<Value> {
+fn row_list(reply: &Input) -> Vec<Input> {
     let data = reply.get("data").and_then(|v| v.get("data"));
-    data.and_then(Value::as_array)
+    data.and_then(Input::as_array)
         .or_else(|| {
             data.and_then(|d| d.get("orderList"))
-                .and_then(Value::as_array)
+                .and_then(Input::as_array)
         })
-        .cloned()
+        .map(<[Input]>::to_vec)
         .unwrap_or_default()
 }
-fn suppression() -> JsJsonValue {
+fn suppression() -> Input {
     object(vec![
-        ("__suppressExchangeError", JsJsonValue::Bool(true)),
-        ("__suppressExchangeRateLimitError", JsJsonValue::Bool(true)),
+        ("__suppressExchangeError", Input::Bool(true)),
+        ("__suppressExchangeRateLimitError", Input::Bool(true)),
     ])
 }
 fn reject<H: OrderModelHost, T>(host: &mut H, message: String) -> Result<T, H::Error> {
@@ -295,13 +306,13 @@ fn reject<H: OrderModelHost, T>(host: &mut H, message: String) -> Result<T, H::E
 
 pub fn format_create_order<H: OrderModelHost>(
     host: &mut H,
-    opts: &Value,
-) -> Result<Vec<JsJsonValue>, H::Error> {
+    opts: &Input,
+) -> Result<Vec<Input>, H::Error> {
     let caller = host.caller_id(opts)?;
     if kind(opts, "trailing_stop_market") {
         return Err(host.error(s("Trailing stop loss is not supported"))?);
     }
-    let symbol = opts.get("symbol").cloned().unwrap_or(Value::Null);
+    let symbol = opts.get("symbol").cloned().unwrap_or(Input::Null);
     let Some(market) = host.market(&symbol)? else {
         return Err(host.error(s(format!(
             "Market {} not found",
@@ -327,7 +338,7 @@ pub fn format_create_order<H: OrderModelHost>(
         .get("reduceOnly")
         .filter(|v| truth(Some(v)))
         .cloned()
-        .unwrap_or(Value::Bool(false));
+        .unwrap_or(Input::Bool(false));
     let effect = if truth(opts.get("timeInForce")) {
         inverse_tif(opts.get("timeInForce"))
     } else {
@@ -379,7 +390,7 @@ pub fn format_create_order<H: OrderModelHost>(
             if amount != 0.0 && !amount.is_nan() {
                 s(js_number_string(amount))
             } else {
-                JsJsonValue::Undefined
+                Input::Undefined
             },
         ),
         (
@@ -387,7 +398,7 @@ pub fn format_create_order<H: OrderModelHost>(
             if price != 0.0 && !price.is_nan() {
                 s(js_number_string(price))
             } else {
-                JsJsonValue::Undefined
+                Input::Undefined
             },
         ),
         ("side", inverse_side(opts.get("side"))),
@@ -456,8 +467,8 @@ pub fn format_create_order<H: OrderModelHost>(
 
 pub fn format_tpsl_order<H: OrderModelHost>(
     host: &mut H,
-    opts: &Value,
-) -> Result<Vec<JsJsonValue>, H::Error> {
+    opts: &Input,
+) -> Result<Vec<Input>, H::Error> {
     let positions = host.positions()?;
     let Some(p) = position(&positions, opts)? else {
         return reject(
@@ -483,7 +494,7 @@ pub fn format_tpsl_order<H: OrderModelHost>(
             ),
         );
     }
-    let symbol = opts.get("symbol").cloned().unwrap_or(Value::Null);
+    let symbol = opts.get("symbol").cloned().unwrap_or(Input::Null);
     let Some(market) = host.market(&symbol)? else {
         return reject(
             host,
@@ -555,7 +566,7 @@ pub fn format_tpsl_order<H: OrderModelHost>(
                 put(&mut payload, "tpStopType", s(stop_type));
             }
         }
-        put(&mut payload, "isPositionOrder", JsJsonValue::Bool(true));
+        put(&mut payload, "isPositionOrder", Input::Bool(true));
     } else {
         let amount = adjusted(opts.get("amount"), pstep(&market, "amount"))?;
         let price = adjusted(opts.get("price"), pstep(&market, "price"))?;
@@ -580,54 +591,139 @@ pub fn format_tpsl_order<H: OrderModelHost>(
     Ok(vec![payload])
 }
 
-pub async fn fetch_regular_orders<H: OrderModelHost>(
-    host: &mut H,
-) -> Result<Vec<JsJsonValue>, H::Error> {
-    let result=async {
-        let reply=host.get(endpoint("OPEN_ORDERS"),suppression()).await?;
-        let mut orders=Vec::new();
-        for row in row_list(&reply){
-            let Some(record)=row.as_object() else {return Err(host.error(s("Expected object order row"))?);};
-            let cached=host.cached_tif(row.get("clientId"))?;
-            let effect=match row.get("effect") {
-                None | Some(Value::Null)=>String::new(),Some(Value::String(value))=>value.to_uppercase(),
-                _=>return Err(JsCoercionError{name:"TypeError",message:"o.effect?.toUpperCase is not a function"}.into()),
+pub async fn fetch_regular_orders<H: OrderModelHost>(host: &mut H) -> Result<Vec<Input>, H::Error> {
+    let result = async {
+        let reply = host.get(endpoint("OPEN_ORDERS"), suppression()).await?;
+        let mut orders = Vec::new();
+        for row in row_list(&reply) {
+            let Some(_record) = row.as_object() else {
+                return Err(host.error(s("Expected object order row"))?);
             };
-            let rest_tif=forward_tif(&effect);
-            let tif=cached.as_ref().filter(|v|truth(Some(v))).map_or(rest_tif,|v|j(Some(v)));
-            let raw_type=match crate::row_extraction::get_first_value(record,&["orderType","type"]){safe_cex_num::TableHit::Mapped(value)=>Some(value),_=>None};
-            let raw_type=string(raw_type.filter(|v|truth(Some(v))).or(Some(&Value::String(String::new()))))?.to_uppercase();
-            let reduce=host.reduce_only(row.get("reduceOnly"),row.get("clientId"))?;
-            let mut info=spread(&row);put(&mut info,"reduceOnly",JsJsonValue::Bool(reduce));
-            let id=host.key(&row,"orderId")?;
-            let raw_side=row.get("side").filter(|v|truth(Some(v))).cloned().unwrap_or(Value::String(String::new()));
-            let upper_side=Value::String(string(Some(&raw_side))?.to_uppercase());
-            let price=float(row.get("price"))?;
-            let amount=float(host.key(&row,"qty")?.as_ref())?;
-            let filled=float(host.key(&row,"tradeQty")?.as_ref())?;
-            let last=host.key(&row,"mtime")?;
-            let qty=host.key(&row,"qty")?;let traded=host.key(&row,"tradeQty")?;
-            let remaining=subtract(qty.as_ref(),traded.as_ref())?;
-            let tp_price=float(host.key(&row,"tpOrderPrice")?.as_ref())?;
-            let sl_price=float(host.key(&row,"slOrderPrice")?.as_ref())?;
-            let tp_trigger=forward_trigger(host.key(&row,"tpStopType")?.as_ref());
-            let sl_trigger=forward_trigger(host.key(&row,"slStopType")?.as_ref());
-            orders.push(object(vec![("id",j(id.as_ref())),("status",s("open")),("symbol",j(row.get("symbol"))),("type",forward_type(&raw_type)),("side",forward_side(Some(&upper_side))),("price",n(price)),("amount",n(amount)),("reduceOnly",JsJsonValue::Bool(reduce)),("filled",n(filled)),("lastUpdate",j(last.as_ref())),("remaining",n(remaining)),("takeProfitPrice",n(tp_price)),("stopLossPrice",n(sl_price)),("timeInForce",tif),("info",info.clone()),("tpTriggerType",tp_trigger),("slTriggerType",sl_trigger)]));
-            for (leg,field,trigger_key) in [("tp","tpPrice","tpStopType"),("sl","slPrice","slStopType")]{
-                if finite_trigger(row.get(field))?{
-                    let id=host.key(&row,"orderId")?;
-                    let reversed=if matches!(forward_side(row.get("side")),JsJsonValue::String(v) if v=="buy"){s("sell")}else{s("buy")};
-                    let price=float(row.get(field))?;
-                    let amount=float(host.key(&row,"qty")?.as_ref())?;
-                    let last=host.key(&row,"mtime")?;
-                    let remaining=float(host.key(&row,"qty")?.as_ref())?;
-                    let trigger=forward_trigger(host.key(&row,trigger_key)?.as_ref());
-                    orders.push(object(vec![("id",s(format!("{}__{leg}",string(id.as_ref())?))),("status",s("open")),("symbol",j(row.get("symbol"))),("type",s(if leg=="tp"{"take_profit_market"}else{"stop_market"})),("side",reversed),("price",n(price)),("amount",n(amount)),("reduceOnly",JsJsonValue::Bool(true)),("filled",n(0.0)),("lastUpdate",j(last.as_ref())),("remaining",n(remaining)),("takeProfitPrice",n(0.0)),("stopLossPrice",n(0.0)),("timeInForce",s("GoodTillCancel")),("info",info.clone()),("tpTriggerType",if leg=="tp"{trigger.clone()}else{s("mark_price")}),("slTriggerType",if leg=="sl"{trigger}else{s("mark_price")})]));
+            let cached = host.cached_tif(row.get("clientId"))?;
+            let effect = match row.get("effect") {
+                None | Some(Input::Undefined | Input::Null) => String::new(),
+                Some(Input::Text(_)) => string(row.get("effect"))?.to_uppercase(),
+                _ => {
+                    return Err(JsCoercionError {
+                        name: "TypeError",
+                        message: "o.effect?.toUpperCase is not a function",
+                    }
+                    .into());
+                }
+            };
+            let rest_tif = forward_tif(&effect);
+            let tif = cached
+                .as_ref()
+                .filter(|v| truth(Some(v)))
+                .map_or(rest_tif, |v| j(Some(v)));
+            let raw_type = ["orderType", "type"].into_iter().find_map(|key| {
+                row.get(key)
+                    .filter(|value| !value.is_nullish() && !value.text_equals(""))
+            });
+            let raw_type =
+                string(raw_type.filter(|v| truth(Some(v))).or(Some(&s(""))))?.to_uppercase();
+            let reduce = host.reduce_only(row.get("reduceOnly"), row.get("clientId"))?;
+            let mut info = spread(&row);
+            put(&mut info, "reduceOnly", Input::Bool(reduce));
+            let id = host.key(&row, "orderId")?;
+            let raw_side = row
+                .get("side")
+                .filter(|v| truth(Some(v)))
+                .cloned()
+                .unwrap_or(s(""));
+            let upper_side = s(string(Some(&raw_side))?.to_uppercase());
+            let price = float(row.get("price"))?;
+            let amount = float(host.key(&row, "qty")?.as_ref())?;
+            let filled = float(host.key(&row, "tradeQty")?.as_ref())?;
+            let last = host.key(&row, "mtime")?;
+            let qty = host.key(&row, "qty")?;
+            let traded = host.key(&row, "tradeQty")?;
+            let remaining = subtract(qty.as_ref(), traded.as_ref())?;
+            let tp_price = float(host.key(&row, "tpOrderPrice")?.as_ref())?;
+            let sl_price = float(host.key(&row, "slOrderPrice")?.as_ref())?;
+            let tp_trigger = forward_trigger(host.key(&row, "tpStopType")?.as_ref());
+            let sl_trigger = forward_trigger(host.key(&row, "slStopType")?.as_ref());
+            orders.push(object(vec![
+                ("id", j(id.as_ref())),
+                ("status", s("open")),
+                ("symbol", j(row.get("symbol"))),
+                ("type", forward_type(&raw_type)),
+                ("side", forward_side(Some(&upper_side))),
+                ("price", n(price)),
+                ("amount", n(amount)),
+                ("reduceOnly", Input::Bool(reduce)),
+                ("filled", n(filled)),
+                ("lastUpdate", j(last.as_ref())),
+                ("remaining", n(remaining)),
+                ("takeProfitPrice", n(tp_price)),
+                ("stopLossPrice", n(sl_price)),
+                ("timeInForce", tif),
+                ("info", info.clone()),
+                ("tpTriggerType", tp_trigger),
+                ("slTriggerType", sl_trigger),
+            ]));
+            for (leg, field, trigger_key) in [
+                ("tp", "tpPrice", "tpStopType"),
+                ("sl", "slPrice", "slStopType"),
+            ] {
+                if finite_trigger(row.get(field))? {
+                    let id = host.key(&row, "orderId")?;
+                    let reversed = if forward_side(row.get("side")).text_equals("buy") {
+                        s("sell")
+                    } else {
+                        s("buy")
+                    };
+                    let price = float(row.get(field))?;
+                    let amount = float(host.key(&row, "qty")?.as_ref())?;
+                    let last = host.key(&row, "mtime")?;
+                    let remaining = float(host.key(&row, "qty")?.as_ref())?;
+                    let trigger = forward_trigger(host.key(&row, trigger_key)?.as_ref());
+                    orders.push(object(vec![
+                        ("id", s(format!("{}__{leg}", string(id.as_ref())?))),
+                        ("status", s("open")),
+                        ("symbol", j(row.get("symbol"))),
+                        (
+                            "type",
+                            s(if leg == "tp" {
+                                "take_profit_market"
+                            } else {
+                                "stop_market"
+                            }),
+                        ),
+                        ("side", reversed),
+                        ("price", n(price)),
+                        ("amount", n(amount)),
+                        ("reduceOnly", Input::Bool(true)),
+                        ("filled", n(0.0)),
+                        ("lastUpdate", j(last.as_ref())),
+                        ("remaining", n(remaining)),
+                        ("takeProfitPrice", n(0.0)),
+                        ("stopLossPrice", n(0.0)),
+                        ("timeInForce", s("GoodTillCancel")),
+                        ("info", info.clone()),
+                        (
+                            "tpTriggerType",
+                            if leg == "tp" {
+                                trigger.clone()
+                            } else {
+                                s("mark_price")
+                            },
+                        ),
+                        (
+                            "slTriggerType",
+                            if leg == "sl" {
+                                trigger
+                            } else {
+                                s("mark_price")
+                            },
+                        ),
+                    ]));
                 }
             }
         }
-        Ok::<_,H::Error>(orders)
-    }.await;
+        Ok::<_, H::Error>(orders)
+    }
+    .await;
     match result {
         Ok(rows) => Ok(rows),
         Err(error) => {
@@ -637,9 +733,7 @@ pub async fn fetch_regular_orders<H: OrderModelHost>(
     }
 }
 
-pub async fn fetch_tpsl_orders<H: OrderModelHost>(
-    host: &mut H,
-) -> Result<Vec<JsJsonValue>, H::Error> {
+pub async fn fetch_tpsl_orders<H: OrderModelHost>(host: &mut H) -> Result<Vec<Input>, H::Error> {
     let reply = host
         .get(endpoint("OPEN_TPSL_ORDERS"), suppression())
         .await?;
@@ -663,10 +757,8 @@ pub async fn fetch_tpsl_orders<H: OrderModelHost>(
         } else {
             host.key(&row, "orderId")?
         };
-        let id = id
-            .filter(|v| truth(Some(v)))
-            .unwrap_or(Value::String(String::new()));
-        let seed = serde_json::json!({"id":string(Some(&id))?,"info":row});
+        let id = id.filter(|v| truth(Some(v))).unwrap_or(s(""));
+        let seed = object(vec![("id", s(string(Some(&id))?)), ("info", row.clone())]);
         let raw = host.raw_id(&seed)?;
         let tp = finite_trigger(row.get("tpPrice"))?;
         let sl = finite_trigger(row.get("slPrice"))?;
@@ -678,7 +770,11 @@ pub async fn fetch_tpsl_orders<H: OrderModelHost>(
                 continue;
             }
             let qty = host.key(&row, if leg == "tp" { "tpQty" } else { "slQty" })?;
-            let qty = crate::value_helpers::parse_finite_number(qty.as_ref(), 0.0)?;
+            let qty = float(qty.as_ref())?
+                .is_finite()
+                .then(|| float(qty.as_ref()))
+                .transpose()?
+                .unwrap_or(0.0);
             let full = if truth(row.get("positionId")) {
                 if let Some(p) = position {
                     number(p.get("contracts"))? == qty
@@ -692,7 +788,7 @@ pub async fn fetch_tpsl_orders<H: OrderModelHost>(
             let side = position.map_or_else(
                 || forward_side(row.get("side")),
                 |p| {
-                    if p.get("side").and_then(Value::as_str) == Some("long") {
+                    if p.get("side").is_some_and(|v| v.text_equals("long")) {
                         s("sell")
                     } else {
                         s("buy")
@@ -708,7 +804,7 @@ pub async fn fetch_tpsl_orders<H: OrderModelHost>(
             let reduce = host
                 .key(&row, "reduceOnly")?
                 .filter(|v| truth(Some(v)))
-                .unwrap_or(Value::Bool(false));
+                .unwrap_or(Input::Bool(false));
             let clock = host.clock()?;
             let trigger = forward_trigger(
                 host.key(
@@ -759,10 +855,10 @@ pub async fn fetch_tpsl_orders<H: OrderModelHost>(
 
 pub async fn update_standalone_tpsl_order<H: OrderModelHost>(
     host: &mut H,
-    order: &Value,
-    update: &Value,
+    order: &Input,
+    update: &Input,
 ) -> Result<Vec<String>, H::Error> {
-    let symbol = order.get("symbol").cloned().unwrap_or(Value::Null);
+    let symbol = order.get("symbol").cloned().unwrap_or(Input::Null);
     let Some(market) = host.market(&symbol)? else {
         return reject(
             host,
@@ -789,9 +885,7 @@ pub async fn update_standalone_tpsl_order<H: OrderModelHost>(
             (
                 "positionId",
                 s(string(
-                    position_id
-                        .filter(|v| truth(Some(v)))
-                        .or(Some(&Value::String(String::new()))),
+                    position_id.filter(|v| truth(Some(v))).or(Some(&s(""))),
                 )?),
             ),
         ])
@@ -833,7 +927,7 @@ pub async fn update_standalone_tpsl_order<H: OrderModelHost>(
         {
             if host.raw_id(&candidate)? == raw
                 || position_id
-                    .filter(|v| !v.is_null())
+                    .filter(|v| !v.is_nullish())
                     .is_some_and(|id| strict(order_info(&candidate, "positionId"), Some(id)))
             {
                 sibling_order = Some(candidate);
@@ -892,10 +986,10 @@ pub async fn update_standalone_tpsl_order<H: OrderModelHost>(
 }
 fn append_leg<H: OrderModelHost>(
     host: &mut H,
-    payload: &mut JsJsonValue,
-    order: &Value,
-    update: &Value,
-    market: &Value,
+    payload: &mut Input,
+    order: &Input,
+    update: &Input,
+    market: &Input,
     changed_leg: &str,
     leg: &'static str,
     position_order: bool,
@@ -967,12 +1061,8 @@ pub fn is_unsupported_order_operation(message: &str) -> bool {
         .contains("order does not support this operation")
 }
 
-pub fn get_internal_trigger_type(raw: Option<&Value>) -> Result<&'static str, JsCoercionError> {
-    let normalized = string(
-        raw.filter(|v| truth(Some(v)))
-            .or(Some(&Value::String(String::new()))),
-    )?
-    .to_uppercase();
+pub fn get_internal_trigger_type(raw: Option<&Input>) -> Result<&'static str, JsCoercionError> {
+    let normalized = string(raw.filter(|v| truth(Some(v))).or(Some(&s(""))))?.to_uppercase();
     Ok(if matches!(normalized.as_str(), "LAST" | "LAST_PRICE") {
         "last_price"
     } else {
@@ -984,24 +1074,22 @@ pub fn get_internal_trigger_type(raw: Option<&Value>) -> Result<&'static str, Js
 /// Payload fields are the strings constructed by update_order, not a wire projection.
 pub async fn recreate_attached_tpsl_parent_order<H: OrderModelHost>(
     host: &mut H,
-    target: &Value,
+    target: &Input,
     virtual_leg: &str,
-    payload: &JsJsonValue,
+    payload: &Input,
 ) -> Result<Vec<String>, H::Error> {
     let field = |key: &str| match payload {
-        JsJsonValue::Object(fields) => {
-            fields
-                .iter()
-                .find(|(k, _)| k == key)
-                .and_then(|(_, v)| match v {
-                    JsJsonValue::String(text) => Some(Value::String(text.clone())),
-                    _ => None,
-                })
-        }
+        Input::Object(fields) => fields
+            .iter()
+            .find(|(k, _)| k.iter().copied().eq(key.encode_utf16()))
+            .and_then(|(_, v)| match v {
+                Input::Text(text) => Some(Input::Text(text.clone())),
+                _ => None,
+            }),
         _ => None,
     };
-    let price = crate::value_helpers::parse_finite_number(field("price").as_ref(), f64::NAN)?;
-    let amount = crate::value_helpers::parse_finite_number(field("qty").as_ref(), f64::NAN)?;
+    let price = float(field("price").as_ref())?;
+    let amount = float(field("qty").as_ref())?;
     if !price.is_finite() || price <= 0.0 {
         return reject(
             host,
@@ -1014,30 +1102,28 @@ pub async fn recreate_attached_tpsl_parent_order<H: OrderModelHost>(
             "Bitunix cancel/recreate fallback requires a valid parent quantity".into(),
         );
     }
-    let mut replacement = serde_json::Map::new();
+    let mut replacement = object(vec![]);
     for key in ["symbol", "type", "side", "timeInForce"] {
         if let Some(value) = target.get(key) {
-            replacement.insert(key.into(), value.clone());
+            put(&mut replacement, key, value.clone());
         }
     }
-    replacement.insert("price".into(), Value::from(price));
-    replacement.insert("amount".into(), Value::from(amount));
-    replacement.insert(
-        "reduceOnly".into(),
+    put(&mut replacement, "price", Input::Float(price));
+    put(&mut replacement, "amount", Input::Float(amount));
+    put(
+        &mut replacement,
+        "reduceOnly",
         target
             .get("reduceOnly")
             .filter(|v| truth(Some(v)))
             .cloned()
-            .unwrap_or(Value::Bool(false)),
+            .unwrap_or(Input::Bool(false)),
     );
     for (prefix, trigger_key, price_key) in [
         ("tp", "tpTriggerType", "takeProfit"),
         ("sl", "slTriggerType", "stopLoss"),
     ] {
-        let trigger = crate::value_helpers::parse_finite_number(
-            field(&format!("{prefix}Price")).as_ref(),
-            f64::NAN,
-        )?;
+        let trigger = float(field(&format!("{prefix}Price")).as_ref())?;
         if !trigger.is_finite() || trigger <= 0.0 {
             continue;
         }
@@ -1046,7 +1132,7 @@ pub async fn recreate_attached_tpsl_parent_order<H: OrderModelHost>(
             order_type
                 .as_ref()
                 .filter(|v| truth(Some(v)))
-                .or(Some(&Value::String("MARKET".into()))),
+                .or(Some(&s("MARKET"))),
         )?
         .to_uppercase();
         if order_type != "MARKET" {
@@ -1058,15 +1144,16 @@ pub async fn recreate_attached_tpsl_parent_order<H: OrderModelHost>(
                 ),
             );
         }
-        replacement.insert(price_key.into(), Value::from(trigger));
-        replacement.insert(
-            trigger_key.into(),
-            Value::String(
-                get_internal_trigger_type(field(&format!("{prefix}StopType")).as_ref())?.into(),
-            ),
+        put(&mut replacement, price_key, Input::Float(trigger));
+        put(
+            &mut replacement,
+            trigger_key,
+            s(get_internal_trigger_type(
+                field(&format!("{prefix}StopType")).as_ref(),
+            )?),
         );
     }
-    if !replacement.contains_key("takeProfit") && !replacement.contains_key("stopLoss") {
+    if replacement.get("takeProfit").is_none() && replacement.get("stopLoss").is_none() {
         return reject(
             host,
             "Bitunix cancel/recreate fallback requires at least one attached TP/SL leg".into(),
@@ -1080,7 +1167,7 @@ pub async fn recreate_attached_tpsl_parent_order<H: OrderModelHost>(
                 ("symbol", j(target.get("symbol"))),
                 (
                     "orderList",
-                    JsJsonValue::Array(vec![object(vec![("orderId", s(&parent_id))])]),
+                    Input::Array(vec![object(vec![("orderId", s(&parent_id))])]),
                 ),
             ]),
         )
@@ -1104,12 +1191,13 @@ pub async fn recreate_attached_tpsl_parent_order<H: OrderModelHost>(
     let ids = host
         .orders()?
         .iter()
-        .filter_map(|order| order.get("id").and_then(Value::as_str))
+        .filter_map(|order| order.get("id").map(|id| string(Some(id))))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
         .filter(|id| *id == parent_id || id.starts_with(&prefix))
-        .map(str::to_owned)
         .collect::<Vec<_>>();
     host.update_status(&ids)?;
-    let replacement_ids = host.place_replacement(Value::Object(replacement)).await?;
+    let replacement_ids = host.place_replacement(replacement).await?;
     Ok(replacement_ids
         .first()
         .filter(|id| !id.is_empty())
@@ -1119,8 +1207,8 @@ pub async fn recreate_attached_tpsl_parent_order<H: OrderModelHost>(
 
 pub async fn update_order<H: OrderModelHost>(
     host: &mut H,
-    order: &Value,
-    update: &Value,
+    order: &Input,
+    update: &Input,
 ) -> Result<Vec<String>, H::Error> {
     let virtual_leg = host.attached_leg(order)?;
     let virtual_order = virtual_leg.is_some();
@@ -1131,9 +1219,11 @@ pub async fn update_order<H: OrderModelHost>(
         id.clone()
     };
     let target = if virtual_order {
-        host.orders()?
-            .into_iter()
-            .find(|candidate| candidate.get("id").and_then(Value::as_str) == Some(&parent))
+        host.orders()?.into_iter().find(|candidate| {
+            candidate
+                .get("id")
+                .is_some_and(|id| id.text_equals(&parent))
+        })
     } else {
         Some(order.clone())
     };
@@ -1168,7 +1258,7 @@ pub async fn update_order<H: OrderModelHost>(
             ),
         );
     }
-    let symbol = target.get("symbol").cloned().unwrap_or(Value::Null);
+    let symbol = target.get("symbol").cloned().unwrap_or(Input::Null);
     let Some(market) = host.market(&symbol)? else {
         return reject(
             host,
@@ -1176,14 +1266,14 @@ pub async fn update_order<H: OrderModelHost>(
         );
     };
     let info = target.get("info");
-    let record = info.is_some_and(Value::is_object);
+    let record = info.is_some_and(Input::is_object);
     let raw_id = info.filter(|_| record).and_then(|i| i.get("orderId"));
     let raw_type = if record {
         string(
             info.and_then(|i| i.get("orderType"))
                 .filter(|v| truth(Some(v)))
                 .or_else(|| info.and_then(|i| i.get("type")).filter(|v| truth(Some(v))))
-                .or(Some(&Value::String(String::new()))),
+                .or(Some(&s(""))),
         )?
         .to_uppercase()
     } else {
@@ -1191,10 +1281,9 @@ pub async fn update_order<H: OrderModelHost>(
     };
     let target_id = string(target.get("id"))?;
     let identity = if record {
-        raw_id.is_some_and(|v| !v.is_null() && v != &Value::String(String::new()))
-            && string(raw_id)? == target_id
+        raw_id.is_some_and(|v| !v.is_null() && v != &s("")) && string(raw_id)? == target_id
     } else {
-        target.get("id") != Some(&Value::String(String::new()))
+        target.get("id") != Some(&s(""))
     };
     if !identity
         || if record {
@@ -1213,7 +1302,7 @@ pub async fn update_order<H: OrderModelHost>(
     if record
         && (!info
             .and_then(|i| i.get("reduceOnly"))
-            .is_some_and(Value::is_boolean)
+            .is_some_and(|value| value.as_bool().is_some())
             || !strict(
                 info.and_then(|i| i.get("reduceOnly")),
                 target.get("reduceOnly"),
@@ -1269,11 +1358,9 @@ pub async fn update_order<H: OrderModelHost>(
         let trigger = if virtual_leg == Some(prefix) {
             update.get("price")
         } else {
-            info.and_then(|i| i.get(format!("{prefix}Price")))
+            info.and_then(|i| i.get(&format!("{prefix}Price")))
         };
-        if trigger.is_none()
-            || trigger.is_some_and(|v| v.is_null() || v == &Value::String(String::new()))
-        {
+        if trigger.is_none() || trigger.is_some_and(|v| v.is_null() || v == &s("")) {
             continue;
         }
         let price = adjusted(trigger, pstep(&market, "price"))?;
@@ -1294,7 +1381,7 @@ pub async fn update_order<H: OrderModelHost>(
         let order_type = string(
             info.and_then(|i| i.get(&type_key))
                 .filter(|v| truth(Some(v)))
-                .or(Some(&Value::String("MARKET".into()))),
+                .or(Some(&s("MARKET"))),
         )?
         .to_uppercase();
         if order_type != "MARKET" && order_type != "LIMIT" {
@@ -1349,13 +1436,12 @@ pub async fn update_order<H: OrderModelHost>(
         let response_id = body
             .and_then(|d| d.get("data"))
             .and_then(|d| d.get("orderId"));
-        let acknowledged = if response_id.is_none()
-            || response_id.is_some_and(|v| v.is_null() || v == &Value::String(String::new()))
-        {
-            target_id
-        } else {
-            string(response_id)?
-        };
+        let acknowledged =
+            if response_id.is_none() || response_id.is_some_and(|v| v.is_null() || v == &s("")) {
+                target_id
+            } else {
+                string(response_id)?
+            };
         Ok(vec![if let Some(leg) = virtual_leg {
             format!("{acknowledged}__{leg}")
         } else {
@@ -1367,8 +1453,8 @@ pub async fn update_order<H: OrderModelHost>(
         Ok(ids) => Ok(ids),
         Err(error) => {
             let message = host.reason(&error, Some("Bitunix modify order failed"))?;
-            if let (Some(leg), JsJsonValue::String(text)) = (virtual_leg, &message)
-                && is_unsupported_order_operation(text)
+            if let Some(leg) = virtual_leg
+                && is_unsupported_order_operation(&string(Some(&message))?)
             {
                 return match recreate_attached_tpsl_parent_order(host, &target, leg, &payload).await
                 {

@@ -336,6 +336,7 @@ describe('exchangeMetadata', () => {
         'apexomni',
         'asterdex',
         'binance',
+        'binanceinverse',
         'binancespot',
         'binancepm',
         'bingx',
@@ -397,6 +398,7 @@ describe('exchangeMetadata', () => {
       });
 
       [
+        'binanceinverse',
         'bitgetinverse',
         'bitgetusdc',
         'hyrotrader',
@@ -420,6 +422,12 @@ describe('exchangeMetadata', () => {
           false,
         );
       });
+    });
+
+    it('keeps Binance inverse hidden until COIN-M private and history surfaces are certified', () => {
+      expect(exchangeMetadata.binanceinverse.supportsTestnet).toBe(false);
+      expect(exchangeMetadata.binanceinverse.requiresTickersForMarketsLoaded).toBe(true);
+      expect(exchangeMetadata.binanceinverse.latencyDomain).toBe('dapi.binance.com');
     });
   });
 });

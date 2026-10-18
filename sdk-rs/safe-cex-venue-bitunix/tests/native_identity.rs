@@ -477,3 +477,270 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     );
     venue.dispose().unwrap();
 }
+
+#[test]
+fn retained_model_info_survives_real_amendment_without_json_projection() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, from_typed, to_typed};
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_types::{Order, UpdateOrderOpts};
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-operations-oracle.cjs"
+        ))
+        .arg("attachedAmendmentRecovery")
+        .arg(support::MARKET)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let case = &source["cases"][0];
+    assert_eq!(case["label"], "tp");
+    let (venue, rt, store, wire) = support::fixture_with(false);
+    let retained = |value: &Value| {
+        let value = from_json(value);
+        let info = value.get("info").unwrap();
+        info.define("unreadNaN", Js::Number(f64::NAN)).unwrap();
+        info.define("negativeZero", Js::Number(-0.0)).unwrap();
+        info.define("ownUndefined", Js::Undefined).unwrap();
+        info.define("unreadText", Js::utf16(&[0xD800, 0xDC00, 0xD800]))
+            .unwrap();
+        to_typed::<Order>(&value).unwrap()
+    };
+    let orders: Vec<Order> = case["input"]["orders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(retained)
+        .collect();
+    let assert_info = |order: &Order| {
+        let info = from_typed(order).unwrap().get("info").unwrap();
+        assert!(info.get("unreadNaN").unwrap().to_number().unwrap().is_nan());
+        assert_eq!(
+            info.get("negativeZero")
+                .unwrap()
+                .to_number()
+                .unwrap()
+                .to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert!(matches!(info.get("ownUndefined").unwrap(), Js::Undefined));
+        assert!(
+            info.own_entries()
+                .unwrap()
+                .iter()
+                .any(|(key, _)| key.as_ref() == "ownUndefined".encode_utf16().collect::<Vec<_>>())
+        );
+        assert_eq!(
+            info.get("unreadText").unwrap().as_str().unwrap().as_ref(),
+            &[0xD800, 0xDC00, 0xD800]
+        );
+    };
+    for order in &orders {
+        assert_info(order);
+    }
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            orders: Some(orders),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    for (path, body) in [
+        ("/api/v1/futures/trade/modify_order", &case["modify"]),
+        ("/api/v1/futures/trade/cancel_orders", &case["cancel"]),
+        ("/api/v1/futures/trade/place_order", &case["placement"]),
+    ] {
+        wire.bodies
+            .lock()
+            .unwrap()
+            .insert(path.into(), body.clone());
+    }
+    let options = UpdateOrderOpts {
+        order: retained(&case["input"]["order"]),
+        update: serde_json::from_value(case["input"]["update"].clone()).unwrap(),
+    };
+    let ids = drive(&rt, venue.update_order(options))
+        .expect("retained model info must not enter JSON before amendment");
+    assert_eq!(json!(ids), case["result"]["ids"]);
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        3,
+        "modify/cancel/replacement must all reach native HTTP"
+    );
+    for (request, expected) in requests.iter().zip(case["calls"].as_array().unwrap()) {
+        assert_eq!(request.url, expected["endpoint"]);
+        let body: Value = match request.body.as_ref().unwrap() {
+            safe_cex_transport::RestBody::Untransformed(value) => {
+                value.clone().into_value().unwrap()
+            }
+            safe_cex_transport::RestBody::Transformed(value) => {
+                match value.value().clone().into_value().unwrap() {
+                    Value::String(text) => serde_json::from_str(&text).unwrap(),
+                    value => value,
+                }
+            }
+            safe_cex_transport::RestBody::Encoded(bytes) => serde_json::from_slice(bytes).unwrap(),
+        };
+        assert_eq!(
+            body, expected["payload"],
+            "only actual finite HTTP bodies are projected"
+        );
+    }
+    drop(requests);
+    for order in store.orders().iter() {
+        assert_info(order);
+    }
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn retained_standalone_nullish_id_matches_source() {
+    retained_standalone_info(0);
+}
+#[test]
+fn retained_standalone_utf16_trigger_matches_source() {
+    retained_standalone_info(1);
+}
+#[test]
+fn retained_standalone_undefined_position_does_not_match_unrelated_sibling() {
+    retained_standalone_info(2);
+}
+fn retained_standalone_info(selected: usize) {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, to_typed};
+    use safe_cex_types::{Order, UpdateOrderOpts};
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-operations-oracle.cjs"
+        ))
+        .arg("retainedInfo")
+        .arg(support::MARKET)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["rows"].as_array().unwrap();
+    assert_eq!(cases.len(), 3);
+    fn decode(value: &Value) -> Js {
+        if value.get("$undefined").is_some() {
+            Js::Undefined
+        } else if let Some(units) = value.get("$units") {
+            Js::utf16(
+                &units
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|unit| unit.as_u64().unwrap() as u16)
+                    .collect::<Vec<_>>(),
+            )
+        } else if let Some(fields) = value.as_object() {
+            let object = Js::object(vec![]);
+            for (key, value) in fields {
+                object.define(key, decode(value)).unwrap();
+            }
+            object
+        } else {
+            from_json(value)
+        }
+    }
+    for (index, case) in cases
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index == selected)
+    {
+        let (venue, rt, store, wire) = support::fixture_with(false);
+        safe_cex_store::Store::update(
+            store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                orders: Some(if let Some(orders) = case["fixture"].get("orders") {
+                    orders
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|order| to_typed::<Order>(&decode(order)).unwrap())
+                        .collect()
+                } else {
+                    serde_json::from_str(case["ordersJson"].as_str().unwrap()).unwrap()
+                }),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let native = from_json(
+            &json!({"id":"TP","status":"open","symbol":"BTCUSDT","type":"take_profit_market","side":"buy","price":120.5,"amount":2.5,"filled":0,"remaining":2.5,"reduceOnly":false,"lastUpdate":17}),
+        );
+        for (key, value) in case["fixture"]["order"].as_object().unwrap() {
+            native.define(key, decode(value)).unwrap();
+        }
+        let order: Order = to_typed(&native).unwrap();
+        let actual = drive(
+            &rt,
+            venue.update_order(UpdateOrderOpts {
+                order,
+                update: serde_json::from_value(json!({"price":110.25})).unwrap(),
+            }),
+        )
+        .expect("retained standalone info must reach its native source route");
+        assert_eq!(actual, ["TP"], "case {index}");
+        let requests = wire.requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "one native standalone modification: {index}"
+        );
+        assert!(requests[0].url.ends_with("/tpsl/modify_order"));
+        let expected = case["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event[0] == "post")
+            .unwrap();
+        let fields = expected[2]["entries"].as_array().unwrap();
+        let body = match requests[0].body.as_ref().unwrap() {
+            safe_cex_transport::RestBody::Untransformed(value) => {
+                value.clone().into_value().unwrap()
+            }
+            safe_cex_transport::RestBody::Transformed(value) => {
+                match value.value().clone().into_value().unwrap() {
+                    Value::String(text) => serde_json::from_str(&text).unwrap(),
+                    value => value,
+                }
+            }
+            safe_cex_transport::RestBody::Encoded(bytes) => serde_json::from_slice(bytes).unwrap(),
+        };
+        assert_eq!(body.as_object().unwrap().len(), fields.len());
+        for field in fields {
+            let key = field[0].as_str().unwrap();
+            let units = field[1]["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|unit| unit.as_u64().unwrap() as u16)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                body[key]
+                    .as_str()
+                    .unwrap()
+                    .encode_utf16()
+                    .collect::<Vec<_>>(),
+                units,
+                "native request field {key}: {index}"
+            );
+        }
+        drop(requests);
+        venue.dispose().unwrap();
+    }
+}

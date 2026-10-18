@@ -9621,6 +9621,85 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "prototype",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Reads actual parent metadata from an existing native builtin identity without reading the shadowable __proto__ string property. Fresh realm/member receivers and direct parent variant/Rc identity observations match Node Object.getPrototypeOf; this selects existing references, without raw input admission or coercion.",
+        "call": "{ use crate::{ProtoMember,PrototypeRealm,PrototypeScalar,PrototypeValue,BuiltinIdentity}; let realm=std::rc::Rc::new(PrototypeRealm::default()); let method=realm.reference(ProtoMember::ToString); let function=method.prototype().expect(\"function parent\"); let reference=match $value.as_str().expect(\"reviewed receiver fixture\") { \"object-prototype\"=>realm.reference(ProtoMember::Prototype), \"object-method\"=>method, \"function-prototype\"=>function, \"function-constructor\"=>match function.get(\"constructor\"){PrototypeValue::Reference(value)=>value,_=>panic!(\"constructor referent\")}, \"function-method\"=>match function.get(\"call\"){PrototypeValue::Reference(value)=>value,_=>panic!(\"call referent\")}, _=>panic!(\"unreviewed receiver fixture\") }; reference.set(\"__proto__\",PrototypeScalar::Number(9.0)); match $type::prototype(&reference) { None=>serde_json::json!({\"parent\":\"null\"}), Some(parent)=>{ let name=match parent.member(){BuiltinIdentity::FunctionPrototype=>\"Function.prototype\",BuiltinIdentity::Object(ProtoMember::Prototype)=>\"Object.prototype\",_=>panic!(\"unexpected parent identity\")};serde_json::json!({\"parent\":name,\"sameRealm\":std::rc::Rc::ptr_eq(parent.realm(),&realm)}) } } }",
+        "cases": [
+          {
+            "input": "object-prototype",
+            "output": {
+              "parent": "null"
+            }
+          },
+          {
+            "input": "object-method",
+            "output": {
+              "parent": "Function.prototype",
+              "sameRealm": true
+            }
+          },
+          {
+            "input": "function-prototype",
+            "output": {
+              "parent": "Object.prototype",
+              "sameRealm": true
+            }
+          },
+          {
+            "input": "function-constructor",
+            "output": {
+              "parent": "Function.prototype",
+              "sameRealm": true
+            }
+          },
+          {
+            "input": "function-method",
+            "output": {
+              "parent": "Function.prototype",
+              "sameRealm": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "get",
           "signature": {
             "inputs": [
