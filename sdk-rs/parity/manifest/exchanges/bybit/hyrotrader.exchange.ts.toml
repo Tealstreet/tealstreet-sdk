@@ -291,6 +291,22 @@ status = "ported"
 note = "Returns a fresh linear-only vector on each call. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_supported_categories."
 
 [[symbol]]
+ts = "HyrotraderExchange#hyrotraderMode"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyrotraderExchange#getConfiguredUrls"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "HyrotraderExchange.getBybitRestBaseUrl"
 kind = "method"
 layer = "mirror"
@@ -345,3 +361,11 @@ layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::hyro_requires_order_link_id"
 status = "ported"
 note = "Exact true capability method. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_requires_order_link_id."
+
+[[symbol]]
+ts = "HyrotraderExchange.shouldUseLocalRestOrderLifecycleFallback"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

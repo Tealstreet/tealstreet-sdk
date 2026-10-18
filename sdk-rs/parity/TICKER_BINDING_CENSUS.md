@@ -50,6 +50,6 @@ satisfy this corpus.
 | Orderly | orderly/orderly.ws-public.ts | Copied ticker/BBO/mark values stay strict; decision-3 row refusal; funding parsed | Pending complete coercion corpus; row policy #803 |
 | Paradex | paradex/paradex.ws-public.ts | parseFloat/Number finite handling | Pending complete coercion corpus |
 | Phemex | phemex/phemex.ws-public.ts | Packed parseFloat/arithmetic; truthy bid/ask guards | Native proven: safe-cex-venue-phemex/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 72 three-row packed frames |
-| Polymarket | polymarket/polymarket.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
+| Polymarket | polymarket/polymarket.ws-public.ts | Finite parseFloat bid/ask/last with token-to-symbol lookup; midpoint mark/index | Native proven: safe-cex-venue-polymarket/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 24 cases / 40 price-change and last-trade frames with production token mappings; numeric mapping scope, not throttle timing |
 | WEEX | weex/weex.ws-public.ts | toNumber finite fallback; bounded fractional percentage scaling | Native proven: safe-cex-venue-weex/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 96 cases / 288 frames, object and one-element array payloads |
 | WOO | woo/woo.ws-public.ts | Copied ticker/BBO/mark values stay strict; decision-3 row refusal | Pending complete coercion corpus; row policy #789/#814 |

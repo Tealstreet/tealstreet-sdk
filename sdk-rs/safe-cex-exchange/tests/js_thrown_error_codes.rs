@@ -1,5 +1,5 @@
 use safe_cex_exchange::{
-    js_runtime::value::{Thrown, from_json},
+    js_runtime::value::{Thrown, from_json, to_json},
     runtime::ExchangeError,
 };
 use serde_json::{Value, json};
@@ -20,16 +20,19 @@ fn thrown_error_codes_preserve_falsy_and_structured_values() {
         let error = thrown.to_exchange_error();
         assert_eq!(error.name, "AxiosError");
         assert_eq!(error.message, "request failed");
-        assert_eq!(error.code, Some(code));
+        assert_eq!(
+            error.code.as_ref().map(to_json).transpose().unwrap(),
+            Some(code)
+        );
     }
     let thrown = Thrown::error("Error", "no code");
-    assert_eq!(thrown.to_exchange_error().code, None);
+    assert!(thrown.to_exchange_error().code.is_none());
 }
 
 #[test]
 fn retained_native_errors_keep_their_complete_metadata() {
     let mut error = ExchangeError::new("native failure");
-    error.code = Some(json!({"reason":"denied"}));
+    error.code = Some(from_json(&json!({"reason":"denied"})));
     error.context = Some(json!({"source":"native"}));
     assert_eq!(Thrown::from(error.clone()).to_exchange_error(), error);
 }

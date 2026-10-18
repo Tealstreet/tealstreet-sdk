@@ -63,7 +63,10 @@ async fn error_events_for(exchange: &str, reply: Value) -> Vec<Value> {
     // The rejected call and proxy error event are separate observable outcomes.
     let result = native_account_call(account.clone(), "validateAccount".into(), vec![]).await;
     if exchange == "bitrue" {
-        assert_eq!(result.unwrap_err()["name"], "AxiosError");
+        assert_eq!(
+            support::boundary_json(result.unwrap_err())["name"],
+            "AxiosError"
+        );
     } else {
         result.unwrap();
     }

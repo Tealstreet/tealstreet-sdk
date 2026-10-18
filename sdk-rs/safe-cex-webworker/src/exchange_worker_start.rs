@@ -1,6 +1,7 @@
 //! ExchangeWorker startup, live dispatch, constructor registry and event bridges.
 //! Dynamic venue imports and heterogeneous constructors are explicit callable
 //! dependencies; none of the worker method bodies is delegated to a success hook.
+use crate::data_post::{WorkerDataPayload, WorkerDataPost};
 use crate::{
     exchange_worker::{
         ExchangeWorker, ExchangeWorkerHost, WorkerConstruction, WorkerHandler, WorkerHandlerKind,
@@ -10,6 +11,7 @@ use crate::{
     postprocessor_registry::PostprocessorRegistry,
     worker_logging::{self, WorkerLogLevel},
 };
+use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_exchange::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture},
@@ -27,16 +29,15 @@ use std::{
 /// The post callback is the worker port; no event payload is interpreted as args.
 pub fn install_exchange_event_bridge(
     base: &safe_cex_exchange::exchange::BaseExchange,
-    post: Rc<dyn Fn(StoreWorkerPayload) -> Result<(), ExchangeError>>,
+    post: WorkerDataPost,
 ) {
     let fill_post = post.clone();
     base.on(
         "fill",
         Rc::new(move |_, data| {
-            fill_post(StoreWorkerPayload {
+            fill_post.send(WorkerDataPayload {
                 op: StoreWorkerOp::Fill,
-                instance_id: None,
-                data: Some(data.clone()),
+                data: data.clone(),
             })
         }),
     );
@@ -59,10 +60,9 @@ pub fn install_exchange_event_bridge(
         base.on_args(
             name,
             Rc::new(move |_, args| {
-                post(StoreWorkerPayload {
+                post.send(WorkerDataPayload {
                     op,
-                    instance_id: None,
-                    data: Some(Value::Array(args.to_vec())),
+                    data: Js::array(args.to_vec()),
                 })
             }),
         );
@@ -113,6 +113,7 @@ pub trait WorkerBootstrapHost: ExchangeWorkerHost {
         payload: StoreWorkerPayload,
     ) -> Result<(), ExchangeError>;
     fn post_payload(&self, payload: StoreWorkerPayload) -> Result<(), ExchangeError>;
+    fn post_event(&self, payload: WorkerDataPayload) -> Result<(), ExchangeError>;
     /// Enqueue and drive the whole future; dropping it on a lost race is forbidden.
     fn construct_exchange_start(&self, exchange: Rc<dyn Exchange>) -> ExchangeFuture<'static, ()>;
     fn error_properties(&self, error: &ExchangeError) -> Value;
@@ -542,12 +543,12 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
             self.exchange()
                 .ok_or_else(|| ExchangeError::new("No exchange for event bridge"))?
                 .base(),
-            Rc::new(move |payload| {
+            WorkerDataPost::new(Rc::new(move |payload| {
                 if let Some(w) = worker.upgrade() {
-                    w.construction.ctx.post_payload(payload)?;
+                    w.construction.ctx.post_event(payload)?;
                 }
                 Ok(())
-            }),
+            })),
         );
         let worker = Rc::downgrade(self);
         self.exchange()

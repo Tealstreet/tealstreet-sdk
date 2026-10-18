@@ -575,7 +575,10 @@ fn private_auth_error_without_message_logs_js_json_stringify_text() {
     h.venue().base().on(
         "log",
         std::rc::Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut().push(Value::String(
+                String::from_utf16(value.as_str().expect("source log message"))
+                    .expect("fixture log UTF16"),
+            ));
             Ok(())
         }),
     );
@@ -1038,11 +1041,23 @@ fn constructed_private_fill_frame_updates_order_and_emits_fill() {
     let fills = fills.borrow();
     assert_eq!(fills.len(), 1);
     let fill = &fills[0];
-    assert_eq!(fill["id"], "o-1");
-    assert_eq!(fill["symbol"], SYMBOL);
-    assert_eq!(fill["side"], "buy");
-    assert_eq!(fill["amount"].as_f64(), Some(0.25));
-    assert_eq!(fill["price"].as_f64(), Some(30002.0));
+    assert!(
+        fill.get("id")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("o-1"))
+    );
+    assert!(
+        fill.get("symbol")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(SYMBOL))
+    );
+    assert!(
+        fill.get("side")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("buy"))
+    );
+    assert_eq!(fill.get("amount").unwrap().as_f64(), Some(0.25));
+    assert_eq!(fill.get("price").unwrap().as_f64(), Some(30002.0));
 }
 #[test]
 fn constructed_private_position_frame_updates_store() {
@@ -1206,10 +1221,25 @@ fn constructed_spot_private_fill_updates_store_and_emits_original_payload() {
         (0.75, 2.25)
     );
     assert_eq!(h.store.orders()[0].status, OrderStatus::Open);
-    assert_eq!(
-        &*fills.borrow(),
-        &[json!({"side":"buy","symbol":"XBT/USD","price":30002.0,"amount":0.25})]
-    );
+    let fills = fills.borrow();
+    assert_eq!(fills.len(), 1);
+    let fill = &fills[0];
+    assert_eq!(fill.own_keys().len(), 4);
+    for (key, expected) in [("side", "buy"), ("symbol", "XBT/USD")] {
+        assert!(fill.has_own(key));
+        assert!(
+            fill.get(key)
+                .unwrap()
+                .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(expected))
+        );
+    }
+    for (key, expected) in [("price", 30002.0_f64), ("amount", 0.25_f64)] {
+        assert!(fill.has_own(key));
+        assert_eq!(
+            fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+            expected.to_bits()
+        );
+    }
 }
 
 #[test]

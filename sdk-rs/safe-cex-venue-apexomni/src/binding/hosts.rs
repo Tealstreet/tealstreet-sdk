@@ -43,7 +43,6 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
     native.response = field("response");
     native.config = field("config");
     native.request = field("request");
-    native.code = field("code");
     native
 }
 // Conversion between the existing prepared-data carrier and shared JS heap.
