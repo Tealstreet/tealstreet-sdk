@@ -13,8 +13,13 @@ const source = rel => path.join(root, 'packages/safe-cex/src', rel);
 const cache = new Map();
 const clock = {now: 1_700_000_000_000};
 let timers = new Map(), nextTimer = 0;
-const setTimer = (fn, delay) => {const id=++nextTimer;timers.set(id,{fn,delay});return id;};
+const setTimer = (fn, delay) => {const id=++nextTimer;timers.set(id,{fn,delay,at:clock.now+delay});return id;};
 const clearTimer = id => timers.delete(id);
+async function advance(ms) {
+ clock.now+=ms;
+ for(const [id,timer] of [...timers])if(timer.at<=clock.now){timers.delete(id);timer.fn();}
+ for(let i=0;i<12;i++)await Promise.resolve();
+}
 const enumsFile = source('types.ts');
 const enumAst = ts.createSourceFile(enumsFile, fs.readFileSync(enumsFile,'utf8'),ts.ScriptTarget.Latest,true);
 const enums = {};
@@ -36,6 +41,7 @@ function evaluate(code, filename, exports={}) {
   return module.exports;
 }
 evaluate(enumCode,enumsFile,enums);
+Object.assign(enums,evaluate(fs.readFileSync(path.join(root,'packages/logging/src/LogSeverity.ts'),'utf8'),path.join(root,'packages/logging/src/LogSeverity.ts')));
 function load(filename) {
   if(cache.has(filename))return cache.get(filename);
   const exports={};cache.set(filename,exports);
@@ -118,5 +124,21 @@ let cases=0;
   s.onMessage({data:JSON.stringify({e:'ACCOUNT_UPDATE',a:{P:[{s:SYMBOL,pa:'-2',ps:'BOTH',ep:'45000',up:'-0.02'}]}})});
   const position=p.store.positions[0];assert.deepEqual([position.contracts,position.notional,position.side,position.leverage,position.liquidationPrice,position.info.contractsNative,position.info.old],[0.004,200,'short',17,20000,2,true]);assert.equal(p.version,1);cases++;
  }
- assert.equal(cases,6);console.log('Maintained inverse socket classes/imported algorithms: 6 actual source groups PASS (wire/data/candle/depth/fill/inverse-position); Base IO ports only.');
+ {
+  timers=new Map();const p=parent(),s=new Private(p);let requests=0;
+  p.xhr={async post(){requests++;throw new Error('listen key unavailable');}};
+  await s.connectAndSubscribe();assert.equal(requests,1);
+  for(const [index,delay] of [5000,10000,20000,40000,60000,60000].entries()){
+   await advance(delay-1);assert.equal(requests,index+1);await advance(1);assert.equal(requests,index+2);
+  }
+  s.isForceClosed=true;await advance(60000);assert.equal(requests,7);cases++;
+ }
+ {
+  timers=new Map();const p=parent(),s=new Private(p);let requests=0;
+  p.xhr={async post(){requests++;return{data:{listenKey:'key'}};},async put(){requests++;if(requests===2)throw new Error('keepalive unavailable');return{data:{}};}};
+  await s.fetchListenKey();await advance(1799999);assert.equal(requests,1);await advance(1);assert.equal(requests,2);
+  await advance(59999);assert.equal(requests,2);await advance(1);assert.equal(requests,3);await advance(60000);assert.equal(requests,3);
+  s.dispose();await advance(1800000);assert.equal(requests,3);cases++;
+ }
+ assert.equal(cases,8);console.log('Maintained inverse socket classes/imported algorithms: 8 actual source groups PASS (wire/data/candle/depth/fill/inverse-position/retry/keepalive); Base IO ports only.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
