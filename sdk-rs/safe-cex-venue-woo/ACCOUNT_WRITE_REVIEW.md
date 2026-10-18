@@ -26,7 +26,9 @@ typed records, ticker/quote cases and live timestamp controls remain.
 The CI WOO command replaces the four retired write-facade targets with the real
 `binding_reads` and `binding_streams` targets. Signed legacy balance, leverage,
 order placement/cancellation, history, sockets and cleanup are still exercised.
-No production TypeScript behavior or V3 migration gate changes.
+The former account facade’s unrelated live pricing assertions and its two source
+guard groups are retained in the existing `pricing` target. No production
+TypeScript behavior or V3 migration gate changes.
 
 Validation uses the constructed source/native registration target, signed legacy
 read/stream targets, remaining ticker fixture, strict all-target Clippy, format
