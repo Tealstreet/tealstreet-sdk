@@ -14,7 +14,6 @@ use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_num::js_number;
 use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_transport::{
     RestBody, RestRequest,
@@ -65,19 +64,35 @@ pub trait ApiHost {
     fn now_ms(&self) -> f64;
 }
 // ts: isBingxSignatureRejection
-pub fn is_bingx_signature_rejection(data: &Value) -> Result<bool, safe_cex_num::JsCoercionError> {
-    let field = |key| data.as_object().and_then(|object| object.get(key));
-    if js_number(field("code"))? == 100001.0 {
+pub fn is_bingx_signature_rejection(
+    data: &RetainedJsonInput,
+) -> Result<bool, safe_cex_num::JsCoercionError> {
+    let field = |key| data.get(key);
+    if safe_cex_num::js_retained_number(field("code"))? == 100001.0 {
         return Ok(true);
     }
-    let message = match field("msg").filter(|value| !value.is_null()) {
-        Some(value) => safe_cex_num::js_string(Some(value))?,
-        None => String::new(),
+    let message = match field("msg").filter(|value| {
+        !matches!(
+            value,
+            RetainedJsonInput::Null | RetainedJsonInput::Undefined
+        )
+    }) {
+        Some(value) => safe_cex_types::js_coercion::js_retained_string_utf16(value)?,
+        None => Vec::new(),
     };
-    // A non-unicode /i regex never folds a non-ASCII unit onto an ASCII one.
-    Ok(message
-        .to_ascii_lowercase()
-        .contains("signature verification failed"))
+    let pattern = "signature verification failed"
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    Ok(message.windows(pattern.len()).any(|units| {
+        units.iter().zip(&pattern).all(|(unit, expected)| {
+            let folded = if (65..=90).contains(unit) {
+                *unit + 32
+            } else {
+                *unit
+            };
+            folded == *expected
+        })
+    }))
 }
 // ts: unsignedPayload. A replayed POST arrives with the body Axios serialized and a
 // replayed GET with the signed params it sent; drop the previous pass's signature.
@@ -262,8 +277,8 @@ impl ReadTransport for BingxApi {
                 .send_with_signature_retry(prepared.clone(), &retry)
                 .await?;
             // BingX answers on HTTP 200, and over the tunnel any status resolves.
-            let view =
-                serde_json::to_value(&data).map_err(|e| ExchangeError::new(e.to_string()))?;
+            let view = safe_cex_num::numeric_ingress::js_capture_output(&data)
+                .map_err(|e| ExchangeError::new(e.to_string()))?;
             let predicate: IsSignatureRejection = Rc::new(is_bingx_signature_rejection);
             if resend_on_rejected_data(&view, &retry, &predicate).map_err(ExchangeError::from)? {
                 // The resend runs the whole chain again, re-signing what was sent.

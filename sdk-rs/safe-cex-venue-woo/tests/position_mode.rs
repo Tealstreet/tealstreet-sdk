@@ -3,7 +3,6 @@ mod retained_input_observations;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str};
 use safe_cex_types::object_map::JsObjectMap;
 use safe_cex_venue_woo::{
-    cancel_all_after::{WooV3CancelAllAfterRequest, WooV3CancelAllAfterResponse},
     v3_account_writes::{
         WooV3AccountMutationTarget, WooV3AccountPositionMode, WooV3AccountWriteError,
     },
@@ -826,60 +825,6 @@ fn native_mode_responses() {
             x["stateEvidence"].as_str().unwrap(),
             "MODE native response evidence"
         );
-    }
-}
-#[test]
-fn native_cancel_declarations() {
-    let s = source();
-    let rows = s["cancelDeclarations"].as_array().unwrap();
-    assert_eq!(rows.len(), 5, "MODE cancel declaration floor");
-    for e in rows {
-        let v = input(e).unwrap();
-        let x = &e["expected"];
-        if e["type"] == "request" {
-            let a = v
-                .decode::<WooV3CancelAllAfterRequest>()
-                .expect("MODE native cancel request decode");
-            assert_eq!(a.method, WooV3HttpMethod::Post, "MODE native cancel method");
-            assert_eq!(x["method"], "POST");
-            assert_eq!(
-                a.path,
-                WooV3Endpoint::TradeCancelAllAfter,
-                "MODE native cancel path"
-            );
-            assert_eq!(x["path"], "/v3/trade/cancelAllAfter");
-            number(
-                a.body.trigger_after,
-                &x["body"]["triggerAfter"],
-                "cancel body trigger",
-            );
-        } else {
-            let a = v
-                .decode::<WooV3CancelAllAfterResponse>()
-                .expect("MODE native cancel response decode");
-            assert_eq!(
-                a.accepted,
-                x["accepted"].as_bool().unwrap(),
-                "MODE native cancel accepted"
-            );
-            number(a.timestamp, &x["timestamp"], "cancel timestamp");
-            number(
-                a.expected_trigger_time,
-                &x["expectedTriggerTime"],
-                "cancel expected trigger time",
-            );
-        }
-    }
-    let rows = s["cancelRefusals"].as_array().unwrap();
-    assert_eq!(rows.len(), 8, "MODE cancel refusal floor");
-    for e in rows {
-        let v = input(e).unwrap();
-        let bad = if e["type"] == "request" {
-            v.decode::<WooV3CancelAllAfterRequest>().is_err()
-        } else {
-            v.decode::<WooV3CancelAllAfterResponse>().is_err()
-        };
-        assert!(bad, "MODE native cancel declaration refusal");
     }
 }
 

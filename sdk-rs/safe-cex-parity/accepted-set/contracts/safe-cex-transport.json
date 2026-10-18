@@ -9683,7 +9683,7 @@
                                     "is_mutable": false,
                                     "type": {
                                       "resolved_path": {
-                                        "path": "serde_json::value::Value",
+                                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                         "args": null
                                       }
                                     }
@@ -9753,7 +9753,7 @@
                                     "is_mutable": false,
                                     "type": {
                                       "resolved_path": {
-                                        "path": "serde_json::value::Value",
+                                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                         "args": null
                                       }
                                     }
@@ -9803,7 +9803,7 @@
     },
     "category": "non-decoder",
     "evidence": "Individually reviewed transport capability alias; exact actual compiler raw/expanded target and fixed generic monomorphization where needed. Native alias/root/Deserialize/alternate probes must execute; no blanket capability exemption.",
-    "reason": "Reference-counted callable predicate capability, not a wire representation of a callback. Its Fn(&Value)->Result<bool,JsCoercionError> signature is retained exactly; actual predicate bodies and scalar coercions have separate owner contracts/native witnesses. Compiler Rc/root identity and actual negative alias trait probes remain required.",
+    "reason": "Reference-counted callable predicate capability, not a wire representation of a callback. Its Fn(&RetainedJsonInput)->Result<bool,JsCoercionError> signature is retained exactly; actual predicate bodies and scalar coercions have separate owner contracts/native witnesses. Compiler Rc/root identity and actual negative alias trait probes remain required.",
     "entrypoints": []
   },
   "safe_cex_transport::tunnel_endpoints::TunnelEgress": {
@@ -11488,7 +11488,7 @@
         ],
         "output": {
           "resolved_path": {
-            "path": "serde_json::value::Value",
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
             "args": null
           }
         },
@@ -11500,8 +11500,8 @@
       }
     },
     "category": "decoder",
-    "evidence": "Actual response-body model decoder, not a borrowed property selector: Encoded bytes pass through json_value while native data keeps its existing phase, and invalid bytes fall back to Null. Native outputs inspect returned kind/own keys and numeric value bits before output encoding.",
-    "call": "{let body=if $value[\"phase\"]==\"encoded\"{crate::RestResponseBody::Encoded($value[\"raw\"].as_str().expect(\"raw body\").as_bytes().to_vec())}else{crate::RestResponseBody::Transformed(safe_cex_types::retained_json::RetainedJsonInput::from_value($value[\"body\"].clone()).unwrap())};let response=crate::RestResponse{status:200,reason:None,headers:Default::default(),body};let actual=$type(&response);let bits=actual.get(\"number\").map(|v|safe_cex_num::js_number(Some(v)).expect(\"numeric field\").to_bits().to_string());serde_json::json!({\"kind\":if actual.is_object(){\"object\"}else if actual.is_array(){\"array\"}else if actual.is_null(){\"null\"}else{\"scalar\"},\"keys\":actual.as_object().map(|v|v.keys().collect::<Vec<_>>()).unwrap_or_default(),\"bits\":bits}) }",
+    "evidence": "Retained response-body capture: encoded text passes through the existing UTF16 JSON parser, invalid JSON remains original Text, and native phase payloads are cloned without JSON projection. Native kind, keys and numeric bits are observed before encoding.",
+    "call": "{let body=if $value[\"phase\"]==\"encoded\"{crate::RestResponseBody::Encoded($value[\"raw\"].as_str().expect(\"raw body\").as_bytes().to_vec())}else{crate::RestResponseBody::Transformed(safe_cex_types::retained_json::RetainedJsonInput::from_value($value[\"body\"].clone()).unwrap())};let response=crate::RestResponse{status:200,reason:None,headers:Default::default(),body};let actual=$type(&response);let bits=actual.get(\"number\").map(|v|safe_cex_num::js_retained_number(Some(v)).expect(\"numeric field\").to_bits().to_string());serde_json::json!({\"kind\":match &actual{safe_cex_types::retained_json::RetainedJsonInput::Object(_)=>\"object\",safe_cex_types::retained_json::RetainedJsonInput::Array(_)=>\"array\",safe_cex_types::retained_json::RetainedJsonInput::Null=>\"null\",_=>\"scalar\"},\"keys\":match &actual{safe_cex_types::retained_json::RetainedJsonInput::Object(fields)=>fields.iter().map(|(key,_)|String::from_utf16(key).expect(\"authored key\")).collect::<Vec<_>>(),_=>Vec::new()},\"bits\":bits,\"text\":match &actual{safe_cex_types::retained_json::RetainedJsonInput::Text(units)=>Some(units.clone()),_=>None}})}",
     "cases": [
       {
         "input": {
@@ -11514,7 +11514,8 @@
             "number",
             "other"
           ],
-          "bits": "9223372036854775808"
+          "bits": "9223372036854775808",
+          "text": null
         }
       },
       {
@@ -11529,7 +11530,8 @@
           "keys": [
             "number"
           ],
-          "bits": "4623085754984169472"
+          "bits": "4623085754984169472",
+          "text": null
         }
       },
       {
@@ -11538,9 +11540,19 @@
           "raw": "not-json"
         },
         "output": {
-          "kind": "null",
+          "kind": "scalar",
           "keys": [],
-          "bits": null
+          "bits": null,
+          "text": [
+            110,
+            111,
+            116,
+            45,
+            106,
+            115,
+            111,
+            110
+          ]
         }
       },
       {
@@ -11554,7 +11566,8 @@
         "output": {
           "kind": "array",
           "keys": [],
-          "bits": null
+          "bits": null,
+          "text": null
         }
       }
     ]
@@ -11573,7 +11586,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -11615,7 +11628,7 @@
     },
     "category": "decoder",
     "evidence": "Actual source predicate performs Number(code) and String(msg) coercions before its case-insensitive signature decision. Execute those conversions and the native TypeError path rather than classifying the JSON predicate as a pure selector. tests/signature_rejection.rs compares the maintained TypeScript source independently.",
-    "call": "{match $type($value){Ok(result)=>serde_json::json!({\"ok\":true,\"rejected\":result}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "call": "{match $type(&safe_cex_types::retained_json::RetainedJsonInput::from_value($value.clone()).expect(\"authored retained input\")){Ok(result)=>serde_json::json!({\"ok\":true,\"rejected\":result}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
     "cases": [
       {
         "input": {
@@ -14409,7 +14422,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -14481,7 +14494,7 @@
     },
     "category": "decoder",
     "evidence": "Actual raw response-data predicate call, shared stamp and thrown error identity are observed. A spent stamp is arranged through an actual prior successful production decision. Rejecting data does not spend the stamp; TypeError preserves its native name/message. Maintained source wrappers independently witness the same one-use decision order.",
-    "call": "{use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&serde_json::Value::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=$value[\"data\"].clone();let result=$type(&data,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
+    "call": "{use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&safe_cex_types::retained_json::RetainedJsonInput::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=safe_cex_types::retained_json::RetainedJsonInput::from_value($value[\"data\"].clone()).expect(\"authored retained data\");let result=$type(&data,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
     "cases": [
       {
         "input": {
@@ -14642,7 +14655,7 @@
     },
     "category": "decoder",
     "evidence": "Execute the actual signature_rejected_response frontdoor. Observe predicate count, prior/returned shared stamp, returned approval and JavaScript TypeError metadata together with the actual failed/effective request URL and timeout. Missing response bypass and a spent stamp are separate cases; typed receipt arrangement does not replace execution of the reviewed function.",
-    "call": "{fn failure(e:&crate::RestFailure)->serde_json::Value{serde_json::json!({\"message\":e.message,\"name\":match e.transport_error.as_deref(){Some(crate::TransportError::JavaScript(e))=>Some(e.name),_=>None},\"url\":e.request.url,\"timeout\":e.request.timeout_ms,\"code\":e.code,\"response\":e.response.as_ref().map(|r|r.status)})}use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&serde_json::Value::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=$value[\"data\"].clone();let request=crate::RestRequest{method:\"POST\".into(),url:\"/effective\".into(),timeout_ms:Some(27),..Default::default()};let response=crate::RestResponse{status:401,reason:None,headers:Default::default(),body:crate::RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap())};let mut input=crate::RestFailure::pre_transmit(\"HTTP rejection\".into(),request);if $value[\"response\"]!=false{input.response=Some(Box::new(response));}let result=$type(&input,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":failure(&e)})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
+    "call": "{fn failure(e:&crate::RestFailure)->serde_json::Value{serde_json::json!({\"message\":e.message,\"name\":match e.transport_error.as_deref(){Some(crate::TransportError::JavaScript(e))=>Some(e.name),_=>None},\"url\":e.request.url,\"timeout\":e.request.timeout_ms,\"code\":e.code,\"response\":e.response.as_ref().map(|r|r.status)})}use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&safe_cex_types::retained_json::RetainedJsonInput::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=$value[\"data\"].clone();let request=crate::RestRequest{method:\"POST\".into(),url:\"/effective\".into(),timeout_ms:Some(27),..Default::default()};let response=crate::RestResponse{status:401,reason:None,headers:Default::default(),body:crate::RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap())};let mut input=crate::RestFailure::pre_transmit(\"HTTP rejection\".into(),request);if $value[\"response\"]!=false{input.response=Some(Box::new(response));}let result=$type(&input,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":failure(&e)})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
     "cases": [
       {
         "input": {
@@ -14826,7 +14839,7 @@
     },
     "category": "decoder",
     "evidence": "Execute the actual resend_on_signature_rejection frontdoor. Observe predicate count, prior/returned shared stamp, returned approval and JavaScript TypeError metadata together with the actual failed/effective request URL and timeout. Missing response bypass and a spent stamp are separate cases; typed receipt arrangement does not replace execution of the reviewed function.",
-    "call": "{fn failure(e:&crate::RestFailure)->serde_json::Value{serde_json::json!({\"message\":e.message,\"name\":match e.transport_error.as_deref(){Some(crate::TransportError::JavaScript(e))=>Some(e.name),_=>None},\"url\":e.request.url,\"timeout\":e.request.timeout_ms,\"code\":e.code,\"response\":e.response.as_ref().map(|r|r.status)})}use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&serde_json::Value::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=$value[\"data\"].clone();let request=crate::RestRequest{method:\"POST\".into(),url:\"/effective\".into(),timeout_ms:Some(27),..Default::default()};let response=crate::RestResponse{status:401,reason:None,headers:Default::default(),body:crate::RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap())};let input=crate::RestExecution{response,config:request};let result=$type(&input,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":failure(&e)})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
+    "call": "{fn failure(e:&crate::RestFailure)->serde_json::Value{serde_json::json!({\"message\":e.message,\"name\":match e.transport_error.as_deref(){Some(crate::TransportError::JavaScript(e))=>Some(e.name),_=>None},\"url\":e.request.url,\"timeout\":e.request.timeout_ms,\"code\":e.code,\"response\":e.response.as_ref().map(|r|r.status)})}use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&safe_cex_types::retained_json::RetainedJsonInput::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=$value[\"data\"].clone();let request=crate::RestRequest{method:\"POST\".into(),url:\"/effective\".into(),timeout_ms:Some(27),..Default::default()};let response=crate::RestResponse{status:401,reason:None,headers:Default::default(),body:crate::RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap())};let input=crate::RestExecution{response,config:request};let result=$type(&input,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":failure(&e)})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
     "cases": [
       {
         "input": {

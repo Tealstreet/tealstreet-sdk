@@ -253,3 +253,7 @@ the reviewed generic-alias policy. `STRUCTURAL_ALIAS_REVIEW.md` separates their
 native trait classifications from actual six-family host/socket execution and
 compiled production controls. The same crate-internal Host re-export is used by
 live assembly; do not introduce a second host or an identity fallback.
+
+The four class/HTTP callable aliases are also registered with actual configured
+Host profiles and six-family invocation/REST observations in the same review.
+`class-alias-controls.py` faults these production capabilities independently.

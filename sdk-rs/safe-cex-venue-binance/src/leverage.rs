@@ -129,7 +129,7 @@ where
     };
     if let Err(error) = result {
         let message = error
-            .response
+            .response_json_view()
             .as_ref()
             .and_then(|r| r.get("data"))
             .and_then(|d| d.get("msg"))
