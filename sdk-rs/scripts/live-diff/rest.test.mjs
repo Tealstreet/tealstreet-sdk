@@ -44,6 +44,26 @@ test('literal REST host inventory covers every maintained registry key exactly',
   assert.ok(keys.length > 40);
   assert.deepEqual(Object.keys(restVenueHosts).sort(), keys.sort());
 });
+test('Coinbase public-only reads follow INTX startup without authenticated brokerage probes', () => {
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const { plan } = publicRestPlan(
+      venue,
+      {
+        markets: [{ active: true, symbol: 'BTC-INTX' }],
+        methods: [],
+        overrides: ['fetchTickersIntx', 'fetchTickersSpot', 'fetchTickersCfm'],
+      },
+      1710000000000,
+    );
+    assert.equal(plan.find((s) => s.label === 'tickers-funding-open-interest').method, 'fetchTickersIntx');
+    assert.equal(plan.find((s) => s.method === 'fetchTickersIntx').skip, undefined);
+    assert.ok(
+      plan
+        .filter((s) => ['fetchOHLCV', 'fetchTickersSpot', 'fetchTickersCfm'].includes(s.method))
+        .every((s) => s.skip.startsWith('AUTH_REQUIRED')),
+    );
+  }
+});
 test('posted public reads preserve all business parameters when removing correlation envelopes', () => {
   const url = new URL('https://api.crypto.com/exchange/v1/public/get-candlestick');
   const key = (body) => readKey('POST', url, JSON.stringify(body));

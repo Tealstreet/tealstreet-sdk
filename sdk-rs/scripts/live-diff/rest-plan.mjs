@@ -18,6 +18,7 @@ export const publicReadMethods = [
 ];
 
 export function publicRestPlan(exchange, description, epoch, { enableOptions = true } = {}) {
+  const coinbase = ['coinbase', 'coinbasespot'].includes(exchange);
   const markets = description.markets ?? [];
   const market =
     markets.find((m) => m.active && m.base === 'BTC' && m.quote === 'USDT') ??
@@ -40,6 +41,7 @@ export function publicRestPlan(exchange, description, epoch, { enableOptions = t
       method: 'fetchOHLCV',
       args: [{ symbol, interval, from: to - duration * 10, to, limit: 10 }],
       ...(exchange === 'bitrue' ? { skip: 'WS_REQUIRED: TS fetchOHLCV uses its live public socket' } : {}),
+      ...(coinbase ? { skip: 'AUTH_REQUIRED: TS Coinbase candles use the authenticated brokerage endpoint' } : {}),
     });
   }
   plan.push({
@@ -68,6 +70,10 @@ export function publicRestPlan(exchange, description, epoch, { enableOptions = t
     'fetchTickersSpot',
   ]) {
     if (!(description.overrides ?? []).includes(method)) continue;
+    if (coinbase && ['fetchTickersCfm', 'fetchTickersSpot'].includes(method)) {
+      plan.push({ label: method, method, args: [], skip: 'AUTH_REQUIRED: TS Coinbase brokerage products require JWT' });
+      continue;
+    }
     // Bitrue max leverage may call a signed leverage-bracket read. Keep
     // authenticated metadata out of this keyless method inventory.
     if (method === 'fetchSymbolMaxLeverage' && exchange === 'bitrue') {
@@ -81,6 +87,9 @@ export function publicRestPlan(exchange, description, epoch, { enableOptions = t
     method: 'fetchTickers',
     args: [],
     ...(exchange.startsWith('hyperliquid') ? { method: '$tickers' } : {}),
+    // The maintained public-only startup uses INTX directly. CoinbaseSpot's
+    // general fetchTickers override first probes authenticated portfolios.
+    ...(coinbase ? { method: 'fetchTickersIntx' } : {}),
     ...(['apexomni', 'bitrue', 'lighter', 'lighter-robinhood'].includes(exchange)
       ? { skip: 'WS_REQUIRED: TS live ticker values require startup streams' }
       : {}),

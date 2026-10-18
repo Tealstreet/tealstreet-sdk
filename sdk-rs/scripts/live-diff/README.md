@@ -244,6 +244,8 @@ TS API: those values are compared as part of each full ticker. Coverage reports
 own/finite/nonzero counts separately. An all-zero open-interest stub does not
 prove populated open-interest coverage. Signed account reads, leverage-bracket
 reads and operator-only origins are excluded explicitly.
+Coinbase uses the maintained public-only startup's INTX ticker method; its
+brokerage candles and spot/CFM product helpers require JWT and are excluded.
 
 Both sides use the #1082 diagnostic clock host. Each operation starts at the
 same predetermined logical minute, then advances in1s steps only while the
