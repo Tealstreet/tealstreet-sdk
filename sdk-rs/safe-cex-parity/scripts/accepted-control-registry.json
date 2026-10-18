@@ -359,6 +359,8 @@
     "symlinked audit source identity",
     "symlinked reexport compiler identity",
     "local macro unconditional global impl",
+    "local literal-expression macro transcriber global impl",
+    "local literal-expression macro argument global impl",
     "local macro doc-hidden global impl",
     "local macro doc-hidden forwarded impl",
     "local macro cfg-disabled shadow",
