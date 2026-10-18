@@ -10,7 +10,7 @@ crate = Path(__file__).resolve().parents[1]
 workspace = crate.parent
 logs = workspace / 'target/backpack-divergence-controls'
 logs.mkdir(parents=True, exist_ok=True)
-env = dict(os.environ)
+env = dict(os.environ, CARGO_INCREMENTAL="0")
 common_git = Path(subprocess.check_output(
     ['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'],
     cwd=workspace, text=True).strip())

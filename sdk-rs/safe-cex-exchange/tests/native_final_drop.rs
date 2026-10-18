@@ -4,9 +4,10 @@ use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     native::native_runtime,
     native_final_drop,
+    native_store::DefaultStore,
     runtime::ExchangeError,
 };
-use safe_cex_store::{StoreUpdate, store::DefaultStore};
+use safe_cex_store::StoreUpdate;
 use safe_cex_types::ExchangeName;
 use std::{
     cell::Cell,
