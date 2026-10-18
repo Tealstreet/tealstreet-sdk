@@ -1235,6 +1235,45 @@ fn retained_ticker_frame_ignores_unread_surrogate_metadata() {
     h.venue().dispose().unwrap();
 }
 #[test]
+fn retained_public_ticker_topics_ignore_metadata_and_keep_native_number_bits() {
+    for topic in ["tickers", "bbos", "markprices"] {
+        let h = started(json!({"publicDataOnly":true}), public_routes);
+        let public = socket(&h, PUBLIC_URL);
+        let frame = format!(
+            r#"{{"topic":"{topic}","data":[{{"symbol":"PERP_BTC_USDT","close":-0.0,"amount":1e400,"volume":30,"bid":-0.0,"ask":1e400,"price":-0.0,"ignored":"\ud800"}}]}}"#
+        );
+        public
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame)));
+        h.runtime.pump();
+        {
+            let tickers = h.store.tickers().unwrap();
+            let ticker = &tickers[0];
+            let zero = match topic {
+                "tickers" => {
+                    assert_eq!(ticker.quote_volume, f64::INFINITY);
+                    assert_eq!(ticker.volume.to_bits(), 30.0f64.to_bits());
+                    ticker.last
+                }
+                "bbos" => {
+                    assert_eq!(ticker.ask, f64::INFINITY);
+                    ticker.bid
+                }
+                "markprices" => ticker.mark,
+                _ => unreachable!(),
+            };
+            assert_eq!(zero.to_bits(), (-0.0f64).to_bits(), "{topic}");
+        }
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{topic}: {:?}",
+            h.runtime.reports.borrow()
+        );
+        h.venue().dispose().unwrap();
+    }
+}
+#[test]
 fn retained_ticker_frame_preserves_overflow_and_signed_zero_numbers() {
     let h = started(json!({"publicDataOnly":true}), public_routes);
     let public = socket(&h, PUBLIC_URL);
