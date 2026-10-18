@@ -144,8 +144,10 @@ impl ExchangeError {
             if let Some(origin) = error.downcast_ref::<RetainedResponseOrigin>() {
                 return Some(origin.response.clone());
             }
-            if let Some(failure) = error.downcast_ref::<safe_cex_transport::RestFailure>() {
-                return failure.response.as_deref().map(retained_http_response);
+            if let Some(failure) = error.downcast_ref::<safe_cex_transport::RestFailure>()
+                && let Some(response) = failure.response.as_deref()
+            {
+                return Some(retained_http_response(response));
             }
             if let Some(cause) = error.downcast_ref::<safe_cex_types::StoreSubscriberError>()
                 && let Some(response) = cause.response()

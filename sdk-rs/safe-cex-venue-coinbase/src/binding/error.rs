@@ -69,8 +69,9 @@ mod tests {
     #[test]
     fn native_http_error_metadata_survives_the_venue_carrier() {
         let mut original = ExchangeError::new("scripted HTTP failure");
-        original.response =
-            Some(serde_json::json!({"status": 503, "data": {"message":"unavailable"}}));
+        original = original.with_retained_response(
+            serde_json::json!({"status": 503, "data": {"message":"unavailable"}}).into(),
+        );
         original.code = Some(safe_cex_exchange::js_runtime::value::from_json(
             &serde_json::json!("ERR_BAD_RESPONSE"),
         ));

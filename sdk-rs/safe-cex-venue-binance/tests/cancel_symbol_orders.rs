@@ -351,7 +351,9 @@ fn compare(variant: &str, count: usize) {
                 })
             }))
         };
-        let emit = |message: Value| {
+        let emit = |message: safe_cex_exchange::js_runtime::value::Js| {
+            let message = safe_cex_exchange::js_runtime::value::to_json(&message)
+                .expect("finite source message fixture");
             emissions.borrow_mut().push(message);
             if case["emitReject"] == true {
                 Err(emitter.clone())

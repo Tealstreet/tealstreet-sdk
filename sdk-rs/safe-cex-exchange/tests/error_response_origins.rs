@@ -135,3 +135,31 @@ fn api_response_wrapper_keeps_a_store_subscriber_cause_on_the_source_chain() {
         "response wrapper must preserve the exact subscriber cause"
     );
 }
+
+#[test]
+fn response_authority_skips_an_outer_transport_without_a_response() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let mut original =
+        RestFailure::pre_transmit("inner HTTP rejection".into(), RestRequest::default());
+    original.response = Some(Box::new(RestResponse {
+        status: 409,
+        reason: None,
+        headers: Default::default(),
+        body: RestResponseBody::Transformed(Input::Text(vec![0xd800, 0xdfff])),
+    }));
+    let outer = RestFailure::from_transport(
+        safe_cex_transport::TransportError::Rejected(
+            safe_cex_transport::provider::TransportErrorOrigin::new(original),
+        ),
+        RestRequest::default(),
+    );
+    let error = ExchangeError::from(outer);
+    let response = error
+        .retained_response_input()
+        .expect("nearest response after empty transport origin");
+    assert_eq!(
+        response.get("data"),
+        Some(&Input::Text(vec![0xd800, 0xdfff]))
+    );
+    assert_eq!(response.get("status"), Some(&Input::Float(409.0)));
+}
