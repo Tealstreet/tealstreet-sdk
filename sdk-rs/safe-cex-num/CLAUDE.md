@@ -7,6 +7,10 @@ numeric_output_invariant target checks native changed-bit refusals and nested
 paths; its compiling comparison fault must fail before exact restoration passes.
 
 This crate hosts shared ECMAScript compatibility helpers below services and venues.
+BuiltinReference::prototype selects the actual native parent identity in the
+same retained realm. It reads metadata rather than the shadowable `__proto__`
+property and never allocates a second intrinsic heap. The complete accepted
+BuiltinReference contract observes all five parent roles plus existing get/set.
 Use `js_trim` when porting JavaScript String.prototype.trim. Its exact set is:
 U+0009–000D, U+0020, U+00A0, U+1680, U+2000–200A, U+2028, U+2029,
 U+202F, U+205F, U+3000, U+FEFF. It preserves internal whitespace.
