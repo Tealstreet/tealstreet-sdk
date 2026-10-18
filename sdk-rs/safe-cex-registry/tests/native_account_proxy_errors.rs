@@ -130,17 +130,18 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
 ) {
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::sync::{Barrier, Notify};
+    use tokio::sync::{Barrier, Notify, watch};
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let paths = Rc::new(RefCell::new(Vec::new()));
     let received = Rc::new(Barrier::new(expected_paths.len()));
-    let release_algo = Rc::new(Notify::new());
-    let (requests, barrier, release) = (paths.clone(), received.clone(), release_algo.clone());
+    let (release_siblings, released) = watch::channel(false);
+    let (requests, barrier, release) = (paths.clone(), received.clone(), released);
     tokio::task::spawn_local(async move {
         for _ in 0..expected_paths.len() * attempts {
             let (mut stream, _) = listener.accept().await.unwrap();
-            let (requests, barrier, release) = (requests.clone(), barrier.clone(), release.clone());
+            let (requests, barrier, mut release) =
+                (requests.clone(), barrier.clone(), release.clone());
             tokio::task::spawn_local(async move {
                 let mut headers = Vec::new();
                 while !headers.ends_with(b"\r\n\r\n") {
@@ -163,7 +164,7 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
                 requests.borrow_mut().push(path);
                 barrier.wait().await;
                 if held {
-                    release.notified().await;
+                    release.wait_for(|released| *released).await.unwrap();
                 }
                 let body = r#"{"message":"Invalid JWT"}"#;
                 let response = format!(
@@ -204,7 +205,7 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
         }),
         Rc::new(|_| {}),
     );
-    // binance.exchange.ts starts each snapshot pair eagerly with Promise.all.
+    // Source Promise.all starts every request before observing a rejection.
     let result = tokio::time::timeout(
         Duration::from_secs(6),
         native_account_call(account.clone(), method.into(), vec![Value::Null.into()]),
@@ -234,7 +235,7 @@ async fn rejected_snapshot_keeps_its_started_http_sibling_alive(
         .collect();
     expected.sort();
     assert_eq!(actual_paths, expected);
-    release_algo.notify_waiters();
+    release_siblings.send(true).unwrap();
     let completed = tokio::time::timeout(Duration::from_secs(2), async {
         while errors.borrow().len() < expected_paths.len() * attempts {
             changed.notified().await;
