@@ -58,4 +58,23 @@ const owner={getAllSockets:()=>[null,{recoverAfterOffline(){visits.push(1);retur
 const result=new Function(initializer+';return recovery();').call(owner);
 assert.equal(result,false,'RECOVERY source base false policy');
 assert.deepEqual(visits,[1,2],'RECOVERY source visits every socket before reduction');
-process.stdout.write(JSON.stringify(records));
+if(process.argv[2]==='timing') {
+ const profiles=[];
+ for(const outer of [false,true]) for(const [method,mode] of [['setLeverage','ready'],['setLeverage','error'],['setLeverage','held'],['recoverAfterOffline','ready'],['recoverAfterOffline','error'],['unknown','ready']]) {
+  let release;const calls=[],replies=[];
+  const exchange={
+   setLeverage(){calls.push('setLeverage');if(mode==='held')return new Promise(resolve=>release=resolve);return mode==='error'?Promise.reject(new Error('bad')):Promise.resolve();},
+   recoverAfterOffline(){calls.push('recoverAfterOffline');if(mode==='error')throw new Error('recovery failed');return true;}
+  };
+  const handler=new context.Handler(exchange,reply=>replies.push(reply));
+  const args=method==='setLeverage'?[mode==='error'?'FAIL':'BTC',3]:[];
+  const invoke=()=>outer?handler.handle({op:'callMethod',data:{requestId:'timing',method,args}}):handler.handleCallMethod('timing',method,args);
+  const waiter=invoke();
+  const prefix={calls:[...calls],replies:replies.length};
+  if(release)release();
+  if(!outer)await waiter;else for(let i=0;i<8;i++)await Promise.resolve();
+  const reply=replies[0];assert.equal(replies.length,1,'TIMING exactly one source reply');
+  profiles.push({outer,method,mode,prefix,success:reply.data.success,message:reply.data.result?.message??null});
+ }
+ process.stdout.write(JSON.stringify(profiles));
+} else process.stdout.write(JSON.stringify(records));

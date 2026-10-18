@@ -441,3 +441,8 @@ BoundHost; native constructor-backed tests prove original referents, getter orde
 UTF-16, own undefined and exact numeric bits. Run `scripts/public-alias-contracts.mjs`
 from sdk-rs for the finite guarded inventory; `scripts/prepared-alias-controls.py`
 compiles pair-order and receiver mutations and requires exact restored passes.
+
+Socket order-book sorting uses canonical V8 TimSort with the source subtraction
+comparator, preserving signed-zero ties and NaN ordering. The two socket-book
+sort tests in `exchange_binding` compare 13 maintained-source profiles per side
+through the real socket and typed callback; see `BOOK_SORT_REVIEW.md`.

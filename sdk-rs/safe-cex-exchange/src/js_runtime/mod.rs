@@ -17,7 +17,6 @@ pub mod promise;
 pub mod regexp;
 pub mod scope;
 pub mod sockets;
-pub(crate) mod sorting;
 pub mod store;
 mod throttle;
 pub mod value;

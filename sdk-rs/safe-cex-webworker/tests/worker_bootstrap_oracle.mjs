@@ -6,22 +6,98 @@ import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:asser
 const require=createRequire(import.meta.url),ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript'),lodash=require('lodash');const root=new URL('../../../packages/safe-cex/src/',import.meta.url);
 function ast(p){return ts.createSourceFile(p,fs.readFileSync(new URL(p,root),'utf8'),ts.ScriptTarget.Latest,true);}function body(p){const a=ast(p);return a.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(a)).join('\n').replace(/\bexport /g,'');}
 const handlerNames=['OHLCVSubscriptionsHandler','OrderBookSubscriptionsHandler','ChaserOrderHandler','TwapHandler','DevHandler','CommandHandler','UpdatePositionsHandler','CallMethodHandler','UiStateHandler'],kinds=['ohlcv','book','chaser','twap','dev','command','positions','method','ui'];
-function fixture(hosted=false){let now=0,next=0,events=[],posts=[],stores=[],timers=new Map(),startRelease,worker;const state={startReady:true,clockError:false,loadMissing:false,replay:false,completed:0,replace:false};class FakeDate extends Date{static now(){return now;}}
+function fixture(hosted=false){let now=0,next=0,events=[],posts=[],stores=[],timers=new Map(),startRelease,clockRelease,loaderRelease,worker;const state={startReady:true,clockReady:true,loadReady:true,clockError:false,loadMissing:false,replay:false,completed:0,replace:false,handled:[]};class FakeDate extends Date{static now(){return now;}}
  function setTimeout(fn,delay){const id=next++;timers.set(id,{fn,delay});events.push('timer:'+delay);return id;}function clearTimeout(id){timers.delete(id);events.push('clear:'+id);}
  const ld=lodash.runInContext({Date:FakeDate,setTimeout,clearTimeout});let c;
- const handlerDeps=Object.fromEntries(handlerNames.map((name,index)=>[name,class Handler{constructor(account,exchange,ex,ctx,settings,metadata){events.push('handler:'+kinds[index]);this.kind=kinds[index];if(worker){assert.equal(ex,worker.exchange);assert.equal(settings,worker._settings);assert.equal(metadata,worker._metadata);}}dispose(){events.push('dispose:'+this.kind);}handle(payload){events.push('handle:'+this.kind+':'+payload.op);if(state.replace){state.replace=false;events.push('handler:method','handler:ui');worker._handlers=[{handle(){throw Error('index replay');},dispose(){}},{handle(p){events.push('handle:ui:'+p.op);},dispose(){events.push('dispose:ui');}}];}}}]))
+ const handlerDeps=Object.fromEntries(handlerNames.map((name,index)=>[name,class Handler{constructor(account,exchange,ex,ctx,settings,metadata){events.push('handler:'+kinds[index]);this.kind=kinds[index];if(worker){assert.equal(ex,worker.exchange);assert.equal(settings,worker._settings);assert.equal(metadata,worker._metadata);}}dispose(){events.push('dispose:'+this.kind);if(state.failHandlerDispose){state.failHandlerDispose=false;throw new Error('handler dispose failed');}}handle(payload){state.handled.push(payload);events.push('handle:'+this.kind+':'+payload.op);if(state.replace){state.replace=false;events.push('handler:method','handler:ui');worker._handlers=[{handle(){throw Error('index replay');},dispose(){}},{handle(p){events.push('handle:ui:'+p.op);},dispose(){events.push('dispose:ui');}}];}}}]))
  const processor=(name)=>class{constructor(account,exchange,options,ex){events.push('ctor:'+name+':'+(arguments.length===4));assert.ok(account==='a'||account==='');assert.equal(exchange,'bybit');if(worker)assert.equal(options,worker._options);}process(){events.push('process:'+name);}};
- const registry=new Proxy({bybit:async()=>{if(state.loadMissing)throw Error('unused');return Venue;}},{get(target,key){events.push('load');return state.loadMissing?undefined:target[key];}});
+ const registry=new Proxy({bybit:async()=>{if(state.loadMissing)throw Error('unused');if(!state.loadReady)return new Promise(resolve=>{loaderRelease=()=>resolve(Venue);});return Venue;}},{get(target,key){events.push('load');return state.loadMissing?undefined:target[key];}});
  class Venue{constructor(name,options,store){events.push('exchange');if(worker){assert.equal(worker.exchange,null);assert.equal(store,worker.store);assert.equal(options,worker._options);}this.name=name;this.store=store;this.isDisposed=false;this.hooks=new Map();}disablePublicWebsockets(){this.disabled=true;}on(name,fn){let list=this.hooks.get(name);if(!list)this.hooks.set(name,list=[]);list.push(fn);}emit(name,data){for(const fn of [...(this.hooks.get(name)||[])])fn(data);}start(){if(state.expectedSeed!==undefined)assert.equal(this.store.latency,state.expectedSeed,'SESSION source seed inside venue start');events.push('start');if(state.startReady){state.completed++;return Promise.resolve();}return new Promise(r=>startRelease=()=>{state.completed++;r();});}dispose(){if(state.disposeCheck)state.disposeCheck();this.isDisposed=true;}}
  const ctx={postMessage(p){if(p.op==='store'){events.push('store');stores.push(p);}else{events.push('post:'+p.op);posts.push(p);}},addEventListener(name,fn){assert.equal(name,'message');assert.equal(this.listener,undefined);events.push('listen');this.listener=fn;}};
- c=vm.createContext({Date:FakeDate,Error,structuredClone,uniqBy:lodash.uniqBy,throttle:ld.throttle,setTimeout,clearTimeout,console:{warn(){events.push('console:warn');},error(){events.push('fallback');},log(){events.push('console:log');}},...handlerDeps,independentPostprocessors:['positions','margin','enrichment','risk'].map(processor),exchangeDependentPostprocessors:['chaser','twap','stats'].map(processor),exchangeRegistry:registry,isReplayingPerfFixture:()=>state.replay,recordOutboundFrame:p=>events.push('record:'+p.op),startReplay(){events.push('replay');},configurePerfFixture(){events.push('configure-perf');},takePerfFixture:()=>({frames:[]}),setTickIntervalMultipliers(){events.push('tick-config');},setWsDiagnosticsEnabled(v){events.push('diagnostics:'+v);},TelegramWorker:class{constructor(){throw Error('telegram not requested');}}});
+ c=vm.createContext({Date:FakeDate,Error,structuredClone,uniqBy:lodash.uniqBy,throttle:ld.throttle,setTimeout,clearTimeout,console:{warn(){events.push('console:warn');},error(...args){state.consoleArgs=args;events.push(args[0]==='[store.webworker] __workerConfig host handler threw'?'console:error':'fallback');},log(){events.push('console:log');}},...handlerDeps,independentPostprocessors:['positions','margin','enrichment','risk'].map(processor),exchangeDependentPostprocessors:['chaser','twap','stats'].map(processor),exchangeRegistry:registry,isReplayingPerfFixture:()=>state.replay,recordOutboundFrame:p=>events.push('record:'+p.op),startReplay(){events.push('replay');},configurePerfFixture(value){state.perfArg=value;events.push('configure-perf');},takePerfFixture:()=>state.fixtureDump||({frames:[]}),setTickIntervalMultipliers(value){state.tickArg=value;events.push('tick-config');},setWsDiagnosticsEnabled(v){events.push('diagnostics:'+v);},TelegramWorker:class{constructor(){throw Error('telegram not requested');}}});
  const run=s=>vm.runInContext(ts.transpileModule(s,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,c);
  const types=ast('types.ts'),enums=types.statements.filter(n=>ts.isEnumDeclaration(n)&&['OrderSide','PositionSide','OrderStatus','OrderType','PositionMode'].includes(n.name.text));assert.equal(enums.length,5);const clockAst=ast('utils/virtualClock.ts'),clock=clockAst.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='VirtualClock');assert.ok(clock);run(clock.getText(clockAst)+'\nconst virtualClock=new VirtualClock();\n'+enums.map(n=>n.getText(types).replace('export ','')).join('\n')+'\n'+body('utils/clone.ts')+'\n'+body('store/store.base.ts'));
- c.clockStart=()=>{events.push('clock');return state.clockError?Promise.reject(new Error('clock failed')):Promise.resolve();};run('virtualClock.start=()=>clockStart();');
+ c.clockStart=()=>{events.push('clock');if(!state.clockReady)return new Promise((resolve,reject)=>{clockRelease=()=>state.clockError?reject(new Error('clock failed')):resolve();});return state.clockError?Promise.reject(new Error('clock failed')):Promise.resolve();};run('virtualClock.start=()=>clockStart();');
  const managerAst=ast('webworker/chaserOrder/ChaserOrderManager.ts'),manager=managerAst.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='ChaserOrderManager');assert.ok(manager);run(manager.getText(managerAst).replace('export ','')+'\nconst chaserOrderManagerInstance=new ChaserOrderManager();');
- run(body('webworker/ExchangeWorker.ts')+'\nglobalThis.WorkerClass=ExchangeWorker;');run(body('webworker/store.webworker.ts')+'\nglobalThis.sessionStart=start;globalThis.workerTable=exchangeWorkers;globalThis.anonTable=anonymousExchangeWorkers;globalThis.portTable=ports;');
+ run(body('webworker/ExchangeWorker.ts')+'\nglobalThis.WorkerClass=ExchangeWorker;');run(body('webworker/store.webworker.ts')+'\nglobalThis.sessionStart=start;globalThis.workerTable=exchangeWorkers;globalThis.anonTable=anonymousExchangeWorkers;globalThis.portTable=ports;globalThis.registerConfig=registerWorkerConfigHandler;');
  const options={key:'',secret:'',hostedMode:hosted},settings={placeOrder:{tpTriggerType:'mark_price',slTriggerType:'last_price'}},metadata={supportedTPSLTriggerTypes:[],privateProxyIps:[]};worker=new c.WorkerClass(ctx,'a','bybit',options,settings,metadata,'s','i');
- return {c,ctx,worker,state,events,posts,stores,timers,init:{op:'init',data:{accountName:'a',exchangeName:'bybit',options:{key:'',secret:''},settings,metadata,sessionKey:'s',store:{latency:7}}},async flush(){for(let iteration=0;iteration<32;iteration++)await Promise.resolve();},release(){startRelease();},fire(id,time){now=time;const timer=timers.get(id);assert.ok(timer);timers.delete(id);timer.fn();},setWorker(v){worker=v;}};
+ return {c,ctx,worker,state,events,posts,stores,timers,init:{op:'init',data:{accountName:'a',exchangeName:'bybit',options:{key:'',secret:''},settings,metadata,sessionKey:'s',store:{latency:7}}},async flush(){for(let iteration=0;iteration<32;iteration++)await Promise.resolve();},release(){startRelease();},releaseClock(){clockRelease();},releaseLoader(){loaderRelease();},fire(id,time){now=time;const timer=timers.get(id);assert.ok(timer);timers.delete(id);timer.fn();},setWorker(v){worker=v;}};
+}
+if(process.argv.includes('--config-carriers')) {
+ const f=fixture();f.setWorker(undefined);f.c.sessionStart(f.ctx,false);
+ const tokens=['-0','-0.0','0','1e400','-1e400','1e-400','-1e-400','1.25','1e3','-1e-4000'];
+ const bits=[],bytes=new DataView(new ArrayBuffer(8));let configs=0,dumps=0,observed;f.c.registerConfig(cfg=>{observed=cfg;});
+ for(const token of tokens){
+  const value=JSON.parse(token),frame={atMs:value,msg:{value,own:undefined,text:'\ud800X\udc00'}},record={version:2,recordedAtMs:value,durationMs:value,frames:[frame]},config={mode:'external-mode',intervalMs:value,fixture:record,loop:null};
+  const knobs={tickIntervalMultipliers:{bybit:value},perfFixture:config};observed=undefined;
+  await f.ctx.listener({data:{op:'__workerConfig',data:knobs}});
+  assert.equal(observed,knobs);assert.equal(f.state.tickArg,knobs.tickIntervalMultipliers);assert.equal(f.state.perfArg,config);configs++;
+  f.state.fixtureDump=record;await f.ctx.listener({data:{op:'__perfFixtureDump'}});
+  assert.equal(f.posts.at(-1).data,record);assert.equal(f.posts.at(-1).data.frames[0],frame);assert.ok(Object.hasOwn(frame.msg,'own'));dumps++;
+  bytes.setFloat64(0,value);bits.push(bytes.getBigUint64(0).toString(16).padStart(16,'0'));
+ }
+ for(const value of [null,true,'untyped',[],{mode:'off',fixture:null,intervalMs:null,loop:null}]){
+  await f.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:value}}});assert.equal(f.state.perfArg,value);configs++;
+ }
+ process.stdout.write(JSON.stringify({configs,dumps,tokens,bits}));process.exit(0);
+}
+if(process.argv.includes('--session-native')) {
+ const lifetime=fixture();lifetime.setWorker(undefined);lifetime.c.sessionStart(lifetime.ctx,false);
+ await lifetime.ctx.listener({data:{op:'__worker_ping__'}});
+ const array=fixture();array.setWorker(undefined);array.c.sessionStart(array.ctx,false);
+ let arrayCalls=0;array.c.registerConfig(cfg=>{assert.ok(Array.isArray(cfg));arrayCalls++;});
+ await array.ctx.listener({data:{op:'__workerConfig',data:[]}});
+ const raw=fixture();raw.setWorker(undefined);raw.c.sessionStart(raw.ctx,false);
+ const cfg={custom:NaN,present:undefined,text:'\ud800X\udc00'};let deep=undefined;for(let i=0;i<150;i++)deep=[deep];cfg.deep=deep;let received;
+ raw.c.registerConfig(value=>{received=value;});
+ await raw.ctx.listener({data:{op:'__workerConfig',data:cfg}});
+ assert.equal(received,cfg);assert.ok(Number.isNaN(received.custom));let tail=received.deep;for(let i=0;i<150;i++)tail=tail[0];assert.equal(tail,undefined);
+ assert.ok(Object.hasOwn(received,'present'));assert.equal(received.present,undefined);
+ const textUnits=Array.from({length:received.text.length},(_,i)=>received.text.charCodeAt(i));
+ const dispatch=fixture();dispatch.setWorker(undefined);dispatch.c.sessionStart(dispatch.ctx,false);await dispatch.ctx.listener({data:dispatch.init});
+ const message={op:'external-op',data:{value:Infinity,own:undefined}};await dispatch.ctx.listener({data:message});
+ assert.equal(dispatch.state.handled.length,9);for(const item of dispatch.state.handled)assert.equal(item,message);
+ const buffered=fixture();const bufferedMessage={op:'external-op',data:{value:Infinity,own:undefined}};buffered.worker.handlePayload(bufferedMessage);bufferedMessage.data.value=-Infinity;await buffered.worker.start();
+ assert.equal(buffered.state.handled.length,9);for(const item of buffered.state.handled){assert.equal(item,bufferedMessage);assert.equal(item.data.value,-Infinity);}
+ const replay=fixture();replay.setWorker(undefined);replay.state.replay=true;replay.c.sessionStart(replay.ctx,false);await replay.ctx.listener({data:{op:'init',data:{}}});
+ assert.equal(replay.posts[0].op,'start-status');assert.equal(Object.keys(replay.c.workerTable).length,0);
+ const configured=fixture();configured.setWorker(undefined);configured.c.sessionStart(configured.ctx,false);
+ const tick={bybit:Infinity},replacement={mode:'off',present:undefined},cause={marker:NaN};
+ const knobs={tickIntervalMultipliers:tick,wsDiagnosticsEnabled:1,perfFixture:null};
+ configured.c.registerConfig(value=>{assert.equal(value,knobs);value.perfFixture=replacement;configured.events.push('config:first');configured.c.registerConfig(()=>configured.events.push('config:second'));throw cause;});
+ await configured.ctx.listener({data:{op:'__workerConfig',data:knobs}});
+ assert.equal(configured.state.tickArg,tick);assert.equal(configured.state.perfArg,replacement);assert.equal(configured.state.consoleArgs[1],cause);
+ const dump=fixture();dump.setWorker(undefined);dump.c.sessionStart(dump.ctx,false);dump.state.fixtureDump={version:1,frames:[{atMs:-0,msg:{nan:NaN,own:undefined}}]};
+ await dump.ctx.listener({data:{op:'__perfFixtureDump'}});assert.equal(dump.posts[0].data,dump.state.fixtureDump);assert.ok(Object.is(dump.posts[0].data.frames[0].atMs,-0));assert.ok(Number.isNaN(dump.posts[0].data.frames[0].msg.nan));assert.ok(Object.hasOwn(dump.posts[0].data.frames[0].msg,'own'));
+ const normal=fixture();await normal.worker.start();normal.events.length=0;normal.state.failHandlerDispose=true;
+ assert.throws(()=>normal.worker.dispose(),/handler dispose failed/);
+ const normalDisposeThrow={disposed:normal.events.filter(value=>value.startsWith('dispose:')),handlers:normal.worker._handlers.length,processors:normal.worker._postprocessors.length,dependent:normal.worker._exchangeDependentPostprocessors.length};
+ process.stdout.write(JSON.stringify({lifetimePongs:lifetime.posts.length,arrayCalls,raw:{nan:true,undefinedOwn:true,textUnits},dispatch:dispatch.state.handled.length,buffered:buffered.state.handled.length,replayEvents:replay.events,configOrder:configured.events,dumpNative:true,normalDisposeThrow}));
+ process.exit(0);
+}
+if(process.argv.includes('--startup-timing')) {
+ const direct=[];
+ for(const mode of ['success','failure','dispose','loader','venue']) {
+  const f=fixture();f.state.clockReady=['loader','venue'].includes(mode);f.state.loadReady=mode!=='loader';f.state.startReady=mode!=='venue';f.state.clockError=mode==='failure';
+  f.worker.start();assert.ok(f.worker._cancelStartup);assert.equal(f.events.at(-1),'clock');
+  await f.flush();assert.equal(f.worker.exchange!==null,mode==='venue');
+  if(mode==='dispose')f.worker.dispose();
+  if(mode==='loader')f.releaseLoader();else if(mode==='venue')f.release();else f.releaseClock();await f.flush();
+  direct.push({mode,completed:f.state.completed,stores:f.stores.length,errors:f.posts.filter(p=>p.op==='error').length,exchange:f.worker.exchange!==null,cancelPending:f.worker._cancelStartup!==null});
+ }
+ const session=[];
+ for(const missing of [false,true]) {
+  const f=fixture();f.setWorker(undefined);f.state.loadMissing=missing;f.state.expectedSeed=7;
+  f.c.sessionStart(f.ctx,false);f.ctx.listener({data:f.init});
+  const worker=f.c.workerTable.a;assert.equal(worker.store.latency,7);
+  await f.flush();
+  session.push({missing,completed:f.state.completed,stores:f.stores.length,present:!!f.c.workerTable.a,cancelPending:worker._cancelStartup!==null});
+ }
+ const ready=fixture();const waiter=ready.worker.start();
+ assert.equal(ready.events.at(-1),'clock');assert.ok(!ready.events.includes('load'));
+ await waiter;assert.equal(ready.stores.length,1);
+ process.stdout.write(JSON.stringify({direct,session}));
+ process.exit(0);
 }
 const success=fixture();success.worker.handlePayload({op:'exec'});const future=success.worker.start();assert.ok(success.worker._cancelStartup);assert.equal(success.events.at(-1),'clock');await future;assert.equal(success.worker._cancelStartup,null);assert.equal(success.worker._messageBuffer.length,0);assert.equal(success.stores.length,1);assert.ok(Object.hasOwn(success.stores[0].data,'orders'));assert.equal(success.timers.size,1);assert.ok(success.events.indexOf('start')<success.events.indexOf('timer:30000'));const successEvents=success.events.slice();
 const cancelled=fixture();cancelled.state.startReady=false;const pending=cancelled.worker.start();await cancelled.flush();cancelled.worker.dispose();assert.equal(await pending,false);cancelled.release();await cancelled.flush();assert.equal(cancelled.state.completed,1);assert.equal(cancelled.stores.length,0);

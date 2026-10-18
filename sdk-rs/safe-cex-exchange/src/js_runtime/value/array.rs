@@ -75,6 +75,7 @@ pub(in crate::js_runtime) fn prototype() -> Js {
     for name in [
         "push",
         "pop",
+        "splice",
         "reverse",
         "includes",
         "indexOf",
@@ -147,20 +148,24 @@ impl Js {
             .to_number()?
             .clamp(0.0, 9_007_199_254_740_991.0) as usize;
         let mut values = Vec::new();
+        let mut undefined = 0;
         for index in 0..length {
             if self.has_index(index) {
-                values.push(self.get(&index.to_string())?);
+                let value = self.get(&index.to_string())?;
+                if value.is_undefined() {
+                    undefined += 1;
+                } else {
+                    values.push(value);
+                }
             }
         }
-        super::super::sorting::stable_sort(&mut values, |x, y| {
-            if x.is_undefined() || y.is_undefined() {
-                Ok(x.is_undefined().cmp(&y.is_undefined()))
-            } else {
-                compare(x, y)
-            }
-        })?;
-        let count = values.len();
-        for (index, value) in values.into_iter().enumerate() {
+        safe_cex_num::sorting::stable_sort(&mut values, &mut compare)?;
+        let count = values.len() + undefined;
+        for (index, value) in values
+            .into_iter()
+            .chain(std::iter::repeat_n(Js::Undefined, undefined))
+            .enumerate()
+        {
             self.set(&index.to_string(), value)?;
         }
         for index in count..length {
@@ -175,14 +180,14 @@ impl Js {
     /// Array.splice mutation phase over live indexed properties, without a raw Vec borrow.
     pub fn splice_array(
         &self,
+        len: usize,
         start: usize,
         delete_count: usize,
         insert: Vec<Js>,
     ) -> Result<(), Thrown> {
-        let Js::Array(array) = self else {
+        let Js::Array(_) = self else {
             return Err(Thrown::type_error("splice requires an array"));
         };
-        let len = array.len();
         let start = start.min(len);
         let count = delete_count.min(len - start);
         let added = insert.len();

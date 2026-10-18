@@ -213,7 +213,10 @@ Promise in another task. `tests/eager_sdk_binding.rs` compares the maintained
 whole TS class with NativeRuntime and signed reqwest loopback requests: missing
 credentials log before polling; discarded getAccount/changePositionMode waiters
 retain their held HTTP continuation and Store effect. This family proof does
-not resolve the separate socket or validateAccount error-envelope findings.
+not by itself close the socket or validation error-envelope findings.
+`VALIDATION_ERROR_REVIEW.md` records the later real HTTP/setup-error witnesses: retained
+error markers come from the existing origin, and unsupported protocols use the
+shared transport classification rather than a network-reset diagnostic.
 
 Public socket ingress uses canonical retained capture, then derives the existing
 typed Value callback argument. String fields and keys use the canonical typed
@@ -223,3 +226,13 @@ request-params parser. `exchange_trait` compares twelve actual constructed TS
 and Rust socket cases (twenty frames), including whole batches with lone units
 in an unused nested value/key, ordinary siblings and native numeric bits. The
 private stream's Value callback/info seam remains a separate migration.
+
+REST depth sorting delegates both source subtraction comparators to canonical
+CI V8 TimSort. `native_exchange::fix_audit_tests::rest_book_*` calls the actual
+constructed fetchOrderBook member, factory, HTTP response path and mapper against
+maintained TS over ten NaN-containing depth profiles, preserving every price,
+amount and cumulative quote-total bit. The previous Rust sort panicked for both
+sides; the bounded native witnesses catch that panic without hanging.
+PnL grouping sanitizes time/id keys and uses the original index to break ties;
+public depth admission rejects nonfinite prices, and API signing sorts UTF-16
+strings. Those remaining crate comparators have a total order.

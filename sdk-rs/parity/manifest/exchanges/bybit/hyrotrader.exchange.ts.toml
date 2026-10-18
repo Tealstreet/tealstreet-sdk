@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/hyrotrader.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/hyro_configuration.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/hyro_capabilities.rs", "safe-cex-venue-bybit/src/hyro_private_reads.rs", "safe-cex-venue-bybit/src/hyro_snapshot.rs", "safe-cex-venue-bybit/src/hyro_order_publication.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/hyro.rs", "safe-cex-venue-bybit/src/exchange.rs" ]
+rust_files = [ "safe-cex-exchange/src/js_runtime/value.rs", "safe-cex-venue-bybit/src/hyro_configuration.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/hyro_capabilities.rs", "safe-cex-venue-bybit/src/hyro_private_reads.rs", "safe-cex-venue-bybit/src/hyro_snapshot.rs", "safe-cex-venue-bybit/src/hyro_order_publication.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/hyro.rs", "safe-cex-venue-bybit/src/exchange.rs" ]
 
 [[symbol]]
 ts = "HyrotraderExchange"
@@ -38,17 +38,17 @@ note = "Closed callback selectors extracted as safe-cex-venue-bybit/src/hyro_pri
 ts = "HyrotraderExchange.validateAccount"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/api_validation.rs::hyro_validate_account"
+rs = [ "safe-cex-venue-bybit/src/api_validation.rs::hyro_validate_account", "safe-cex-venue-bybit/src/binding/members/hyro.rs::install", "safe-cex-exchange/src/js_runtime/value.rs::Js::ordinary_has_instance" ]
 status = "divergent"
-note = "CHOSEN: HyroTrader explicit balance/log callbacks retain native balance and ExchangeError identity; typed message errors omit primitive/non-Error String coercion, executable properties, JS stack and prototype identity. Both synchronous invocation errors and awaited balance rejection are caught; log rejection propagates. The anonymous result becomes a string/optional-balance tuple and Future execution/cancellation differs from Promise scheduling. Full host constructor/store composition is pending. Renamed Rust target: safe-cex-venue-bybit/src/api_validation.rs::hyro_validate_account."
+note = "FIX-audit row 28: the constructed native Hyro receiver now applies canonical OrdinaryHasInstance to the installed Error constructor rather than a class tag. Inherited Error.prototype reads the original message; detached Errors use source String coercion. Native UTF16, raw message identity, synchronous/awaited rejection and logger failure propagate before typed output. Shared operation follows bound targets (including call-only functions), callable/prototype checks and internal prototype traversal; Node unit covers primitive LHS, null prototypes, throwing getters and bound constructors. The generic typed callback helper remains a supplemental projection, not this native proof. Renamed Rust target: safe-cex-venue-bybit/src/api_validation.rs::hyro_validate_account. Split native installation: safe-cex-venue-bybit/src/binding/members/hyro.rs::install. Split shared instanceof operation: safe-cex-exchange/src/js_runtime/value.rs::Js::ordinary_has_instance."
 
 [[symbol]]
 ts = "HyrotraderExchange.fetchMarginAccountInfos"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/account_readers.rs::hyro_fetch_margin_account_infos"
+rs = [ "safe-cex-venue-bybit/src/account_readers.rs::hyro_fetch_margin_account_infos", "safe-cex-venue-bybit/src/binding/members/hyro.rs::install" ]
 status = "divergent"
-note = "CHOSEN: native generic future plus lazy disposal/update callbacks replace receiver properties and Promise scheduling; Rust starts when polled. The update callback accepts the retained native balance directly rather than an anonymous {balance} object; composing the store payload remains a host responsibility. The source updates only after successful fetch when still active, preserves fetched balance/error identity, and propagates update failure. HyroTrader constructor and lifecycle composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::hyro_fetch_margin_account_infos."
+note = "FIX-audit row 22 ACCEPT: the actual retained Hyro receiver already starts fetchBalance during invocation, preserves held native balance identity and publishes the anonymous {balance} payload only after settlement while active. Disposal suppresses publication; no extra SDK spawn is introduced. Native production/demo profiles and the maintained TS member compare these effects; a compiled removed-disposal-guard fault must fail the native witness. The generic callback future is a supplemental typed helper, not the production Promise boundary. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::hyro_fetch_margin_account_infos. Split native installation: safe-cex-venue-bybit/src/binding/members/hyro.rs::install."
 
 [[symbol]]
 ts = "HyrotraderExchange#assertPrivateListResponse"
@@ -216,7 +216,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/binding/members/hyro.rs::install"
 status = "divergent"
-note = "CHOSEN: native retained receiver over the shared typed Bybit facade; Scope owns asynchronous tails/disposal rather than JavaScript object lifetime. tests/hyro_binding.rs exercises the production constructor, HTTP clients, real private/public protocols and Store. Source configuration guards, USDT/one-way policy, caller-ID refusal and generated recovery identity are retained. This is executable native composition, not an extra source class or a stand-in host. Installs the separately named source empty Promise method; range arguments cause no HTTP and the inherited unsupported brand is retained. Renamed target safe-cex-venue-bybit/src/binding/members/hyro.rs::install implements this source declaration through the native receiver."
+note = "FIX-audit row 29 ACCEPT: actual production/demo Hyro receivers already return a fresh canonical Promise and fresh empty array, ignore opaque/throwing range arguments and perform no HTTP. The typed capability retains the source inherited unsupported brand. Native receivers and maintained TS member execute the same observations; a compiled nonempty-result fault must fail. Scope owns native asynchronous tails rather than JS garbage collection. Renamed target safe-cex-venue-bybit/src/binding/members/hyro.rs::install."
 
 [[symbol]]
 ts = "HyrotraderExchange#assertPrivateReady"
@@ -344,7 +344,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange::options_enabled"
 status = "divergent"
-note = "CHOSEN: native retained receiver over the shared typed Bybit facade; Scope owns asynchronous tails/disposal rather than JavaScript object lifetime. tests/hyro_binding.rs exercises the production constructor, HTTP clients, real private/public protocols and Store. Source configuration guards, USDT/one-way policy, caller-ID refusal and generated recovery identity are retained. This is executable native composition, not an extra source class or a stand-in host. The live name guard forces false even when account options request option markets; the configured public-start witness supplies that flag. Renamed target safe-cex-venue-bybit/src/exchange.rs::BybitExchange::options_enabled implements this source declaration through the native receiver."
+note = "FIX-audit row 30 ACCEPT: constructed native production/demo Hyro receivers already force false when option markets are explicitly enabled in account options. Maintained TS member and native receiver agree; a compiled missing-Hyro-guard fault must fail. Shared typed facade/lifetime boundaries remain separate. Renamed target safe-cex-venue-bybit/src/exchange.rs::BybitExchange::options_enabled."
 
 [[symbol]]
 ts = "HyrotraderExchange.inverseEnabled"
@@ -352,7 +352,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange::inverse_enabled"
 status = "divergent"
-note = "CHOSEN: native retained receiver over the shared typed Bybit facade; Scope owns asynchronous tails/disposal rather than JavaScript object lifetime. tests/hyro_binding.rs exercises the production constructor, HTTP clients, real private/public protocols and Store. Source configuration guards, USDT/one-way policy, caller-ID refusal and generated recovery identity are retained. This is executable native composition, not an extra source class or a stand-in host. The live name guard forces false even when account options request inverse markets; no inverse public socket is allocated. Renamed target safe-cex-venue-bybit/src/exchange.rs::BybitExchange::inverse_enabled implements this source declaration through the native receiver."
+note = "FIX-audit row 31 ACCEPT: constructed native production/demo Hyro receivers already force false when inverse markets are explicitly enabled in account options. Maintained TS member and native receiver agree; a compiled missing-Hyro-guard fault must fail. Shared typed facade/lifetime boundaries remain separate. Renamed target safe-cex-venue-bybit/src/exchange.rs::BybitExchange::inverse_enabled."
 
 [[symbol]]
 ts = "HyrotraderExchange.requiresOrderLinkId"
