@@ -198,7 +198,9 @@ The final receipt checks consumed/processed application counts per physical URL
 occurrence and native transport counts for messages, ping, pong and close. Only
 matching receipts set `nativeDrainVerified: true`. Ready Promise jobs are included
 in the native checkpoint, and outstanding source Promise jobs keep drain false.
-TS HTTP completion is fenced through the response Promise turn as well. Startup still uses real scheduling, so exact two-run repeatability on
+TS HTTP completion and returned WebSocket listener Promises are fenced through
+their response/continuation turns as well. Startup subscription work settles
+under real scheduling before the replay clock is activated. Startup still uses real scheduling, so exact two-run repeatability on
 each side remains mandatory for attribution. The trailing Store delivery runs
 under the replay clock, through the real production throttle.
 
@@ -206,3 +208,6 @@ Missing/extra frames, unfinished handlers, unread control frames and clock
 rollback fail closed. An ack-only instrument tape proves receipt wiring but
 provides no ticker/orderbook/candle coverage or 60-second venue result. Full
 venue comparisons await the shared Store hot-path repair before being rerun.
+
+The addon bytes are copied before child startup; the recorded SHA identifies the
+loaded snapshot even if another lane rebuilds the supplied addon path.
