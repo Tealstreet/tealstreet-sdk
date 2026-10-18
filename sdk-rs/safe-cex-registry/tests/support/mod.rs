@@ -137,6 +137,9 @@ pub async fn serve_http(listener: TcpListener, handler: Handler, seen: Rc<RefCel
             let answer = handler(&request);
             seen.borrow_mut().push(request);
             let (status, body) = match answer {
+                Some(reply) if reply.get("__rawBody").and_then(Value::as_str).is_some() => {
+                    ("200 OK", reply["__rawBody"].as_str().unwrap().to_owned())
+                }
                 // A handler picks a non-200 status with {"__status": 400, "body": ...}.
                 Some(reply) if reply.get("__status").is_some() => (
                     match reply["__status"].as_u64() {
@@ -245,6 +248,7 @@ impl RestAdapter for LocalOrigin {
 pub struct LocalDial {
     pub inner: Rc<NativeRuntime>,
     pub origin: String,
+    pub reports: Rc<RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>>,
 }
 impl ExchangeRuntime for LocalDial {
     fn monotonic_now_ms(&self) -> f64 {
@@ -271,14 +275,20 @@ impl ExchangeRuntime for LocalDial {
     fn random(&self) -> f64 {
         self.inner.random()
     }
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+        self.reports.borrow_mut().push(context.clone());
         self.inner.report_exception(error, context)
     }
     fn report_raw_exception(
         &self,
         error: &safe_cex_exchange::js_runtime::value::Js,
-        context: &Value,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
+        self.reports.borrow_mut().push(context.clone());
         self.inner.report_raw_exception(error, context)
     }
     fn execute_worker_request(&self, request: Value) -> ExchangeFuture<'static, Value> {
@@ -359,6 +369,7 @@ pub struct Harness {
     pub peers: Rc<RefCell<Vec<WsPeer>>>,
     /// Text frames every local socket received from the exchange.
     pub received: Rc<RefCell<Vec<String>>>,
+    pub reports: Rc<RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>>,
 }
 /// Binance built through the registry's Rust constructor on the native host. Call inside a LocalSet.
 pub async fn binance_harness(extra: Handler) -> Harness {
@@ -407,9 +418,11 @@ pub async fn venue_harness(
     tokio::task::spawn_local(serve_http(http, handler(extra), seen.clone()));
     let received = Rc::new(RefCell::new(vec![]));
     tokio::task::spawn_local(serve_ws(ws, peers.clone(), received.clone()));
+    let reports = Rc::new(RefCell::new(vec![]));
     let host = Rc::new(LocalDial {
         inner: runtime,
         origin: ws_origin,
+        reports: reports.clone(),
     });
     let adapters = Rc::new(move || {
         let inner = safe_cex_transport::native::reqwest_adapter()
@@ -452,6 +465,7 @@ pub async fn venue_harness(
         seen,
         peers,
         received,
+        reports,
     }
 }
 pub fn run_local(future: impl std::future::Future<Output = ()>) {

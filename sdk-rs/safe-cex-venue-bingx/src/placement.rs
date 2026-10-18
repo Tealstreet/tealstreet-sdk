@@ -513,8 +513,10 @@ impl BingxPlacement {
                 let reporter = runtime.clone();
                 runtime.spawn_local(Box::pin(async move {
                     if let Err(e) = future.as_mut().await {
-                        reporter
-                            .report_exception(&e, &json!({"operation":"BingX formatting sibling"}));
+                        reporter.report_exception(
+                            &e,
+                            &json!({"operation":"BingX formatting sibling"}).into(),
+                        );
                     }
                 }));
             }

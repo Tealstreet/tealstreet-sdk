@@ -188,8 +188,8 @@ impl ExchangeRuntime for RecordingRuntime {
     fn unique_id(&self) -> String { "fixture-id".into() }
     fn is_worker(&self) -> bool { false }
     fn random(&self) -> f64 { 0.5 }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) { eprintln!("{}: {}", error.name, error.message); }
-    fn report_raw_exception(&self, _: &Js, _: &Value) { panic!("unexpected raw exception report") }
+    fn report_exception(&self, error: &ExchangeError, _: &safe_cex_types::retained_json::RetainedJsonInput) { eprintln!("{}: {}", error.name, error.message); }
+    fn report_raw_exception(&self, _: &Js, _: &safe_cex_types::retained_json::RetainedJsonInput) { panic!("unexpected raw exception report") }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         panic!("unexpected worker request")
     }
@@ -1562,6 +1562,12 @@ across six bound arithmetic and six comparison methods, and five min/max argumen
 sets against the actual npm dependency. Positive finite precision stays decimal;
 the public shared model types are unchanged.
 
+The BigNumber import supplies both native call and construct bodies. OKX's
+source placement formatter uses `new BigNumber(amount)`; a callable-only import
+refuses before any order reaches HTTP. The installed-package constructor witness
+compares both forms and constructed clones for all 22 scalar profiles, while the
+real OKX placement binding tests retain batch payload and attached-error checks.
+
 Error prototype thread-local storage stays inside its sole private accessor.
 Module-level item macros are rejected by the parity indexer. The focused
 `safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
@@ -1617,7 +1623,7 @@ NaN, both infinities, signed zero, clones and arithmetic results.
 Raw error reporter inputs use `ExchangeErrorInput::Raw(Js)`. Pass the original
 shared-runtime value; already-JSON readers use explicit `from_json` at that boundary.
 The reporter retains lazy reads, native formatted messages and worker error identity.
-Optional message/extra-data retain their stated UTF-8/JSON profiles; console and
+Optional message retains its stated UTF-8 profile; extra data uses retained input; console and
 main-thread raw exception hosts receive original local Js references; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
 
 Worker/native delivery services live in exchange-core so constructor hosts never
@@ -1761,6 +1767,24 @@ native account identity reads with the maintained TS constructor's shared option
 and checks reentry, exact references/bits, capture release and refusal behavior.
 Missing-publication and premature-publication production mutations must compile,
 fail the named source-visible assertions, restore exact bytes and pass.
+
+Exception reporter contexts and `emitAndLogError` extra data use canonical
+`RetainedJsonInput`. JS adapters capture before JSON so UTF-16, own undefined,
+NaN and signed zero reach the reporting sink intact. Native terminal formatting
+is a sink choice. Typed `ExchangeError` diagnostic strings keep their existing
+shape; original UTF-16 name/message fields use the existing retained callback
+cause and are restored only while their diagnostic views remain unchanged.
+
+## Shared for-in record
+
+ForInRecord enumerates original native descriptor names along canonical
+prototype links. Hidden own names suppress inherited enumerables, deleted
+unvisited names are skipped, and enumeration never reads property values.
+Native functions store name/length as ordinary nonenumerable configurable,
+readonly descriptors; redefining/deleting them uses the common property code.
+Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
+this does not widen the public intrinsic descriptor-reflection surface.
+Array descriptor/prototype migration remains the separate single-storage step.
 
 ## ccxt compatibility imports
 

@@ -1,5 +1,8 @@
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
+#[cfg(feature = "native")]
+#[path = "support/lifecycle_aliases.rs"]
+mod lifecycle_aliases;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
@@ -32,6 +35,7 @@ impl ExchangeTask for Task {
 #[derive(Default)]
 struct Runtime {
     now: Cell<f64>,
+    monotonic_clock: Cell<Option<f64>>,
     sleep_clock: Rc<Cell<f64>>,
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
@@ -57,7 +61,7 @@ impl ExchangeRuntime for Runtime {
         self.now.get()
     }
     fn monotonic_now_ms(&self) -> f64 {
-        22000.0
+        self.monotonic_clock.get().unwrap_or(22000.0)
     }
     fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
         self.sleeps.borrow_mut().push(delay);
@@ -88,11 +92,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reported.borrow_mut().push(error.name.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -5095,6 +5103,10 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
     }
 }
 
+#[cfg(feature = "native")]
+#[path = "support/snapshot_aliases.rs"]
+mod snapshot_aliases;
+
 #[test]
 #[cfg(feature = "native")]
 fn production_native_public_rest_future_waits_and_preserves_candles_and_rejection() {
@@ -5269,6 +5281,112 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
 #[cfg(feature = "native")]
 #[path = "support/order_throttle_binding.rs"]
 mod order_throttle_binding;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_clones_share_settlement_and_captured_receiver() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct ListenKey {
+        released: Arc<AtomicBool>,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+    impl RestAdapter for ListenKey {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.requests.lock().unwrap().push(request.url);
+            let released = self.released.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                if !released.load(Ordering::SeqCst) {
+                    return Poll::Pending;
+                }
+                Poll::Ready(Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Encoded(
+                        br#"{"listenKey":"native-clone-key"}"#.to_vec(),
+                    ),
+                }))
+            }))
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let released = Arc::new(AtomicBool::new(false));
+    let requests = Arc::<Mutex<Vec<String>>>::default();
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        Arc::new(ListenKey {
+            released: released.clone(),
+            requests: requests.clone(),
+        }),
+        Rc::new(|_, _| panic!("no external provider")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let owner = ExchangeOwner::new(
+        Venue::Futures,
+        safe_cex_types::ExchangeName::Binance,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        dependencies,
+    )
+    .unwrap();
+    let original = owner.private.connect_and_subscribe();
+    let mut first = Box::pin(original.clone());
+    let second = original.clone();
+    drop(original);
+    runtime.pump();
+    assert!(
+        first
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "settlement clones share one real listen-key request"
+    );
+    released.store(true, Ordering::SeqCst);
+    run(&runtime, first).unwrap();
+    run(&runtime, second).unwrap();
+    assert!(!owner.private.connect.connecting.get());
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "both settlement clones observe the same completion"
+    );
+    let action = owner.private.capture_connect();
+    let retained = action.clone();
+    assert!(
+        action.same(&retained),
+        "CapturedAction Clone retains the actual bound arrow"
+    );
+    drop(action);
+    retained.call().unwrap();
+    for _ in 0..16 {
+        runtime.pump();
+    }
+    let requests = requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "cloned current arrow reconnects through the real native parent"
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|path| path.starts_with("/fapi/v1/listenKey"))
+    );
+    drop(requests);
+    owner.dispose().unwrap();
+    assert!(runtime.reported.borrow().is_empty());
+}
 
 #[test]
 #[cfg(feature = "native")]

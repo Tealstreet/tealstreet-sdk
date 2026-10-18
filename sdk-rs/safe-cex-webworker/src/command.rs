@@ -74,7 +74,7 @@ impl CommandHandler {
                 {
                     exchange.base().runtime.report_exception(
                         &report_error,
-                        &json!({"method":"CommandHandler.handle"}),
+                        &json!({"method":"CommandHandler.handle"}).into(),
                     );
                 }
             }));

@@ -2105,3 +2105,73 @@ fn retained_info_option_filters_precede_utf8_admission() {
         "filtered UTF16 row cannot hide tradable option siblings"
     );
 }
+
+#[test]
+fn position_mode_retains_utf16_diagnostic_extra_data_through_the_real_binding() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let source = std::process::Command::new("node")
+        .args([
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/position-controls-fixtures.cjs"
+            ),
+            "--utf16-position-mode",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Vec<serde_json::Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected.len(), 3);
+    for case in expected {
+        let units: Vec<u16> = serde_json::from_value(case["units"].clone()).unwrap();
+        assert_eq!(case["mode"], "oneway");
+        assert_eq!(case["retMsgUnits"], case["units"]);
+        assert_eq!(case["messageUnits"], case["units"]);
+        assert_eq!(case["hasExplicitStatus"], true);
+        let h = harness(options(), |wire| {
+            wire.ok("GET", "/v5/position/list", json!({"list":[]}));
+            wire.retained_routes.borrow_mut().push((
+                "/v5/position/list".into(),
+                Input::Object(vec![
+                    ("retCode".encode_utf16().collect(), Input::Float(7.)),
+                    (
+                        "retMsg".encode_utf16().collect(),
+                        Input::Text(units.clone()),
+                    ),
+                    (
+                        "result".encode_utf16().collect(),
+                        Input::Object(vec![(
+                            "list".encode_utf16().collect(),
+                            Input::Array(vec![]),
+                        )]),
+                    ),
+                ]),
+            ));
+            wire.ok("POST", "/v5/order/create", json!({"orderId":"mode-utf16"}));
+        });
+        seed_market(&h);
+        let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+            "symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":25000
+        }))
+        .unwrap();
+        let venue = h.venue();
+        h.drive(Box::pin(venue.base().place_order(venue, opts)))
+            .expect("the source emits the original message and places using oneway fallback");
+        assert_eq!(h.wire.calls("/v5/order/create").len(), 1);
+        assert!(
+            h.runtime.report_contexts.borrow().iter().any(|context| {
+                let extra = context.get("extra").unwrap();
+                extra.get("retMsg").and_then(|message| message.as_text()) == Some(units.as_slice())
+                    && extra
+                        .get("symbol")
+                        .is_some_and(|symbol| symbol.text_equals("BTCUSDT"))
+                    && extra.get("hasExplicitStatus") == Some(&Input::Bool(true))
+            }),
+            "position-mode diagnostic context retains the native retMsg units"
+        );
+    }
+}
