@@ -472,3 +472,9 @@ compiler inventory. Observations retain raw UTF-16 units and binary64 bits;
 named compiled failure plus exact-source restoration. See
 `SPOT_DECODER_REVIEW.md`; no Realm or Value-ingress equivalence follows from
 these raw decoder receipts.
+
+The cloid FIX audit has constructed exchange/cache and exported lookup probes
+in `tests/support/cloid_audit.rs`. `FIX_AUDIT_CLOID.md` records the two bounded
+ACCEPT decisions: native pattern representation and nonboolean record inputs
+outside the typed placement producer. `scripts/cloid-audit-controls.py` requires
+compiled production mutations to fail those consumers before exact restoration.

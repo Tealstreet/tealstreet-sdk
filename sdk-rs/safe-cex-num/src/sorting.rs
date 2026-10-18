@@ -1,12 +1,11 @@
 //! V8 TimSort comparison scheduling for native JavaScript comparator ports.
 //! Adapted from V8 13.6.233.17 array-sort.tq; see THIRD_PARTY_NOTICES.md.
-use super::value::Thrown;
 use std::cmp::Ordering;
 
-pub fn stable_sort<T: Clone>(
+pub fn stable_sort<T: Clone, E>(
     values: &mut [T],
-    compare: impl FnMut(&T, &T) -> Result<Ordering, Thrown>,
-) -> Result<(), Thrown> {
+    compare: impl FnMut(&T, &T) -> Result<Ordering, E>,
+) -> Result<(), E> {
     if values.len() < 2 {
         return Ok(());
     }
@@ -53,8 +52,8 @@ struct TimSort<T, F> {
     min_gallop: usize,
 }
 
-impl<T: Clone, F: FnMut(&T, &T) -> Result<Ordering, Thrown>> TimSort<T, F> {
-    fn count_run(&mut self, low: usize) -> Result<usize, Thrown> {
+impl<T: Clone, E, F: FnMut(&T, &T) -> Result<Ordering, E>> TimSort<T, F> {
+    fn count_run(&mut self, low: usize) -> Result<usize, E> {
         if low + 1 == self.work.len() {
             return Ok(1);
         }
@@ -73,7 +72,7 @@ impl<T: Clone, F: FnMut(&T, &T) -> Result<Ordering, Thrown>> TimSort<T, F> {
         Ok(len)
     }
 
-    fn binary_insertion(&mut self, low: usize, start: usize, high: usize) -> Result<(), Thrown> {
+    fn binary_insertion(&mut self, low: usize, start: usize, high: usize) -> Result<(), E> {
         for at in start.max(low + 1)..high {
             let pivot = self.work[at].clone();
             let (mut left, mut right) = (low, at);
@@ -97,7 +96,7 @@ impl<T: Clone, F: FnMut(&T, &T) -> Result<Ordering, Thrown>> TimSort<T, F> {
         at < 2 || self.runs[at - 2].1 > self.runs[at - 1].1 + self.runs[at].1
     }
 
-    fn collapse(&mut self) -> Result<(), Thrown> {
+    fn collapse(&mut self) -> Result<(), E> {
         while self.runs.len() > 1 {
             let mut at = self.runs.len() - 2;
             if !self.invariant(at + 1) || !self.invariant(at) {
@@ -114,7 +113,7 @@ impl<T: Clone, F: FnMut(&T, &T) -> Result<Ordering, Thrown>> TimSort<T, F> {
         Ok(())
     }
 
-    fn merge_at(&mut self, at: usize) -> Result<(), Thrown> {
+    fn merge_at(&mut self, at: usize) -> Result<(), E> {
         let (mut base_a, mut len_a) = self.runs[at];
         let (base_b, mut len_b) = self.runs[at + 1];
         self.runs[at].1 += len_b;
@@ -170,7 +169,7 @@ impl<T: Clone, F: FnMut(&T, &T) -> Result<Ordering, Thrown>> TimSort<T, F> {
         mut len_a: usize,
         base_b: usize,
         mut len_b: usize,
-    ) -> Result<(), Thrown> {
+    ) -> Result<(), E> {
         let temp = self.work[base_a..base_a + len_a].to_vec();
         let (mut dst, mut a, mut b) = (base_a, 0, base_b);
         self.work[dst] = self.work[b].clone();
@@ -264,7 +263,7 @@ impl<T: Clone, F: FnMut(&T, &T) -> Result<Ordering, Thrown>> TimSort<T, F> {
         mut len_a: usize,
         base_b: usize,
         mut len_b: usize,
-    ) -> Result<(), Thrown> {
+    ) -> Result<(), E> {
         let temp = self.work[base_b..base_b + len_b].to_vec();
         let (mut dst, mut a, mut b) = (base_b + len_b, base_a + len_a, len_b);
         dst -= 1;
@@ -373,7 +372,7 @@ impl<T: Clone, F: FnMut(&T, &T) -> Result<Ordering, Thrown>> TimSort<T, F> {
     }
 }
 
-fn gallop<T, F: FnMut(&T, &T) -> Result<Ordering, Thrown>>(
+fn gallop<T, E, F: FnMut(&T, &T) -> Result<Ordering, E>>(
     array: &[T],
     key: &T,
     base: usize,
@@ -381,8 +380,8 @@ fn gallop<T, F: FnMut(&T, &T) -> Result<Ordering, Thrown>>(
     hint: usize,
     right: bool,
     compare: &mut F,
-) -> Result<usize, Thrown> {
-    let before = |value: &T, key: &T, compare: &mut F| -> Result<bool, Thrown> {
+) -> Result<usize, E> {
+    let before = |value: &T, key: &T, compare: &mut F| -> Result<bool, E> {
         if right {
             Ok(compare(key, value)? != Ordering::Less)
         } else {
