@@ -84,6 +84,25 @@ pub fn create(
     Ok(client)
 }
 
+/// Source safeCexAxiosCreateNoProxy: bypass provider REST routing while keeping
+/// the same terminal host, fixed timeout and owning exchange outcome observer.
+pub fn create_no_proxy(host: Host, config: Js, owner: &Rc<BaseExchange>) -> Result<Js, Thrown> {
+    host.configure_exchange(owner.name().clone())?;
+    let defaults = config.spread_object()?;
+    defaults.define("timeout", Js::Number(20_000.0))?;
+    let headers = super::axios_headers_from(&Js::object(vec![(
+        "Accept",
+        Js::str("application/json, text/plain, */*"),
+    )]))?;
+    for (name, value) in config.get("headers")?.spread_object()?.own_entries()? {
+        super::set_header(&headers, Js::utf16(&name), value, Js::Undefined)?;
+    }
+    defaults.define("headers", headers)?;
+    let client = super::create(host, defaults);
+    install_outcome_interceptor(&client, Rc::downgrade(owner), false)?;
+    Ok(client)
+}
+
 // ts: the safeCexAxiosCreate response interceptor's recordRequestOutcome and
 // proxy-failure `error` emission. Registered first, so venue interceptors see
 // the request afterwards, as in the source.

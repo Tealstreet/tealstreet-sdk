@@ -1,5 +1,15 @@
 //! Binance COIN-M: source-corresponding native venue assembly.
+mod api;
+mod exchange;
+mod globals;
+mod lifecycle;
+mod ops;
+mod orders;
+mod reads;
+#[path = "generated/binanceinverse.rs"]
 pub mod types;
+mod ws_private;
+mod ws_public;
 
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
@@ -35,6 +45,7 @@ pub(crate) type Rt = Scope<ExchangeState>;
 
 pub struct BinanceInverseExchange {
     scope: Rt,
+    capabilities: safe_cex_exchange::capabilities::ExchangeCapabilities,
 }
 
 impl BinanceInverseExchange {
@@ -58,7 +69,7 @@ impl BinanceInverseExchange {
         install_builtins(&shared.globals, Rc::downgrade(&shared));
         install_enums(&shared.globals);
         install_library(&shared.globals, Rc::downgrade(&shared));
-        types::install(&shared.globals).map_err(|e| e.to_exchange_error())?;
+        globals::install(&shared.globals).map_err(|e| e.to_exchange_error())?;
         let (receiver, base) = base_exchange::create(
             &shared.sockets,
             BaseExchangeParts {
@@ -100,12 +111,79 @@ impl BinanceInverseExchange {
             .set(base)
             .map_err(|_| ExchangeError::new("duplicate BaseExchange"))?;
         *shared.exchange.borrow_mut() = receiver.clone();
-        Ok(Rc::new(Self {
-            scope: Scope {
-                shared,
-                this: receiver,
-            },
-        }))
+        let rt = Scope {
+            shared: shared.clone(),
+            this: receiver.clone(),
+        };
+        ops::install(&rt).map_err(|e| e.to_exchange_error())?;
+        let weak = Rc::downgrade(&shared);
+        let create_api = Js::function("createAPI", move |_, args| {
+            let rt = safe_cex_exchange::js_runtime::scope::scope_of(&weak)?;
+            api::create(
+                &rt,
+                safe_cex_exchange::js_runtime::value::arg(&args, 0),
+                false,
+            )
+        });
+        let limit = Js::function("rateLimit", |_, args| {
+            let client = safe_cex_exchange::js_runtime::value::arg(&args, 0);
+            client.call_method(
+                "__configureRateLimit",
+                vec![Js::object(vec![("maxRPS", Js::Number(3.0))])],
+            )?;
+            Ok(client)
+        });
+        let options = receiver.get("options").map_err(|e| e.to_exchange_error())?;
+        let xhr = receiver
+            .call_method(
+                "createXhrWithSecondaryKey",
+                vec![
+                    options.clone(),
+                    create_api,
+                    Js::object(vec![("rateLimit", limit)]),
+                ],
+            )
+            .map_err(|e| e.to_exchange_error())?;
+        receiver
+            .define("xhr", xhr)
+            .map_err(|e| e.to_exchange_error())?;
+        receiver
+            .define(
+                "publicXhr",
+                api::create(&rt, options.clone(), true).map_err(|e| e.to_exchange_error())?,
+            )
+            .map_err(|e| e.to_exchange_error())?;
+        receiver
+            .define(
+                "unlimitedXHR",
+                api::create(&rt, options, false).map_err(|e| e.to_exchange_error())?,
+            )
+            .map_err(|e| e.to_exchange_error())?;
+        let clients = ["_primaryXhr", "_secondaryXhr", "publicXhr", "unlimitedXHR"]
+            .into_iter()
+            .map(|key| receiver.get(key))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_exchange_error())?;
+        receiver
+            .call_method("installRequestWeightGuards", vec![Js::array(clients)])
+            .map_err(|e| e.to_exchange_error())?;
+        let venue = Rc::new(Self {
+            scope: rt,
+            capabilities: exchange::capabilities(),
+        });
+        let erased: Rc<dyn safe_cex_exchange::exchange::Exchange> = venue.clone();
+        *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&erased));
+        let (public, _) = ws_public::new(&venue.scope).map_err(|e| e.to_exchange_error())?;
+        receiver
+            .define("publicWebsocket", public)
+            .map_err(|e| e.to_exchange_error())?;
+        let (private, _) = ws_private::new(&venue.scope).map_err(|e| e.to_exchange_error())?;
+        receiver
+            .define("privateWebsocket", private)
+            .map_err(|e| e.to_exchange_error())?;
+        // BaseExchange's source property lookups resolve these actual receiver
+        // members into their Public/Private slots, including future replacement.
+        Ok(venue)
     }
 
     pub fn receiver(&self) -> Js {
@@ -115,4 +193,13 @@ impl BinanceInverseExchange {
     pub fn base(&self) -> &Rc<BaseExchange> {
         self.scope.base()
     }
+}
+
+/// Source optional fields admit omission, while a present null still fails.
+fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
