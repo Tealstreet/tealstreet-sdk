@@ -4,5 +4,11 @@
     "runtimeOwner": "safe_cex_types::ws_auth::ws_auth_payload",
     "reason": "Relocated canonical WS auth visitor linked to its actual production decoder with direct input/output witnesses; Deserialize shape probes remain mandatory alongside those outputs.",
     "sourceSha256": "82ae56786796ad28f646a63aed1e41c6ee57458911ca6fe8c070daaa2f128b9a"
+  },
+  "safe-cex-types/src/retained_json/codec.rs::LOCAL_TRAIT_IMPL:Visitor:PayloadVisitor": {
+    "category": "decoder-helper",
+    "runtimeOwner": "safe_cex_types::retained_json::codec::deserialize_native_payload",
+    "reason": "The nested visitor implements the canonical closed native payload decoder. Execute its actual enclosing function and inspect tag variants, UTF16 units and native Number bits, including malformed cardinality and out-of-range units.",
+    "sourceSha256": "f8c2f2cb1ce9b89f2cb3d65a5986c63758c364977e53caefd3413574f129e555"
   }
 }
