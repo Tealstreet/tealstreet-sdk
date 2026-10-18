@@ -19,7 +19,10 @@ fn response() -> RestResponse {
         status: 207,
         reason: Some("fixture receipt".into()),
         headers: BTreeMap::new(),
-        body: RestResponseBody::Untransformed(json!({"receipt": 19})),
+        body: RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"receipt": 19}))
+                .unwrap(),
+        ),
     }
 }
 struct Terminal(RefCell<Vec<RestRequest>>);
@@ -54,7 +57,10 @@ fn terminal_receipt_calls_adapter_once_and_retains_input() {
     let input = RestRequest {
         method: "post".into(),
         url: "/terminal-input".into(),
-        body: Some(RestBody::Untransformed(json!({"raw": 37}))),
+        body: Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"raw": 37}))
+                .unwrap(),
+        )),
         timeout_ms: Some(159),
         ..Default::default()
     };
@@ -92,7 +98,10 @@ fn codec_success_restores_only_its_wire_projections() {
         url: "/codec-input#fragment".into(),
         query_params: Some(params.clone()),
         query_profile: Some(profile),
-        body: Some(RestBody::Untransformed(json!({"field": 43}))),
+        body: Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"field": 43}))
+                .unwrap(),
+        )),
         ..Default::default()
     };
     let execution = run(codec.execute_with_receipt(input)).unwrap();
@@ -130,7 +139,8 @@ fn codec_success_restores_only_its_wire_projections() {
             .unwrap()
             .untransformed()
             .unwrap(),
-        &json!("{\"field\":43}"),
+        &safe_cex_types::retained_json::RetainedJsonInput::from_value(json!("{\"field\":43}"))
+            .unwrap(),
         "receipt_codec_native_retry_body_value"
     );
 }
@@ -140,7 +150,10 @@ fn codec_success_retains_effective_inner_changes_and_omissions() {
         method: "head".into(),
         url: "/changed-target?inner=1".into(),
         params: Some(json!({"inner-query": 47})),
-        body: Some(RestBody::Untransformed(json!({"inner-body": 53}))),
+        body: Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"inner-body": 53}))
+                .unwrap(),
+        )),
         headers: [("Inner-Only".into(), "present".into())]
             .into_iter()
             .collect(),
@@ -163,7 +176,10 @@ fn codec_success_retains_effective_inner_changes_and_omissions() {
         headers: [("Outer-Only".into(), "remove".into())]
             .into_iter()
             .collect(),
-        body: Some(RestBody::Untransformed(json!({"outer-body": 59}))),
+        body: Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"outer-body": 59}))
+                .unwrap(),
+        )),
         ..Default::default()
     }))
     .unwrap();

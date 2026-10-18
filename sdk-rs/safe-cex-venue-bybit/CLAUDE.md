@@ -567,6 +567,15 @@ special orders before regular category groups, preserve TP/SL on every request,
 and keep the original batch for individual fallback. Successful result indices
 refer to the filtered formatter entries. The pure formatter receives the awaited
 canonical 0/1/2 position index; other request numerics are source string fields.
+Spot and inverse install the same native recent-order recorder: cache the order
+and optionally publish Brazil REST fallback without primary reconciliation timers.
+Spot previously inherited the primary recorder; its compiled master-red HTTP
+probe regression now passes, with inverse and primary/demo timer controls.
+
+The unused typed local_order_cache facade, its fake-host oracle and its mutation
+runner are removed. Spot/inverse cache manifest rows name the live native
+lifecycle handlers; the canonical PrimaryOrderState owns the actual cache.
+
 Spot and dedicated Inverse keep their own `placeOrders` overrides.
 Native promise tails belong to Scope and stop on disposal. The batch source
 oracle executes the actual five member bodies with maintained helpers; the
@@ -717,6 +726,11 @@ linear/inverse context order, source combined-category sort/limit rules, inclusi
 windows and repeated IDs. The mapper stays native until the typed public output;
 its ordinary lookup tables retain actual Object.prototype members.
 
+Spot's missing-market intrinsic constructs the source message before the caller
+wraps it in Error. Real placement witnesses cover ordinary limit and full-position
+SL/TP routes. The REST/private-frame unknown stopOrderType witness retains all
+three unlisted stop kinds as own Undefined through the ModelField Store bridge.
+
 Spot trailing-order placement retains the source `Ticker <symbol> not found`
 error when market or ticker data is missing. The SessionHost intrinsic builds
 the source template in UTF-16 before the existing Error construction. The real
@@ -784,12 +798,31 @@ primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
 order history. `history_capability_binding` exercises the actual capability calls
 and signed HTTP; direct trait coverage alone does not witness this dispatch path.
 
+The production `SpotExchangeHost::destructure` consumes the shared JS iterator
+protocol for candle tuples, interval splits and guarded balance arrays. It reads
+only the requested elements, skips value reads for elisions, pads exhausted
+iterators and closes bounded iteration. `native_host_bybit` proves string KLINE
+tuples through the real registry and HTTP reader for all four account variants;
+the maintained TS source check is imported by the Spot read oracle. Noniterable
+rows remain failures. The old array-only adapter compiled but failed this actual
+registry witness at `234567 is not iterable`.
+
 HyroTrader inherits all three option-read methods but its optionsEnabled override
 always returns false. Route those trait and dynamic calls through the inherited
 receiver so they preserve the source options-disabled Error before HTTP, including
 when the account option-market flag is true. hyro_binding compares all six paths
 with maintained Bybit methods and the actual Hyro guard; spot/inverse family
 routing remains independently defined.
+
+API response diagnostics can invoke fallible error listeners. Preserve the original
+name/message/code through the canonical owned callback transport cause and the
+Bybit HTTP receiver; do not stringify this rejection or attach a replacement
+request config. The owned-value capture profile explicitly refuses unsupported
+code values. `native_host_bybit` drives this path through signed native HTTP for
+all four account constructors, including NaN and own undefined inside code. The
+response-boundaries source oracle executes maintained createAPI with actual
+Axios/retry/qs and asserts the injected diagnostic throw is the identical final
+rejection after one physical attempt.
 
 Margin and position-mode control bodies forward the generic fetched batch without
 inspecting it. The production binding carries Js directly into Store publication;
@@ -802,8 +835,49 @@ and Spot retain their own source layouts. Real socket regressions cover all four
 account constructors and partial updates; the maintained-source ticker corpus
 now covers both primary categories in 1,944 cases and 21,384 field comparisons.
 
-Market base/quote remain strict strings under the approved row-admission policy.
-Primary/demo and Spot defer typed asset refusals until source mapping completes;
-dedicated inverse admits assets after building its native rows. Each refused row
+Market id/symbol/base/quote remain strict strings under the approved row-admission policy.
+Primary/demo and Spot defer typed string refusals until source mapping completes;
+dedicated inverse admits strings after building its native rows. Each refused row
 reports its identity and field values, while valid siblings survive fetch/refresh.
-This intentionally differs from TS retaining malformed asset fields.
+This intentionally differs from TS retaining malformed string fields. Fee joins compare primitive symbol values strictly; distinct
+JSON objects/arrays never match by contents. Source numeric/property errors retain
+priority over typed row refusals.
+
+Primary/demo single-order routing rechecks truthiness after price/trigger rounding.
+A conditional trigger rounded to zero rejects before placement; a zero-rounded
+conditional price selects Market and omits price/TIF. Adjusted NaN also skips
+trigger-direction ticker reads. Raw option gates still send
+zero-rounded bracket/trigger strings, and plain limit orders retain price zero.
+`adjusted_order_binding` covers both real class bindings and those payload controls.
+
+Submission checks unknown outcome only for one payload carrying a caller client ID.
+The real HTTP regression sends a rejected first split lot with a non-coercible
+error code and verifies later lots still place; a single order without a caller
+ID also skips classification, while a caller-ID control still reaches it.
+
+The retained HTTP body carries lone UTF-16 surrogate units through the common
+response hook. The legacy api_factory typed response view still refuses those
+strings visibly under the strict-output decision; its RestFailure retains the
+original response and effective request. This is a post-response consumer
+refusal, not a network failure. The native factory observer records canonical
+retained input, and its compiled control fails if the original response is lost.
+Numeric fixture comparisons check exact binary64 bits and source JSON spelling,
+rather than serde number lexemes.
+
+The remaining generic callback dispatchers take closed per-module `Callback`
+selectors. Native routing converts only the original fixed factory tags; all
+matches are exhaustive. Their former unknown-callback intrinsic arms had no
+production route and are deleted. Hyro socket disposal uses the existing concrete
+PrivateProtocol hook followed by shared BaseWebSocket cleanup; the uncalled
+generic dispose wrapper and its three synthetic-only cases are removed. Preserve
+the actual constructor/socket/Store witnesses and the remaining439 session cases.
+
+The constructed ticker census in `public_stream_binding` compares primary/demo
+linear and inverse categories, dedicated inverse and Spot with their maintained
+TS exchanges and DefaultStores. The configured Hyro constructor uses the same
+shared live helper from `hyro_binding`. Across616 cases and1848 real frames,
+all11 source numeric inputs vary independently beside distinct good rows, with
+finite Store resets and native binary64 assertions. Spot's ignored funding time
+and truthy rate-to-zero behavior remain source-equal. The shared control runner
+must fail all four family witnesses and the configured Hyro witness under live
+last/bid misrouting, then pass after exact source restoration.

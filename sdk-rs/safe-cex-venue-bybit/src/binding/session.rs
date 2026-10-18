@@ -284,7 +284,12 @@ impl SessionHost for Rt {
                 message.extend(" not found".encode_utf16());
                 Ok(Js::utf16(&message))
             }
-            "missingMarket" => Js::Undefined.get("limits"),
+            "missingMarket" => {
+                let mut message: Vec<u16> = "Market ".encode_utf16().collect();
+                message.extend_from_slice(&arg(&args, 0).to_js_string()?);
+                message.extend(" not found".encode_utf16());
+                Ok(Js::utf16(&message))
+            }
             "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" | "LogSeverity" => {
                 self.shared.globals.get(name)
             }
@@ -469,19 +474,45 @@ impl crate::variant_account_refresh::AccountRefreshHost for Rt {
         promise.call_method("then", vec![fulfilled])
     }
     fn all(&self, promises: Vec<Js>) -> Result<Js, Thrown> {
-        Ok(self.spawn(Box::pin(super::promise::all(promises))))
+        Ok(Js::Promise(super::promise::all(
+            &self.exchange_runtime(),
+            promises,
+        )))
     }
 }
 
 impl crate::spot_exchange_reads::SpotExchangeHost for Rt {
     fn destructure(&self, value: Js, skip: usize, count: usize) -> Result<Vec<Js>, Thrown> {
-        // These bindings consume wire arrays (candle tuples and split strings).
-        let values = value.array_values().ok_or_else(|| {
-            Thrown::type_error(&format!("{} is not iterable", value.to_display()))
-        })?;
-        Ok((skip..skip + count)
-            .map(|index| values.get(index).cloned().unwrap_or(Js::Undefined))
-            .collect())
+        let iterator = value.iterator()?;
+        let next = iterator.get("next")?;
+        let mut done = false;
+        let mut values = Vec::with_capacity(count);
+        for index in 0..skip + count {
+            let value = if done {
+                Js::Undefined
+            } else {
+                let step = next.call(iterator.clone(), vec![])?;
+                if !step.is_object() {
+                    return Err(Thrown::type_error("Iterator result is not an object"));
+                }
+                done = step.get("done")?.truthy();
+                if done || index < skip {
+                    Js::Undefined
+                } else {
+                    step.get("value")?
+                }
+            };
+            if index >= skip {
+                values.push(value);
+            }
+        }
+        if !done {
+            let close = iterator.get("return")?;
+            if !close.is_nullish() && !close.call(iterator.clone(), vec![])?.is_object() {
+                return Err(Thrown::type_error("Iterator result is not an object"));
+            }
+        }
+        Ok(values)
     }
     fn for_each<F>(&self, method: Js, mut body: F) -> Result<(), Thrown>
     where

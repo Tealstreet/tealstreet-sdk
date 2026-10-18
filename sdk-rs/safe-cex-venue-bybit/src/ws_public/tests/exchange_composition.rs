@@ -36,7 +36,10 @@ impl RestAdapter for Adapter {
             assert_eq!(request.url, "/v5/order/create", "submission endpoint");
             let payload = body
                 .untransformed()
-                .expect("submission must preserve unsigned structured payload");
+                .expect("submission must preserve unsigned structured payload")
+                .clone()
+                .into_value()
+                .unwrap();
             if payload["fail"] == true {
                 let mut failure = safe_cex_transport::RestFailure::pre_transmit(
                     "transport failure".into(),
@@ -400,7 +403,8 @@ fn constructor_clients_and_sockets_follow_actual_source() {
                 .unwrap()
                 .untransformed()
                 .unwrap(),
-            &json!({"fail":true})
+            &safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"fail":true}))
+                .unwrap()
         );
         let weak = Rc::downgrade(&venue);
         venue.dispose().unwrap();

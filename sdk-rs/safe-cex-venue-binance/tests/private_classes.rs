@@ -36,6 +36,7 @@ struct Runtime {
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
+    dial_socket: RefCell<Option<Rc<dyn WsSocket>>>,
 }
 impl Runtime {
     fn pump(&self) {
@@ -74,7 +75,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(f);
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -84,7 +85,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -1238,7 +1243,10 @@ impl WsRuntime for Runtime {
         _: WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
-        Box::pin(std::future::pending())
+        match self.dial_socket.borrow().clone() {
+            Some(socket) => Box::pin(std::future::ready(Ok(socket))),
+            None => Box::pin(std::future::pending()),
+        }
     }
     fn headers_capable(&self) -> bool {
         false
@@ -4289,7 +4297,8 @@ fn market_asset_refusal_case(venue: Venue) {
                 );
                 let errors = errors.borrow();
                 assert_eq!(errors.len(), 1, "one visible row refusal");
-                let message = errors[0].as_str().unwrap();
+                let message = String::from_utf16(errors[0].as_str().unwrap())
+                    .expect("market refusal is a scalar Unicode message");
                 let expected = value
                     .as_ref()
                     .map_or_else(|| "undefined".into(), Value::to_string);
@@ -4421,7 +4430,7 @@ fn market_field_refusal_case(venue: Venue, leverage: bool) {
             );
             let errors = errors.borrow();
             assert_eq!(errors.len(), 1);
-            let message = errors[0].as_str().unwrap();
+            let message = String::from_utf16(errors[0].as_str().unwrap()).unwrap();
             let expected = value
                 .as_ref()
                 .map_or_else(|| "undefined".into(), Value::to_string);
@@ -4486,4 +4495,225 @@ fn production_market_field_source_preserves_raw_symbol_and_leverage() {
         count += rows.len();
     }
     assert_eq!(count, 23, "source raw symbols and leverage cases");
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_depth_binding_preserves_the_source_type_error_and_recovers() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::{
+        RestAdapter, RestRequest, RestResponse, RestResponseBody, socket::SocketFrame,
+    };
+    struct DepthHttp(std::sync::atomic::AtomicU64);
+    impl RestAdapter for DepthHttp {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            assert!(request.url.split('?').next().unwrap().ends_with("/depth"));
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: None,
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(
+                    serde_json::to_vec(
+                        &json!({"lastUpdateId":self.0.load(std::sync::atomic::Ordering::SeqCst),"bids":[["99","2"]],"asks":[["101","3"]]}),
+                    )
+                    .unwrap(),
+                ),
+            })))
+        }
+    }
+    struct DepthSocket {
+        events: Rc<RefCell<std::collections::VecDeque<WsEvent>>>,
+        sent: RefCell<Vec<String>>,
+    }
+    impl WsSocket for DepthSocket {
+        fn ready_state(&self) -> u8 {
+            1
+        }
+        fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+            let events = self.events.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                events
+                    .borrow_mut()
+                    .pop_front()
+                    .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+            }))
+        }
+        fn send(&self, text: &str) -> Result<(), ExchangeError> {
+            self.sent.borrow_mut().push(text.into());
+            Ok(())
+        }
+        fn close(&self) {}
+        fn terminate(&self) {}
+        fn reconnect(&self) {}
+        fn is_reconnecting(&self) -> bool {
+            false
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let runtime = Rc::new(Runtime::default());
+        let socket = Rc::new(DepthSocket {
+            events: Rc::new(RefCell::new(std::collections::VecDeque::from([
+                WsEvent::Open,
+            ]))),
+            sent: RefCell::default(),
+        });
+        *runtime.dial_socket.borrow_mut() = Some(socket.clone());
+        let http = std::sync::Arc::new(DepthHttp(std::sync::atomic::AtomicU64::new(100)));
+        let deps = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            http.clone(),
+            Rc::new(|_, _| panic!("no external data configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let name = match venue {
+            Venue::Futures => "binance",
+            Venue::PM => "binancepm",
+            Venue::Spot => "binancespot",
+        };
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(name)).unwrap(),
+            serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            deps,
+        )
+        .unwrap();
+        let exchange = sdk_class(venue, owner.clone());
+        owner.public_socket().connect_and_subscribe().unwrap();
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let seen = books.clone();
+        let cleanup = exchange
+            .listen_order_book(
+                "BTCUSDT".into(),
+                Rc::new(move |book| seen.borrow_mut().push(book)),
+            )
+            .unwrap();
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|wire| wire.contains("btcusdt@depth"))
+        );
+        let push = |frame: Value| {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+            for _ in 0..12 {
+                runtime.pump();
+            }
+        };
+        push(
+            json!({"e":"depthUpdate","s":"BTCUSDT","U":101,"u":101,"pu":100,"b":[["99","4"]],"a":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "native snapshot/buffered delta callback {venue:?}"
+        );
+        assert_eq!(books.borrow()[0].bids[0].amount, 4.0);
+        let malformed =
+            json!({"e":"depthUpdate","s":"BTCUSDT","U":102,"u":102,"pu":101,"b":[null],"a":[]});
+        let error = owner
+            .public_socket()
+            .base()
+            .on_message(&SocketFrame::Text(malformed.to_string()))
+            .unwrap_err();
+        assert_eq!(
+            error.name, "TypeError",
+            "native depth preserves source TypeError {venue:?}"
+        );
+        assert_eq!(
+            error.message,
+            "Cannot read properties of null (reading '0')"
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "malformed delta must not emit a book"
+        );
+        push(
+            json!({"e":"depthUpdate","s":"BTCUSDT","U":102,"u":102,"pu":101,"b":[["99","5"]],"a":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            2,
+            "next valid delta still reaches listener"
+        );
+        assert_eq!(books.borrow()[1].bids[0].total, 5.0);
+        http.0.store(104, std::sync::atomic::Ordering::SeqCst);
+        push(
+            json!({"e":"depthUpdate","s":"BTCUSDT","U":105,"u":105,"pu":104,"b":[["99","8"]],"a":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            3,
+            "sequence gap fetches a fresh native snapshot"
+        );
+        assert_eq!(books.borrow()[2].bids[0].amount, 8.0);
+        cleanup().unwrap();
+        exchange.dispose().unwrap();
+    }
+}
+
+#[cfg(feature = "native")]
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[cfg(feature = "native")]
+fn native_ticker_coercion(venue: Venue, name: &str, count: usize) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let source = ticker_coercion::source(name);
+    assert_eq!(source["cases"].as_array().unwrap().len(), count);
+    let owner = production_native_owner(venue);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            owner.base.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed(name)),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = if venue != Venue::Spot && case["channel"] != "bookTicker" {
+            owner
+                .public
+                .market_websocket
+                .get()
+                .expect("production market socket")
+        } else {
+            &owner.public
+        };
+        for frame in case["frames"].as_array().unwrap() {
+            socket.on_message(frame.as_str().unwrap()).unwrap();
+        }
+        ticker_coercion::assert_native(&owner.base.store.tickers(), case);
+    }
+    owner.base.dispose().unwrap();
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Futures, "binance", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_pm_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::PM, "binancepm", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Spot, "binancespot", 48);
 }

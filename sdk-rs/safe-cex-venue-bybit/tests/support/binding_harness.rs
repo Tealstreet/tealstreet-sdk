@@ -3,6 +3,14 @@
     dead_code,
     reason = "each test binary uses a different part of the harness"
 )]
+#[path = "../../../test-support/release.rs"]
+pub mod release;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::{
     exchange::Exchange,
     http::{HttpFailure, HttpFuture, HttpHost},
@@ -36,6 +44,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
 #[derive(Default)]
 pub struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     next_id: Cell<u64>,
     pub now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
@@ -53,25 +62,14 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     pub fn pump(&self) {
-        // Promise settlement during an event task can wake a driver polled
-        // earlier in this same pass; drain that microtask before returning.
-        struct WakeFlag(std::sync::atomic::AtomicBool);
-        impl std::task::Wake for WakeFlag {
-            fn wake(self: Arc<Self>) {
-                self.wake_by_ref();
-            }
-            fn wake_by_ref(self: &Arc<Self>) {
-                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-        }
-        let flag = Arc::new(WakeFlag(std::sync::atomic::AtomicBool::new(false)));
-        let waker = Waker::from(flag.clone());
+        self.sleep_wakers.wake_due(self.now.get());
         for _ in 0..64 {
-            flag.0.store(false, std::sync::atomic::Ordering::Relaxed);
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
+            let signal = std::sync::Arc::new(virtual_time::WakeSignal::default());
+            let waker = signal.waker();
             let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
@@ -87,7 +85,7 @@ impl Runtime {
             }
             let added = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !added && !flag.0.load(std::sync::atomic::Ordering::Relaxed) {
+            if !progressed && !added && !signal.take() {
                 return;
             }
         }
@@ -103,10 +101,12 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleeper = self.sleep_wakers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -116,7 +116,9 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, level: &str, message: &str) {
+    fn console_values(&self, level: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.logs.borrow_mut().push(format!("{level}: {message}"));
     }
     fn unique_id(&self) -> String {
@@ -138,8 +140,10 @@ impl ExchangeRuntime for Runtime {
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         self.reports.borrow_mut().push(error.message.clone());
     }
-    fn report_raw_exception(&self, error: &Value, _: &Value) {
-        self.reports.borrow_mut().push(error.to_string());
+    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+        self.reports
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(error));
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
@@ -240,7 +244,7 @@ pub struct Wire {
     pub param_routes: RefCell<Vec<(String, String, String, String, (u16, Value))>>,
     pub requests: RefCell<Vec<Request>>,
     /// Hold selected responses after dispatch; release explicitly from the test.
-    pub response_gates: RefCell<Vec<(String, Rc<Cell<bool>>)>>,
+    pub response_gates: RefCell<Vec<(String, Rc<release::Release>)>>,
 }
 impl Wire {
     pub fn route(&self, method: &str, path: &str, status: u16, body: Value) {
@@ -356,14 +360,7 @@ impl RestAdapter for Wire {
         let reject_http_errors = self.reject_http_errors.get();
         Box::pin(async move {
             if let Some(gate) = gate {
-                std::future::poll_fn(move |_| {
-                    if gate.get() {
-                        Poll::Ready(())
-                    } else {
-                        Poll::Pending
-                    }
-                })
-                .await;
+                gate.wait().await;
             }
             match reply {
                 Some((status, body)) if reject_http_errors && status >= 400 => {
@@ -563,4 +560,53 @@ impl Harness {
     pub fn venue(&self) -> &dyn Exchange {
         self.exchange.as_ref()
     }
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Runtime::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.now.set(runtime.now.get() + 9.0);
+    runtime.pump();
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.now.set(runtime.now.get() + 1.0);
+    runtime.pump();
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.now.set(runtime.now.get() + 10.0);
+    runtime.pump();
+    assert!(!latest.take(), "dropped sleep must not wake");
 }

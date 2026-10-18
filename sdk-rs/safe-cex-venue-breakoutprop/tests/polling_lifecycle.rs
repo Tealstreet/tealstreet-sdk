@@ -41,8 +41,8 @@ impl ExchangeRuntime for Clock {
     fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.runtime.spawn_local(f)
     }
-    fn console(&self, l: &str, m: &str) {
-        self.runtime.console(l, m);
+    fn console_values(&self, l: &str, m: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.runtime.console_values(l, m);
     }
     fn unique_id(&self) -> String {
         self.runtime.unique_id()
@@ -53,7 +53,11 @@ impl ExchangeRuntime for Clock {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, c: &Value) {
@@ -547,7 +551,7 @@ fn session_coalesces_expiry_retry_finally_and_reentrant_clock_values() {
         assert_eq!(r.url, "/login");
         assert!(r.params.is_none());
         assert!(
-            matches!(&r.body,Some(RestBody::Untransformed(v))if v==&json!({"domain":"default","username":"k","password":"s"}))
+            matches!(&r.body,Some(RestBody::Untransformed(v))if v==&safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"domain":"default","username":"k","password":"s"})).unwrap())
         );
     }
     s.ready.set(true);
@@ -780,12 +784,20 @@ fn context(s: Rc<State>, ex: Rc<BreakoutpropExchange>) -> (Rc<BreakoutRuntime>, 
 #[derive(Default)]
 struct Wire {
     trace: RefCell<Vec<String>>,
+    interceptor: RefCell<std::rc::Weak<safe_cex_venue_breakoutprop::api::DxApi>>,
     requests: RefCell<Vec<RestRequest>>,
     unauthorized: Cell<u32>,
     status: Cell<f64>,
     faults: RefCell<VecDeque<(f64, bool)>>,
 }
 impl ApiWire for Wire {
+    fn install_request_interceptor(
+        &self,
+        api: std::rc::Weak<safe_cex_venue_breakoutprop::api::DxApi>,
+    ) -> Result<(), ExchangeError> {
+        *self.interceptor.borrow_mut() = api;
+        Ok(())
+    }
     fn rate_limit(&self, max: f64) -> Result<(), ExchangeError> {
         self.trace.borrow_mut().push(format!("limit:{max}"));
         Ok(())
@@ -794,6 +806,21 @@ impl ApiWire for Wire {
         &self,
         c: Config,
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<JsNumberInput, ApiFailure>>>> {
+        if let Err(error) = self
+            .interceptor
+            .borrow()
+            .upgrade()
+            .unwrap()
+            .intercept_request(&mut c.borrow_mut())
+        {
+            return Box::pin(async move {
+                Err(ApiFailure {
+                    error,
+                    status: None,
+                    config: None,
+                })
+            });
+        }
         let request = c.borrow().request.clone();
         self.trace.borrow_mut().push(request.url.clone());
         self.requests.borrow_mut().push(request.clone());
@@ -1127,6 +1154,9 @@ fn final_cancel_batches_and_update() {
         .as_ref()
         .unwrap()
         .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
         .unwrap();
     assert_eq!(body["limitPrice"], 102.2, "UPDATE native patched price");
     assert_eq!(body["quantity"], 2.35, "UPDATE native patched amount");
@@ -1228,6 +1258,9 @@ fn final_place_native_numeric_payload_and_failures() {
         .as_ref()
         .unwrap()
         .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
         .unwrap();
     assert_eq!(body["instrument"], "BTC");
     assert_eq!(body["quantity"], 1.23);

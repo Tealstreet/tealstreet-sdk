@@ -1,11 +1,11 @@
 //! Pure exchange decisions, kept independent from lifecycle and transport state.
-use safe_cex_exchange::js_runtime::value::{Js, from_json};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_json};
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_num::{JsCoercionError, js_number, js_string, js_truthy, parse_float};
 use safe_cex_transport::{RestAdapter, RestRequest};
 use safe_cex_types::{
-    Balance, BothPositionSide, Candle, ExchangeAccount, Execution, ExecutionPositionSide,
-    OrderBook, OrderBookOrders, OrderSide, OrderType, PositionSide,
+    Balance, BothPositionSide, ExchangeAccount, Execution, ExecutionPositionSide, OrderBook,
+    OrderBookOrders, OrderSide, OrderType, PositionSide,
 };
 use serde_json::{Map, Value};
 
@@ -105,10 +105,12 @@ pub async fn fetch_open_interest_map(
             .map_err(|failure| failure.message)?;
         // Axios's default silent JSON transform keeps non-JSON response text
         // as a string (including an empty body) rather than rejecting it.
-        Ok(response
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| error.to_string())?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| error.to_string())
     }
 
     let mut map = Map::new();
@@ -754,18 +756,21 @@ pub fn balance_from_account_response(account: &Value) -> Result<Balance, JsCoerc
 }
 
 // ts: AsterDEXExchange.fetchOHLCV
-pub fn transform_klines(rows: &[crate::types::AsterDEXKlineResponse]) -> Vec<Candle> {
-    rows.iter()
-        .map(|candle| Candle {
-            timestamp: candle.0,
-            open: parse_float(&candle.1),
-            high: parse_float(&candle.2),
-            low: parse_float(&candle.3),
-            close: parse_float(&candle.4),
-            volume: parse_float(&candle.5),
-            last_side: None,
-        })
-        .collect()
+pub fn transform_klines(rows: &Js) -> Result<Js, Thrown> {
+    rows.call_method(
+        "map",
+        vec![Js::function("", |_, args| {
+            let row = arg(&args, 0);
+            Ok(Js::object(vec![
+                ("timestamp", row.get("0")?),
+                ("open", Js::Number(row.get("1")?.parse_float()?)),
+                ("high", Js::Number(row.get("2")?.parse_float()?)),
+                ("low", Js::Number(row.get("3")?.parse_float()?)),
+                ("close", Js::Number(row.get("4")?.parse_float()?)),
+                ("volume", Js::Number(row.get("5")?.parse_float()?)),
+            ]))
+        })],
+    )
 }
 
 // ts: AsterDEXExchange.fetchHistoricalFills
@@ -1052,7 +1057,7 @@ pub fn transform_order(
         filled,
         remaining: amount - filled,
         status: status.into(),
-        reduce_only: order.close_position == Some(true) || order.reduce_only == Some(true),
+        reduce_only: (order.close_position == Some(true) || order.reduce_only == Some(true)).into(),
         last_update: order.time,
         info: (Some(
             retained_info(

@@ -100,7 +100,9 @@ fn request(config: &Js) -> Result<RestRequest, Thrown> {
     }
     let data = config.get("data")?;
     if !data.is_undefined() {
-        request.body = Some(RestBody::Untransformed(to_json(&data)?));
+        request.body = Some(RestBody::Untransformed(
+            safe_cex_exchange::js_runtime::value::to_retained_input(&data)?,
+        ));
     }
     Ok(request)
 }

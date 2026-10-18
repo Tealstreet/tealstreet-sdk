@@ -202,7 +202,11 @@ impl ApexOmniPrivateWebsocket {
         }
         self.host.track_last_received()?;
         self.host.diagnostic_receive(raw)?;
-        let json = J::from(safe_cex_transport::how::json_parse(raw));
+        let json = J::from(
+            safe_cex_transport::how::json_parse(raw)
+                .into_value()
+                .map_err(|error| ExchangeError::new(error.to_string()))?,
+        );
         if get(&json, "success") == &J::Bool(false) && truthy(get(&json, "ret_msg")) {
             self.parent.base.log(
                 &format!(

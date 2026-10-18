@@ -226,7 +226,8 @@ or replacement reconnect path is needed. Private text frames cover order Store
 writes, terminal fill emission/status, and position writes before REST healing.
 Balance-only account rows remain ignored as in TS; this socket has no balance
 handler and the REST balance stays unchanged. Approved strict-asset market row
-refusals emit the row, symbol, field and value, while retaining valid siblings.
+refusals include base/quote and nonnumeric leverage maxima. They emit the row,
+symbol, field and value while retaining valid siblings.
 Source/transport failures retain the stored snapshot; all refused rows return
 an empty fresh result.
 
@@ -251,3 +252,17 @@ Historical fill ISO dates without an offset use the required
 `BingxDependencies.local_wall_time_to_utc` callback; explicit offsets bypass it.
 The native registry supplies its UTC profile explicitly. The real binding test
 compares actual TS executions in Singapore and New York (winter and summer).
+
+Amendment copies preserve Order.reduceOnly presence through PreparedOrderOpts;
+undefined is not reconciled as false. The real native updateOrder test supplies
+own undefined without a raw reduce-only alias, exercises position-side lookup,
+and compares the entire signed cancel-replace body to the maintained TypeScript
+class plus actual API signer/qs/HMAC. Undefined reduceOnly is omitted at the wire.
+
+The constructed native ticker corpus in `tests/binding.rs` covers 140 three-row
+market.contracts frames, including every camel/snake numeric alias and distinct
+later fallback values. Ten independent inputs include null, strings, malformed
+objects, NaN, overflow and signed zero; large finite values exercise derived
+prices. All eleven stored numeric fields are compared by bits with the maintained
+TS constructor and actual DefaultStore. The shared fault runner misroutes mark
+to index and requires a compiled native assertion failure and exact restored pass.

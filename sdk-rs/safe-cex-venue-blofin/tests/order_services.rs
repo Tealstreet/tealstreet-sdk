@@ -175,7 +175,7 @@ fn assert_forwarded_order(native: &Order, raw: &Value) {
     );
     assert_eq!(native.filled, 0.0);
     assert_eq!(native.remaining, raw["amount"].as_f64().unwrap());
-    assert!(!native.reduce_only);
+    assert_eq!(native.reduce_only, false);
     assert_eq!(native.last_update, 123.0);
     assert_eq!(native.info.as_ref().unwrap()["witness"], raw["id"]);
 }
@@ -314,7 +314,7 @@ struct Adapter {
 impl RestAdapter for Adapter {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         let payload = match &request.body {
-            Some(RestBody::Untransformed(value)) => value.clone(),
+            Some(RestBody::Untransformed(value)) => value.clone().into_value().unwrap(),
             None => Value::Null,
             _ => panic!("native request origin"),
         };
@@ -337,7 +337,12 @@ impl RestAdapter for Adapter {
                     status: 503,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"msg":message})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"msg":message}),
+                        )
+                        .unwrap(),
+                    ),
                 }));
             }
             if let Some(text) = row["responseBodyText"].as_str() {
@@ -347,8 +352,18 @@ impl RestAdapter for Adapter {
                     headers: Default::default(),
                     body: match self.path {
                         0 => RestResponseBody::Encoded(text.as_bytes().to_vec()),
-                        1 => RestResponseBody::Untransformed(Value::String(text.into())),
-                        _ => RestResponseBody::Transformed(Value::String(text.into())),
+                        1 => RestResponseBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                Value::String(text.into()),
+                            )
+                            .unwrap(),
+                        ),
+                        _ => RestResponseBody::Transformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                Value::String(text.into()),
+                            )
+                            .unwrap(),
+                        ),
                     },
                 }));
             }
@@ -360,8 +375,12 @@ impl RestAdapter for Adapter {
                 headers: Default::default(),
                 body: match self.path {
                     0 => RestResponseBody::Encoded(serde_json::to_vec(&row).unwrap()),
-                    1 => RestResponseBody::Untransformed(row),
-                    _ => RestResponseBody::Transformed(row),
+                    1 => RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(row).unwrap(),
+                    ),
+                    _ => RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(row).unwrap(),
+                    ),
                 },
             })
         };

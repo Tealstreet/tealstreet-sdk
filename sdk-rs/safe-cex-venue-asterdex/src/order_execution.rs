@@ -1,6 +1,9 @@
 //! Configured REST execution and open-interest ownership. API construction and
 //! the complete exchange lifecycle remain separate manifest rows.
-use crate::{builder, exchange_helpers as h, helpers, types::*};
+use crate::{
+    builder, exchange_helpers as h, helpers,
+    types::{AsterDEXAPIVersion, AsterDEXPlaceOrderOpts, AsterDEXStpMode},
+};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
@@ -138,7 +141,11 @@ impl OrderExecution {
         let mut request = RestRequest {
             method: method.into(),
             url,
-            body: body.map(RestBody::Untransformed),
+            body: body
+                .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                .transpose()
+                .map_err(|error| ExchangeError::new(error.to_string()))?
+                .map(RestBody::Untransformed),
             params,
             ..Default::default()
         };
@@ -149,24 +156,20 @@ impl OrderExecution {
             );
         }
         let response = adapter.execute(request).await.map_err(|failure| {
-            let mut e = ExchangeError::new(failure.message);
+            let method = failure.request.method.clone();
+            let url = failure.request.url.clone();
+            let mut e: ExchangeError = failure.into();
             e.is_axios_error = true;
-            e.code = failure
-                .code
-                .map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
-            e.context = failure.context.map(|c| *c);
-            e.method = Some(failure.request.method);
-            e.url = Some(failure.request.url);
-            if let Some(r) = failure.response {
-                e.response =
-                    Some(json!({"status":r.status,"data":r.body.into_data(),"headers":r.headers}));
-            }
+            e.method = Some(method);
+            e.url = Some(url);
             e
         })?;
-        Ok(response
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     // ts: AsterDEXExchange.validateAccount
     pub async fn validate_account(
@@ -283,7 +286,7 @@ impl OrderExecution {
                     if !truthy(trigger) {
                         continue;
                     }
-                    let new = PreparedOrderOpts {
+                    let new: PreparedOrderOpts = PreparedOrderOpts {
                         symbol: opts.symbol.clone(),
                         r#type: kind.into(),
                         side: if opts.side == OrderSide::Buy {
@@ -296,7 +299,7 @@ impl OrderExecution {
                         trigger_price: trigger,
                         stop_loss: None,
                         take_profit: None,
-                        reduce_only: Some(true),
+                        reduce_only: true.into(),
                         time_in_force: None,
                         trigger_type: None,
                         tp_trigger_type: if kind == OrderType::TakeProfit {
@@ -580,7 +583,7 @@ impl OrderExecution {
                     r#type: old.r#type.into_property(),
                     side: old.side.into_property(),
                     amount,
-                    reduce_only: Some(old.reduce_only),
+                    reduce_only: old.reduce_only.into_property(),
                     price: (!algo).then_some(price).flatten(),
                     trigger_price: algo.then_some(price).flatten(),
                     take_profit: None,
@@ -699,10 +702,12 @@ impl OrderExecution {
             })
             .await
             .map_err(|e| ExchangeError::new(e.message))?;
-        Ok(response
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     async fn interest(
         &self,

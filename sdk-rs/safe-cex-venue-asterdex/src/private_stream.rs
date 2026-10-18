@@ -308,7 +308,7 @@ impl PrivateStream {
                 return Ok(());
             };
             if data.is_object() || data.is_array() {
-                data = safe_cex_transport::signing::try_parse_json(Value::String(raw));
+                data = safe_cex_transport::signing::try_parse_params_json(Value::String(raw));
             }
             if !js_truthy(Some(&data)) {
                 return Ok(());
@@ -474,7 +474,7 @@ impl PrivateStream {
                 amount,
                 filled,
                 remaining: amount - filled,
-                reduce_only: js_truthy(d.get("R")) || js_truthy(d.get("cp")),
+                reduce_only: (js_truthy(d.get("R")) || js_truthy(d.get("cp"))).into(),
                 last_update: self.parent.virtual_time_ms(),
                 info: (Some(d.clone())).into(),
                 close: (None).into(),

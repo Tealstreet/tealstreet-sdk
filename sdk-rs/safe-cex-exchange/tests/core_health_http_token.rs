@@ -50,7 +50,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &serde_json::Value) {}
@@ -94,7 +98,7 @@ impl ExchangeRuntime for Runtime {
         self.tasks.borrow_mut().push((canceled.clone(), future));
         Box::new(Handle(canceled))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -357,7 +361,10 @@ impl HttpHost for HttpTestHost {
                     .map(safe_cex_transport::RestBody::untransformed)
                     .transpose()
                 {
-                    Ok(Some(value)) => self.signing_inputs.borrow_mut().push(value.clone()),
+                    Ok(Some(value)) => self
+                        .signing_inputs
+                        .borrow_mut()
+                        .push(value.clone().into_value().unwrap()),
                     Ok(None) => {}
                     Err(error) => {
                         return Box::pin(async move {
@@ -380,7 +387,12 @@ impl HttpHost for HttpTestHost {
                             .body
                             .as_ref()
                             .unwrap()
-                            .with_signed_data(serde_json::json!("second raw text"))
+                            .with_signed_data(
+                                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                    serde_json::json!("second raw text"),
+                                )
+                                .unwrap(),
+                            )
                             .unwrap(),
                     );
                 }
@@ -906,7 +918,12 @@ impl safe_cex_transport::signing::RemoteSigner for HedgeSigner {
         };
         assert_eq!(
             request.config.data,
-            Some(serde_json::json!({"hedge":true})),
+            Some(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    serde_json::json!({"hedge":true})
+                )
+                .unwrap()
+            ),
             "signer must see original body"
         );
         assert_eq!(
@@ -982,7 +999,10 @@ fn remote_serializer_after_tunnel_preserves_hedge_body_omission_and_baked_bytes(
             url: "/unsigned".into(),
             params: Some(serde_json::json!({"unsigned":true})),
             body: Some(safe_cex_transport::RestBody::Untransformed(
-                serde_json::json!({"hedge":true}),
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    serde_json::json!({"hedge":true}),
+                )
+                .unwrap(),
             )),
             ..Default::default()
         }))
@@ -1370,7 +1390,9 @@ fn structured_body_survives_http_and_secondary_selection_before_wire_transform()
         for value in [serde_json::json!({"x":1}), serde_json::json!("{\"x\":1}")] {
             let request = RestRequest {
                 method: "POST".into(),
-                body: Some(RestBody::Untransformed(value)),
+                body: Some(RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )),
                 ..Default::default()
             };
             if secondary {
@@ -1448,7 +1470,10 @@ fn json_content_type_transforms_only_after_signing_against_live_axios() {
     for case in cases {
         let mut request = RestRequest {
             method: "POST".into(),
-            body: Some(RestBody::Untransformed(case["data"].clone())),
+            body: Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(case["data"].clone())
+                    .unwrap(),
+            )),
             ..Default::default()
         };
         if let Some(content_type) = case["contentType"].as_str() {
@@ -1549,7 +1574,10 @@ fn live_retry_body_preserves_signing_input_and_wire_bytes() {
             headers: [("Content-Type".into(), "application/json".into())]
                 .into_iter()
                 .collect(),
-            body: Some(RestBody::Untransformed(row["data"].clone())),
+            body: Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(row["data"].clone())
+                    .unwrap(),
+            )),
             params: Some(serde_json::json!({"a":1})),
             ..Default::default()
         };
@@ -1666,7 +1694,11 @@ fn axios_header_pipeline_preserves_signer_and_wire_views() {
         let client = safe_cex_axios_create_no_proxy(options);
         let mut request = RestRequest {
             method: row["method"].as_str().unwrap().into(),
-            body: row.get("data").cloned().map(RestBody::Untransformed),
+            body: row.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             ..Default::default()
         };
         request.headers.insert("APIKEY".into(), "request".into());
@@ -1849,15 +1881,37 @@ fn remote_echo_data_reaches_http_inner_adapter_without_a_second_transform() {
     run(client.execute(RestRequest {
         method: "post".into(),
         url: "/echo".into(),
-        body: Some(RestBody::Untransformed(data.clone())),
+        body: Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone()).unwrap(),
+        )),
         ..Default::default()
     }))
     .unwrap();
     let requests = capture.0.lock().unwrap();
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let echoed = requests[0].body.as_ref().unwrap().untransformed().unwrap();
+    let Input::Object(fields) = echoed else {
+        panic!("remote echo must remain an object")
+    };
     assert_eq!(
-        requests[0].body.as_ref().unwrap().untransformed().ok(),
-        Some(&data),
-        "HTTP inner adapter must preserve remote echoed object identity"
+        fields.len(),
+        1,
+        "HTTP inner adapter must preserve remote echoed object keys"
+    );
+    assert_eq!(fields[0].0, vec![u16::from(b'x')]);
+    let Input::Float(value) = fields[0].1 else {
+        panic!("remote JSON.parse must produce a native number")
+    };
+    assert_eq!(
+        value.to_bits(),
+        1.0_f64.to_bits(),
+        "HTTP inner adapter must preserve remote echoed number bits"
+    );
+    assert_eq!(
+        safe_cex_num::js_retained_json_stringify(echoed)
+            .unwrap()
+            .as_deref(),
+        Some(r#"{"x":1}"#)
     );
     assert!(
         requests[0].headers.is_empty(),
@@ -1958,7 +2012,10 @@ impl RestAdapter for EffectiveConfigAdapter {
                 .headers
                 .insert("Returned-Only".into(), "effective".into());
             request.body = Some(safe_cex_transport::RestBody::Untransformed(
-                serde_json::json!({"inner":67}),
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    serde_json::json!({"inner":67}),
+                )
+                .unwrap(),
             ));
             Ok(safe_cex_transport::RestExecution {
                 response: RestResponse {
@@ -1966,7 +2023,10 @@ impl RestAdapter for EffectiveConfigAdapter {
                     reason: Some("effective".into()),
                     headers: BTreeMap::new(),
                     body: safe_cex_transport::RestResponseBody::Untransformed(
-                        serde_json::json!({"answer":71}),
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            serde_json::json!({"answer":71}),
+                        )
+                        .unwrap(),
                     ),
                 },
                 config: request,
@@ -1987,7 +2047,10 @@ fn http_response_hook_observes_effective_adapter_config() {
         method: "post".into(),
         url: "/original-target".into(),
         body: Some(safe_cex_transport::RestBody::Untransformed(
-            serde_json::json!({"outer":73}),
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                serde_json::json!({"outer":73}),
+            )
+            .unwrap(),
         )),
         ..Default::default()
     }))
@@ -2014,7 +2077,10 @@ fn http_response_hook_observes_effective_adapter_config() {
             .unwrap()
             .untransformed()
             .unwrap(),
-        &serde_json::json!({"inner":67}),
+        &safe_cex_types::retained_json::RetainedJsonInput::from_value(
+            serde_json::json!({"inner":67})
+        )
+        .unwrap(),
         "http_receipt_native_inner_body"
     );
     assert_eq!(
@@ -2066,7 +2132,10 @@ fn http_response_transform_precedes_success_and_rejection_hooks() {
             ..Default::default()
         }));
         let expected = safe_cex_transport::RestResponseBody::Transformed(
-            serde_json::json!({"message":"Invalid JWT"}),
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                serde_json::json!({"message":"Invalid JWT"}),
+            )
+            .unwrap(),
         );
         if status == 200 {
             let response = result.unwrap();

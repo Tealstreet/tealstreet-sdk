@@ -127,7 +127,7 @@ fn network_condition(_: &Rt, _: Vec<Js>) -> Result<Js, Thrown> {
                     reason: None,
                     headers: Default::default(),
                     body: safe_cex_transport::RestResponseBody::Untransformed(
-                        serde_json::Value::Null,
+                        safe_cex_types::retained_json::RetainedJsonInput::Null,
                     ),
                 }))
             },
@@ -636,13 +636,30 @@ async fn orders(rt: &Rt) -> Result<Js, Thrown> {
         initialization,
         || rt.this.get("jwtManager").is_ok_and(|v| v.truthy()),
         |e| Ok::<_, Thrown>(data(rt.clone(), e)),
-        |row| {
-            crate::order_mapper::map_order(
-                row.as_object()
-                    .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
-                |ms| (rt.shared.extra.deps.local_wall_time_to_utc)(ms),
-            )
-            .map_err(|e| Thrown::error("Error", &e))
+        |row| match crate::order_mapper::map_order_row(
+            row.as_object()
+                .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
+            |ms| (rt.shared.extra.deps.local_wall_time_to_utc)(ms),
+        )
+        .map_err(|e| Thrown::error("Error", &e))?
+        {
+            Ok(order) => Ok(Some(order)),
+            Err(refusal) => {
+                let received = refusal
+                    .value
+                    .map_or_else(|| "undefined".into(), |value| value.to_string());
+                h.log(
+                    h.logger()?,
+                    format!(
+                        "Paradex order row refused: Order.{} requires a string; received: {}",
+                        refusal.field, received
+                    )
+                    .encode_utf16()
+                    .collect(),
+                    "warning",
+                )?;
+                Ok(None)
+            }
         },
         &mut crate::order_reads::OrderReadEffects {
             log: |s: String, l| h.log(h.logger()?, s.encode_utf16().collect(), l),
@@ -652,7 +669,7 @@ async fn orders(rt: &Rt) -> Result<Js, Thrown> {
         },
     )
     .await?;
-    from_typed(&value)
+    from_typed(&value.into_iter().flatten().collect::<Vec<_>>())
 }
 async fn leverage(rt: &Rt) -> Result<Js, Thrown> {
     let h = Host::new(rt);

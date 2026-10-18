@@ -417,7 +417,8 @@ pub struct Order {
     pub amount: f64,
     pub filled: f64,
     pub remaining: f64,
-    pub reduce_only: bool,
+    #[ts(as = "bool")]
+    pub reduce_only: ModelField<bool>,
     #[ts(as = "Option<bool>")]
     pub close: ModelField<bool>,
     #[ts(type = "any", optional)]
@@ -1010,6 +1011,8 @@ pub struct HistoricalTradeOptions {
 #[ts(optional_fields)]
 pub struct OHLCVOptions {
     pub symbol: String,
+    // The TS declaration is narrower than the source worker's runtime interval domain.
+    #[ts(as = "Timeframe")]
     pub interval: AnyTimeframe,
     #[serde(
         default,
@@ -3644,7 +3647,8 @@ mod strict_codecs {
         amount: f64,
         filled: f64,
         remaining: f64,
-        reduce_only: bool,
+        #[serde(default)]
+        reduce_only: ModelField<bool>,
         #[serde(default)]
         close: ModelField<bool>,
         #[serde(default, deserialize_with = "crate::model_field::deserialize_info")]
@@ -7484,7 +7488,7 @@ impl serde::Serialize for Order {
         state.serialize_field("amount", &self.amount)?;
         state.serialize_field("filled", &self.filled)?;
         state.serialize_field("remaining", &self.remaining)?;
-        state.serialize_field("reduceOnly", &self.reduce_only)?;
+        self.reduce_only.serialize_field(&mut state, "reduceOnly")?;
         self.close.serialize_field(&mut state, "close")?;
         self.info.serialize_field(&mut state, "info")?;
         self.client_order_id

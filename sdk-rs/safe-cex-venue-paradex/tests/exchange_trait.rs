@@ -674,7 +674,7 @@ fn amendment_precision_keeps_amount_execution_and_trigger_axes_distinct() {
     let mut stop = reconciled_order();
     stop.id = "native-stop".into();
     stop.r#type = (safe_cex_types::OrderType::StopLoss).into();
-    stop.reduce_only = true;
+    stop.reduce_only = true.into();
     stop.price = (99.37).into();
     stop.info = (Some(
         json!({"id":"native-stop","market":"BTC-USD-PERP","side":"BUY","type":"STOP_MARKET","status":"UNTRIGGERED","price":"0","trigger_price":"99.37","size":"0.006","remaining_size":"0.006","reduce_only":true,"instruction":"GTC"}),
@@ -1505,4 +1505,306 @@ fn actual_amendment_preflight_refuses_infinite_size_before_putting() {
             .any(|request| request.method.eq_ignore_ascii_case("PUT"))
     );
     venue.dispose().unwrap();
+}
+
+fn identity_order(id: &str) -> serde_json::Value {
+    json!({"id":id,"market":"BTC-USD-PERP","side":"BUY","type":"LIMIT","status":"OPEN","price":"101.5","size":"0.006","remaining_size":"0.003","created_at":1784505600000i64,"reduce_only":false})
+}
+fn order_refusal_logs(venue: &dyn Exchange) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
+    let logs = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = logs.clone();
+    venue.base().on_args(
+        "log",
+        std::rc::Rc::new(move |_, args| {
+            if args[1].strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("warning")) {
+                captured
+                    .borrow_mut()
+                    .push(String::from_utf16(args[0].as_str().unwrap().as_ref()).unwrap());
+            }
+            Ok(())
+        }),
+    );
+    logs
+}
+#[test]
+fn order_identity_refusals_keep_good_rows_and_report_fields() {
+    for field in ["id", "market"] {
+        for bad in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(json!(17)),
+            Some(json!(false)),
+            Some(json!({})),
+            Some(json!([])),
+        ] {
+            let (venue, runtime, store, wire) =
+                support::fixture_with(private_options(), private_script);
+            drive(&runtime, venue.start()).unwrap();
+            let mut refused = identity_order("refused");
+            match &bad {
+                Some(value) => {
+                    refused[field] = value.clone();
+                }
+                None => {
+                    refused.as_object_mut().unwrap().remove(field);
+                }
+            }
+            wire.responses.borrow_mut().insert(
+                "/orders".into(),
+                json!({"results":[identity_order("before"),refused,identity_order("after")]}),
+            );
+            let logs = order_refusal_logs(venue.as_ref());
+            let before = wire.requests.borrow().len();
+            let orders = drive(&runtime, venue.fetch_orders(None))
+                .expect("one strict identity refusal must not reject the complete order snapshot");
+            let ids: Vec<_> = orders.iter().map(|o| o.id.as_str()).collect();
+            assert_eq!(ids, ["before", "after"]);
+            for order in &orders {
+                assert_eq!(order.symbol, "BTC-USD-PERP");
+                assert_eq!(order.amount.to_bits(), 0.006_f64.to_bits());
+                assert_eq!(order.last_update.to_bits(), 1784505600000_f64.to_bits());
+            }
+            assert!(
+                store.orders().is_empty(),
+                "fetch returns the snapshot; caller commits it"
+            );
+            let logs = logs.borrow();
+            assert_eq!(logs.len(), 1);
+            let message = logs[0].as_str();
+            let received = bad
+                .as_ref()
+                .map_or_else(|| "undefined".into(), serde_json::Value::to_string);
+            assert!(message.contains(&format!("Order.{field}")), "{message}");
+            assert!(
+                message.contains(&format!("received: {received}")),
+                "{message}"
+            );
+            assert_eq!(
+                wire.requests.borrow()[before..]
+                    .iter()
+                    .filter(|r| r.url == "/orders")
+                    .count(),
+                1
+            );
+            venue.dispose().unwrap();
+        }
+    }
+}
+#[test]
+fn order_identity_all_refused_rows_return_empty() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut first = identity_order("first");
+    first["id"] = json!(17);
+    let mut second = identity_order("second");
+    second["market"] = serde_json::Value::Null;
+    wire.responses
+        .borrow_mut()
+        .insert("/orders".into(), json!({"results":[first,second]}));
+    let logs = order_refusal_logs(venue.as_ref());
+    assert!(
+        drive(&runtime, venue.fetch_orders(None))
+            .expect("all refused rows resolve empty")
+            .is_empty()
+    );
+    assert_eq!(logs.borrow().len(), 2);
+    venue.dispose().unwrap();
+}
+#[test]
+fn order_identity_refusal_preserves_later_source_date_error() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut bad = identity_order("bad");
+    bad["id"] = json!(17);
+    bad["created_at"] = json!({"toString":null});
+    wire.responses.borrow_mut().insert(
+        "/orders".into(),
+        json!({"results":[identity_order("before"),bad]}),
+    );
+    let logs = order_refusal_logs(venue.as_ref());
+    let error = drive(&runtime, venue.fetch_orders(None))
+        .expect_err("a source failure still rejects the read");
+    assert!(
+        error
+            .message
+            .contains("Cannot convert object to primitive value"),
+        "{}",
+        error.message
+    );
+    assert!(
+        logs.borrow().is_empty(),
+        "a source failure must not be reported as a strict field refusal"
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn order_identity_source_keeps_raw_fields_and_date_error() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-row-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "13");
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("paradex");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 264);
+    let (venue, runtime, store, _) = support::fixture_with(
+        json!({"key":"", "secret":"", "publicDataOnly":true}),
+        |_| {},
+    );
+    let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
+    socket.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    assert!(socket.is_connected(), "production ticker socket opens");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("paradex")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            runtime.now.set(runtime.now.get() + 1100.0);
+            runtime.pump();
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            runtime.pump();
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "{:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}
+fn side_order(id: &str, side: Option<serde_json::Value>) -> serde_json::Value {
+    let mut row = json!({"id":id,"market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","price":"101.5","size":"0.006","remaining_size":"0.003","created_at":1784505600000i64,"reduce_only":false});
+    if let Some(side) = side {
+        row["side"] = side;
+    }
+    row
+}
+#[test]
+fn undefined_order_sides_survive_constructed_start_reads_and_store() {
+    let mut rows = Vec::new();
+    for (index, side) in [
+        None,
+        Some(json!("unknown")),
+        Some(json!("")),
+        Some(serde_json::Value::Null),
+        Some(json!(17)),
+        Some(json!(false)),
+        Some(json!({})),
+        Some(json!([])),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        rows.push(side_order(&format!("undefined-{index}"), side));
+    }
+    rows.push(side_order("buy", Some(json!("BUY"))));
+    rows.push(side_order("sell", Some(json!("SELL"))));
+    rows.push(side_order("array-buy", Some(json!(["BUY"]))));
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), |wire| {
+        private_script(wire);
+        wire.responses
+            .borrow_mut()
+            .insert("/orders".into(), json!({"results":rows}));
+    });
+    drive(&runtime, venue.start())
+        .expect("source undefined sides must not reject startup order loading");
+    let orders = drive(&runtime, venue.fetch_orders(None))
+        .expect("read must retain rows with undefined side");
+    assert_eq!(orders.len(), 11);
+    assert_eq!(store.orders().len(), 11);
+    for order in orders.iter().chain(store.orders().iter()) {
+        if order.id.starts_with("undefined-") {
+            assert!(
+                order.side.is_undefined(),
+                "{} must retain own undefined side",
+                order.id
+            );
+        } else {
+            let side = if order.id == "sell" {
+                safe_cex_types::OrderSide::Sell
+            } else {
+                safe_cex_types::OrderSide::Buy
+            };
+            assert_eq!(order.side.value(), Some(&side));
+        }
+        assert_eq!(order.amount.to_bits(), 0.006_f64.to_bits());
+        assert_eq!(order.last_update.to_bits(), 1784505600000_f64.to_bits());
+    }
+    assert!(store.loaded().orders);
+    assert!(
+        wire.requests
+            .borrow()
+            .iter()
+            .filter(|r| r.url == "/orders")
+            .count()
+            >= 2
+    );
+    venue.dispose().unwrap();
+}
+#[test]
+fn undefined_order_side_preserves_later_date_failure() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut bad = side_order("bad", Some(json!("unknown")));
+    bad["created_at"] = json!({"toString":null});
+    wire.responses
+        .borrow_mut()
+        .insert("/orders".into(), json!({"results":[bad]}));
+    let error = drive(&runtime, venue.fetch_orders(None))
+        .expect_err("source Date conversion failure still rejects");
+    assert!(
+        error
+            .message
+            .contains("Cannot convert object to primitive value"),
+        "{}",
+        error.message
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn undefined_order_side_matches_maintained_source_presence_and_errors() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-side-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "12");
 }

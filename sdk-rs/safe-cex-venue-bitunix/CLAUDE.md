@@ -151,8 +151,8 @@ Optional response-envelope reads remain distinct from direct batch-row reads.
 `tests/native_audit_controls.py` compiles each fault independently and retains
 logs under `target/venue-audit-controls`.
 
-Concrete market reads omit only eligible rows with a non-string base and warn
-with the row, symbol, field and value. Valid siblings remain fresh; all refused
+Concrete market reads omit eligible rows with non-string base/symbol or a
+refused maximum conversion and warn with the row, field and original value. Valid siblings remain fresh; all refused
 rows produce an empty result. Quote filtering remains source-strict USDT.
 Source/transport failures still log their cause before returning cached markets.
 `tests/native_market_refusal.rs` exercises production fetch and refresh paths.
@@ -167,3 +167,32 @@ client over the existing scripted wire and compares its signatures to the
 maintained TypeScript createAPI interceptor with real qs and SHA primitives.
 Its source oracle mode leaves the original factory/request/response corpus
 unchanged. Primitive IO/clock fixtures do not replace the native client or signer.
+
+The public placement preflight refuses nonfinite amount inputs before hydration
+or HTTP, for both single orders and whole batches. It reports the amount and
+original NaN/Infinity value through the existing error path and returns TypeError.
+This is the explicit strict placement-input ruling; TS may format a NaN/-Infinity
+quantity or produce no payload. It does not justify coercing an input to zero,
+leaking a JSON decode error, or widening the placement carrier. The real native
+identity test keeps the maintained-source observations alongside all6 refusals.
+
+
+Attached virtual TP/SL amendments fall back only on the source unsupported-order
+message. The reconciled payload is validated before cancel, including refusal of
+LIMIT protection semantics. Cancel uses the limited xhr; only an accepted cancel
+marks the exact parent and parent__children canceled in the real Store, before
+calling existing placement. A failed replacement leaves that canceled status.
+`native_identity` compares8 actual-source/public-binding paths, including both
+legs, nonmatching/ordinary-parent errors, LIMIT preflight and cancel/place failures.
+The existing retained snapshot/UTF-8 boundaries remain; placement inputs stay strict.
+
+
+
+`native_identity::production_ticker_coercion_matches_constructed_typescript` exercises
+80 field-independent cases through the constructed venue's actual socket and
+DefaultStore. Null, numeric/prefix/NaN strings, objects, overflow, signed zero and
+false arrive beside good rows as consecutive single-row protocol frames. The
+maintained TS exchange and actual TS DefaultStore produce the comparison values;
+eleven native number fields are checked before JSON. The shared ticker census
+records the witness; `parity/scripts/ticker-native-controls.py bitunix` compiles
+a production binding fault, requires the named assertion, restores and reruns.

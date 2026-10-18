@@ -136,12 +136,13 @@ pub fn prepare_update_order(order: &Order, update: OrderUpdate) -> PreparedOrder
         trigger_price: None,
         stop_loss: order.stop_loss.into_value(),
         take_profit: order.take_profit.into_value(),
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: order.time_in_force.into_value(),
         trigger_type: order.trigger_type.into_value(),
         tp_trigger_type: order.tp_trigger_type.into_value(),
         sl_trigger_type: order.sl_trigger_type.into_value(),
         close: order.close.into_value(),
+        client_order_id: order.client_order_id.clone().into_value(),
         ..Default::default()
     }
 }
@@ -249,17 +250,18 @@ impl BreakoutRuntime {
         })
     }
     pub fn place_order(self: &Rc<Self>, opts: PlaceOrderOpts) -> ExchangeFuture<'static, Value> {
-        // Outside source try: caller-ID rejection must not reach this catch.
-        let preflight = self.exchange.base.resolve_caller_client_order_id(&opts);
-        if let Err(error) = preflight {
-            return Box::pin(async move { Err(error) });
-        }
         self.place_prepared_order(opts.into())
     }
     fn place_prepared_order(
         self: &Rc<Self>,
         opts: PreparedOrderOpts,
     ) -> ExchangeFuture<'static, Value> {
+        // Source placeOrder starts with this guard, including replacements
+        // entered by updateOrder after its cancellation completes.
+        let preflight = self.exchange.base.resolve_caller_client_order_id(&opts);
+        if let Err(error) = preflight {
+            return Box::pin(async move { Err(error) });
+        }
         let market = self
             .exchange
             .base
@@ -292,8 +294,11 @@ impl BreakoutRuntime {
                         url: "accounts/{accountCode}/orders".into(),
                         params: Some(json!({"accountCode":account})),
                         body: Some(RestBody::Untransformed(
-                            serde_json::to_value(payload)
-                                .map_err(|e| ExchangeError::new(e.to_string()))?,
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                serde_json::to_value(payload)
+                                    .map_err(|e| ExchangeError::new(e.to_string()))?,
+                            )
+                            .map_err(|e| ExchangeError::new(e.to_string()))?,
                         )),
                         ..Default::default()
                     })

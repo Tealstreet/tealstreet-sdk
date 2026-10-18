@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/local_order_cache.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/binding/members/lifecycle.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" ]
 
 [[symbol]]
 ts = "isBybitOrderAlreadyGoneCancelMessage"
@@ -62,17 +62,17 @@ note = "Exact synchronous BybitSpotExchange disposal body: calls base disposal b
 ts = "BybitSpotExchange#shouldUseLocalRestOrderLifecycleFallback"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::should_use_local_rest_order_lifecycle_fallback"
+rs = "safe-cex-venue-bybit/src/binding/members/lifecycle.rs::should_use_local_fallback"
 status = "ported"
-note = "Exact strict equality with the maintained Brazil site constant; no truthiness or coercion. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::should_use_local_rest_order_lifecycle_fallback."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::should_use_local_fallback. The dead standalone cache facade and its fake-host oracle are removed; source cache operations run through the real receiver and Store. Exact strict equality with the maintained Brazil site constant; no truthiness or coercion. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::should_use_local_fallback."
 
 [[symbol]]
 ts = "BybitSpotExchange.markOrderSeen"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::mark_order_seen"
+rs = "safe-cex-venue-bybit/src/binding/members/lifecycle.rs::mark_order_seen"
 status = "divergent"
-note = "CHOSEN: ordered native Map storage and UTF-8 string keys exclude JS Map subclass/method overrides and lone UTF-16 surrogates. Deletes only the requested cache key; constructors and websocket composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::mark_order_seen."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::mark_order_seen. The dead standalone cache facade and its fake-host oracle are removed; source cache operations run through the real receiver and Store. CHOSEN: ordered native Map storage and UTF-8 string keys exclude JS Map subclass/method overrides and lone UTF-16 surrogates. Deletes only the requested cache key; constructors and websocket composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::mark_order_seen."
 
 [[symbol]]
 ts = "BybitSpotExchange#recordRecentlyPlacedOrderFromOpts"
@@ -86,17 +86,17 @@ note = "Native shared body preserves supplied receiver/callee ownership, JS oper
 ts = "BybitSpotExchange#recordRecentlyPlacedOrder"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::record_recently_placed_order"
+rs = "safe-cex-venue-bybit/src/binding/members/lifecycle.rs::record_variant_recently_placed_order"
 status = "divergent"
-note = "CHOSEN: typed shared Order/UTF-8 models exclude arbitrary executable rows and lone UTF-16 surrogates. Rc/RefCell retains mutable order identity; key evaluation precedes the explicit clock callback. Cache replacement retains insertion order. Site settings are read through a delayed callback after the clock and cache insertion. Explicit synchronous store callback receives native order references and can reenter or fail after insertion; ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Constructor and REST consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::record_recently_placed_order."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::record_variant_recently_placed_order. The dead standalone cache facade and its fake-host oracle are removed; source cache operations run through the real receiver and Store. The real Spot/Inverse receivers install the shared native timer-free variant body. One actual Brazil Spot master-red regression now passes; Inverse already passed and primary/demo positive controls retain primary reconciliation. CHOSEN: typed shared Order/UTF-8 models exclude arbitrary executable rows and lone UTF-16 surrogates. Rc/RefCell retains mutable order identity; key evaluation precedes the explicit clock callback. Cache replacement retains insertion order. Site settings are read through a delayed callback after the clock and cache insertion. Explicit synchronous store callback receives native order references and can reenter or fail after insertion; ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Actual signed placement and native Store publication are covered in variant_reconciliation_binding. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::record_variant_recently_placed_order."
 
 [[symbol]]
 ts = "BybitSpotExchange#retireCancelledOrders"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::retire_cancelled_orders"
+rs = "safe-cex-venue-bybit/src/binding/members/lifecycle.rs::retire_cancelled_orders"
 status = "divergent"
-note = "CHOSEN: typed UTF-8 order IDs exclude lone UTF-16 surrogates and arbitrary JS method overrides. Site settings are read after cache deletion. Explicit synchronous remove callback receives the ordered IDs instead of fresh JS {id} objects, preserving duplicate IDs and callback failure after cache deletion. ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Empty input skips all host work. Constructor and cancel consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::retire_cancelled_orders."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::retire_cancelled_orders. The dead standalone cache facade and its fake-host oracle are removed; source cache operations run through the real receiver and Store. CHOSEN: typed UTF-8 order IDs exclude lone UTF-16 surrogates and arbitrary JS method overrides. Site settings are read after cache deletion. Explicit synchronous remove callback receives the ordered IDs instead of fresh JS {id} objects, preserving duplicate IDs and callback failure after cache deletion. ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Empty input skips all host work. Actual Brazil Spot cancellation is covered by spot_binding. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::retire_cancelled_orders."
 
 [[symbol]]
 ts = "BybitSpotExchange#applyLocalOrderUpdateAfterRestWrite"
@@ -110,9 +110,9 @@ note = "Native Spot-only body preserves supplied receiver/callee ownership, JS o
 ts = "BybitSpotExchange#preserveRecentlyPlacedOrders"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::preserve_recently_placed_orders"
+rs = "safe-cex-venue-bybit/src/binding/members/lifecycle.rs::preserve_recently_placed_orders"
 status = "divergent"
-note = "CHOSEN: typed shared Order/UTF-8 models exclude executable/getter rows, JS Map method overrides and lone UTF-16 surrogates. Store orders are read lazily after the clock and for each preserved key. Store accessor callbacks model ordinary field reads; executable store getters that mutate the cache during iteration are excluded. Ordered native cache and Rc/RefCell preserve mutable order identity, first matching store reference, strict 8000ms expiration and IEEE nonfinite clock behavior. Chosen caller-owned native Vec snapshots carry ordered references; JavaScript fetched-array membership edits inside the clock and appended-result array object identity are outside this ABI. Empty/no-preservation results return the input vector. Constructor and snapshot consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::preserve_recently_placed_orders."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::preserve_recently_placed_orders. The dead standalone cache facade and its fake-host oracle are removed; source cache operations run through the real receiver and Store. CHOSEN: typed shared Order/UTF-8 models exclude executable/getter rows, JS Map method overrides and lone UTF-16 surrogates. Store orders are read lazily after the clock and for each preserved key. Store accessor callbacks model ordinary field reads; executable store getters that mutate the cache during iteration are excluded. Ordered native cache and Rc/RefCell preserve mutable order identity, first matching store reference, strict 8000ms expiration and IEEE nonfinite clock behavior. Chosen caller-owned native Vec snapshots carry ordered references; JavaScript fetched-array membership edits inside the clock and appended-result array object identity are outside this ABI. Empty/no-preservation results return the input vector. Constructor and snapshot consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/lifecycle.rs::preserve_recently_placed_orders."
 
 [[symbol]]
 ts = "BybitSpotExchange.getAccount"
@@ -264,7 +264,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper"
 status = "divergent"
-note = "APPROVED strict-field divergence: base/quote remain strings and invalid asset rows are visibly reported and omitted, keeping valid siblings through production fetch/refresh. Actual binding regressions cover five malformed domains for this family. TS keeps those malformed fields. CHOSEN typed Market boundary: symbol/base/quote must be strings and successful instrument lists must be arrays; TypeScript can pass through non-string fields; inverse can iterate string lists (an empty string produces no rows), while spot invokes list.map. Shared adapted request sequence extracted to safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper with inverse mode false. The caller supplies the existing venue GET operation and error emitter; this maps fetchMarketsHelper, not client construction. Inverse fees and sequential PreLaunch requests preserve failure order; spot skips both. Null sentinel results are retained as None, with complete diagnostics tested. A dropped read cancels only its invocation, leaves no shared latch, and makes no later requests."
+note = "Real HTTP witnesses also retain valid siblings around object/boolean/null/numeric/absent symbols; primitive fee equality preserves TS identity for separately decoded objects/arrays. APPROVED strict-field divergence: id/symbol/base/quote remain strings and invalid asset rows are visibly reported and omitted, keeping valid siblings through production fetch/refresh. Actual binding regressions cover five malformed domains for this family. TS keeps those malformed fields. CHOSEN typed Market boundary: symbol/base/quote must be strings and successful instrument lists must be arrays; TypeScript can pass through non-string fields; inverse can iterate string lists (an empty string produces no rows), while spot invokes list.map. Shared adapted request sequence extracted to safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper with inverse mode false. The caller supplies the existing venue GET operation and error emitter; this maps fetchMarketsHelper, not client construction. Inverse fees and sequential PreLaunch requests preserve failure order; spot skips both. Null sentinel results are retained as None, with complete diagnostics tested. A dropped read cancels only its invocation, leaves no shared latch, and makes no later requests."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchOHLCV"
@@ -312,7 +312,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::place_order"
 status = "ported"
-note = "Preserves preflight/delegation order, payload splitting, native client-ID guard and original unknown-outcome errors. Source attached TP consults slTriggerType; compacted successful responses retain source payload indexing. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::place_order."
+note = "The production missingMarket intrinsic now constructs the source named error; three compiled master-red real-binding controls cover limit and full-position SL/TP. Preserves preflight/delegation order, payload splitting, native client-ID guard and original unknown-outcome errors. Source attached TP consults slTriggerType; compacted successful responses retain source payload indexing. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::place_order."
 
 [[symbol]]
 ts = "BybitSpotExchange.placeOrders"
@@ -328,7 +328,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::place_stop_loss_or_take_profit"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::place_stop_loss_or_take_profit."
+note = "The production missingMarket intrinsic now constructs the source named error; three compiled master-red real-binding controls cover limit and full-position SL/TP. Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::place_stop_loss_or_take_profit."
 
 [[symbol]]
 ts = "BybitSpotExchange.placeTrailingStopLoss"
@@ -376,7 +376,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::map_order"
 status = "ported"
-note = "Preserves native raw-info and shallow extra aliases, remainingNative, inverse precision, Full-mode amount, virtual protection rows and distinct clock calls. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::map_order."
+note = "Actual REST/private-frame witnesses retain tpslOrder/OcoOrder/BidirectionalTpslOrder rows as own Undefined type and omit type on serialization, exercising the shared ModelField repair. Preserves native raw-info and shallow extra aliases, remainingNative, inverse precision, Full-mode amount, virtual protection rows and distinct clock calls. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::map_order."
 
 [[symbol]]
 ts = "BybitSpotExchange#getOrderPositionIdx"

@@ -1,10 +1,11 @@
+use crate::native_data::{property, text};
 use crate::{TransportError, frames::ResponseData, socket::SocketFrame};
 use base64::{
     Engine, alphabet,
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
 };
 use flate2::bufread::GzDecoder;
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use std::io::Read;
 
 pub fn to_array_buffer(bytes: &[u8]) -> Vec<u8> {
@@ -34,7 +35,7 @@ pub fn decode_base64(encoded: &str) -> Result<Vec<u8>, TransportError> {
 
 pub fn decode_trade_tunnel_message(
     frame: SocketFrame,
-) -> Result<(Value, Option<Vec<u8>>), TransportError> {
+) -> Result<(Input, Option<Vec<u8>>), TransportError> {
     match frame {
         SocketFrame::Close { .. } => Err(decode_error("close event has no message payload")),
         SocketFrame::Text(text) => Ok((crate::how::json_parse(&text), None)),
@@ -63,10 +64,14 @@ pub fn decode_trade_tunnel_message(
             }
             let header = std::str::from_utf8(&bytes[8..offset]).map_err(decode_error)?;
             let header = header.strip_prefix('\u{feff}').unwrap_or(header);
-            let value: Value = crate::how::json_parse(header);
-            if value["type"] != "rpc.http"
-                || !value["nonce"].is_string()
-                || value["data"]["data_encoding"] != "gzip"
+            let value = crate::how::json_parse(header);
+            if property(&value, "type").and_then(text).as_deref() != Some("rpc.http")
+                || !matches!(property(&value, "nonce"), Some(Input::Text(_)))
+                || property(&value, "data")
+                    .and_then(|data| property(data, "data_encoding"))
+                    .and_then(text)
+                    .as_deref()
+                    != Some("gzip")
             {
                 return Err(decode_error(
                     "TradeTunnel binary frame has an invalid response header",
@@ -123,6 +128,13 @@ mod tests {
     use serde_json::json;
     use std::io::Write;
 
+    fn metadata(value: Input) -> crate::frames::RpcHttpResponse {
+        // Closed finite/raw-text protocol fixture; native payload delivery is
+        // covered separately through actual HOW adapters in tests/tunnel.rs.
+        let mut value = value.into_value().unwrap();
+        crate::how::normalize_json_numbers(&mut value, false, false);
+        serde_json::from_value(value).unwrap()
+    }
     fn gzip(raw: &[u8]) -> Vec<u8> {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(raw).unwrap();
@@ -137,8 +149,13 @@ mod tests {
             SocketFrame::Binary(envelope(header.as_bytes(), b"x")),
         ] {
             let (value, _) = decode_trade_tunnel_message(frame).unwrap();
-            assert_eq!(value["numbers"].to_string(), "[9007199254740992,1.5,1000]");
-            let response: crate::frames::RpcHttpResponse = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                crate::native_data::wire_json(property(&value, "numbers").unwrap())
+                    .unwrap()
+                    .to_string(),
+                "[9007199254740992,1.5,1000]"
+            );
+            let response: crate::frames::RpcHttpResponse = metadata(value);
             assert_eq!(response.data.status, 200);
         }
     }
@@ -181,7 +198,7 @@ mod tests {
                 SocketFrame::Text(header.to_string())
             };
             let (value, binary) = decode_trade_tunnel_message(frame).unwrap();
-            let response: crate::frames::RpcHttpResponse = serde_json::from_value(value).unwrap();
+            let response: crate::frames::RpcHttpResponse = metadata(value);
             assert_eq!(
                 decode_raw_body(&response.data, binary).unwrap().unwrap(),
                 raw
@@ -266,7 +283,10 @@ mod tests {
         }
         let (header, payload) =
             decode_trade_tunnel_message(SocketFrame::Binary(envelope(valid, b"payload"))).unwrap();
-        assert_eq!(header["nonce"], "n");
+        assert_eq!(
+            property(&header, "nonce").and_then(text).as_deref(),
+            Some("n")
+        );
         assert_eq!(payload.unwrap(), b"payload");
         let mut maximum_header = valid.to_vec();
         maximum_header.resize(1024 * 1024, b' ');
@@ -299,7 +319,7 @@ mod tests {
         );
         assert_eq!(
             decode_trade_tunnel_message(SocketFrame::Text("not json".into())).unwrap(),
-            (Value::Null, None)
+            (Input::Null, None)
         );
     }
 

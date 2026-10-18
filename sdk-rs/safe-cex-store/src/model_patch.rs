@@ -234,6 +234,7 @@ impl PatchModel for safe_cex_types::Order {
                     | "type"
                     | "side"
                     | "price"
+                    | "reduceOnly"
                     | "close"
                     | "info"
                     | "clientOrderId"
@@ -259,7 +260,7 @@ impl PatchModel for safe_cex_types::Order {
             "amount" => self.amount = number(field, value)?,
             "filled" => self.filled = number(field, value)?,
             "remaining" => self.remaining = number(field, value)?,
-            "reduceOnly" => self.reduce_only = decode(field, value)?,
+            "reduceOnly" => self.reduce_only = model_field(field, value)?,
             "close" => self.close = model_field(field, value)?,
             "info" => self.info = model_info(field, value)?,
             "clientOrderId" => self.client_order_id = model_field(field, value)?,

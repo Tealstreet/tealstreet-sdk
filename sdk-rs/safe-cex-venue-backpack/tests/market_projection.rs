@@ -17,10 +17,10 @@ fn markets() -> Vec<Market> {
     let (owner, runtime, _, wire) = support::fixture();
     wire.bodies.lock().unwrap().insert(
         "/api/v1/markets".into(),
-        RestResponseBody::Untransformed(json!([
+        RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([
             {"symbol":"BTC_USDC_PERP","marketType":"PERP","filters":{"price":{"minPrice":"5.25","maxPrice":"900","tickSize":"0.25"}}},
             {"symbol":"BTC_USDC","marketType":"SPOT","filters":{"price":{"minPrice":"0.5","maxPrice":"800","tickSize":"0.1"}}}
-        ])),
+        ])).unwrap()),
     );
     let mut future = std::pin::pin!(Exchange::fetch_markets(owner.as_ref()));
     let result = (0..64).find_map(|_| {

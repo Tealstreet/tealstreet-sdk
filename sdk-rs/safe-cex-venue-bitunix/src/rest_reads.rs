@@ -117,11 +117,19 @@ where
                 refusals.push(format!("Refused Bitunix market row {index} symbol={symbol}: base={value}: expected string"));
                 continue;
             };
-            let max_amount = js_number(key(row, "maxLimitOrderVolume"))?;
-            let symbol = row
-                .get("symbol")
-                .and_then(Value::as_str)
-                .ok_or_else(|| E::from(error("Market symbol must be a string")))?;
+            let Some(symbol) = row.get("symbol").and_then(Value::as_str) else {
+                let value = row.get("symbol").map_or_else(|| "undefined".into(), Value::to_string);
+                refusals.push(format!("Refused Bitunix market row {index}: symbol={value}: expected string"));
+                continue;
+            };
+            let max_amount = match js_number(key(row, "maxLimitOrderVolume")) {
+                Ok(value) => value,
+                Err(cause) => {
+                    let value = key(row, "maxLimitOrderVolume").map_or_else(|| "undefined".into(), Value::to_string);
+                    refusals.push(format!("Refused Bitunix market row {index} symbol={symbol:?}: limits.amount.max={value}: {}", cause.message));
+                    continue;
+                }
+            };
             markets.push(Market {
                 id,
                 symbol: symbol.into(),

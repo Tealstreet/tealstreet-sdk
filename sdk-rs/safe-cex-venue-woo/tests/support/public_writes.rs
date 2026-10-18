@@ -59,12 +59,20 @@ fn public_writer_matches_numeric_bits_and_notification_failure() {
         }
         let rows = input
             .get("raw")
-            .map(|raw| safe_cex_transport::how::json_parse(raw.as_str().unwrap()))
+            .map(|raw| {
+                safe_cex_transport::how::json_parse(raw.as_str().unwrap())
+                    .into_value()
+                    .unwrap()
+            })
             .unwrap_or_else(|| input["rows"].clone());
+        let retained_rows =
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(rows.clone()).unwrap();
         let result = match input["method"].as_str().unwrap() {
-            "handleTickersStreamEvents" => handle_tickers_stream_events(&store, &rows),
-            "handleBBOStreamEvents" => handle_bbo_stream_events(&store, &rows),
-            "handleMarkPricesStreamEvents" => handle_mark_prices_stream_events(&store, &rows),
+            "handleTickersStreamEvents" => handle_tickers_stream_events(&store, &retained_rows),
+            "handleBBOStreamEvents" => handle_bbo_stream_events(&store, &retained_rows),
+            "handleMarkPricesStreamEvents" => {
+                handle_mark_prices_stream_events(&store, &retained_rows)
+            }
             _ => unreachable!(),
         };
         assert_eq!(

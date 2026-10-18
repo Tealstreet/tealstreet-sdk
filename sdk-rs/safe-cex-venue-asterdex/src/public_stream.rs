@@ -188,7 +188,7 @@ impl PublicStream {
                 SocketFrame::Binary(b) => String::from_utf8_lossy(b).into_owned(),
                 SocketFrame::Close { .. } => return Ok(()),
             };
-            let json = safe_cex_transport::signing::try_parse_json(
+            let json = safe_cex_transport::signing::try_parse_params_json(
                 serde_json::from_str(&text).map_err(|e| ExchangeError::new(e.to_string()))?,
             );
             if !js_truthy(Some(&json)) {
@@ -323,6 +323,15 @@ impl PublicStream {
                 safe_cex_store::model_patch::PatchValue::Number(n) => *n,
                 safe_cex_store::model_patch::PatchValue::Json(Value::Number(n)) => {
                     safe_cex_num::number_from_string(&n.to_string())
+                }
+                safe_cex_store::model_patch::PatchValue::Json(value) => {
+                    self.parent.log(
+                        &format!(
+                            "AsterDEX ticker {symbol} typed field {field} requires a number; received {value}"
+                        ),
+                        safe_cex_exchange::runtime::LogSeverity::Error,
+                    )?;
+                    return Ok(None);
                 }
                 _ => return Err(ExchangeError::new("Non-number public ticker patch")),
             };

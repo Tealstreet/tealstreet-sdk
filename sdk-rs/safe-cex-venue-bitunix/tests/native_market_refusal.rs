@@ -170,3 +170,86 @@ fn refused_base_does_not_coerce_an_unused_maximum() {
     );
     venue.dispose().unwrap();
 }
+
+fn scalar_market_refusal_case(maximum: bool, refresh: bool) {
+    let values = if maximum {
+        vec![Some(json!({"toString":null}))]
+    } else {
+        vec![
+            Some(json!({"symbol":"wrong"})),
+            Some(json!(false)),
+            Some(Value::Null),
+            Some(json!(17)),
+            None,
+        ]
+    };
+    for value in values {
+        let (venue, rt, store, wire) = support::fixture();
+        let mut bad = instrument("BADUSDT", "BAD");
+        let wire_field = if maximum {
+            "maxLimitOrderVolume"
+        } else {
+            "symbol"
+        };
+        if let Some(value) = &value {
+            bad[wire_field] = value.clone();
+        } else {
+            bad.as_object_mut().unwrap().remove(wire_field);
+        }
+        wire.bodies.lock().unwrap().insert(
+            "/api/v1/futures/market/trading_pairs".into(),
+            json!({"code":0,"data":[instrument("BTCUSDT","BTC"),bad,instrument("ETHUSDT","ETH")]}),
+        );
+        let markets = if refresh {
+            drive(&rt, venue.refresh_markets()).unwrap();
+            store.markets().to_vec()
+        } else {
+            drive(&rt, venue.fetch_markets()).unwrap()
+        };
+        assert_eq!(
+            markets
+                .iter()
+                .map(|m| m.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["BTCUSDT", "ETHUSDT"]
+        );
+        let logs = rt.console.borrow();
+        let reports = logs
+            .iter()
+            .filter(|(_, line)| line.contains("Refused Bitunix market row"))
+            .collect::<Vec<_>>();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].0, "warning");
+        let field = if maximum {
+            "limits.amount.max"
+        } else {
+            "symbol"
+        };
+        let expected = value
+            .as_ref()
+            .map_or_else(|| "undefined".into(), Value::to_string);
+        assert!(
+            reports[0].1.contains(&format!("{field}={expected}")),
+            "{:?}",
+            reports[0]
+        );
+        drop(logs);
+        venue.dispose().unwrap();
+    }
+}
+#[test]
+fn fetch_market_symbol_refusals_keep_siblings() {
+    scalar_market_refusal_case(false, false);
+}
+#[test]
+fn refresh_market_symbol_refusals_keep_siblings() {
+    scalar_market_refusal_case(false, true);
+}
+#[test]
+fn fetch_market_maximum_refusals_keep_siblings() {
+    scalar_market_refusal_case(true, false);
+}
+#[test]
+fn refresh_market_maximum_refusals_keep_siblings() {
+    scalar_market_refusal_case(true, true);
+}

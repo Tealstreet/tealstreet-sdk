@@ -7,7 +7,7 @@ use safe_cex_exchange::{
     },
     runtime::ExchangeError,
 };
-use safe_cex_types::*;
+use safe_cex_types::{Execution, ExecutionsOptions, OHLCVOptions, Order};
 use serde_json::{Value, json};
 use std::rc::Rc;
 
@@ -230,8 +230,7 @@ pub(super) fn invoke(rt: &Rt, name: &'static str, a: Vec<Js>) -> Result<Js, Thro
                 let mut params = json!({"symbol":opts.symbol,"interval":helpers::map_timeframe(opts.interval),"limit":opts.limit.filter(|v|*v!=0.0).unwrap_or(500.0)});
                 if let Some(from)=opts.from.filter(|v|*v!=0.0){params["startTime"]=json!(from);}
                 let data=request(&rt,"publicAPI","get",path(&rt,"klines"),Some(params)).await.map_err(error)?;
-                let rows: Vec<crate::types::AsterDEXKlineResponse> = serde_json::from_value(data).map_err(|e|Thrown::error("RepresentationError",&e.to_string()))?;
-                from_typed(&helpers::transform_klines(&rows))
+                helpers::transform_klines(&from_json(&data))
             }
             "fetchHistoricalFills" => {
                 let opts: ExecutionsOptions = to_typed(&first)?;

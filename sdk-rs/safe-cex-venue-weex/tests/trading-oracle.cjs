@@ -57,6 +57,17 @@ add('algo_virtual_zero_execution','normalizeAlgoOrder',{raw:{algoId:'1',symbol:'
 add('batch_null_error_message','placeRegularOrderBatch',{replies:[[{clientOrderId:'A',success:false,errorMessage:null}]]});
 add('single_null_result','placeOrder',{replies:[null]});
 add('positions_failure_unfiltered','fetchPositions',{fail:'request:end',traceErrors:true});
+// Optional production-binding supplement; the original76-case corpus is unchanged.
+const bindingIds = process.argv[2] === 'binding-batch-ids' ? JSON.parse(process.argv[3]) : null;
+if (bindingIds) {
+  cases.length = 0;
+  for (const [index, id] of bindingIds.entries()) {
+    add('binding_id_' + index, 'placeOrders', {
+      orders: [order(1, {clientOrderId:'synthetic-client-1',timeInForce:'PostOnly'})],
+      replies: [[{clientOrderId:'synthetic-client-1',success:true,orderId:id}]],
+    });
+  }
+}
 async function run(c){const input=structuredClone(c.input),events=[],requests=[],reported=[],updates=[],resolved=[],infer=[],prefix=[];let initial;let requestCount=0,appendDone=false,instance,error=null,result;
  const check=stage=>{if(input.fail===stage)throw new RangeError('fail:'+stage);};const record=stage=>{events.push(stage);check(stage);};
  function requestError(stage){const error=new RangeError('fail:'+stage);error.response={data:{errorMessage:'VENUE',msg:'REMOTE',message:'ALT'}};if(input.traceErrors){const message=error.message;Object.defineProperty(error,'message',{get(){events.push('error:message');return message;}});error.response.data=new Proxy(error.response.data,{get(t,k){events.push('error:'+k);return t[k];}});const response=error.response;Object.defineProperty(error,'response',{get(){events.push('error:response');return response;}});}return error;}
@@ -78,4 +89,4 @@ async function run(c){const input=structuredClone(c.input),events=[],requests=[]
  for(const i of input.holes)delete input.orders[i];if(input.customIterator)attachIterator(input.orders);
  try{if(['normalizeOrder','normalizeAlgoOrder'].includes(input.method))result=scope.exports[input.method](input.raw,input.market);else if(input.method==='normalizePosition')result=scope.exports.normalizePosition(input.raw,input.market,input.fallback);else{const arg=input.method==='formatOrderPayload'||input.method==='placeOrder'?input.opts:input.method==='updateOrder'?input.update:input.method==='fetchPositions'?input.symbols:input.orders;const p=instance[input.method](arg);prefix.push(...events);initial=structuredClone({requests,reported,updates,resolved,infer});result=await p;}}catch(e){error={name:e.name,message:e.message};}
  return{id:c.id,input:enc(c.input),expected:enc({result,error,requests,reported,updates,resolved,infer,initial}),prefix,events};}
-(async()=>{const rows=[];for(const c of cases)rows.push(await run(c));assert.equal(rows.length,76,'trading::fixture_floor');process.stdout.write(JSON.stringify(rows));})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{const rows=[];for(const c of cases)rows.push(await run(c));assert.equal(rows.length,bindingIds ? bindingIds.length :76,'trading::fixture_floor');process.stdout.write(JSON.stringify(rows));})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -915,7 +915,6 @@ fn business_socket_reopen_alone_resyncs_the_private_snapshot() {
 #[test]
 fn eu_order_reads_start_both_instruments_before_first_reply() {
     use std::{
-        cell::Cell,
         rc::Rc,
         task::{Context, Poll, Waker},
     };
@@ -943,7 +942,7 @@ fn eu_order_reads_start_both_instruments_before_first_reply() {
         });
         loaded(&h);
         h.http.requests.borrow_mut().clear();
-        let gate = Rc::new(Cell::new(false));
+        let gate = Rc::new(harness::release::Release::default());
         *h.http.held_instrument.borrow_mut() = Some((path.into(), "SWAP".into(), gate.clone()));
         let mut future = h.venue().fetch_orders(None);
         assert!(matches!(
@@ -973,4 +972,367 @@ fn eu_order_reads_start_both_instruments_before_first_reply() {
         source,
         "OKX EU both source parallel reads start before SWAP completes for normal and algo orders"
     );
+}
+
+#[test]
+fn public_market_data_frames_reach_real_book_ticker_and_candle_bindings() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(ExchangeName::Okx, options(), okx);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.advance(50.0);
+    let public = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/ws/v5/public"))
+        .unwrap()
+        .1
+        .clone();
+    let business = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/ws/v5/business"))
+        .unwrap()
+        .1
+        .clone();
+    let books = Rc::new(RefCell::new(Vec::new()));
+    let seen = books.clone();
+    let stop_book = h
+        .venue()
+        .listen_order_book(
+            "BTCUSDT".into(),
+            Rc::new(move |book| seen.borrow_mut().push(book)),
+        )
+        .unwrap();
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let seen = candles.clone();
+    let options: OHLCVOptions =
+        serde_json::from_value(json!({"symbol":"BTCUSDT", "interval":"1m"})).unwrap();
+    let stop_candle = h
+        .venue()
+        .listen_ohlcv(
+            options,
+            Rc::new(move |candle| seen.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    let frame = |socket: &Rc<harness::Socket>, value: Value| {
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(value.to_string())));
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+    };
+    frame(
+        &public,
+        json!({"arg":{"channel":"tickers","instId":"BTC-USDT-SWAP"},"data":[{
+            "instId":"BTC-USDT-SWAP","last":"50000","open24h":"40000", "bidPx":"49998", "askPx":"50002", "volCcy24h":"12", "vol24h":"34"
+        }]}),
+    );
+    let ticker = h.store.tickers_by_symbol()["BTCUSDT"].clone();
+    assert_eq!(
+        (
+            ticker.bid,
+            ticker.ask,
+            ticker.last,
+            ticker.percentage,
+            ticker.volume,
+            ticker.quote_volume
+        ),
+        (49998.0, 50002.0, 50000.0, 25.0, 12.0, 34.0)
+    );
+    frame(
+        &public,
+        json!({"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot","data":[{
+            "seqId":100,"checksum":-999,"bids":[["49999","2"],["49998","3"]],"asks":[["50001","4"],["50002","0"]]
+        }]}),
+    );
+    assert_eq!(
+        books.borrow().len(),
+        1,
+        "OKX real binding delivers snapshot"
+    );
+    assert_eq!(
+        (
+            books.borrow()[0].bids[1].amount,
+            books.borrow()[0].bids[1].total
+        ),
+        (3.0, 5.0)
+    );
+    frame(
+        &public,
+        json!({"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{
+            "seqId":101,"prevSeqId":100,"bids":[["49999","0"],["49997","7"]],"asks":[["50001","6"]]
+        }]}),
+    );
+    assert_eq!(
+        books.borrow().len(),
+        2,
+        "OKX real binding delivers contiguous delta"
+    );
+    assert_eq!(
+        (
+            books.borrow()[1].bids[0].price,
+            books.borrow()[1].bids[1].total
+        ),
+        (49998.0, 10.0)
+    );
+    let before = public.sent.borrow().len();
+    frame(
+        &public,
+        json!({"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{
+            "seqId":103,"prevSeqId":102,"bids":[],"asks":[]
+        }]}),
+    );
+    assert_eq!(
+        books.borrow().len(),
+        2,
+        "sequence gap must suppress callback"
+    );
+    let sent = public.sent.borrow();
+    assert_eq!(
+        sent.len(),
+        before + 2,
+        "sequence gap resubscribes exactly once"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&sent[before]).unwrap()["op"],
+        "unsubscribe"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&sent[before + 1]).unwrap()["op"],
+        "subscribe"
+    );
+    drop(sent);
+    frame(
+        &public,
+        json!({"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot","data":[{
+            "seqId":200,"bids":[["49996","1"]],"asks":[["50003","2"]]
+        }]}),
+    );
+    assert_eq!(books.borrow().len(), 3, "fresh snapshot ends recovery");
+    assert_eq!(books.borrow()[2].bids.len(), 1);
+    frame(
+        &business,
+        json!({"arg":{"channel":"candle1m","instId":"BTC-USDT-SWAP"},"data":[["1700000000000","10","13","9","12","999","888","77","1"]]}),
+    );
+    assert_eq!(
+        candles.borrow().len(),
+        1,
+        "OKX real business binding delivers candle"
+    );
+    let candle = candles.borrow()[0].clone();
+    assert_eq!(
+        (
+            candle.timestamp,
+            candle.open,
+            candle.high,
+            candle.low,
+            candle.close,
+            candle.volume
+        ),
+        (1700000000.0, 10.0, 13.0, 9.0, 12.0, 77.0)
+    );
+    stop_book().unwrap();
+    stop_candle().unwrap();
+    h.venue().dispose().unwrap();
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+}
+
+#[test]
+fn production_retry_excludes_cancel_dns_and_certificate_errors() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let codes = [
+        "ERR_CANCELED",
+        "ECONNABORTED",
+        "ENOTFOUND",
+        "ENETUNREACH",
+        "UNABLE_TO_GET_ISSUER_CERT",
+        "UNABLE_TO_GET_CRL",
+        "UNABLE_TO_DECRYPT_CERT_SIGNATURE",
+        "UNABLE_TO_DECRYPT_CRL_SIGNATURE",
+        "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
+        "CERT_SIGNATURE_FAILURE",
+        "CRL_SIGNATURE_FAILURE",
+        "CERT_NOT_YET_VALID",
+        "CERT_HAS_EXPIRED",
+        "CRL_NOT_YET_VALID",
+        "CRL_HAS_EXPIRED",
+        "ERROR_IN_CERT_NOT_BEFORE_FIELD",
+        "ERROR_IN_CERT_NOT_AFTER_FIELD",
+        "ERROR_IN_CRL_LAST_UPDATE_FIELD",
+        "ERROR_IN_CRL_NEXT_UPDATE_FIELD",
+        "OUT_OF_MEM",
+        "DEPTH_ZERO_SELF_SIGNED_CERT",
+        "SELF_SIGNED_CERT_IN_CHAIN",
+        "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+        "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+        "CERT_CHAIN_TOO_LONG",
+        "CERT_REVOKED",
+        "INVALID_CA",
+        "PATH_LENGTH_EXCEEDED",
+        "INVALID_PURPOSE",
+        "CERT_UNTRUSTED",
+        "CERT_REJECTED",
+        "HOSTNAME_MISMATCH",
+        "ECONNRESET",
+        "EPIPE",
+        "ETIMEDOUT",
+        "",
+    ];
+    assert_eq!(codes.len(), 36);
+    let inputs: Vec<_> = codes
+        .iter()
+        .map(|code| json!({"code":code,"method":"GET"}))
+        .chain(std::iter::once(
+            json!({"code":"ECONNRESET","method":"POST"}),
+        ))
+        .collect();
+    let mut child = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/network-retry-binding.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&inputs).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<bool> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 37);
+    let mut failures = vec![];
+    for (index, code) in codes.into_iter().enumerate() {
+        let expected = matches!(code, "ECONNRESET" | "EPIPE" | "ETIMEDOUT");
+        assert_eq!(source[index], expected, "maintained source {code}");
+        let h = harness(ExchangeName::Okx, options(), okx);
+        loaded(&h);
+        h.http.network_failures.borrow_mut().insert(
+            BALANCE.into(),
+            std::collections::VecDeque::from([code.to_owned()]),
+        );
+        let _ = h.drive(h.venue().validate_account());
+        let count = h.http.calls(BALANCE).len();
+        let expected_count = if expected { 2 } else { 1 };
+        if count != expected_count {
+            failures.push(format!(
+                "{code}: requests {count}, expected {expected_count}"
+            ));
+        }
+    }
+    assert!(!source[36], "source writes do not retry");
+    let h = harness(ExchangeName::Okx, options(), okx);
+    loaded(&h);
+    let positions = h.drive(h.venue().fetch_positions(None)).expect("positions");
+    Store::add_or_update_positions(&*h.store, positions).expect("store positions");
+    h.http.network_failures.borrow_mut().insert(
+        SET_LEVERAGE.into(),
+        std::collections::VecDeque::from(["ECONNRESET".to_owned()]),
+    );
+    assert!(
+        h.drive(h.venue().set_leverage("BTCUSDT".into(), 5., None))
+            .is_err()
+    );
+    assert_eq!(
+        h.http.calls(SET_LEVERAGE).len(),
+        1,
+        "actual write must not retry"
+    );
+    assert!(
+        failures.is_empty(),
+        "production retry/source differences: {failures:?}"
+    );
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("okx");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 88);
+    for name in [
+        ExchangeName::Okx,
+        ExchangeName::Okxdemo,
+        ExchangeName::Okxeu,
+        ExchangeName::Okxeudemo,
+    ] {
+        let h = harness(name, options(), |_| {});
+        let seed = ticker_coercion::seed("okx");
+        let markets = seed
+            .iter()
+            .map(|t| {
+                serde_json::from_value(json!({
+            "id":t.id,"symbol":t.symbol,"base":"fixture","quote":"USDT","active":true,
+            "info":{"uly":t.id.trim_end_matches("-SWAP")},"precision":{"amount":0.01,"price":0.25},
+            "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+        })).unwrap()
+            })
+            .collect();
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+        socket.connect_and_subscribe(false).unwrap();
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        assert!(socket.is_connected(), "production OKX ticker socket opens");
+        for case in source["cases"].as_array().unwrap() {
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(seed.clone()),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            for frame in case["frames"].as_array().unwrap() {
+                socket
+                    .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                    .unwrap();
+                h.runtime.pump();
+            }
+            ticker_coercion::assert_native(&h.store.tickers(), case);
+        }
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{:?}",
+            h.runtime.reports.borrow()
+        );
+        h.venue().dispose().unwrap();
+    }
 }

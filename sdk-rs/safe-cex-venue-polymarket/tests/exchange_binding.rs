@@ -470,9 +470,11 @@ fn concrete_public_ohlcv_and_orderbook_socket() {
 }
 
 fn wire(request: &binding_harness::Request) -> Vec<u8> {
-    safe_cex_transport::RestBody::Untransformed(request.data.clone())
-        .wire_bytes_for_content_type(Some("application/json"))
-        .unwrap()
+    safe_cex_transport::RestBody::Untransformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(request.data.clone()).unwrap(),
+    )
+    .wire_bytes_for_content_type(Some("application/json"))
+    .unwrap()
 }
 
 #[test]
@@ -880,4 +882,64 @@ fn offline_recovery_requests_account_reload_for_source_owned_sockets() {
         h.venue().recover_after_offline().unwrap(),
         "disposed accounts do not request another reload"
     );
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::exchange::Exchange;
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("polymarket");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 24);
+    let h = harness(ExchangeName::Polymarket, options(), |http| {
+        let rows: Vec<_> = ["BTC", "ETH", "ADA"].into_iter().map(|asset| json!({
+            "conditionId":asset, "slug":asset, "question":"Question?", "description":"description",
+            "endDate":"2026-12-01", "active":true, "closed":false,
+            "enableOrderBook":true, "acceptingOrders":true,
+            "clobTokenIds":format!("[\"{asset}-token\"]"), "outcomes":"[\"Yes\"]",
+            "orderPriceMinTickSize":"0.01", "orderMinSize":"5", "negRisk":false,
+        })).collect();
+        http.ok("GET", "/markets", json!(rows));
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert_eq!(markets.len(), 3, "production token-to-symbol mappings");
+    let venue = h.exchange.clone();
+    let runtime = h.runtime.clone();
+    let store = h.store.clone();
+    let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
+    socket.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    assert!(socket.is_connected(), "production ticker socket opens");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("polymarket")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            runtime.now.set(runtime.now.get() + 1100.0);
+            runtime.pump();
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            runtime.pump();
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(
+        runtime.reports.borrow().is_empty(),
+        "{:?}",
+        runtime.reports.borrow()
+    );
+    venue.dispose().unwrap();
 }

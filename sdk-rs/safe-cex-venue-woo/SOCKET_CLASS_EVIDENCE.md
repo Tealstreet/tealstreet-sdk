@@ -24,8 +24,8 @@ send/sendWithLog receiver/order. Existing public typed core-socket facade APIs
 remain deliberate convenience surfaces; their notes price replaced-member and
 setter observations that those facade calls omit.
 
-The class adapter deliberately retains immutable JSON ingress for typed child
-handlers. A caller-owned mutable object graph is outside that input surface.
+The class adapter retains owned immutable input for typed child handlers. Public
+ticker handlers capture RetainedJsonInput; private timestamps keep JSON ingress. A caller-owned mutable object graph is outside that input surface.
 The fifth native group first proves caller row.close becomes 59, then proves the
 installed handler reads the earlier sidecar value 31; actual maintained source
 reads 59. Both class rows price this lost mutation as CHOSEN. This is evidence of

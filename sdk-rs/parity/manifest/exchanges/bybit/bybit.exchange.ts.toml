@@ -411,8 +411,8 @@ status = "ported"
 note = "safe-cex-venue-bybit/src/private_snapshot_refresh.rs::schedule_set_trading_stop_snapshot_refresh selects and invokes the actual receiver field with no arguments, then returns undefined; debounce completion is not awaited. Its source initializer and native scheduling calls are exercised together. Full class/constructor binding remains pending."
 
 [[symbol]]
-ts = "BybitExchange#shouldUseLocalRestOrderLifecycleFallback"
-kind = "field-fn"
+ts = "BybitExchange.shouldUseLocalRestOrderLifecycleFallback"
+kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/primary_order_lifecycle.rs::should_use_local_rest_order_lifecycle_fallback"
 status = "ported"
@@ -816,7 +816,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-bybit/src/binding/members/markets.rs::fetch_markets_helper", "safe-cex-venue-bybit/src/market_mapping.rs::map_market" ]
 status = "divergent"
-note = "APPROVED strict-field divergence: base/quote remain strings; after source mapping, unrepresentable asset rows are visibly reported at Warning and omitted while valid Trading/PreLaunch siblings survive. TS retains malformed asset values. Real primary/demo HTTP fetch/refresh regressions cover object, boolean, null, number and absent values, alongside the maintained-source mapper corpus. Source property/coercion errors retain priority over typed asset admission. Existing JSON/UTF-8 info and symbol-output boundaries remain outside this claim. Renamed Rust targets: safe-cex-venue-bybit/src/binding/members/markets.rs::fetch_markets_helper; safe-cex-venue-bybit/src/market_mapping.rs::map_market."
+note = "Real HTTP witnesses also retain valid siblings around object/boolean/null/numeric/absent symbols; primitive fee equality preserves TS identity for separately decoded objects/arrays. APPROVED strict-field divergence: id/symbol/base/quote remain strings; after source mapping, unrepresentable string rows are visibly reported at Warning and omitted while valid Trading/PreLaunch siblings survive. TS retains malformed string values. Real primary/demo HTTP fetch/refresh regressions cover object, boolean, null, number and absent values, alongside the maintained-source mapper corpus. Source property/coercion errors retain priority over typed string admission. Existing JSON/UTF-8 info boundaries remain outside this claim. Renamed Rust targets: safe-cex-venue-bybit/src/binding/members/markets.rs::fetch_markets_helper; safe-cex-venue-bybit/src/market_mapping.rs::map_market."
 
 [[symbol]]
 ts = "BybitExchange.fetchClosedPositionRows"
@@ -960,7 +960,7 @@ kind = "field-fn"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Single-order adjusted price/trigger truthiness is repaired in binding/members/orders.rs::place_order: four compiled primary/demo master-red real-binding controls, plus raw option-gate payload and NaN-adjusted trigger controls in adjusted_order_binding. This narrow branch repair does not claim the entire pending placement method."
 
 [[symbol]]
 ts = "BybitExchange#assertOptionOrderPlaceable"
@@ -984,7 +984,7 @@ kind = "method"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Native unknown-outcome classification now short-circuits after the one-payload and caller-client-ID guards, matching source. Four primary/demo actual HTTP controls compiled master-red; a positive caller-ID control retains classifier errors. "
 
 [[symbol]]
 ts = "BybitExchange.placeStopLossOrTakeProfit"

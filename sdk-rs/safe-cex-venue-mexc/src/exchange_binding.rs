@@ -550,11 +550,11 @@ impl Host {
             }),
             ("noteRegularOrderSubmitError", |h, a| {
                 let mut cooldown = h.cooldown()?;
-                let runtime = h.runtime.clone();
+                let clock = h.venue()?.current_time_ms.clone();
                 note_regular_order_submit_error(
                     &mut cooldown,
                     json(&arg(&a, 0))?.as_ref(),
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 )?;
                 h.set_cooldown(cooldown)?;
                 Ok(Js::Undefined)
@@ -563,10 +563,10 @@ impl Host {
                 let data = arg(&a, 0);
                 let payload = json(&data)?.map(|v| Rc::new(RefCell::new(v)));
                 let mut cooldown = h.cooldown()?;
-                let runtime = h.runtime.clone();
+                let clock = h.venue()?.current_time_ms.clone();
                 let result =
                     assert_regular_order_submit_succeeded(payload.as_ref(), &mut cooldown, &|| {
-                        runtime.now_ms()
+                        clock()
                     });
                 h.set_cooldown(cooldown)?;
                 result.map_err(|e| submit_error(e, &data))?;
@@ -581,20 +581,20 @@ impl Host {
             }),
             ("isRecentlyRejectedRegularOrder", |h, a| {
                 let venue = h.venue()?;
-                let runtime = h.runtime.clone();
+                let clock = venue.current_time_ms.clone();
                 Ok(Js::Bool(is_recently_rejected_regular_order(
                     &mut venue.rejected.borrow_mut(),
                     &text(&arg(&a, 0))?,
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 )))
             }),
             ("notePlacedStopLikeOrder", |h, a| {
                 let venue = h.venue()?;
-                let runtime = h.runtime.clone();
+                let clock = venue.current_time_ms.clone();
                 note_placed_stop_like_order(
                     &mut venue.placed.borrow_mut(),
                     &text(&arg(&a, 0))?,
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 );
                 Ok(Js::Undefined)
             }),
@@ -657,7 +657,9 @@ impl Host {
                 let venue = host.venue()?;
                 let (body, config) = if method == "post" {
                     (
-                        Some(RestBody::Untransformed(to_json(&arg(&a, 1))?)),
+                        Some(RestBody::Untransformed(
+                            safe_cex_exchange::js_runtime::value::to_retained_input(&arg(&a, 1))?,
+                        )),
                         arg(&a, 2),
                     )
                 } else {
@@ -967,7 +969,9 @@ impl ExchangeRuntimeHost for Host {
         from_json(&types::REVERSE_POSITION_MODE).get_key(&mode.to_js_string()?)
     }
     fn promise_all(&self, values: Vec<Js>) -> Result<Rc<Pending>, Thrown> {
-        Ok(Pending::of(Box::pin(promise::all(values))))
+        Ok(Pending::of(Box::pin(
+            promise::all(&self.runtime, values).wait(),
+        )))
     }
     fn for_of(&self, value: Js, visitor: &mut Iteration<'_, Js, Thrown>) -> Result<(), Thrown> {
         // This opaque typed settings view has no JS object protocol. Preserve
@@ -1071,7 +1075,7 @@ impl OrderWorkflowHost for Host {
                 .map_err(|message| Thrown::error("Error", &message))?;
                 Js::str(&id)
             }
-            "now" => Js::Number(self.runtime.now_ms()),
+            "now" => Js::Number((self.venue()?.current_time_ms)()),
             "sleep" => {
                 let runtime = self.runtime.clone();
                 let ms = delay(&a(0))?;

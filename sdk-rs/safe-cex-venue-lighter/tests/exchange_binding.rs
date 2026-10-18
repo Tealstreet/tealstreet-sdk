@@ -1055,8 +1055,212 @@ fn private_account_frame_for_deployment(name: ExchangeName) {
 }
 
 #[test]
+fn private_fill_timestamp_types_match_the_maintained_handler() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, process::Command, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    h.drive(h.venue().start()).unwrap();
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/fill-timestamps-oracle.cjs"
+        ))
+        .arg(h.runtime.now.get().to_string())
+        .output()
+        .expect("maintained Lighter handler oracle");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 15);
+    // The production socket uses real VirtualClock time for its connect grace period.
+    std::thread::sleep(std::time::Duration::from_millis(5100));
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            observed.borrow_mut().push(fill.clone());
+            Ok(())
+        }),
+    );
+    let socket = h.runtime.sockets.borrow()[1].1.clone();
+    for case in cases {
+        fills.borrow_mut().clear();
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({
+                    "channel":"account_all:42", "type":"update/account_all",
+                    "data":{"fills":[{"orderId":case["label"], "side":"BUY", "symbol":"BTC",
+                        "price":"49000", "size":"0.1", "timestamp":case["timestamp"]}]}
+                })
+                .to_string(),
+            )));
+        h.runtime.pump();
+        let mut expected = case["expected"].as_array().unwrap().clone();
+        for fill in &mut expected {
+            for field in ["price", "amount"] {
+                fill[field] = json!(fill[field].as_f64().unwrap());
+            }
+        }
+        let actual = fills.borrow();
+        assert_eq!(actual.len(), expected.len(), "real private frame: {case}");
+        for (actual, expected) in actual.iter().zip(&expected) {
+            let fields = expected.as_object().expect("source fill object");
+            assert_eq!(actual.own_keys().len(), fields.len());
+            for (key, expected) in fields {
+                assert!(actual.has_own(key), "source fill key {key}: {case}");
+                let value = actual.get(key).unwrap();
+                match expected {
+                    Value::Number(number) => {
+                        let safe_cex_exchange::js_runtime::value::Js::Number(number_actual) = value
+                        else {
+                            panic!("native fill Number {key}: {case}");
+                        };
+                        assert_eq!(number_actual.to_bits(), number.as_f64().unwrap().to_bits());
+                    }
+                    Value::String(text) => assert!(
+                        value.strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(text))
+                    ),
+                    _ => panic!("unexpected source fill field {key}: {case}"),
+                }
+            }
+        }
+        assert_eq!(
+            actual
+                .iter()
+                .map(safe_cex_exchange::js_runtime::value::to_json)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            expected,
+            "real private frame: {case}"
+        );
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
 fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
     for name in [ExchangeName::Lighter, ExchangeName::LighterRobinhood] {
         private_account_frame_for_deployment(name);
     }
+}
+
+#[test]
+fn attributed_placement_preserves_nonfinite_tier_alias_precedence() {
+    use std::process::Command;
+    let source = Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args(["-e", r#"
+const fs=require('node:fs'),vm=require('node:vm');
+const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
+const exports={};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('packages/safe-cex/src/exchanges/lighter/lighter.account-tier.ts','utf8'),
+ {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports});
+process.stdout.write(JSON.stringify(['1e400','-1e400','null'].map(raw=>{
+ const wire=`{"code":200,"user_tier_name":${raw},"user_tier":"standard"}`;
+ const tier=exports.extractLighterAccountTierFromPayload(JSON.parse(wire));
+ return {wire,allowed:!tier||exports.isLighterAccountTierEligibleForPartnerAttribution(tier)};
+})));
+"#]).output().expect("maintained account-tier module");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 3);
+    for case in cases {
+        let h = harness(ExchangeName::Lighter, options(), lighter);
+        loaded(&h);
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != LIMITS);
+        h.http.ok(
+            "GET",
+            LIMITS,
+            serde_json::from_str(case["wire"].as_str().unwrap()).unwrap(),
+        );
+        let result = h.drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({}))),
+        ));
+        assert_eq!(
+            result.is_ok(),
+            case["allowed"].as_bool().unwrap(),
+            "real placement: {case}; {result:?}"
+        );
+        assert_eq!(h.http.calls(LIMITS).len(), 1, "actual tier lookup");
+        if case["allowed"] == true {
+            let ids = result.unwrap();
+            assert_eq!(ids.len(), 1);
+            let txs = sent_txs(&h, 0);
+            assert_eq!(txs.len(), 1, "one real signed placement");
+            assert_signed_by_account(&txs[0].1);
+        } else {
+            assert_eq!(result.unwrap_err().message,
+                safe_cex_venue_lighter::account_tier::LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
+            assert!(
+                h.http.calls(SEND_TX).is_empty(),
+                "known Standard tier blocks transaction send"
+            );
+        }
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("lighter");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 1240);
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    let reports = h.runtime.reports.borrow().len();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("lighter")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert_eq!(
+        h.runtime.reports.borrow().len(),
+        reports,
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
 }
