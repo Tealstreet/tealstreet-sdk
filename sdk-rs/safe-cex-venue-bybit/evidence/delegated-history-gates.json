@@ -1,6 +1,6 @@
 {
-  "source_commit": "4630307b3e198ace2fdb77dba29ba0b2f82c3840",
-  "base": "1b55cfc9c32405515d21a632cf771db14c1a2a3b",
+  "source_commit": "1baa1825892747da0fff8c384256753a1c0ec543",
+  "base": "35b178ba1c1b85ec8af881cb4d7ee01b6c01d3db",
   "CARGO_INCREMENTAL": "0",
   "cargo_cwd": "sdk-rs",
   "cargo_jobs": 2,
@@ -39,9 +39,9 @@
         "--include-ignored"
       ],
       "exit": 0,
-      "seconds": 593.78,
+      "seconds": 560.06,
       "log": "/tmp/bybit-history-gate-full-venue.log",
-      "sha256": "3406a784ea18f2d085d6c57f1ed90e5f27f05320ffd42739e4890b42d55770c5"
+      "sha256": "0e654bdcb4a21d5c97abbd3106c0d02d1e8510bdedfa0eefd8a16a99ab410c57"
     },
     {
       "gate": "core-gates",
@@ -64,9 +64,9 @@
         "--include-ignored"
       ],
       "exit": 0,
-      "seconds": 149.01,
+      "seconds": 98.6,
       "log": "/tmp/bybit-history-gate-core-gates.log",
-      "sha256": "2485dc71990212e92f56960ca77efd9344b057d4cd64d1a93aaf1eac183b95fe"
+      "sha256": "05217a1837fa7b045dd01b22e251792612f5ada312e43c68dfb41b094639eaa1"
     },
     {
       "gate": "full-index",
@@ -83,9 +83,9 @@
         "--"
       ],
       "exit": 0,
-      "seconds": 25.55,
+      "seconds": 17.85,
       "log": "/tmp/bybit-history-gate-full-index.log",
-      "sha256": "6874cf88ed79e7d95a778e406bbe727b526de663a600b3cc29f0d45772e1889d"
+      "sha256": "11dab072011db086066d8f15ce737a889135abd01a760db0030a2891d7da6904"
     },
     {
       "gate": "fmt",
@@ -95,7 +95,7 @@
         "--check"
       ],
       "exit": 0,
-      "seconds": 34.74,
+      "seconds": 21.59,
       "log": "/tmp/bybit-history-gate-fmt.log",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
@@ -116,9 +116,9 @@
         "warnings"
       ],
       "exit": 0,
-      "seconds": 49.96,
+      "seconds": 31.99,
       "log": "/tmp/bybit-history-gate-clippy.log",
-      "sha256": "25ea1e61c6b16e0e8a08b9823876d882de2667f41ad0b9cc469de787309d0de8"
+      "sha256": "9eb50847bee070163adf308377c43bb24110cc480596dcf0b8c02a65eee60b10"
     },
     {
       "gate": "wasm-clippy",
@@ -139,46 +139,46 @@
         "warnings"
       ],
       "exit": 0,
-      "seconds": 34.46,
+      "seconds": 12.55,
       "log": "/tmp/bybit-history-gate-wasm-clippy.log",
-      "sha256": "4492530ed76aae417d037b9784da74b44e82871be9ea1f6986ef44ca3544f1db"
+      "sha256": "4fd6a5cd17fe8115a868ad3f988554a17773d205600d2ecc67bc31d85e63c0a9"
     }
   ],
   "additional_gates": [
     {
-      "gate": "latest focused matrix",
-      "log": "/tmp/bybit-history-final-strong-green.log",
+      "gate": "focused matrix in refreshed full-suite replay",
+      "log": "/tmp/bybit-history-refreshed-focused.log",
       "proof": "10 passed; 0 failed; 0 ignored",
-      "sha256": "42f2aca497a62329f5efe09964eda02f69d429e7ed5afef2906c5dfb39a48e8b"
+      "sha256": "47879a0848c1f6c5c12da3adadf68bec78f7b1c84f48b7cf50cd569eff9841fd"
     },
     {
       "gate": "CI wiring",
       "log": "/tmp/bybit-history-wiring.log",
       "proof": "pass 376",
-      "sha256": "aa6ed757dcb003f55f394cc552efd5a6dbfb0f34428b864deaff007f7e267baa"
+      "sha256": "251bc93de58e7d3b1e449ee2d0ceaf9ccaf1bb2926340286c2f6415740945d6b"
     },
     {
       "gate": "Node cancellation",
       "log": "/tmp/bybit-history-node-cancellation.log",
       "proof": "pass 11",
-      "sha256": "64a5e141260976ceb5e8e13171431e107bb9e5399f4ee72ed6db25fe2efcc44d"
+      "sha256": "81f4db78501121e037d63989c58cace7e4fdc4db1bfd1546ae67ce11eafef35f"
     },
     {
       "gate": "TS extraction",
       "log": "/tmp/bybit-history-final-extractor.log",
       "proof": "Would update 0 manifests; 0 added, 0 orphaned symbols.",
-      "sha256": "74d36e665b281023372e92dafdce2cc5494cd140950d0462b828ae4bc5b8aa6e"
+      "sha256": "7a2962ead405bd33d2776962fe1df41d7c60b4f5b9208f62d63d2c1664a868c4"
     }
   ],
   "full_venue": {
     "executables": 74,
-    "passed": 482,
+    "passed": 486,
     "failed": 0,
     "ignored": 0
   },
   "full_index": {
     "rows": 7563,
-    "public_rust_items": 16351
+    "public_rust_items": 16352
   },
   "core_gate_tests": {
     "cancellation": 7,
