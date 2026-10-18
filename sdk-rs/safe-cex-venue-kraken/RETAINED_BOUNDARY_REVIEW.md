@@ -68,3 +68,8 @@ restoration must pass. These controls do not count compiler failures as evidence
 The control leaves `helpers.rs` and `wire.rs` byte-identical to their originals.
 Run full parity index, cancellation/override inventories, fmt check, native/Wasm
 all-target Clippy, extractor check and the registered CI wiring test before READY.
+
+This migration does not close the separate manifest full-block findings (for
+example, comparing different unpaired asset/contract strings before a classifier).
+It measures the twelve existing cases and the named five failures only; no
+manifest status or audit finding is relabeled as parity by this repair.

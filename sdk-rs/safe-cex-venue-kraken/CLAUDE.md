@@ -105,8 +105,9 @@ and nonzero balance-delta supplements prevent same-valued swaps and collapsed
 branches from satisfying these assertions. No local record-field Serde renames
 are involved: the input enum keeps keys and the output is constructed directly.
 This is not an interface-field AST census and makes no inherited-field claim.
-Paired source acceptance/Rust refusal witnesses cover lone surrogates and the
-shared depth budget. Host callback exceptions and resolver order are exercised.
+Paired source/native witnesses retain lone-surrogate units and observe their
+explicit final closed String projection; separate depth-budget refusals remain.
+Host callback exceptions and resolver order are exercised.
 
 Utility porting gate: `cargo test --manifest-path sdk-rs/Cargo.toml
 -p safe-cex-venue-kraken --test utilities --jobs 1` with the same explicit compiler
