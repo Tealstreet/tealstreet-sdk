@@ -193,7 +193,7 @@ fn account_closed_error(id: u32) -> NativeValue {
         ("name", NativeValue::string("AccountClosedError")),
         (
             "message",
-            NativeValue::string(format!("native account {id} is closed")),
+            NativeValue::string(&format!("native account {id} is closed")),
         ),
         ("code", NativeValue::string("ACCOUNT_CLOSED")),
     ])
