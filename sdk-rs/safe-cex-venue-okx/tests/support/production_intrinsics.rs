@@ -1,5 +1,8 @@
 //! Test adapters over the actual production intrinsic dispatcher and JS values.
 //! Fixture callbacks supply external operations; intrinsic semantics live in src.
+#[path = "binding_harness.rs"]
+#[allow(dead_code)]
+mod binding;
 #[path = "../../src/binding/intrinsics.rs"]
 mod table;
 use safe_cex_exchange::{
@@ -7,10 +10,14 @@ use safe_cex_exchange::{
         promise::Promise,
         value::{Js, Thrown},
     },
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    runtime::ExchangeRuntime,
 };
 use serde_json::{Value, json};
-use std::{future::Future, pin::Pin, rc::Rc};
+use std::{
+    future::Future,
+    rc::Rc,
+    task::{Context, Poll, Waker},
+};
 pub type V = Js;
 pub type E = Thrown;
 struct Host(Js);
@@ -99,51 +106,33 @@ pub fn pack(value: &Js) -> Value {
         _ => panic!("fixture unpacked native value"),
     }
 }
-struct SettledRuntime;
-impl ExchangeRuntime for SettledRuntime {
-    fn monotonic_now_ms(&self) -> f64 {
-        0.0
-    }
-    fn now_ms(&self) -> f64 {
-        0.0
-    }
-    fn sleep(&self, _: u64) -> ExchangeFuture<'static, ()> {
-        panic!("unused settled fixture sleep")
-    }
-    fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
-        panic!("unused settled fixture spawn")
-    }
-    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {
-        panic!("unused settled fixture console")
-    }
-    fn unique_id(&self) -> String {
-        panic!("unused settled fixture UUID")
-    }
-    fn is_worker(&self) -> bool {
-        true
-    }
-    fn random(&self) -> f64 {
-        panic!("unused settled fixture random")
-    }
-    fn report_exception(&self, _: &ExchangeError, _: &Value) {
-        panic!("unexpected fixture exception")
-    }
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
-        panic!("unexpected raw fixture exception")
-    }
-    fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
-        panic!("unused settled fixture worker")
-    }
+std::thread_local! {
+    static RUNTIME: Rc<binding::Runtime> = Rc::default();
 }
 pub fn promise(result: Result<Js, Thrown>) -> Js {
-    let runtime: Rc<dyn ExchangeRuntime> = Rc::new(SettledRuntime);
-    Js::Promise(Promise::settled(&runtime, result))
+    RUNTIME.with(|runtime| {
+        let runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
+        Js::Promise(Promise::settled(&runtime, result))
+    })
 }
 pub fn outcome(value: &Js) -> Result<Js, Thrown> {
     let Js::Promise(p) = value else {
         panic!("fixture native promise")
     };
-    p.result().expect("fixture settled promise")
+    let mut awaited = Box::pin(p.wait());
+    let mut context = Context::from_waker(Waker::noop());
+    RUNTIME.with(|runtime| {
+        assert!(awaited.as_mut().poll(&mut context).is_pending());
+        runtime.pump();
+        assert!(
+            runtime.reports.borrow().is_empty(),
+            "handled fixture rejection"
+        );
+        match awaited.as_mut().poll(&mut context) {
+            Poll::Ready(result) => result,
+            Poll::Pending => panic!("fixture settled promise did not resume after checkpoint"),
+        }
+    })
 }
 pub fn failure() -> Thrown {
     Thrown::new(object(vec![
