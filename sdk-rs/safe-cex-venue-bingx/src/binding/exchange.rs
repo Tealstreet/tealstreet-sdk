@@ -28,7 +28,7 @@ pub struct BingxExchange {
 }
 impl Drop for BingxExchange {
     fn drop(&mut self) {
-        let _ = self.dispose();
+        safe_cex_exchange::native_final_drop(self.base(), || self.dispose());
     }
 }
 impl BingxExchange {
