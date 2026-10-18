@@ -3,7 +3,7 @@ use safe_cex_exchange::js_runtime::{
     base_exchange, client,
     promise::await_js,
     scope::bound_member,
-    value::{Js, Thrown, arg, from_typed, to_json, to_typed},
+    value::{Js, Thrown, arg, from_typed, to_json, to_retained_input, to_typed},
 };
 use std::rc::{Rc, Weak};
 pub(super) fn install_globals(g: &Js, weak: Weak<Shared>) {
@@ -280,13 +280,14 @@ fn sync(rt: &Rt, n: &str, a: &[Js], c: &[Js]) -> Result<Option<Js>, Thrown> {
         )?,
         "mapOrderStatus" => table_hit(rt, crate::order_maps::map_order_status(&text(&x)?))?,
         "mapOrder" => {
-            let raw = to_json(&x)?;
+            let raw = to_retained_input(&x)?;
+            if !raw.is_object() {
+                return Err(Thrown::type_error("Order row must be an object"));
+            }
             from_typed(
-                &crate::order_mapper::map_order(
-                    raw.as_object()
-                        .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
-                    |ms| (rt.shared.extra.deps.local_wall_time_to_utc)(ms),
-                )
+                &crate::order_mapper::map_order(&raw, |ms| {
+                    (rt.shared.extra.deps.local_wall_time_to_utc)(ms)
+                })
                 .map_err(|e| Thrown::error("Error", &e))?,
             )?
         }
@@ -635,19 +636,38 @@ async fn orders(rt: &Rt) -> Result<Js, Thrown> {
     let value = crate::order_reads::fetch_orders(
         initialization,
         || rt.this.get("jwtManager").is_ok_and(|v| v.truthy()),
-        |e| Ok::<_, Thrown>(data(rt.clone(), e)),
-        |row| match crate::order_mapper::map_order_row(
-            row.as_object()
-                .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
-            |ms| (rt.shared.extra.deps.local_wall_time_to_utc)(ms),
-        )
+        |endpoint| {
+            let rt = rt.clone();
+            Ok::<_, Thrown>(async move {
+                let response = await_js(
+                    rt.this
+                        .get("xhr")?
+                        .call_method("get", vec![Js::str(endpoint)])?,
+                )
+                .await?
+                .get("data")?;
+                if response.is_undefined() {
+                    Ok(None)
+                } else {
+                    Ok(Some(to_retained_input(&response)?))
+                }
+            })
+        },
+        |row| match crate::order_mapper::map_order_row(row, |ms| {
+            (rt.shared.extra.deps.local_wall_time_to_utc)(ms)
+        })
         .map_err(|e| Thrown::error("Error", &e))?
         {
             Ok(order) => Ok(Some(order)),
             Err(refusal) => {
                 let received = refusal
                     .value
-                    .map_or_else(|| "undefined".into(), |value| value.to_string());
+                    .as_ref()
+                    .map(safe_cex_num::js_retained_json_stringify)
+                    .transpose()
+                    .map_err(coercion)?
+                    .flatten()
+                    .unwrap_or_else(|| "undefined".into());
                 h.log(
                     h.logger()?,
                     format!(

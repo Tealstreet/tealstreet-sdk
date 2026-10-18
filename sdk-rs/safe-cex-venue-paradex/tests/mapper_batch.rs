@@ -438,7 +438,7 @@ fn actual_typescript_mapper_batch() {
         assert_json(&input, &case["input"], "batch_live_input_content");
         let row = input.as_object().unwrap();
         let local_calls = Cell::new(0);
-        let result = map_order(row, |ms| {
+        let result = map_order(&serde_json::Value::Object(row.clone()).into(), |ms| {
             local_calls.set(local_calls.get() + 1);
             ms
         });
@@ -592,7 +592,7 @@ fn actual_typescript_mapper_batch() {
     }
     assert_eq!(completed_channels, 7, "batch_completed_channels");
     let mut raw = base();
-    let order = map_order(raw.as_object().unwrap(), |ms| ms).unwrap();
+    let order = map_order(&raw.clone().into(), |ms| ms).unwrap();
     raw["extra"]["marker"] = json!("changed-after-map");
     assert!(
         order
