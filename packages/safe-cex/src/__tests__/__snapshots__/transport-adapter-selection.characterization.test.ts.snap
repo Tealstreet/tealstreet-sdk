@@ -236,6 +236,71 @@ exports[`transport adapter selection per exchange > binance 1`] = `
 }
 `;
 
+exports[`transport adapter selection per exchange > binanceinverse 1`] = `
+{
+  "private direct": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://dapi.binance.com",
+  },
+  "private proxy+tunnel-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "private proxy+tunnel-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "private proxy-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+  },
+  "private proxy-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+  },
+  "private tunnel-only": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "public direct": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+  },
+  "public proxy+tunnel-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "public proxy+tunnel-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+  "public proxy-JA": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+  },
+  "public proxy-SG": {
+    "_primaryXhr = _secondaryXhr = xhr": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+    "publicXhr": "default https://dapi.binance.com",
+    "unlimitedXHR": "default https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com",
+  },
+  "public tunnel-only": {
+    "_primaryXhr = _secondaryXhr = xhr": "how:bigInt https://dapi.binance.com",
+    "publicXhr": "how:bigInt https://dapi.binance.com",
+    "unlimitedXHR": "how:bigInt https://dapi.binance.com",
+  },
+}
+`;
+
 exports[`transport adapter selection per exchange > binancepm 1`] = `
 {
   "private direct": {
