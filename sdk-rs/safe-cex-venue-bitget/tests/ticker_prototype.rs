@@ -175,10 +175,10 @@ fn run(scene: &'static str) -> Observed {
     );
     if scene == "symbol-sentinel" {
         assert!(
-            Store::tickers_by_symbol(&store)
+            !Store::tickers_by_symbol(&store)
                 .unwrap()
                 .contains_key("__proto__"),
-            "PROTO native chosen borrowed own-entry view"
+            "PROTO native plain symbol dictionary has no own prototype key"
         );
         let lookup = Store::lookup_ticker_by_symbol(&store, "symbol").unwrap();
         assert!(
@@ -187,8 +187,8 @@ fn run(scene: &'static str) -> Observed {
         );
         assert_eq!(
             lookup.update_id().unwrap(),
-            None,
-            "PROTO native inherited value has no id"
+            Some("undefined".into()),
+            "PROTO native inherited primitive id uses source property-key coercion"
         );
     }
     let key = match scene {
@@ -376,8 +376,9 @@ fn prototype_native_before_source() {
         assert_eq!(handler["file"], file);
         assert_eq!(handler["last_index"], 21, "PROTO final source iteration");
         assert_eq!(
-            handler["getter"]["hasOwnPrototype"], false,
-            "PROTO source getter chosen-view distinction"
+            handler["getter"],
+            json!({"hasOwnPrototype":false,"hasOwnSymbol":false,"inheritedSymbol":"__proto__","idKey":"undefined","prototypeIsRow":true}),
+            "PROTO maintained Store dictionary prototype and inherited primitive shape"
         );
         assert_eq!(
             handler["cases"],
