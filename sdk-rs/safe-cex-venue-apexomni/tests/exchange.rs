@@ -288,7 +288,21 @@ impl ExchangeRuntime for Host {
         Box::new(Task)
     }
     fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
-        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let rendered = if !matches!(severity, "info" | "warning" | "debug") {
+            safe_cex_exchange::runtime::console_text(message)
+        } else {
+            let [message, observed_severity] = message else {
+                panic!(
+                    "BaseExchange.log console observation requires message and severity: {severity}: {message:?}"
+                );
+            };
+            assert!(
+                observed_severity
+                    .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(severity)),
+                "BaseExchange.log console severity argument must match its recorded channel"
+            );
+            safe_cex_exchange::runtime::console_text(std::slice::from_ref(message))
+        };
         let message = rendered.as_str();
         self.record("log", vec![s(message), s(severity)]);
     }
