@@ -5,13 +5,14 @@ use crate::options_patch::{
 use indexmap::IndexMap;
 use safe_cex_exchange::{
     eager::start_eager,
+    native_store::DefaultStore,
     js_runtime::{
         promise::{self, Promise},
         value::{Js, Thrown},
     },
     runtime::{ExchangeError, ExchangeRuntime},
 };
-use safe_cex_store::{Store, store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_store::{Store, virtual_clock::VirtualClock};
 use safe_cex_transport::{TransportProvider, TransportRegistry};
 use safe_cex_types::{ExchangeName, ExchangeOptions, exchange_metadata::get_exchange_metadata};
 use std::{

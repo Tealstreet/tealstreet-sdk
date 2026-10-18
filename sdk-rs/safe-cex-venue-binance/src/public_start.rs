@@ -27,7 +27,7 @@ fn start_public_data_only(base: &BaseExchange) -> Result<(), Box<dyn std::error:
     }
     base.log("Ready to watch public data on Binance", "info")
         .map_err(|error: ExchangeError| -> Box<dyn std::error::Error> { Box::new(error) })?;
-    let mut loaded = base.store.loaded().clone();
+    let mut loaded = base.store.loaded()?.clone();
     loaded.orders = true;
     loaded.balance = true;
     loaded.positions = true;

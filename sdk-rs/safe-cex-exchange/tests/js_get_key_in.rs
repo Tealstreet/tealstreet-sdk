@@ -118,7 +118,7 @@ console.log(JSON.stringify(rows));
         let native = native_runtime();
         let http = client::rest_http_host(native.clone(), Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
         let shared = Rc::new(ScopeShared::new(native, http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()), Js::object(vec![]), ()));
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()), Js::object(vec![]), ()));
         globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
         library::install_library(&shared.globals, Rc::downgrade(&shared));
         let get = shared.globals.get("v").unwrap();

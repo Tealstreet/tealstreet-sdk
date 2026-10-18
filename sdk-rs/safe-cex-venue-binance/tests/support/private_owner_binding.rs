@@ -43,7 +43,7 @@ fn native_private_owner_keeps_family_receiver_defaults_and_store_route() {
             .private
             .on_message(string(native_order_frame(venue, false).to_string()))
             .unwrap();
-        let rows = owner.base.store.orders();
+        let rows = owner.base.store.orders().unwrap();
         assert_eq!(
             rows.len(),
             1,
@@ -130,7 +130,7 @@ fn native_spot_auth_uses_actual_parent_clock_secret_and_socket() {
             Venue::Spot,
             safe_cex_types::ExchangeName::Binancespot,
             serde_json::from_value(json!({"key":key,"secret":secret})).unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             dependencies,
         )
         .unwrap();

@@ -264,7 +264,7 @@ pub fn fixture_with(
 ) -> (
     Rc<safe_cex_venue_paradex::native_exchange::ParadexExchange>,
     Rc<Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
+    Rc<safe_cex_exchange::native_store::DefaultStore>,
     Arc<Wire>,
 ) {
     fixture_with_timezone(options, configure, Rc::new(|ms| ms))
@@ -276,7 +276,7 @@ pub fn fixture_with_timezone(
 ) -> (
     Rc<safe_cex_venue_paradex::native_exchange::ParadexExchange>,
     Rc<Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
+    Rc<safe_cex_exchange::native_store::DefaultStore>,
     Arc<Wire>,
 ) {
     use safe_cex_venue_paradex::native_exchange::{ParadexDependencies, ParadexExchange};
@@ -295,7 +295,7 @@ pub fn fixture_with_timezone(
     #[expect(clippy::arc_with_non_send_sync)]
     let wire = Arc::new(Wire::default());
     configure(&wire);
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let rt = runtime.clone();
     let transport = wire.clone();
     let venue = ParadexExchange::new(

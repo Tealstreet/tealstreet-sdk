@@ -216,7 +216,7 @@ async fn mapped<E>(
         store,
         host.now,
     )
-    .map_err(ServiceError::Coercion)
+    .map_err(ServiceError::from)
 }
 pub async fn fetch_normal_orders<E>(
     store: &dyn Store,
@@ -319,7 +319,7 @@ pub async fn fetch_orders_with_retry<'a, E: std::fmt::Display>(
             let orders = three(normal, algo, trigger).await?;
             let orders = add_inline_tpsl_fallback_orders(&orders, host.now)
                 .map_err(ServiceError::Coercion)?;
-            if orders.is_empty() && !store.orders().is_empty() {
+            if orders.is_empty() && !store.orders()?.is_empty() {
                 log(
                     host.service,
                     "Warning: fetchOrders returned empty but store had orders. Could be valid or API issue.",
@@ -359,7 +359,7 @@ pub async fn fetch_orders_with_retry<'a, E: std::fmt::Display>(
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| "fetchOrders failed after retries".into());
     emit(host.service, Some(&Value::String(text)))?;
-    Ok(store.orders().to_vec())
+    Ok(store.orders()?.to_vec())
 }
 pub async fn fetch_orders<'a, E: std::fmt::Display>(
     _symbols: Option<&[String]>,
@@ -382,7 +382,10 @@ pub async fn fetch_historical_orders<E: std::fmt::Display>(
     let symbol = opts
         .and_then(|o| o.symbol.as_deref())
         .filter(|s| !s.is_empty());
-    let market = symbol.and_then(|s| store.markets_by_symbol().get(s).cloned());
+    let market = match symbol {
+        Some(symbol) => store.markets_by_symbol()?.get(symbol).cloned(),
+        None => None,
+    };
     if symbol.is_some() && market.is_none() {
         return Ok(Vec::new());
     }
@@ -417,9 +420,9 @@ pub async fn fetch_historical_orders<E: std::fmt::Display>(
             for row in rows {
                 if let Some(order) =
                     map_blofin_historical_order(&HistoryInput::from_retained(row.clone()), |id| {
-                        store.markets_by_id().get(id).map(|m| m.symbol.clone())
+                        Ok(store.markets_by_id()?.get(id).map(|m| m.symbol.clone()))
                     })
-                    .map_err(ServiceError::Coercion)?
+                    .map_err(ServiceError::from)?
                 {
                     orders.push(order);
                 }
@@ -530,10 +533,10 @@ fn execution_rows<E>(
         let empty = Value::String(String::new());
         let raw_id = or_fields(row, &["instId", "symbol"])?.unwrap_or(&empty);
         let id = js_string(Some(raw_id)).map_err(ServiceError::Coercion)?;
-        let symbol = if let Some(found) = store.markets_by_id().get(&id) {
+        let symbol = if let Some(found) = store.markets_by_id()?.get(&id) {
             Some(found.symbol.clone())
         } else if raw_id.is_string() {
-            market_id_to_symbol(&id, store)
+            market_id_to_symbol(&id, store)?
         } else {
             // JS fallback keeps the original value; numeric 17 !== string "17".
             None
@@ -656,11 +659,11 @@ async fn fill_rows<E>(
     xhr: &dyn RestAdapter,
 ) -> Result<Vec<Value>, ServiceError<E>> {
     let mut params = Map::new();
-    if let Some(id) = opts
-        .symbol
-        .as_deref()
-        .and_then(|s| symbol_to_market_id(s, store))
-    {
+    let id = match opts.symbol.as_deref() {
+        Some(symbol) => symbol_to_market_id(symbol, store)?,
+        None => None,
+    };
+    if let Some(id) = id {
         params.insert("instId".into(), json!(id));
     }
     if key == "FILLS" {
@@ -714,7 +717,7 @@ pub async fn fetch_historical_fills<E: std::fmt::Display>(
     let Some(symbol) = opts.symbol.as_deref().filter(|s| !s.is_empty()) else {
         return Ok(Vec::new());
     };
-    let market = store.markets_by_symbol().get(symbol).cloned();
+    let market = store.markets_by_symbol()?.get(symbol).cloned();
     let Some(market) = market else {
         return Ok(Vec::new());
     };

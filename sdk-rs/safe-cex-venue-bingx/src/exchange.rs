@@ -169,7 +169,7 @@ impl BingxExchange {
                             return Ok(StartupValue::Markets(0));
                         }
                         let count = markets.len();
-                        let mut loaded = markets_owner.base.store.loaded().clone();
+                        let mut loaded = markets_owner.base.store.loaded()?.clone();
                         loaded.markets = true;
                         markets_owner
                             .base
@@ -212,7 +212,7 @@ impl BingxExchange {
                 &raw.ok_or_else(|| ExchangeError::new("BingX startup ticker result missing"))?,
             )?;
             let count = tickers.len().min(market_count);
-            let mut loaded = self.base.store.loaded().clone();
+            let mut loaded = self.base.store.loaded()?.clone();
             loaded.tickers = true;
             self.base
                 .store
@@ -229,7 +229,7 @@ impl BingxExchange {
                 .log(&format!("Loaded {count} Bingx markets"), "info")?;
         }
         if public_only {
-            let mut loaded = self.base.store.loaded().clone();
+            let mut loaded = self.base.store.loaded()?.clone();
             loaded.balance = true;
             loaded.positions = true;
             loaded.orders = true;
@@ -266,7 +266,7 @@ impl BingxExchange {
                 Box::pin(async move {
                     let fetched = orders.history.fetch_orders().await?;
                     if !orders.base.is_disposed() {
-                        let mut loaded = orders.base.store.loaded().clone();
+                        let mut loaded = orders.base.store.loaded()?.clone();
                         loaded.orders = true;
                         orders
                             .base
@@ -291,7 +291,7 @@ impl BingxExchange {
                             .store
                             .add_or_update_positions_full(fetched)
                             .map_err(ExchangeError::from)?;
-                        let mut loaded = positions.base.store.loaded().clone();
+                        let mut loaded = positions.base.store.loaded()?.clone();
                         loaded.positions = true;
                         positions
                             .base
@@ -310,20 +310,14 @@ impl BingxExchange {
                 Box::pin(async move {
                     let fetched = balance.reads.fetch_balance().await?;
                     if !balance.base.is_disposed() {
-                        let mut loaded = balance.base.store.loaded().clone();
+                        let mut loaded = balance.base.store.loaded()?.clone();
                         loaded.balance = true;
-                        balance
-                            .base
-                            .store
-                            .update(
-                                StoreUpdate {
-                                    balance: Some((*fetched).clone()),
-                                    loaded: Some(loaded),
-                                    ..Default::default()
-                                },
-                                false,
-                            )
-                            .map_err(ExchangeError::from)?;
+                        safe_cex_exchange::native_store::update_balance_and_loaded(
+                            balance.base.store.as_ref(),
+                            &fetched,
+                            &loaded,
+                        )
+                        .map_err(ExchangeError::from)?;
                     }
                     Ok(StartupValue::Unit)
                 }),

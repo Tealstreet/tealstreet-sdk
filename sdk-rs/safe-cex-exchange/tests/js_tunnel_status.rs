@@ -1,5 +1,6 @@
 //! The installed HOW adapter owns settlement; execute real native client/transport.
 #![cfg(all(feature = "native", not(target_arch = "wasm32")))]
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     js_runtime::{
@@ -10,7 +11,6 @@ use safe_cex_exchange::{
     native::native_tealstreet_runtime_with,
     websocket::WsRuntime,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestAdapterVariant, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportError, TransportFuture,

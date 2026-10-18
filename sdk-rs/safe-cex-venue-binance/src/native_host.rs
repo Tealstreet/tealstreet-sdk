@@ -1192,12 +1192,12 @@ impl ExchangeImports for NativeImports {
             let (fills_owner, income_owner) = (owner.clone(), owner.clone());
             let store = owner.base.store.clone();
             let mut settle = move |symbol: &str| {
-                store
-                    .markets_by_symbol()
+                Ok(store
+                    .markets_by_symbol()?
                     .get(symbol)
                     .map(|market| market.quote.clone())
                     .filter(|quote| !quote.is_empty())
-                    .unwrap_or_else(|| "USDT".into())
+                    .unwrap_or_else(|| "USDT".into()))
             };
             let mut exchange = FoldableExchange {
                 fetch_historical_fills: &mut move |options: ExecutionsOptions| {

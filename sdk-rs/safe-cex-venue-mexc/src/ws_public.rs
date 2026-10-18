@@ -111,7 +111,7 @@ impl MexcPublicSocket {
         let market = parent
             .base()
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&symbol)
             .cloned()
             .ok_or_else(|| ExchangeError::new(format!("Market {symbol} not found")))?;
@@ -368,7 +368,7 @@ impl MexcPublicProtocol {
     fn reconcile_tickers(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         let store = socket.store();
         let available = store
-            .markets()
+            .markets()?
             .iter()
             .map(|m| m.symbol.clone())
             .collect::<Vec<_>>();
@@ -384,7 +384,7 @@ impl MexcPublicProtocol {
             .take(100)
             .collect::<Vec<_>>();
         for symbol in symbols {
-            let market = store.markets_by_symbol().get(&symbol).cloned();
+            let market = store.markets_by_symbol()?.get(&symbol).cloned();
             if let Some(market) = market {
                 let subscription = Subscription {
                     sequence: 0,
@@ -609,7 +609,7 @@ pub fn handle_depth_frame(
         .or_else(|| data.and_then(|row| row.get("symbol")));
     let symbol =
         from_mexc_symbol(symbol_value).map_err(|error| ExchangeError::new(error.message))?;
-    let market = store.markets_by_symbol().get(&symbol).cloned();
+    let market = store.markets_by_symbol()?.get(&symbol).cloned();
     let Some(market) = market else {
         return Ok(None);
     };
@@ -804,8 +804,8 @@ pub fn handle_ticker_frame(
         .or_else(|| data.and_then(|row| row.get("symbol")));
     let symbol =
         from_mexc_symbol(symbol_value).map_err(|error| ExchangeError::new(error.message))?;
-    let market = store.markets_by_symbol().get(&symbol).cloned();
-    let current = store.tickers_by_symbol().get(&symbol).cloned();
+    let market = store.markets_by_symbol()?.get(&symbol).cloned();
+    let current = store.tickers_by_symbol()?.get(&symbol).cloned();
     let (Some(market), Some(_current)) = (market, current) else {
         return Ok(false);
     };

@@ -271,7 +271,7 @@ impl WsProtocol for SecondaryProtocol {
         let ticker = parent
             .base()
             .store
-            .markets()
+            .markets()?
             .iter()
             .enumerate()
             .filter(|(i, _)| (*i % 3) as f64 == self.index.get())
