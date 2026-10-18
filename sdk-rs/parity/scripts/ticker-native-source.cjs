@@ -4,16 +4,17 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../../..');
 const { DefaultStore } = require(path.join(root, 'packages/safe-cex/src/store/store.base.ts'));
 const venue = process.argv[2];
-assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot'].includes(venue), `unsupported ticker corpus ${venue}`);
-const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange' }[venue];
-const directory = venue === 'kucoinspot' ? 'kucoin' : venue;
+assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter'].includes(venue), `unsupported ticker corpus ${venue}`);
+const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange' }[venue];
+const directory = { kucoinspot: 'kucoin', hyperliquidspot: 'hyperliquid' }[venue] || venue;
 const Exchange = require(path.join(root, `packages/safe-cex/src/exchanges/${directory}/${venue}.exchange.ts`))[name];
 const fields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'volume', 'quoteVolume', 'fundingRate', 'fundingTime', 'openInterest'];
+if (venue.startsWith('hyperliquid')) fields.push('midPrice');
 const store = new DefaultStore();
 const symbols = ['BTC', 'ETH', 'ADA'];
 const tickers = symbols.map(asset => ({
-  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT` }[venue],
-  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT` }[venue],
+  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1) }[venue],
+  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset }[venue],
   ...Object.fromEntries(fields.map((field, index) => [field, 101 + index])),
 }));
 store.update({ tickers: structuredClone(tickers), markets: tickers.map(t => ({ id: t.id, symbol: t.symbol })) });
@@ -30,7 +31,31 @@ function bits(number) {
   if (Number.isNaN(number)) return '7ff8000000000000';
   const buffer = Buffer.alloc(8); buffer.writeDoubleBE(number); return buffer.toString('hex');
 }
-const channels = venue === 'bitunix'
+const lighterTickerInputs = {
+  last: ['lastPrice', 'last_price', 'lastTradePrice', 'last_trade_price', 'last', 'price'],
+  mark: ['markPrice', 'mark_price', 'mark'], index: ['indexPrice', 'index_price', 'index'],
+  bid: ['bidPrice', 'bid_price', 'bestBidPrice', 'best_bid_price', 'bestBid', 'best_bid', 'b', 'bid.0', 'b.0', 'b.price', 'bid.price', 'bid.p', 'bid.bestPrice', 'bid.best_price', 'b.p', 'b.bestPrice', 'b.best_price', 'bid'],
+  ask: ['askPrice', 'ask_price', 'bestAskPrice', 'best_ask_price', 'bestAsk', 'best_ask', 'a', 'ask.0', 'a.0', 'a.price', 'ask.price', 'ask.p', 'ask.bestPrice', 'ask.best_price', 'a.p', 'a.bestPrice', 'a.best_price', 'ask'],
+  volume: ['volume24h', 'volume_24h', 'volume'], quoteVolume: ['quoteVolume24h', 'quote_volume_24h', 'quoteVolume', 'quote_volume'],
+  openInterest: ['openInterest', 'open_interest', 'oi', 'openInterestUsd', 'open_interest_usd'],
+  fundingRate: ['fundingRate', 'funding_rate', 'currentFundingRate'], percentage: ['priceChange24h', 'price_change_24h'],
+};
+const lighterStatsInputs = {
+  mark: ['mark_price', 'markPrice', 'mark'], index: ['index_price', 'indexPrice', 'index'],
+  last: ['last_trade_price', 'lastTradePrice', 'last', 'price'], volume: ['daily_base_token_volume', 'volume'],
+  quoteVolume: ['daily_quote_token_volume', 'quote_volume'], openInterest: ['open_interest', 'openInterest'],
+  fundingRate: ['current_funding_rate', 'funding_rate'], percentage: ['daily_price_change'],
+  bid: ['best_bid_price', 'bid_price', 'bid'], ask: ['best_ask_price', 'ask_price', 'ask'],
+};
+function putInput(data, key, value) {
+  const [name, member] = key.split('.');
+  if (member === undefined) data[name] = value;
+  else data[name] = member === '0' ? [value, '2'] : { [member]: value };
+}
+const channels = venue === 'lighter' ? { ticker: Object.values(lighterTickerInputs).flat(), tickers: Object.values(lighterTickerInputs).flat(), 'market_stats:all': Object.values(lighterStatsInputs).flat() }
+  : venue === 'hyperliquid' ? { allMids: ['mid'], fastAssetCtxs: ['markPx', 'midPx'] }
+  : venue === 'hyperliquidspot' ? { allMids: ['mid'] }
+  : venue === 'bitunix'
   ? { ticker: ['la', 'o', 'b', 'q'], price: ['mp', 'ip', 'fr', 'ft'], depth_book1: ['b', 'a'] }
   : venue === 'bitrue' ? { ticker: ['close', 'rose', 'vol', 'amount'] }
     : venue === 'apexomni' ? { instrumentInfo: ['p', 'mp', 'xp', 'pr', 'o', 'fr', 'v', 'to'] }
@@ -45,6 +70,22 @@ const channels = venue === 'bitunix'
       store.update({ tickers: structuredClone(tickers) });
       let frames = tickers.map((ticker, index) => {
         const offset = index * 11;
+        if (venue === 'lighter') {
+          const groups = channel === 'market_stats:all' ? lighterStatsInputs : lighterTickerInputs;
+          const data = { symbol: ticker.symbol };
+          for (const [field, aliases] of Object.entries(groups)) {
+            const selected = aliases.includes(key) ? key : aliases[0];
+            const good = { last: 31.5, mark: 37.75, index: 38.25, bid: 29.5, ask: 33.75, volume: 53.25, quoteVolume: 1091.75, openInterest: 91.25, fundingRate: .0025, percentage: .125 }[field] + offset;
+            putInput(data, selected, index === 0 && aliases.includes(key) ? value : String(good));
+          }
+          if (channel === 'market_stats:all') { delete data.symbol; data.market_id = ticker.id; }
+          return channel === 'ticker' ? JSON.stringify({ channel: `ticker/${ticker.id}`, data: { ...data, symbol: undefined } }) : data;
+        }
+        if (venue.startsWith('hyperliquid')) {
+          const data = channel === 'allMids' ? { mid: String(31.5 + offset) } : { markPx: String(37.75 + offset), midPx: String(31.5 + offset) };
+          if (index === 0) data[key] = value;
+          return [ticker.id, channel === 'allMids' ? data.mid : data];
+        }
         if (venue === 'phemex') {
           const data = { openRp: String(19.25 + offset), lastRp: String(31.5 + offset), volumeRq: String(53.25 + offset),
             openInterestRv: String(91.25 + offset), indexRp: String(38.25 + offset), markRp: String(37.75 + offset), fundingRateRr: String(.0025 + index), bid: String(29.5 + offset), ask: String(33.75 + offset) };
@@ -96,6 +137,12 @@ const channels = venue === 'bitunix'
         } else if (index === 0) data[key] = value;
         return JSON.stringify({ ch: channel, symbol: ticker.symbol, data });
       });
+      if (venue === 'lighter' && channel === 'tickers') frames = [JSON.stringify({ channel, data: [frames[1], frames[0], frames[2]] })];
+      if (venue === 'lighter' && channel === 'market_stats:all') frames = [JSON.stringify({ channel, market_stats: Object.fromEntries([1, 0, 2].map(i => [`market-${tickers[i].id}`, frames[i]])) })];
+      if (venue.startsWith('hyperliquid')) {
+        const data = Object.fromEntries([frames[1], frames[0], frames[2]]);
+        frames = [JSON.stringify(channel === 'allMids' ? { channel, data: { mids: data } } : { channel, data: require('node:zlib').deflateRawSync(JSON.stringify(data)).toString('base64') })];
+      }
       if (venue === 'phemex') frames = [JSON.stringify({ method: 'perp_market24h_pack_p.update', data: [frames[1], frames[0], frames[2]] })];
       if (venue === 'apexomni') frames = [JSON.stringify({ topic: 'instrumentInfo.all', data: [frames[1], frames[0], frames[2]] })];
       for (const frame of frames) {
