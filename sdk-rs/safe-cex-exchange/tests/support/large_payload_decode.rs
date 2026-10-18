@@ -167,6 +167,20 @@ pub(super) fn recorded() {
         let decode_ms = start.elapsed().as_secs_f64() * 1000.0;
         let decode_cpu_ms = cpu_ms() - cpu;
         assert_eq!(markets.len(), profile.count);
+        eprintln!("PAYLOAD_PHASE {} capture", profile.name);
+        let cpu = cpu_ms();
+        let start = Instant::now();
+        let captured = to_retained_input(&native).unwrap();
+        let capture_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let capture_cpu_ms = cpu_ms() - cpu;
+        eprintln!("PAYLOAD_PHASE {} retained-decode", profile.name);
+        let cpu = cpu_ms();
+        let start = Instant::now();
+        let decoded: Vec<Market> = captured.decode_native(false).unwrap();
+        let native_decode_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let native_decode_cpu_ms = cpu_ms() - cpu;
+        assert_eq!(decoded.len(), profile.count);
+        eprintln!("PAYLOAD_PHASE {} observation", profile.name);
         let observation = encode(to_retained_input(&from_typed(&markets).unwrap()).unwrap())
             .json_stringify()
             .unwrap()
@@ -178,7 +192,7 @@ pub(super) fn recorded() {
         .unwrap();
         eprintln!(
             "PAYLOAD_RESULT {}",
-            serde_json::json!({"venue":profile.name,"count":markets.len(),"rawBytes":profile.raw_files.iter().map(|p|std::fs::metadata(p).unwrap().len()).sum::<u64>(),"parseMs":parse_ms,"decodeMs":decode_ms,"parseCpuMs":parse_cpu_ms,"decodeCpuMs":decode_cpu_ms,"rawHash":format!("{raw_hash:016x}")})
+            serde_json::json!({"venue":profile.name,"count":markets.len(),"rawBytes":profile.raw_files.iter().map(|p|std::fs::metadata(p).unwrap().len()).sum::<u64>(),"parseMs":parse_ms,"decodeMs":decode_ms,"parseCpuMs":parse_cpu_ms,"decodeCpuMs":decode_cpu_ms,"captureMs":capture_ms,"captureCpuMs":capture_cpu_ms,"nativeDecodeMs":native_decode_ms,"nativeDecodeCpuMs":native_decode_cpu_ms,"rawHash":format!("{raw_hash:016x}")})
         );
     }
 }

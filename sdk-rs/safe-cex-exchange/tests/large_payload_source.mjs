@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const argument = (name) => {
   const value = process.argv.find(v => v.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -27,38 +28,68 @@ function native(value) {
 const profiles = [];
 const bybit = deserialize(readFileSync(bybitMarkets));
 if (bybit.length !== 8110) throw new Error(`recorded Bybit count ${bybit.length}, expected 8110`);
-writeFileSync(`${output}/bybit.markets.json`, JSON.stringify(native(bybit)));
-profiles.push({name:'bybit', count:8110, marketsFile:`${output}/bybit.markets.json`, rawFiles:manifest.filter(x=>x.venue==='bybit').map(x=>x.file)});
-for (const venue of ['okx', 'paradex']) {
+const cpu = () => { const time = process.cpuUsage(); return (time.user + time.system) / 1000; };
+function routeKey(url) {
+  const copy = new URL(url);
+  copy.searchParams.delete('requestId');
+  copy.searchParams.sort();
+  return copy.pathname + copy.search;
+}
+for (const venue of ['bybit', 'okx', 'paradex']) {
   const requests = [];
-  const rawFiles = venue === 'okx' ? manifest.filter(x=>x.venue==='okx').map(x=>x.file) : [`${root}/sdk-rs/safe-cex-ffi/tests/fixtures/live-public/paradex-markets.json`];
-  const routes = venue === 'okx' ? manifest.filter(x=>x.venue==='okx').map(x=>({ route:new URL(x.request.trim().slice(4)),file:x.file })) : [{route:new URL('https://api.prod.paradex.trade/v1/markets'),file:rawFiles[0]}];
+  const rawFiles = venue !== 'paradex' ? manifest.filter(x=>x.venue===venue).map(x=>x.file) : [`${root}/sdk-rs/safe-cex-ffi/tests/fixtures/live-public/paradex-markets.json`];
+  const routes = venue !== 'paradex' ? manifest.filter(x=>x.venue===venue).map(x=>({ route:new URL(x.request.trim().slice(4)),file:x.file })) : [{route:new URL('https://api.prod.paradex.trade/v1/markets'),file:rawFiles[0]}];
+  const bodies = new Map(routes.map(route=>[routeKey(route.route),readFileSync(route.file,'utf8')]));
   const failures = [];
   const server = createServer((request, response) => {
     const observed = new URL(request.url.replace(/^\/https?:\/\/[^/]+/, ''), 'http://fixture');
     requests.push(observed.pathname + observed.search);
-    const route = routes.find(x=>x.route.pathname===observed.pathname && x.route.search===observed.search);
-    if (!route) {
+    const body = bodies.get(routeKey(observed));
+    if (body === undefined) {
       failures.push(`unrecorded request ${request.url}`);
       response.writeHead(500); response.end('unrecorded fixture request'); return;
     }
     response.setHeader('Content-Type','application/json');
-    response.end(readFileSync(route.file));
+    response.end(body);
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const { DefaultStore } = await import(`${root}/packages/safe-cex/src/store/store.base.ts`);
   const module = await import(`${root}/packages/safe-cex/src/exchanges/${venue}/${venue}.exchange.ts`);
-  const Constructor = module[venue==='okx'?'OKXExchange':'ParadexExchange'];
-  const exchange = new Constructor(venue,{key:'',secret:'',publicDataOnly:true,hostedMode:true,overrideProxyUrl:`http://127.0.0.1:${server.address().port}`,tuning:{consoleLogging:false}},new DefaultStore());
-  const markets = await exchange.fetchMarkets();
+  const Constructor = module[{bybit:'BybitExchange',okx:'OKXExchange',paradex:'ParadexExchange'}[venue]];
+  const exchange = new Constructor(venue,{key:'',secret:'',publicDataOnly:true,hostedMode:true,enableOptionMarkets:true,overrideProxyUrl:`http://127.0.0.1:${server.address().port}`,tuning:{consoleLogging:false}},new DefaultStore());
+  const originalParse = JSON.parse;
+  const rawBodies = new Set(bodies.values());
+  let parseMs=0,parseCpuMs=0,parseCount=0,waiting=0,waitStart,waitCpuStart,waitMs=0,waitCpuMs=0;
+  JSON.parse = function(text,...args) {
+    if (!rawBodies.has(text)) return originalParse.call(this,text,...args);
+    const start=performance.now(), startCpu=cpu();
+    try { return originalParse.call(this,text,...args); }
+    finally { parseMs+=performance.now()-start; parseCpuMs+=cpu()-startCpu; parseCount++; }
+  };
+  const get = exchange.xhr.get;
+  exchange.xhr.get = function(...args) {
+    if (waiting++===0) { waitStart=performance.now(); waitCpuStart=cpu(); }
+    return get.apply(this,args).finally(()=>{
+      if (--waiting===0) { waitMs+=performance.now()-waitStart; waitCpuMs+=cpu()-waitCpuStart; }
+    });
+  };
+  let markets, timing;
+  const start=performance.now(), startCpu=cpu();
+  try {
+    markets = await exchange.fetchMarkets();
+    const fetchMs=performance.now()-start,fetchCpuMs=cpu()-startCpu;
+    timing={fetchMs,fetchCpuMs,parseMs,parseCpuMs,mapMs:fetchMs-waitMs,mapCpuMs:fetchCpuMs-waitCpuMs,parseCount};
+  } finally { JSON.parse=originalParse; exchange.xhr.get=get; }
   await exchange.dispose();
   server.closeAllConnections(); await new Promise(r=>server.close(r));
   assert.deepEqual(failures, []);
-  assert.deepEqual(requests, routes.map(x=>x.route.pathname + x.route.search));
-  assert.equal(markets.length, {okx:509,paradex:66}[venue], 'complete recorded market census');
+  assert.deepEqual(requests.map(url=>routeKey(new URL(url,'http://fixture'))).sort(), routes.map(x=>routeKey(x.route)).sort());
+  assert.equal(parseCount,routes.length,'each recorded response uses the actual JSON parser');
+  assert.equal(markets.length, {bybit:8110,okx:509,paradex:66}[venue], 'complete recorded market census');
+  if (venue==='bybit') assert.deepEqual(native(markets),native(bybit),'complete captured Bybit output');
   writeFileSync(`${output}/${venue}.markets.json`,JSON.stringify(native(markets)));
   profiles.push({name:venue,count:markets.length,marketsFile:`${output}/${venue}.markets.json`,rawFiles});
-  console.log({venue,markets:markets.length,requests});
+  console.log('SOURCE_PAYLOAD_RESULT',JSON.stringify({venue,markets:markets.length,...timing,parseMapMs:timing.parseMs+timing.mapMs,parseMapCpuMs:timing.parseCpuMs+timing.mapCpuMs,requests}));
 }
 writeFileSync(`${output}/manifest.json`,JSON.stringify(profiles,null,2));
 console.log({bybit:bybit.length,manifest:`${output}/manifest.json`});
