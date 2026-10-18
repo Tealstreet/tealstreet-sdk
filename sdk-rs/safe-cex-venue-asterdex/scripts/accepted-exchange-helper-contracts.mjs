@@ -53,8 +53,9 @@ for (const row of results) {
   assert.deepEqual(row.failures, [], row.name);
   assert.ok(!row.classificationOnly, `${row.name}: actual native execution required`);
 }
-console.log('Aster exchange-helper batch: 8 actual production-native owners, zero failures.');
-console.log('Scope excludes other owners, aliases, locals, features and wasm; this is not a full package gate.');
+assert.equal(selected.reduce((count, name) => count + contracts[name].cases.length, 0), 48);
+console.log('Aster exchange-helper batch: 12 actual production-native owners / 48 cases, zero failures.');
+console.log('Scope is exactly these twelve native function owners; other full-matrix obligations remain.');
 
 const source = spawnSync(process.execPath, [fileURLToPath(new URL('./accepted-exchange-helper-source.cjs', import.meta.url))], {cwd: workspace, encoding: 'utf8', env: process.env});
 assert.equal(source.status, 0, `maintained-source expectation check failed: ${source.stderr}`);

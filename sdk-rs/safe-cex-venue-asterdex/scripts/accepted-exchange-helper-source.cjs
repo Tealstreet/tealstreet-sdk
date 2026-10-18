@@ -25,6 +25,20 @@ const members = selected.map(name => {
 });
 const precision = compile(fs.readFileSync(path.join(root, 'packages/safe-cex/src/utils/ccxt_helpers/precision.ts'), 'utf8'));
 const { Oracle } = compile(`${enums}\n${idSource}\nexport class Oracle { ${members.join('\n')} }`, {precisionToString: precision.precisionToString, LogSeverity: {Info:'info', Warning:'warning', Error:'error'}});
+const load = require('./load-module.cjs');
+const failure = load('packages/safe-cex/src/utils/httpFailure.ts', [], {});
+const context = load('packages/safe-cex/src/utils/httpFailureContext.ts', [], {'./httpFailure':failure});
+const baseAst = ast('packages/safe-cex/src/exchanges/base.ts');
+const baseClass = baseAst.statements.find(node => ts.isClassDeclaration(node) && node.name.text==='BaseExchange');
+assert.ok(baseClass);
+const emitMethod = baseClass.members.find(node => node.name?.getText(baseAst)==='emitAndLogError');
+assert.ok(emitMethod);
+const { BaseOracle } = compile(`export class BaseOracle { ${printer.printNode(ts.EmitHint.Unspecified,emitMethod,baseAst)} }`, {
+  readHttpFailureContext:context.readHttpFailureContext,
+  reportException:()=>{},
+  formatErrorForSentry:()=>{throw Error('unexpected enhanced error in string guard fixture');},
+  console:{error:()=>{},trace:()=>{},warn:()=>{}},
+});
 const ex = new Oracle();
 const bits = value => { const bytes=Buffer.alloc(8); bytes.writeDoubleBE(value); return bytes.toString('hex'); };
 const result = action => { try { action(); return {ok:true}; } catch(error) { return {ok:false,name:error.name,message:error.message}; } };
@@ -66,7 +80,9 @@ const adapters = {
   assert_v3_feature: input => {
     ex.apiVersion=input.version;
     const events=[];
-    ex.emitAndLogError=message=>events.push(message);
+    ex.options={};ex.isDisposed=false;ex.name='asterdex';
+    ex.emitter={emit:(event,payload)=>{assert.equal(event,'error');events.push(payload);}};
+    ex.emitAndLogError=BaseOracle.prototype.emitAndLogError;
     try {ex.assertV3Feature(input.feature);return {ok:true,message:null,events};}
     catch(error){return {ok:false,message:error.message,events};}
   },
@@ -99,6 +115,6 @@ async function main(){
     }
   }
   assert.equal(count,41);assert.equal(sourceBoundary,3);assert.equal(nativeOnly,4);
-  console.log('Aster exchange-helper source: 41 exact cases +3 documented shared-output boundary cases PASS; 4 Rust-only retained pointer invariants remain native probes.');
+  console.log('Aster exchange-helper source: 41 exact cases +3 documented shared-output boundary cases PASS; 4 Rust-only pointer cases use the native runner.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});
