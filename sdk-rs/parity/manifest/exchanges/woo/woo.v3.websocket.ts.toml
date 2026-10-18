@@ -621,18 +621,18 @@ note = "CHOSEN: Maps to safe-cex-venue-woo/src/v3_ws_private.rs::decode_woo_v3_w
 [[symbol]]
 ts = "WooV3WsSequenceResult"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ws_state.rs::WooV3WsSequenceResult"
-status = "divergent"
-note = "CHOSEN: Maps to safe-cex-venue-woo/src/v3_ws_state.rs::WooV3WsSequenceResult. An owned mutable map-only native enum replaces two source Readonly structural branches. Declaration decoding enforces accepted true/false, sequence-gap and requiresFreshSnapshot=true literals; public bool/String fields deliberately widen native construction. Exhaustive numeric output registration retains accepted next timestamp and separate gap expected/actual timestamps, including signed zero and infinity. Native variant and every field are asserted. ws_state uses the actual whole TypeScript module with decoded-native assertions before any wire projection. This row enables no live socket, credentials, timer or automatic subscription lifecycle."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 sequence scaffold with no production TypeScript caller. Only the maintained audit test references advanceWooV3OrderBookSequence; the constructed whole-class/import-graph probe loads no V3 module and the actual native receiver exposes no sequence member. Rust callers were only this isolated helper and ws_state facade cases, so its function, result enum, orphan codecs and exact oracle/control tail are retired. The real legacy listenOrderBook snapshot/delta/cleanup path remains covered by binding_streams. See FIX_AUDIT_LEDGER.md row 46; no standalone algorithm-parity claim."
 
 [[symbol]]
 ts = "advanceWooV3OrderBookSequence"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ws_state.rs::advance_woo_v3_order_book_sequence"
-status = "divergent"
-note = "CHOSEN: Maps to safe-cex-venue-woo/src/v3_ws_state.rs::advance_woo_v3_order_book_sequence. Typed f64 input and an immutable borrowed update exclude malformed dynamic/prototype update values; Result messages replace Error identity and owned records replace frozen outputs. Only the expected timestamp is validated as a safe nonnegative integer, exactly as source; update.previousTimestamp/ timestamp are not newly validated. Number equality admits -0 versus 0, gaps retain both observed timestamps, and accepted updates retain the next timestamp bits. Nine source cases assert native branches and all fields. ws_state uses the actual whole TypeScript module with decoded-native assertions before any wire projection. This row enables no live socket, credentials, timer or automatic subscription lifecycle."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 sequence scaffold with no production TypeScript caller. Only the maintained audit test references advanceWooV3OrderBookSequence; the constructed whole-class/import-graph probe loads no V3 module and the actual native receiver exposes no sequence member. Rust callers were only this isolated helper and ws_state facade cases, so its function, result enum, orphan codecs and exact oracle/control tail are retired. The real legacy listenOrderBook snapshot/delta/cleanup path remains covered by binding_streams. See FIX_AUDIT_LEDGER.md row 46; no standalone algorithm-parity claim."
 
 [[symbol]]
 ts = "WooV3WsSubscriptionState"
