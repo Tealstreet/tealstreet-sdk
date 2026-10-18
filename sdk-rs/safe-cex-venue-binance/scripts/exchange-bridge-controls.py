@@ -17,7 +17,7 @@ COMMAND = ["node", "safe-cex-parity/scripts/accepted-set.mjs",
            "--package=safe-cex-venue-binance", "--jobs=1", "--measure"]
 COMMAND += ["--owner=" + name for name in OWNERS]
 FAULTS = [
-    (OWNERS[0], "exchange_classes.rs", "Rc::new(ExchangeError::new(message))", 'Rc::new(ExchangeError::new(format!("wrong:{0}", message.into())))'),
+    (OWNERS[0], "exchange_classes.rs", "Rc::new(ExchangeError::new(message))", 'Rc::new(ExchangeError::new({ let message = message.into(); if message == "venue refusal" { "wrong reason".to_owned() } else { message } }))'),
     (OWNERS[1], "exchange_classes.rs", "serde_json::from_str(&text)", 'serde_json::from_str("null")'),
     (OWNERS[2], "exchange_classes.rs", "crate::class_decode::decode(v.clone())", "crate::class_decode::decode(EventValue::Null)"),
 ]
