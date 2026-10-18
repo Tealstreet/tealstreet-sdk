@@ -506,3 +506,13 @@ reuse the shared transport deny-list data without a second String conversion.
 script executes the live utility and exact Spot retry arrow. The three serial
 `api-receiver-controls.py` faults must fail named compiled witnesses and restore
 exactly. Array.join UTF16 behavior is shared-owned and repaired separately in #1037.
+
+
+The three `rest_account` aliases have finite profiles at the actual constructed
+`binding::rt::Rt` host (and explicit `bool` payload for ReadResult), with native
+Serde/conversion detectors and independent invariant expected types. Run
+`RUSTC_BOOTSTRAP=1 node safe-cex-venue-kraken/scripts/handle-alias-contracts.mjs`
+from `sdk-rs`; discovery stays in its separate accepted-inventory target. The
+constructed-Scope tests and three compiled consumer controls are described in
+[READ_ALIAS_REVIEW.md](READ_ALIAS_REVIEW.md). These contracts do not classify
+other hosts, payloads, following aliases, or runtime method behavior by default.
