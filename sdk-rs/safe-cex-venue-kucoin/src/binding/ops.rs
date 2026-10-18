@@ -12,7 +12,7 @@ use crate::{
 use safe_cex_exchange::js_runtime::{
     promise::Promise,
     scope::scope_of,
-    value::{Js, Thrown, arg},
+    value::{FunctionData, Js, Thrown, arg},
 };
 use std::rc::Rc;
 
@@ -165,16 +165,20 @@ pub(crate) fn derive_class(
         *o.proto.borrow_mut() = Some(base_proto);
     }
     let superclass = base;
-    let own: Rc<std::cell::OnceCell<Js>> = Rc::default();
+    let own: Rc<std::cell::OnceCell<std::rc::Weak<FunctionData>>> = Rc::default();
     let slot = own.clone();
     let class = Js::constructor(name, None, move |target, a| {
         let active = slot
             .get()
-            .cloned()
+            .and_then(std::rc::Weak::upgrade)
+            .map(Js::Function)
             .ok_or_else(|| Thrown::type_error("class not initialized"))?;
         ctor(active, target, a)
     });
-    own.set(class.clone())
+    let Js::Function(function) = &class else {
+        unreachable!()
+    };
+    own.set(Rc::downgrade(function))
         .map_err(|_| Thrown::type_error("class already initialized"))?;
     class.define("prototype", proto)?;
     class.set("__proto__", superclass)?;
