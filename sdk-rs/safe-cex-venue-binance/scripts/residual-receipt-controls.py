@@ -7,6 +7,7 @@ Restore exact production bytes and require all four owners to pass afterwards.
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,9 +58,16 @@ for owner, filename, before, after in FAULTS:
     path = ROOT / "safe-cex-venue-binance/src" / filename
     original = path.read_bytes()
     text = original.decode()
-    assert text.count(before) == 1, owner
+    # The PM duplicate may still exist until #938 lands. Locate the assigned
+    # function, never mutate its separately owned sibling by a global replace.
+    start = re.search(r"\bfn " + re.escape(owner.split("::")[-1]) + r"[<(]", text)
+    assert start, owner
+    following = re.search(r"\n(?:pub )?(?:async )?fn ", text[start.end():])
+    end = start.end() + following.start() if following else len(text)
+    body = text[start.start():end]
+    assert body.count(before) == 1, owner
     try:
-        path.write_text(text.replace(before, after))
+        path.write_text(text[:start.start()] + body.replace(before, after) + text[end:])
         rows = measure(owner.split("::")[-1] + "-red")
         fault = next(row for row in rows if row["name"] == "safe_cex_venue_binance::" + owner)
         assert fault["failures"], (owner, rows)
