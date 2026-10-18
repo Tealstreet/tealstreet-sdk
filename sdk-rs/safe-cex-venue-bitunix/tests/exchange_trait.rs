@@ -184,14 +184,16 @@ fn calls(wire: &support::Wire) -> Vec<(String, String, Value)> {
         .drain(..)
         .map(|r| {
             let body = match r.body {
-                Some(safe_cex_transport::RestBody::Untransformed(v)) => v,
+                Some(safe_cex_transport::RestBody::Untransformed(v)) => v.into_value().unwrap(),
                 Some(safe_cex_transport::RestBody::Encoded(b)) => {
                     serde_json::from_slice(&b).unwrap()
                 }
-                Some(safe_cex_transport::RestBody::Transformed(t)) => match t.value() {
-                    Value::String(s) => serde_json::from_str(s).unwrap(),
-                    v => v.clone(),
-                },
+                Some(safe_cex_transport::RestBody::Transformed(t)) => {
+                    match &t.value().clone().into_value().unwrap() {
+                        Value::String(s) => serde_json::from_str(s).unwrap(),
+                        v => v.clone(),
+                    }
+                }
                 None => Value::Null,
             };
             (r.method.to_uppercase(), r.url, body)
@@ -207,11 +209,15 @@ fn wire_request(wire: &support::Wire, path: &str) -> (Vec<(String, String)>, Str
         .find(|r| r.url == path)
         .expect("request sent");
     let raw = match &r.body {
-        Some(safe_cex_transport::RestBody::Transformed(t)) => match t.value() {
-            Value::String(s) => s.clone(),
-            v => v.to_string(),
-        },
-        Some(safe_cex_transport::RestBody::Untransformed(v)) => v.to_string(),
+        Some(safe_cex_transport::RestBody::Transformed(t)) => {
+            match &t.value().clone().into_value().unwrap() {
+                Value::String(s) => s.clone(),
+                v => v.to_string(),
+            }
+        }
+        Some(safe_cex_transport::RestBody::Untransformed(v)) => {
+            v.clone().into_value().unwrap().to_string()
+        }
         Some(safe_cex_transport::RestBody::Encoded(b)) => String::from_utf8(b.clone()).unwrap(),
         None => String::new(),
     };

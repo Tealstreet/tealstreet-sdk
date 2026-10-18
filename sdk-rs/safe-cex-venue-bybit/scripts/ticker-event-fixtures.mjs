@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const root=new URL('../../../packages/safe-cex/src/exchanges/bybit/',import.meta.url);
@@ -14,6 +15,16 @@ for(const [variant,category] of [['bybit','linear'],['bybit','inverse'],['bybiti
  const method=cls.members.find(m=>m.name?.getText()==='handleTickersEvent');
  // Arrow lexical this is supplied by evaluating inside an ordinary factory.
  const make=vm.runInNewContext(ts.transpileModule(`(function(){return ${method.initializer.getText(file)};})`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText.replace(/;\s*$/,''));
+ const failure=Object.assign(new Error('ticker subscriber rejected'),{name:'TickerSubscriberError',response:{status:418}});
+ const committed={...initial};let later=0;
+ const listeners=[()=>{throw failure;},()=>{later++;}];
+ const failingStore={tickersBySymbol:{BTCUSDT:committed},updateTicker(t,patch){Object.assign(t,patch);for(const listener of listeners)listener();}};
+ assert.throws(()=>make.call({parent:{store:failingStore}})({data:{symbol:'BTCUSDT',lastPrice:'42'}}),e=>e===failure,`${variant}: subscriber error identity`);
+ assert.equal(committed.last,42,`${variant}: ticker commit precedes rejection`);
+ assert.equal(later,0,`${variant}: rejection stops subsequent work`);
+ for(const data of [{symbol:{toString:null}},{symbol:'BTCUSDT',lastPrice:{toString:null}}]) {
+  assert.throws(()=>make.call({parent:{store:failingStore}})({data}),e=>e.name==='TypeError',`${variant}: coercion error class`);
+ }
  const add=frame=>{
   const ticker={...initial};let calls=0,notifications=0,error;
   const store={tickersBySymbol:{BTCUSDT:ticker},updateTicker(t,patch){calls++;if(t===ticker){Object.assign(t,patch);if(Object.keys(patch).length)notifications++;}}};

@@ -1214,3 +1214,77 @@ fn fetch_market_leverage_refusals_keep_siblings() {
 fn refresh_market_leverage_refusals_keep_siblings() {
     market_leverage_refusal_case(true);
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bingx");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 140);
+    for name in [ExchangeName::Bingx] {
+        let mut opts = options();
+        opts.public_data_only = Some(true);
+        let h = harness(name, opts, |_| {});
+        let seed = ticker_coercion::seed("bingx");
+        let markets = seed
+            .iter()
+            .map(|ticker| {
+                serde_json::from_value(serde_json::json!({
+            "id":ticker.id,"symbol":ticker.symbol,"base":"fixture","quote":"USDT","active":true,
+            "precision":{"amount":0.01,"price":0.25},
+            "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":20}}
+        })).unwrap()
+            })
+            .collect();
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                tickers: Some(seed.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for slot in [SocketSlot::Public] {
+            let socket = h.venue().base().get_socket(slot).unwrap();
+            socket.connect_and_subscribe(false).unwrap();
+            for _ in 0..8 {
+                h.runtime.pump();
+            }
+            assert!(
+                socket.is_connected(),
+                "production bingx ticker socket connects"
+            );
+        }
+        for case in source["cases"].as_array().unwrap() {
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(seed.clone()),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+            for frame in case["frames"].as_array().unwrap() {
+                socket
+                    .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                    .unwrap();
+                h.runtime.pump();
+            }
+            ticker_coercion::assert_native(&h.store.tickers(), case);
+        }
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{:?}",
+            h.runtime.reports.borrow()
+        );
+        h.venue().dispose().unwrap();
+    }
+}

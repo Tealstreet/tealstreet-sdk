@@ -237,7 +237,9 @@ impl RestAdapter for Wire {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(body),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+                ),
             })
         })
     }
@@ -276,8 +278,12 @@ impl Wire {
                     .body
                     .as_ref()
                     .and_then(|b| match b {
-                        safe_cex_transport::RestBody::Transformed(v) => Some(v.value().clone()),
-                        safe_cex_transport::RestBody::Untransformed(v) => Some(v.clone()),
+                        safe_cex_transport::RestBody::Transformed(v) => {
+                            Some(v.value().clone().into_value().unwrap())
+                        }
+                        safe_cex_transport::RestBody::Untransformed(v) => {
+                            Some(v.clone().into_value().unwrap())
+                        }
                         safe_cex_transport::RestBody::Encoded(bytes) => {
                             serde_json::from_slice(bytes).ok()
                         }
