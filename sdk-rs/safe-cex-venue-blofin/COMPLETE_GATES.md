@@ -135,3 +135,18 @@ three inherited position-adapter findings. Commands/exits/raw logs are in
 Clean static preservation review is bound to0ec1 in
 `complete-evidence/final-review.json`; reviewer ran no gates and excluded evidence
 documents. The final evidence-only commit changes no gate inputs.
+
+## Partial-fill refresh
+
+The production `native_ping_latency` regression starts `BlofinNativeExchange`,
+loads its market through REST, then sends six orders frames through the private
+socket. Native emitter values assert four execution prices (100, 101.8, 103,
+106), exact base quantities, order identity and timestamps. An older frame and
+a terminal replay emit nothing; no JSON projection grades native numbers.
+
+Current-master control `6b2050d0f7323cd9f42b62c8cf731f4df05dd784` substituted
+only the production private-topic handler: it compiled, then the named test
+failed with five fills rather than four. Exact restoration passed. The scoped
+TypeScript partial-fill regression independently failed against that master's
+source handler and passed after exact restoration. These fresh controls do not
+relabel the historical complete-slice controls above.

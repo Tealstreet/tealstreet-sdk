@@ -139,8 +139,8 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
   positionsThrottleTimeout: NodeJS.Timeout | undefined;
   // Per-orderId cumulative-fill / cumulative-fee trackers. Apex order updates
   // carry CUMULATIVE totals (cumSuccessFillSize / cumSuccessFillFee), not deltas.
-  // Differencing against the last total seen per order derives a positive
-  // delta and avoids double-counting against contents.fills rows.
+  // Mirroring Blofin's lastFilledSizeByOrderId pattern lets us derive a positive
+  // delta and avoid double-counting against contents.fills rows.
   private lastCumFilledByOrderId: Map<string, number> = new Map();
   private lastCumFeeByOrderId: Map<string, number> = new Map();
 
