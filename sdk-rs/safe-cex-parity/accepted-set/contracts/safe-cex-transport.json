@@ -3717,7 +3717,9 @@
                 "lifetime": null,
                 "is_mutable": false,
                 "type": {
-                  "primitive": "str"
+                  "slice": {
+                    "primitive": "u16"
+                  }
                 }
               }
             }

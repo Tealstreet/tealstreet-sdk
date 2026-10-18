@@ -259,3 +259,9 @@ Historical fill ISO dates without an offset use the required
 `BingxDependencies.local_wall_time_to_utc` callback; explicit offsets bypass it.
 The native registry supplies its UTC profile explicitly. The real binding test
 compares actual TS executions in Singapore and New York (winter and summer).
+
+Amendment copies preserve Order.reduceOnly presence through PreparedOrderOpts;
+undefined is not reconciled as false. The real native updateOrder test supplies
+own undefined without a raw reduce-only alias, exercises position-side lookup,
+and compares the entire signed cancel-replace body to the maintained TypeScript
+class plus actual API signer/qs/HMAC. Undefined reduceOnly is omitted at the wire.

@@ -402,6 +402,53 @@ impl ApiHost for ClientFactory {
     }
 }
 impl ApiWire for Wire {
+    fn install_request_interceptor(&self, api: Weak<api::DxApi>) -> Result<(), ExchangeError> {
+        let interceptor = Js::function("dxSessionAuth", move |_, args| {
+            let config = arg(&args, 0);
+            let api = api
+                .upgrade()
+                .ok_or_else(|| Thrown::from(ExchangeError::new("DXtrade API dropped")))?;
+            let mut projected = api::DxConfig {
+                request: RestRequest {
+                    url: config.get("url")?.to_display(),
+                    params: if config.get("params")?.is_undefined() {
+                        None
+                    } else {
+                        Some(
+                            safe_cex_exchange::js_runtime::value::to_retained_input(
+                                &config.get("params")?,
+                            )?
+                            .into_value()
+                            .map_err(|error| Thrown::type_error(&error.to_string()))?,
+                        )
+                    },
+                    ..Default::default()
+                },
+                session_retried: false,
+            };
+            api.intercept_request(&mut projected)?;
+            let next = Js::object(vec![]);
+            for (key, value) in config.own_entries()? {
+                next.define_key(&key, value)?;
+            }
+            next.define("url", Js::str(&projected.request.url))?;
+            next.define(
+                "params",
+                from_json(projected.request.params.as_ref().unwrap()),
+            )?;
+            let headers = config.get("headers")?;
+            for (key, value) in projected.request.headers {
+                headers.call_method("set", vec![Js::str(&key), Js::str(&value), Js::Bool(true)])?;
+            }
+            next.define("headers", headers)?;
+            Ok(next)
+        });
+        self.xhr
+            .get("interceptors")?
+            .get("request")?
+            .call_method("use", vec![interceptor])?;
+        Ok(())
+    }
     fn rate_limit(&self, max_rps: f64) -> Result<(), ExchangeError> {
         self.xhr.call_method(
             "__configureRateLimit",
@@ -465,8 +512,7 @@ impl ApiWire for Wire {
                     native.response = to_json(&response).ok();
                 }
                 if let Ok(code) = error.value.get("code")
-                    && !code.is_undefined()
-                    && let Ok(code) = to_json(&code)
+                    && (error.value.has_own("code") || !code.is_undefined())
                 {
                     native.code = Some(code);
                 }

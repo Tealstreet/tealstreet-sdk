@@ -137,7 +137,7 @@ impl Exchange for Owner {
 struct Host {
     owner: std::rc::Weak<Owner>,
     trace: Rc<RefCell<Vec<String>>>,
-    responses: RefCell<Vec<Value>>,
+    responses: RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>,
     failures: Cell<usize>,
 }
 impl HttpHost for Host {
@@ -152,8 +152,10 @@ impl HttpHost for Host {
     }
     fn note_response(&self, response: &RestResponse, request: &RestRequest) {
         self.trace.borrow_mut().push("common-response".into());
-        let value = response.body.clone().into_data().into_value().unwrap();
-        self.responses.borrow_mut().push(value.clone());
+        self.responses
+            .borrow_mut()
+            .push(response.body.clone().into_data());
+        let value = safe_cex_exchange::runtime::response_json_view(&response.body);
         if let Some(owner) = self.owner.upgrade() {
             owner.base.note_http_response(
                 &json!({"status":response.status,"data":value}),
@@ -699,6 +701,65 @@ fn retry_config_cases() -> Vec<Value> {
     assert_eq!(results.len(), 6, "factory_retry_config_native_inventory");
     results
 }
+// JSON.parse produces binary64 values; serde Number lexemes are fixture storage,
+// not the source result. Check native bits before comparing source wire spelling.
+fn assert_native_json(
+    actual: &safe_cex_types::retained_json::RetainedJsonInput,
+    expected: &Value,
+    context: &str,
+) {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    match (actual, expected) {
+        (Input::Float(actual), Value::Number(expected)) => {
+            let expected = safe_cex_num::number_from_string(&expected.to_string());
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{context}: number bits"
+            );
+        }
+        (Input::Lexeme(actual), Value::Number(expected)) => {
+            let actual = safe_cex_num::number_from_string(actual);
+            let expected = safe_cex_num::number_from_string(&expected.to_string());
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{context}: number bits"
+            );
+        }
+        (Input::Array(actual), Value::Array(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{context}: array length");
+            for (actual, expected) in actual.iter().zip(expected) {
+                assert_native_json(actual, expected, context);
+            }
+        }
+        (Input::Object(actual), Value::Object(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{context}: own keys");
+            for (key, value) in actual {
+                let key = String::from_utf16(key).unwrap();
+                assert_native_json(value, expected.get(&key).expect("source own key"), context);
+            }
+        }
+        _ => assert_eq!(
+            actual,
+            &Input::from_value(expected.clone()).unwrap(),
+            "{context}: native value"
+        ),
+    }
+    let expected = Input::from_value(expected.clone()).unwrap();
+    assert_eq!(
+        safe_cex_num::js_retained_json_stringify(actual).unwrap(),
+        safe_cex_num::js_retained_json_stringify(&expected).unwrap(),
+        "{context}: exact source JSON spelling"
+    );
+}
+fn assert_json_numbers(actual: &Value, expected: &Value, context: &str) {
+    assert_native_json(
+        &safe_cex_types::retained_json::RetainedJsonInput::from_value(actual.clone()).unwrap(),
+        expected,
+        context,
+    );
+}
 fn observe(value: &Value) -> Value {
     match value {
         Value::String(text) => {
@@ -712,7 +773,15 @@ fn observe(value: &Value) -> Value {
         }
         Value::Null => json!({"kind":"null","value":null}),
         Value::Bool(value) => json!({"kind":"boolean","value":value}),
-        _ => json!({"kind":"object","value":value}),
+        _ => {
+            // This report crosses the source oracle's JSON.stringify boundary.
+            let input = safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                .unwrap();
+            let wire = safe_cex_num::js_retained_json_stringify(&input)
+                .unwrap()
+                .unwrap();
+            json!({"kind":"object","value":serde_json::from_str::<Value>(&wire).unwrap()})
+        }
     }
 }
 fn transform_cases() -> Vec<Value> {
@@ -806,25 +875,34 @@ fn transform_cases() -> Vec<Value> {
         );
         let observation = if id == "native-lone-surrogate" {
             let error = result.unwrap_err();
+            let response = error
+                .response
+                .as_ref()
+                .expect("factory_transform_native_representation_response");
+            assert_eq!(
+                response.body.clone().into_data(),
+                safe_cex_types::retained_json::RetainedJsonInput::Text(vec![0xd800]),
+                "factory_transform_native_representation_response_units",
+            );
+            assert_eq!(
+                f.host.responses.borrow()[0],
+                response.body.clone().into_data()
+            );
             assert!(
                 error
                     .message
-                    .contains("Axios response representation refused"),
+                    .contains("Bybit response representation refused"),
                 "factory_transform_native_representation_refusal"
-            );
-            assert!(
-                error.response.is_some(),
-                "factory_transform_native_representation_response"
             );
             assert_eq!(
                 f.host.responses.borrow().len(),
-                0,
-                "factory_transform_native_refusal_before_success_hook"
+                1,
+                "factory_transform_native_refusal_after_native_response_hook"
             );
             assert_eq!(
                 f.host.failures.get(),
-                1,
-                "factory_transform_native_representation_failure_hook"
+                0,
+                "factory_transform_native_consumer_refusal_is_not_a_transport_failure"
             );
             json!({"kind":"representation-refusal"})
         } else if id == "raw-own-number-includes-throws" {
@@ -864,7 +942,7 @@ fn transform_cases() -> Vec<Value> {
             );
             assert_eq!(
                 f.host.responses.borrow()[0],
-                value,
+                execution.response.body.clone().into_data(),
                 "factory_transform_native_before_common_hook {id}"
             );
             let expected = match id {
@@ -890,7 +968,11 @@ fn transform_cases() -> Vec<Value> {
                     json!({"retCode":10001,"retMsg":"request rejected","raw_response":serde_json::from_str::<Value>(raw_for_id(id)).unwrap()})
                 }
             };
-            assert_eq!(value, expected, "factory_transform_native_value {id}");
+            assert_json_numbers(
+                &value,
+                &expected,
+                &format!("factory_transform_native_value {id}"),
+            );
             observe(&value)
         };
         let successful_auth = matches!(
@@ -1357,16 +1439,10 @@ fn retry_condition_cases() -> Vec<Value> {
             "retry" => {
                 totals[0] += 1;
                 let result = result.unwrap();
-                assert_eq!(
-                    result
-                        .response
-                        .body
-                        .clone()
-                        .into_data()
-                        .into_value()
-                        .unwrap()["retCode"],
-                    0,
-                    "factory_condition_native_result {id}"
+                assert_native_json(
+                    &result.response.body.clone().into_data(),
+                    &json!({"retCode":0,"retMsg":"OK"}),
+                    &format!("factory_condition_native_result {id}"),
                 );
                 assert_eq!(
                     f.owner.accesses.borrow().len(),
@@ -1392,12 +1468,12 @@ fn retry_condition_cases() -> Vec<Value> {
                     Some(&json!({"retainedCause":71})),
                     "factory_condition_native_original_cause {id}"
                 );
-                assert_eq!(
-                    error.response.unwrap().body,
-                    RestResponseBody::Transformed(
-                        safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap()
-                    ),
-                    "factory_condition_native_original_payload {id}"
+                let response = error.response.unwrap();
+                assert!(matches!(response.body, RestResponseBody::Transformed(_)));
+                assert_native_json(
+                    &response.body.into_data(),
+                    &body,
+                    &format!("factory_condition_native_original_payload {id}"),
                 );
                 assert!(
                     f.owner.accesses.borrow().is_empty(),

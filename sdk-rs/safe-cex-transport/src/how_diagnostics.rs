@@ -34,8 +34,19 @@ fn bounded_string(value: &str) -> String {
     format!("{}...{TRUNCATED}", String::from_utf16_lossy(&utf16[..500]))
 }
 
-fn sensitive_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
+fn sensitive_key(key: &[u16]) -> bool {
+    // The source /i pattern is ASCII and has no Unicode flag. Fold only ASCII
+    // units, retaining lone surrogates and every other unit as match barriers.
+    let key: Vec<_> = key
+        .iter()
+        .map(|&unit| {
+            if (0x41..=0x5a).contains(&unit) {
+                unit + 0x20
+            } else {
+                unit
+            }
+        })
+        .collect();
     [
         "authorization",
         "cookie",
@@ -52,7 +63,14 @@ fn sensitive_key(key: &str) -> bool {
         "access_key",
     ]
     .iter()
-    .any(|pattern| key.contains(pattern))
+    .any(|pattern| {
+        key.windows(pattern.len()).any(|units| {
+            units
+                .iter()
+                .zip(pattern.bytes())
+                .all(|(&unit, byte)| unit == u16::from(byte))
+        })
+    })
 }
 
 pub fn sanitize_for_trade_tunnel_log(value: &Input) -> Input {
@@ -87,10 +105,9 @@ fn sanitize(value: &Input, depth: usize) -> Input {
                 .iter()
                 .take(50)
                 .map(|(key, value)| {
-                    let sensitive = String::from_utf16(key).is_ok_and(|key| sensitive_key(&key));
                     (
                         key.clone(),
-                        if sensitive {
+                        if sensitive_key(key) {
                             Input::Text("[REDACTED]".encode_utf16().collect())
                         } else {
                             sanitize(value, depth + 1)

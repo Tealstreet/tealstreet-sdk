@@ -256,3 +256,16 @@ request outcome counters, whose exact deltas are checked independently against
 the maintained `safeCexAxiosCreate` interceptor running with installed Axios.
 Each successful cursor page increments `ok`; a rejected HTTP 503 increments
 `other`. These telemetry updates do not commit positions, orders, or balances.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` observes 24 cases / 40 price-change and last-trade frames with production token mappings
+through the production socket protocol and DefaultStore. Independent null,
+string, NaN-producing, object, overflow, signed-zero and false fields accompany
+distinct good rows. The maintained TS constructor and actual DefaultStore provide
+native numeric-bit expectations. Fresh TS receivers and advancing native clocks
+isolate numeric mapping from throttle timing. `ticker-native-controls.py polymarket-store polymarket`
+compiles a live publication fault, requires a native assertion failure, then
+restores exact source bytes and requires the named test to pass.
+
+Last-trade updates pass `{ id: tokenId }` as the Store selector. Passing the
+raw token string silently leaves existing prices unchanged. The constructed
+corpus fails with that old binding and passes with the object selector.

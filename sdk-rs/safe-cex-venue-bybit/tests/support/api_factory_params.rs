@@ -220,18 +220,16 @@ pub fn collect_native() -> Vec<Value> {
                     0,
                     "factory_params_native_no_failure_hook {carrier}/{id}"
                 );
-                assert_eq!(
-                    f.host.responses.borrow().as_slice(),
-                    &[json!({"retCode":0,"retMsg":"OK"})],
-                    "factory_params_native_common_response {carrier}/{id}"
+                assert_eq!(f.host.responses.borrow().len(), 1);
+                assert_native_json(
+                    &f.host.responses.borrow()[0],
+                    &json!({"retCode":0,"retMsg":"OK"}),
+                    &format!("factory_params_native_common_response {carrier}/{id}"),
                 );
-                assert_eq!(
-                    execution.response.body.clone().into_data(),
-                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
-                        json!({"retCode":0,"retMsg":"OK"})
-                    )
-                    .unwrap(),
-                    "factory_params_native_returned_response {carrier}/{id}"
+                assert_native_json(
+                    &execution.response.body.clone().into_data(),
+                    &json!({"retCode":0,"retMsg":"OK"}),
+                    &format!("factory_params_native_returned_response {carrier}/{id}"),
                 );
                 assert_eq!(
                     f.emissions.get(),

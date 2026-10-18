@@ -474,7 +474,7 @@ impl PrivateStream {
                 amount,
                 filled,
                 remaining: amount - filled,
-                reduce_only: js_truthy(d.get("R")) || js_truthy(d.get("cp")),
+                reduce_only: (js_truthy(d.get("R")) || js_truthy(d.get("cp"))).into(),
                 last_update: self.parent.virtual_time_ms(),
                 info: (Some(d.clone())).into(),
                 close: (None).into(),

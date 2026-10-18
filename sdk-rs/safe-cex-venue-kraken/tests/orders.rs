@@ -150,7 +150,7 @@ fn fallback(tag: &str, n: f64) -> Order {
         amount: n + 2.5,
         filled: n + 3.75,
         remaining: n + 4.125,
-        reduce_only: true,
+        reduce_only: true.into(),
         close: (None).into(),
         info: (Some(json!({"tag":tag}))).into(),
         time_in_force: (Some(OrderTimeInForce::PostOnly)).into(),
@@ -166,7 +166,7 @@ fn fallback(tag: &str, n: f64) -> Order {
 fn error(name: &str, message: &str, pointer: &Cell<usize>) -> ExchangeError {
     let mut error = ExchangeError::new(message);
     error.name = name.into();
-    error.metadata.code = Some(json!(name));
+    error.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::str(name));
     pointer.set((&*error.metadata as *const _) as usize);
     error
 }

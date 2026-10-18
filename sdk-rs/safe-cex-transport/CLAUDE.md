@@ -78,6 +78,14 @@ use an explicit fallible `into_value` view, never a silent substitute. The core
 legacy Error response view is deliberately lossy while its original RestFailure
 retains the complete native body.
 
+HOW diagnostic redaction matches ASCII sensitive substrings directly over UTF-16
+key units, with the source regex's case-insensitive, non-Unicode semantics. A lone
+surrogate beside `apiKey` cannot bypass redaction; one inside the substring stays
+a match barrier. `tunnel::production_how_logs_redact_sensitive_utf16_keys_without_changing_delivery`
+compares actual HOW request/response logs with the maintained sanitizer across 23
+cases and checks the original native response remains intact. The compiled old
+UTF-8-gated predicate fails the `apiKey` plus high-surrogate case.
+
 **Remote signer JSON replay.** `try_parse_json` parses only object/array STRING
 results with the shared UTF-16 parser. It retains native binary64 values, key
 order, duplicate-key assignment and lone surrogates; non-string values pass

@@ -411,8 +411,8 @@ status = "ported"
 note = "safe-cex-venue-bybit/src/private_snapshot_refresh.rs::schedule_set_trading_stop_snapshot_refresh selects and invokes the actual receiver field with no arguments, then returns undefined; debounce completion is not awaited. Its source initializer and native scheduling calls are exercised together. Full class/constructor binding remains pending."
 
 [[symbol]]
-ts = "BybitExchange#shouldUseLocalRestOrderLifecycleFallback"
-kind = "field-fn"
+ts = "BybitExchange.shouldUseLocalRestOrderLifecycleFallback"
+kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/primary_order_lifecycle.rs::should_use_local_rest_order_lifecycle_fallback"
 status = "ported"
@@ -960,7 +960,7 @@ kind = "field-fn"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Single-order adjusted price/trigger truthiness is repaired in binding/members/orders.rs::place_order: four compiled primary/demo master-red real-binding controls, plus raw option-gate payload and NaN-adjusted trigger controls in adjusted_order_binding. This narrow branch repair does not claim the entire pending placement method."
 
 [[symbol]]
 ts = "BybitExchange#assertOptionOrderPlaceable"
@@ -984,7 +984,7 @@ kind = "method"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Native unknown-outcome classification now short-circuits after the one-payload and caller-client-ID guards, matching source. Four primary/demo actual HTTP controls compiled master-red; a positive caller-ID control retains classifier errors. "
 
 [[symbol]]
 ts = "BybitExchange.placeStopLossOrTakeProfit"

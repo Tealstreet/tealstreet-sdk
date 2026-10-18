@@ -894,6 +894,7 @@ fn production_import_live_fills_emit_each_fill_update_later_positions_and_refres
     f.exchange.base().on(
         "fill",
         Rc::new(move |_, event| {
+            let event = safe_cex_exchange::js_runtime::value::to_json(event).unwrap();
             observed.borrow_mut().push(event.clone());
             Ok(())
         }),
@@ -1319,6 +1320,7 @@ fn seam_observe_fills(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
     f.exchange.base().on(
         "fill",
         Rc::new(move |_, event| {
+            let event = safe_cex_exchange::js_runtime::value::to_json(event).unwrap();
             observed.borrow_mut().push(event.clone());
             Ok(())
         }),
@@ -1555,4 +1557,77 @@ fn production_reconcile_clears_undefined_tif_and_then_stops_rewriting() {
         revision,
         "an identical REST refresh must not rewrite the reconciled order"
     );
+}
+
+#[test]
+fn native_nonfinite_order_size_reaches_the_signed_order_post() {
+    for (amount, expected) in [
+        (f64::NAN, "NaN"),
+        (f64::INFINITY, "Infinity"),
+        (f64::NEG_INFINITY, "-Infinity"),
+    ] {
+        let f = started();
+        let mut opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+            "symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.01,"price":60000
+        }))
+        .unwrap();
+        opts.amount = amount;
+        let result = f
+            .host
+            .block_on(f.exchange.base().place_order(&*f.exchange, opts));
+        assert!(
+            result.is_ok(),
+            "{expected} wire must reach the actual signed order request: {result:?}"
+        );
+        let body = last_body(&f, "exchange:order");
+        assert_eq!(body["action"]["orders"][0]["s"], expected);
+        assert_eq!(body["action"]["orders"][0]["p"], "60000");
+        assert_eq!(body["action"]["orders"][0]["b"], true);
+        assert_eq!(body["action"]["orders"][0]["a"], 0);
+        assert!(
+            body["signature"]["r"]
+                .as_str()
+                .is_some_and(|s| s.len() == 66)
+        );
+        assert_eq!(f.routes.count("exchange:order"), 1);
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("hyperliquid");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 24);
+    let f = started();
+    let wire = seam_socket(&f, "allMids");
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.exchange.base().store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("hyperliquid")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            wire.push(WsEvent::Message(SocketFrame::Text(
+                frame.as_str().unwrap().into(),
+            )));
+            f.host.settle();
+        }
+        ticker_coercion::assert_native(&f.exchange.base().store.tickers(), case);
+    }
+    assert!(
+        f.host.reports.borrow().is_empty(),
+        "{:?}",
+        f.host.reports.borrow()
+    );
+    f.exchange.dispose().unwrap();
 }

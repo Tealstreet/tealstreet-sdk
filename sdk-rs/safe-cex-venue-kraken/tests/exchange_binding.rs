@@ -104,6 +104,105 @@ fn fetch_tickers_reads_the_rest_snapshot_for_known_markets() {
 }
 
 #[test]
+fn futures_candles_refuse_only_nan_timestamp_rows() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/reads-cardinality-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let case = &source["futuresCandleBoundaries"][0];
+    assert_eq!(case["label"], "mixed-NaN-timestamps");
+    assert_eq!(case["result"].as_array().unwrap().len(), 4);
+    let original: Value = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+    let mut multiple = original.clone();
+    multiple["candles"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"time":"bad","open":"99"}));
+    for (body, expected_rows, expected_reports) in [
+        (original, 3, 1),
+        (multiple, 3, 2),
+        (json!({"candles":[{"time":"NaN"},{"time":"bad"}]}), 0, 2),
+    ] {
+        let url = format!("https://futures.kraken.com/api/charts/v1/trade/{SYMBOL}/1m");
+        let h = futures(|http| http.ok("GET", &url, body));
+        let candles = h
+            .drive(
+                h.venue().fetch_ohlcv(
+                    serde_json::from_value(json!({
+                        "symbol":SYMBOL,"interval":"1m","limit":4,"to":1700000000000.0
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            candles.len(),
+            expected_rows,
+            "valid candles survive bad timestamp rows"
+        );
+        for (index, candle) in candles.iter().enumerate() {
+            let expected = &case["result"][index];
+            for (field, actual) in [
+                ("timestamp", candle.timestamp),
+                ("open", candle.open),
+                ("high", candle.high),
+                ("low", candle.low),
+                ("close", candle.close),
+                ("volume", candle.volume),
+            ] {
+                assert_eq!(
+                    format!("{:016x}", actual.to_bits()),
+                    expected[field]["number"].as_str().unwrap(),
+                    "native {field}"
+                );
+            }
+        }
+        let console = h.runtime.console.borrow();
+        let refusals = console
+            .iter()
+            .filter(|(level, message)| level == "error" && message.contains("timestamp=NaN"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refusals.len(),
+            expected_reports,
+            "each refused timestamp is visible"
+        );
+        assert_eq!(h.http.calls(&url).len(), 1);
+    }
+    let url = format!("https://futures.kraken.com/api/charts/v1/trade/{SYMBOL}/1m");
+    let h = futures(|http| {
+        http.ok("GET", &url, json!({"candles":[{
+        "time":1000,"open":"NaN","high":"Infinity","low":"-0","close":"-Infinity","volume":"5"
+    }]}))
+    });
+    let candles = h
+        .drive(
+            h.venue().fetch_ohlcv(
+                serde_json::from_value(json!({
+                    "symbol":SYMBOL,"interval":"1m","to":1700000000000.0
+                }))
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(candles.len(), 1, "only timestamp controls row admission");
+    assert!(candles[0].open.is_nan());
+    assert_eq!(candles[0].high.to_bits(), f64::INFINITY.to_bits());
+    assert_eq!(candles[0].low.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(candles[0].close.to_bits(), f64::NEG_INFINITY.to_bits());
+    assert!(h.runtime.console.borrow().is_empty());
+}
+
+#[test]
 fn private_reads_sign_and_map_orders_positions_and_balance() {
     let h = futures(|http| {
         http.ok("GET", "/v3/openorders", open_orders());
@@ -476,7 +575,10 @@ fn private_auth_error_without_message_logs_js_json_stringify_text() {
     h.venue().base().on(
         "log",
         std::rc::Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut().push(Value::String(
+                String::from_utf16(value.as_str().expect("source log message"))
+                    .expect("fixture log UTF16"),
+            ));
             Ok(())
         }),
     );
@@ -596,6 +698,60 @@ fn place_order_with_stop_loss_places_the_derived_algo_order_through_place_orders
     assert!(stop.contains("orderType=stp"), "{stop}");
     assert!(stop.contains("stopPrice=29000"), "{stop}");
     assert!(stop.contains("side=sell"), "{stop}");
+}
+
+#[test]
+fn spot_place_order_spreads_transaction_ids_by_unicode_code_point() {
+    for (txids, expected) in [
+        (json!(["T-1", "T-2"]), vec!["T-1", "T-2"]),
+        (json!("A💰B"), vec!["A", "💰", "B"]),
+    ] {
+        let h = harness(ExchangeName::Krakenspot, options(), |http| {
+            http.ok(
+                "GET",
+                "/0/public/AssetPairs",
+                json!({"error": [], "result": {"XXBTZUSD": {
+                    "wsname": "XBT/USD", "pair_decimals": 1, "lot_decimals": 8,
+                    "ordermin": "0.0001", "status": "online", "altname": "XBTUSD"
+                }}}),
+            );
+            http.ok(
+                "POST",
+                "/0/private/AddOrder",
+                json!({"error": [], "result": {"txid": txids}}),
+            );
+        });
+        let markets = h.drive(h.venue().fetch_markets()).expect("spot markets");
+        safe_cex_store::Store::update(
+            h.store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .expect("store markets");
+        let ids = h
+            .drive(Box::pin(
+                safe_cex_exchange::exchange::Exchange::base(h.exchange.as_ref()).place_order(
+                    h.venue(),
+                    order(json!({"symbol": "XBT/USD", "type": "limit", "side": "buy",
+                    "amount": 0.5, "price": 30000})),
+                ),
+            ))
+            .expect("spot placement");
+        assert_eq!(
+            ids, expected,
+            "AddOrder txids use JavaScript string iteration"
+        );
+        let requests = h.http.calls("/0/private/AddOrder");
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0].headers["API-Sign"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+        );
+    }
 }
 
 #[test]
@@ -885,11 +1041,23 @@ fn constructed_private_fill_frame_updates_order_and_emits_fill() {
     let fills = fills.borrow();
     assert_eq!(fills.len(), 1);
     let fill = &fills[0];
-    assert_eq!(fill["id"], "o-1");
-    assert_eq!(fill["symbol"], SYMBOL);
-    assert_eq!(fill["side"], "buy");
-    assert_eq!(fill["amount"].as_f64(), Some(0.25));
-    assert_eq!(fill["price"].as_f64(), Some(30002.0));
+    assert!(
+        fill.get("id")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("o-1"))
+    );
+    assert!(
+        fill.get("symbol")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(SYMBOL))
+    );
+    assert!(
+        fill.get("side")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("buy"))
+    );
+    assert_eq!(fill.get("amount").unwrap().as_f64(), Some(0.25));
+    assert_eq!(fill.get("price").unwrap().as_f64(), Some(30002.0));
 }
 #[test]
 fn constructed_private_position_frame_updates_store() {
@@ -1053,10 +1221,25 @@ fn constructed_spot_private_fill_updates_store_and_emits_original_payload() {
         (0.75, 2.25)
     );
     assert_eq!(h.store.orders()[0].status, OrderStatus::Open);
-    assert_eq!(
-        &*fills.borrow(),
-        &[json!({"side":"buy","symbol":"XBT/USD","price":30002.0,"amount":0.25})]
-    );
+    let fills = fills.borrow();
+    assert_eq!(fills.len(), 1);
+    let fill = &fills[0];
+    assert_eq!(fill.own_keys().len(), 4);
+    for (key, expected) in [("side", "buy"), ("symbol", "XBT/USD")] {
+        assert!(fill.has_own(key));
+        assert!(
+            fill.get(key)
+                .unwrap()
+                .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(expected))
+        );
+    }
+    for (key, expected) in [("price", 30002.0_f64), ("amount", 0.25_f64)] {
+        assert!(fill.has_own(key));
+        assert_eq!(
+            fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+            expected.to_bits()
+        );
+    }
 }
 
 #[test]
@@ -1122,4 +1305,248 @@ fn constructed_spot_private_position_topic_preserves_rest_owned_store() {
         0,
         "Spot has no private positions/fill route for this channel"
     );
+}
+
+#[test]
+fn constructed_public_book_frames_keep_source_string_iterables() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/orderbook-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    for (name, family, symbol) in [
+        (ExchangeName::Kraken, "Futures", SYMBOL),
+        (ExchangeName::Krakenspot, "Spot", "XBT/USD"),
+    ] {
+        let h = if family == "Futures" {
+            futures(|_| {})
+        } else {
+            harness(name, options(), |http| {
+                http.ok(
+                    "GET",
+                    "/0/public/AssetPairs",
+                    json!({"error":[],"result":{
+                        "XXBTZUSD":{"wsname":"XBT/USD","pair_decimals":1,"lot_decimals":8,
+                        "ordermin":"0.0001","status":"online","altname":"XBTUSD"}
+                    }}),
+                );
+                http.ok("GET", "/0/public/Ticker", json!({"error":[],"result":{}}));
+            })
+        };
+        loaded(&h);
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let sink = books.clone();
+        let cleanup = h
+            .venue()
+            .listen_order_book(
+                symbol.into(),
+                Rc::new(move |book| {
+                    sink.borrow_mut().push(book);
+                }),
+            )
+            .unwrap();
+        h.runtime.pump();
+        h.runtime.advance(100.0);
+        let socket = h.runtime.sockets.borrow()[0].1.clone();
+        assert!(
+            socket.sent.borrow().iter().any(|wire| {
+                let wire: Value = serde_json::from_str(wire).unwrap();
+                if family == "Futures" {
+                    wire["feed"] == "book" && wire["product_ids"] == json!([symbol])
+                } else {
+                    wire["params"]["channel"] == "book"
+                        && wire["params"]["symbol"] == json!([symbol])
+                }
+            }),
+            "real {family} subscription"
+        );
+        let frame = |snapshot: bool, bids: Value, asks: Value| {
+            let raw = if family == "Futures" {
+                assert!(snapshot);
+                json!({"feed":"book_snapshot","product_id":symbol,"bids":bids,"asks":asks})
+            } else {
+                json!({"channel":"book","type":if snapshot {"snapshot"} else {"update"},
+                    "data":[{"symbol":symbol,"bids":bids,"asks":asks,"checksum":123}]})
+            };
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(raw.to_string())));
+            h.runtime.pump();
+        };
+        let source_snapshot = source["books"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| {
+                row["family"] == family
+                    && row["operation"] == "snapshot"
+                    && row["config"]["bids"] == "ab"
+            })
+            .unwrap();
+        assert!(source_snapshot["failure"].is_null());
+        assert_eq!(source_snapshot["cache"], json!({"bids":[],"asks":[]}));
+        frame(true, json!("ab"), json!([]));
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "{family} source emits the string-side snapshot"
+        );
+        assert!(books.borrow()[0].bids.is_empty() && books.borrow()[0].asks.is_empty());
+        frame(
+            true,
+            json!([{"price":5.5,"qty":7.25},{"price":17.25,"qty":11.5}]),
+            json!([{"price":41.25,"qty":43.5},{"price":37.75,"qty":47.125}]),
+        );
+        assert_eq!(books.borrow().len(), 2);
+        assert_eq!(books.borrow()[1].bids.len(), 2);
+        assert_eq!(books.borrow()[1].asks.len(), 2);
+        if family == "Spot" {
+            let expected = source["books"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| {
+                    row["family"] == family
+                        && row["operation"] == "delta"
+                        && row["config"]["bids"] == "ab"
+                })
+                .unwrap();
+            assert!(expected["failure"].is_null());
+            frame(false, json!("ab"), json!([]));
+            let books = books.borrow();
+            assert_eq!(books.len(), 3, "Spot source emits its string-side delta");
+            for (side, levels) in [("bids", &books[2].bids), ("asks", &books[2].asks)] {
+                let expected = expected["cache"][side].as_array().unwrap();
+                assert_eq!(levels.len(), expected.len());
+                for expected in expected {
+                    let price =
+                        u64::from_str_radix(expected[0]["n"].as_str().unwrap(), 16).unwrap();
+                    let amount =
+                        u64::from_str_radix(expected[1]["n"].as_str().unwrap(), 16).unwrap();
+                    let level = levels
+                        .iter()
+                        .find(|level| {
+                            if f64::from_bits(price).is_nan() {
+                                level.price.is_nan()
+                            } else {
+                                level.price.to_bits() == price
+                            }
+                        })
+                        .unwrap();
+                    if f64::from_bits(amount).is_nan() {
+                        assert!(level.amount.is_nan());
+                    } else {
+                        assert_eq!(level.amount.to_bits(), amount);
+                    }
+                    assert_eq!(level.total.to_bits(), 0.0_f64.to_bits());
+                }
+            }
+        }
+        cleanup().unwrap();
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn constructed_spot_candles_keep_source_date_input_coercion() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/stream-updates-oracle.cjs"
+        ))
+        .arg("--date-inputs")
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["dates"].as_array().unwrap();
+    assert_eq!(cases.len(), 11);
+    let h = harness(ExchangeName::Krakenspot, options(), |http| {
+        http.ok(
+            "GET",
+            "/0/public/AssetPairs",
+            json!({"error":[],"result":{
+                "XXBTZUSD":{"wsname":"BTC/USD","pair_decimals":1,"lot_decimals":8,
+                "ordermin":"0.0001","status":"online","altname":"XBTUSD"}
+            }}),
+        );
+        http.ok("GET", "/0/public/Ticker", json!({"error":[],"result":{}}));
+    });
+    loaded(&h);
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let sink = candles.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTC/USD","interval":"1m"})).unwrap(),
+            Rc::new(move |candle| sink.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    h.runtime.advance(100.0);
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(socket.sent.borrow().iter().any(|wire| {
+        let wire: Value = serde_json::from_str(wire).unwrap();
+        wire["params"] == json!({"channel":"ohlc","symbol":["BTC/USD"],"interval":1})
+    }));
+    for (index, case) in cases.iter().enumerate() {
+        assert!(case["failure"].is_null(), "{case}");
+        let expected = &case["trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["kind"] == "candle")
+            .unwrap()["fields"];
+        let frame = json!({"channel":"ohlc","type":"update","data":[{
+            "symbol":"BTC/USD","interval":1,"interval_begin":case["input"],
+            "open":"17.25tail","high":19.5,"low":23.75,"close":29.125,"volume":31.5
+        }]});
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+        h.runtime.pump();
+        let candles = candles.borrow();
+        assert_eq!(candles.len(), index + 1, "source delivers {case}");
+        let candle = &candles[index];
+        for (name, actual) in [
+            ("timestamp", candle.timestamp),
+            ("open", candle.open),
+            ("high", candle.high),
+            ("low", candle.low),
+            ("close", candle.close),
+            ("volume", candle.volume),
+        ] {
+            let bits = u64::from_str_radix(expected[name]["number"].as_str().unwrap(), 16).unwrap();
+            if f64::from_bits(bits).is_nan() {
+                assert!(actual.is_nan(), "{name}: input={}", case["input"]);
+            } else {
+                assert_eq!(actual.to_bits(), bits, "{name}: input={}", case["input"]);
+            }
+        }
+    }
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
 }

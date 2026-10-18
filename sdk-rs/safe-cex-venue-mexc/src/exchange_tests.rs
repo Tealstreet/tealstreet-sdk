@@ -208,6 +208,7 @@ fn venue_with_runtime_and_key(
         capabilities: ExchangeCapabilities::default(),
         xhr: Rc::new(NoRequests),
         local_to_utc: Rc::new(|v| v),
+        current_time_ms: Rc::new(move || time),
         placed: RefCell::new(BTreeMap::from([
             ("placed".into(), 1.0),
             ("seen".into(), 1.0),
@@ -3177,7 +3178,7 @@ fn mexc_cancel_transport_projection_finding() {
         "MEXC transport rejection leaves native order open"
     );
     assert_eq!(
-        error.code,
+        observed_error_code(&error.code),
         Some(json!("ERR_NETWORK")),
         "MEXC cancellation native code retained"
     );
@@ -3369,7 +3370,7 @@ fn mexc_uncaught_rest_rejections_retain_native_origins() {
             "MEXC REST producer mutation witness {name}"
         );
         assert_eq!(
-            error.code,
+            observed_error_code(&error.code),
             Some(json!("ERR_NETWORK")),
             "MEXC REST native code {name}"
         );
@@ -4515,6 +4516,10 @@ fn mexc_validation_keeps_raw_detail_and_error_precedence() {
         exchange.base.on_args(
             "error",
             Rc::new(move |_, event| {
+                let event: Vec<serde_json::Value> = event
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 events.borrow_mut().push(serde_json::json!(event));
                 Ok(())
             }),
@@ -4633,11 +4638,15 @@ fn mexc_snapshot_reporters_preserve_object_detail_and_listener_failure() {
             let emitted = Rc::new(RefCell::new(Vec::new()));
             let events = emitted.clone();
             let mut original = ExchangeError::new("listener stopped reporting");
-            original.code = Some(json!(777));
+            original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(777)));
             let failure = original.clone();
             exchange.base.on_args(
                 "error",
                 Rc::new(move |_, value| {
+                    let value: Vec<serde_json::Value> = value
+                        .iter()
+                        .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                        .collect();
                     events.borrow_mut().push(serde_json::json!(value));
                     if throws { Err(failure.clone()) } else { Ok(()) }
                 }),
@@ -4787,6 +4796,10 @@ fn mexc_account_reporting_checks_enhancement_before_message_coercion() {
     exchange.base.on_args(
         "error",
         Rc::new(move |_, value| {
+            let value: Vec<serde_json::Value> = value
+                .iter()
+                .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                .collect();
             sink.borrow_mut().push(serde_json::json!(value));
             Ok(())
         }),
@@ -4816,4 +4829,12 @@ fn mexc_account_reporting_checks_enhancement_before_message_coercion() {
         error.name, "TypeError",
         "MEXC getAccount preserves original coercion TypeError"
     );
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
+    })
 }

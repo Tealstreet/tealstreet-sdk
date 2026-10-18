@@ -353,3 +353,16 @@ isGrvtRead; production request classification retains the shared transport
 predicate. The session oracle keeps its other eight groups (84 source cases).
 The helper manifest row is not-applicable, with the live predicate mapped next
 to it; this does not remove any exported builder or browser workflow.
+
+The concrete amendment and cancellation catch callbacks invoke the installed
+`emitAndLogError` reporter. Constructed binding regressions cover preflight
+amendment refusal and SDK account/symbol cancellation failures: reporter metadata,
+console error/trace effects and the absence of premature amendment writes must
+survive. Direct emitter calls lose the source reporter's second argument.
+
+Constructed candle coverage in `tests/exchange_binding.rs` drives REST and raw
+public socket frames for lite/full aliases, nanosecond-string versus numeric
+millisecond timestamps, truthy fallback, reverse REST order and callback cleanup.
+It compares all six native fields against unchanged maintained-source captures,
+including NaN, infinities and signed zero. Run `tests/candle-binding-controls.mjs`
+alone for two compiling live-volume substitutions and exact restoration proof.

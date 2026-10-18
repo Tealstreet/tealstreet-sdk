@@ -5,6 +5,42 @@ use safe_cex_transport::{RestBody, RestFailure, RestRequest, RestResponse, RestR
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Value, json};
 use std::{cell::Cell, collections::BTreeMap, rc::Rc};
+
+#[test]
+fn reviewed_transport_error_origin_clones_preserve_the_same_native_cause() {
+    use safe_cex_transport::provider::{TransportError, TransportErrorOrigin};
+    use std::error::Error;
+
+    let original = TransportErrorOrigin::new(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "signer refused",
+    ));
+    let copied = original.clone();
+    assert_eq!(original, copied);
+    assert!(std::ptr::eq(original.error(), copied.error()));
+    let unrelated = TransportErrorOrigin::new(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "signer refused",
+    ));
+    assert_ne!(original, unrelated);
+    drop(original);
+    let failure = TransportError::Rejected(copied);
+    let cloned_failure = failure.clone();
+    assert!(std::ptr::eq(
+        failure.source().unwrap(),
+        cloned_failure.source().unwrap()
+    ));
+    drop(failure);
+    let cause = cloned_failure
+        .source()
+        .unwrap()
+        .downcast_ref::<std::io::Error>()
+        .unwrap();
+    assert_eq!(cause.kind(), std::io::ErrorKind::PermissionDenied);
+    assert_eq!(cause.to_string(), "signer refused");
+    assert_eq!(cloned_failure.to_string(), "signer refused");
+}
+
 #[test]
 fn reviewed_transformed_data_clone_preserves_payload_and_completed_phase() {
     for (input, header, expected, bytes) in [

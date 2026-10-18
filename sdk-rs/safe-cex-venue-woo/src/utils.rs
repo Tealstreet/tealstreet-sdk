@@ -3,31 +3,60 @@ use safe_cex_types::{OrderSide, PositionSide};
 
 // ts: normalizeSymbol
 pub fn normalize_symbol(value: &str) -> String {
-    let upper = value.to_uppercase();
-    let normalized = upper
-        .rsplit(':')
-        .next()
-        .filter(|v| !v.is_empty())
-        .unwrap_or(&upper);
-    for separator in ['_', '-'] {
-        let parts: Vec<_> = normalized.split(separator).collect();
-        if parts.len() >= 3 {
-            if matches!(parts[0], "PERP" | "SPOT") {
-                return format!("{}{}", parts[1], parts[2]);
+    String::from_utf16(&normalize_symbol_utf16(
+        &value.encode_utf16().collect::<Vec<_>>(),
+    ))
+    .expect("normalizing a Unicode scalar string preserves scalar text")
+}
+
+pub(crate) fn normalize_symbol_utf16(value: &[u16]) -> Vec<u16> {
+    let mut upper = Vec::new();
+    for scalar in char::decode_utf16(value.iter().copied()) {
+        match scalar {
+            Ok(scalar) => {
+                for mapped in scalar.to_uppercase() {
+                    upper.extend_from_slice(mapped.encode_utf16(&mut [0; 2]));
+                }
             }
-            if parts.last() == Some(&"PERP") {
-                return format!("{}{}", parts[0], parts[1]);
+            Err(surrogate) => upper.push(surrogate.unpaired_surrogate()),
+        }
+    }
+    let normalized = upper
+        .rsplit(|unit| *unit == u16::from(b':'))
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&upper);
+    let equals = |units: &[u16], text: &str| units.iter().copied().eq(text.encode_utf16());
+    for separator in *b"_-" {
+        let parts: Vec<_> = normalized
+            .split(|unit| *unit == u16::from(separator))
+            .collect();
+        if parts.len() >= 3 {
+            if equals(parts[0], "PERP") || equals(parts[0], "SPOT") {
+                return [parts[1], parts[2]].concat();
+            }
+            if equals(parts[parts.len() - 1], "PERP") {
+                return [parts[0], parts[1]].concat();
             }
         }
     }
-    if !normalized.contains(['_', '-'])
-        && let Some(base) = normalized.strip_suffix("PERP")
+    if !normalized
+        .iter()
+        .any(|unit| *unit == u16::from(b'_') || *unit == u16::from(b'-'))
+        && normalized.ends_with(&"PERP".encode_utf16().collect::<Vec<_>>())
     {
-        return format!("{base}USDT");
+        let mut result = normalized[..normalized.len() - 4].to_vec();
+        result.extend("USDT".encode_utf16());
+        return result;
     }
     normalized
-        .chars()
-        .filter(|c| !matches!(c, '_' | '-' | '.' | '/' | ':'))
+        .iter()
+        .copied()
+        .filter(|unit| {
+            !b"_-./:"
+                .iter()
+                .any(|separator| *unit == u16::from(*separator))
+        })
         .collect()
 }
 

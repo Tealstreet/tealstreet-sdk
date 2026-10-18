@@ -36,7 +36,12 @@ pub(super) fn from_input(value: Input) -> Js {
     }
 }
 
-pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<Input, Thrown> {
+pub(super) fn capture(
+    value: &Js,
+    depth: usize,
+    present_fields: bool,
+    data_only: bool,
+) -> Result<Input, Thrown> {
     if depth >= 128 {
         return Err(Thrown::type_error("typed value recursion limit exceeded"));
     }
@@ -49,6 +54,9 @@ pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<
         Js::Null | Js::Function(_) | Js::Promise(_) => Input::Null,
         Js::Bool(value) => Input::Bool(*value),
         Js::Number(value) => Input::Float(*value),
+        Js::BigInt(_) if data_only => {
+            return Err(Thrown::type_error("Do not know how to serialize a BigInt"));
+        }
         Js::BigInt(value) => Input::Text(value.to_string().encode_utf16().collect()),
         Js::String(value) => Input::Text(value.to_vec()),
         Js::Array(values) => Input::Array(
@@ -57,7 +65,7 @@ pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<
                 .iter()
                 .map(|value| {
                     value.as_ref().map_or(Ok(Input::Null), |value| {
-                        capture(value, depth + 1, present_fields)
+                        capture(value, depth + 1, present_fields, data_only)
                     })
                 })
                 .collect::<Result<_, _>>()?,
@@ -69,7 +77,10 @@ pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<
                 if !present_fields && (matches!(value, Js::Function(_)) || value.is_callable()) {
                     continue;
                 }
-                fields.push((key.to_vec(), capture(&value, depth + 1, present_fields)?));
+                fields.push((
+                    key.to_vec(),
+                    capture(&value, depth + 1, present_fields, data_only)?,
+                ));
             }
             Input::Object(fields)
         }
@@ -86,7 +97,7 @@ pub(super) fn decode<T: de::DeserializeOwned>(
     } else {
         NativeMode::Normal
     };
-    T::deserialize(NativeInput(capture(value, 0, present_fields)?, mode)).map_err(fault)
+    T::deserialize(NativeInput(capture(value, 0, present_fields, false)?, mode)).map_err(fault)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -208,8 +219,108 @@ impl<'de> Deserializer<'de> for NativeInput {
             )),
         }
     }
+    fn deserialize_i8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-128.0..128.0).contains(&value)
+        {
+            return visitor.visit_i8(value as i8);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_i16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-32768.0..32768.0).contains(&value)
+        {
+            return visitor.visit_i16(value as i16);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_i32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-2147483648.0..2147483648.0).contains(&value)
+        {
+            return visitor.visit_i32(value as i32);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_i64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-2.0f64.powi(63)..2.0f64.powi(63)).contains(&value)
+        {
+            return visitor.visit_i64(value as i64);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_i128<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-2.0f64.powi(127)..2.0f64.powi(127)).contains(&value)
+        {
+            return visitor.visit_i128(value as i128);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..256.0).contains(&value)
+        {
+            return visitor.visit_u8(value as u8);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..65536.0).contains(&value)
+        {
+            return visitor.visit_u16(value as u16);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..4294967296.0).contains(&value)
+        {
+            return visitor.visit_u32(value as u32);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..2.0f64.powi(64)).contains(&value)
+        {
+            return visitor.visit_u64(value as u64);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u128<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..2.0f64.powi(128)).contains(&value)
+        {
+            return visitor.visit_u128(value as u128);
+        }
+        self.deserialize_any(visitor)
+    }
     serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf
+        bool f32 f64 char str string bytes byte_buf
         unit unit_struct seq tuple tuple_struct map struct identifier ignored_any
     }
 }

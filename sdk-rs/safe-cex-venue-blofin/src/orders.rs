@@ -202,7 +202,7 @@ fn map_orders_with_projection(
                     filled,
                     remaining,
                     extra,
-                    reduce_only,
+                    reduce_only: bool,
                     time_in_force: Option<OrderTimeInForce>,
                     last_update| Order {
             client_order_id: (None).into(),
@@ -216,7 +216,7 @@ fn map_orders_with_projection(
             amount,
             filled,
             remaining,
-            reduce_only,
+            reduce_only: reduce_only.into(),
             close: (None).into(),
             info: (Some(row.clone())).into(),
             time_in_force: time_in_force.into(),

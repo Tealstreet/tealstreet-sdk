@@ -1,3 +1,4 @@
+use safe_cex_exchange::js_runtime::value::{Thrown, from_json, to_json};
 use safe_cex_num::JsCoercionError;
 use serde::Deserialize;
 use serde::Serialize;
@@ -93,8 +94,9 @@ fn lighter_account_tier_matches_live_typescript() {
     );
     for case in oracle["normalized"].as_array().unwrap() {
         assert_eq!(
-            outcome(
-                normalize_lighter_account_tier(case.get("input")).map(|value| value.map(tier_name))
+            js_outcome(
+                normalize_lighter_account_tier(case.get("input").map(from_json).as_ref())
+                    .map(|value| value.map(tier_name))
             ),
             case["result"],
             "normalizeLighterAccountTier {case}"
@@ -112,9 +114,21 @@ fn lighter_account_tier_matches_live_typescript() {
             oracle["tiers"].as_array().unwrap().contains(&case["input"]),
             "LighterAccountTier exact decoding {case}"
         );
+        let input = case.get("input").map(from_json);
+        let record = as_record(input.as_ref());
+        if let Some(record) = record {
+            assert!(
+                record.same_reference(input.as_ref().unwrap()),
+                "asRecord retains its input"
+            );
+        }
         assert_eq!(
-            as_record(case.get("input")).unwrap_or(&Value::Null),
-            &case["record"],
+            record
+                .map(to_json)
+                .transpose()
+                .unwrap()
+                .unwrap_or(Value::Null),
+            to_json(&from_json(&case["record"])).unwrap(),
             "asRecord native value identity {case}"
         );
     }
@@ -130,9 +144,11 @@ fn lighter_account_tier_matches_live_typescript() {
     }
     for case in oracle["payloads"].as_array().unwrap() {
         assert_eq!(
-            outcome(
-                extract_lighter_account_tier_from_payload(case.get("input"))
-                    .map(|value| value.map(tier_name))
+            js_outcome(
+                extract_lighter_account_tier_from_payload(
+                    case.get("input").map(from_json).as_ref()
+                )
+                .map(|value| value.map(tier_name))
             ),
             case["result"],
             "extractLighterAccountTierFromPayload {case}"
@@ -172,5 +188,160 @@ fn outcome<T: Serialize>(result: Result<T, JsCoercionError>) -> Value {
     match result {
         Ok(value) => json!({"ok":value}),
         Err(error) => json!({"error":{"name":error.name,"message":error.message}}),
+    }
+}
+
+fn js_outcome<T: Serialize>(result: Result<T, Thrown>) -> Value {
+    match result {
+        Ok(value) => json!({"ok":value}),
+        Err(error) => {
+            json!({"error":{"name":error.value.get("name").unwrap().to_display(),"message":error.value.get("message").unwrap().to_display()}})
+        }
+    }
+}
+
+#[test]
+fn native_account_tier_keeps_live_values_and_throw_identity() {
+    use safe_cex_exchange::js_runtime::value::Js;
+    use std::{cell::RefCell, rc::Rc};
+    let source = Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args(["-e", r#"
+const fs=require('node:fs'),vm=require('node:vm');
+const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
+const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync('packages/safe-cex/src/exchanges/lighter/lighter.account-tier.ts','utf8'),
+ {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports});
+const marker={sentinel:true};
+const cases={nan:{user_tier_name:NaN,user_tier:'standard'},infinity:{user_tier_name:Infinity,user_tier:'standard'},
+ undefined:{user_tier_name:undefined,user_tier:'premium'},null:{user_tier_name:null,user_tier:'plus'},
+ surrogate:{user_tier_name:'\ud800',user_tier:'standard'},unrelated:{user_tier_name:'premium',extra:'\ud800'},
+ symbol:{user_tier_name:Symbol.iterator,user_tier:'standard'},
+ coercion:{user_tier_name:{toString(){return ' PREMIUM ';}}},
+ 'coercion-throw':{user_tier_name:{toString(){throw marker;}}},
+ 'getter-throw':{get data(){throw marker;}},cycle:{user_tier_name:'plus'}};
+cases.cycle.extra=cases.cycle;
+const trace=[];cases.trace={get data(){trace.push('data');return {get account(){trace.push('data.account');return null;}}},
+ get account(){trace.push('account');return null;},get user_tier_name(){trace.push('alias');return NaN;},
+ get user_tier(){throw new Error('later alias must not run');}};
+const rows=Object.entries(cases).map(([label,input])=>{
+ trace.length=0;
+ try{return {label,expected:{tier:exports.extractLighterAccountTierFromPayload(input)??null,trace:[...trace]}};}
+ catch(error){if(error!==marker)throw error;return {label,expected:{sameError:true,trace:[...trace]}};}
+});process.stdout.write(JSON.stringify(rows));
+"#]).output().expect("live account-tier source oracle");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(rows.len(), 12);
+    for row in rows {
+        let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+        let marker = Js::object(vec![("sentinel", Js::Bool(true))]);
+        let mut payload = Js::object(vec![("user_tier", Js::str("standard"))]);
+        let first = match row["label"].as_str().unwrap() {
+            "nan" => Js::Number(f64::NAN),
+            "infinity" => Js::Number(f64::INFINITY),
+            "undefined" => {
+                payload.set("user_tier", Js::str("premium")).unwrap();
+                Js::Undefined
+            }
+            "null" => {
+                payload.set("user_tier", Js::str("plus")).unwrap();
+                Js::Null
+            }
+            "surrogate" => Js::String(vec![0xd800].into()),
+            "unrelated" => {
+                payload
+                    .define("extra", Js::String(vec![0xd800].into()))
+                    .unwrap();
+                Js::str("premium")
+            }
+            "symbol" => Js::SymbolIterator,
+            "coercion" => Js::object(vec![(
+                "toString",
+                Js::function("toString", |_, _| Ok(Js::str(" PREMIUM "))),
+            )]),
+            "coercion-throw" => {
+                let marker = marker.clone();
+                Js::object(vec![(
+                    "toString",
+                    Js::function("toString", move |_, _| Err(Thrown::new(marker.clone()))),
+                )])
+            }
+            "getter-throw" => {
+                let marker = marker.clone();
+                payload.define_accessor(
+                    "data",
+                    Some(Rc::new(move |_| Err(Thrown::new(marker.clone())))),
+                    None,
+                );
+                Js::Undefined
+            }
+            "cycle" => {
+                payload.define("extra", payload.clone()).unwrap();
+                Js::str("plus")
+            }
+            "trace" => {
+                payload = Js::object(vec![]);
+                let data = Js::object(vec![]);
+                let seen = trace.clone();
+                data.define_accessor(
+                    "account",
+                    Some(Rc::new(move |_| {
+                        seen.borrow_mut().push("data.account".into());
+                        Ok(Js::Null)
+                    })),
+                    None,
+                );
+                let seen = trace.clone();
+                payload.define_accessor(
+                    "data",
+                    Some(Rc::new(move |_| {
+                        seen.borrow_mut().push("data".into());
+                        Ok(data.clone())
+                    })),
+                    None,
+                );
+                let seen = trace.clone();
+                payload.define_accessor(
+                    "account",
+                    Some(Rc::new(move |_| {
+                        seen.borrow_mut().push("account".into());
+                        Ok(Js::Null)
+                    })),
+                    None,
+                );
+                let seen = trace.clone();
+                payload.define_accessor(
+                    "user_tier_name",
+                    Some(Rc::new(move |_| {
+                        seen.borrow_mut().push("alias".into());
+                        Ok(Js::Number(f64::NAN))
+                    })),
+                    None,
+                );
+                payload.define_accessor(
+                    "user_tier",
+                    Some(Rc::new(|_| panic!("later alias must not run"))),
+                    None,
+                );
+                Js::Undefined
+            }
+            label => panic!("unknown source case {label}"),
+        };
+        if row["label"] != "trace" {
+            payload.define("user_tier_name", first).unwrap();
+        }
+        assert!(as_record(Some(&payload)).unwrap().same_reference(&payload));
+        let actual = match extract_lighter_account_tier_from_payload(Some(&payload)) {
+            Ok(tier) => json!({"tier":tier.map(tier_name),"trace":*trace.borrow()}),
+            Err(error) => {
+                json!({"sameError":error.value.same_reference(&marker),"trace":*trace.borrow()})
+            }
+        };
+        assert_eq!(actual, row["expected"], "{row}");
+        payload.delete(&"extra".encode_utf16().collect::<Vec<_>>());
     }
 }

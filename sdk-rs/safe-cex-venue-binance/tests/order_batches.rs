@@ -244,11 +244,13 @@ struct Bindings(Shared);
 fn error(name: &str) -> Failure {
     let mut e = ExchangeError::new("batch fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!(if name == "post-only-reject" {
-        -5022
-    } else {
-        -1000
-    }));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        if name == "post-only-reject" {
+            -5022
+        } else {
+            -1000
+        }
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
     Rc::new(e)
 }
@@ -411,7 +413,9 @@ fn state(family: &str, name: &str) -> Shared {
     };
     let mut replacement = ExchangeError::new("emitter fixture");
     replacement.name = "SyntaxError".into();
-    replacement.code = Some(json!("emit-code"));
+    replacement.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "emit-code"
+    )));
     replacement.response = Some(json!({"status":504,"data":{"msg":"emit detail"}}));
     Rc::new(RefCell::new(State {
         family: family.into(),
@@ -694,7 +698,7 @@ impl BatchBindings for Bindings {
                 Rejection::Error(e) => {
                     let mut fields = serde_json::Map::new();
                     fields.insert("message".into(), json!(e.message));
-                    if let Some(c) = &e.code {
+                    if let Some(c) = &observed_error_code(&e.code) {
                         fields.insert("code".into(), c.clone());
                     }
                     if let Some(r) = &e.response {
@@ -821,7 +825,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
         "{l}"
     );
     assert_eq!(
-        e.code,
+        observed_error_code(&e.code),
         Some(if replaced {
             json!("emit-code")
         } else {
@@ -844,7 +848,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
     );
 }
 fn error_wire(e: &Failure, b: &State) -> Value {
-    json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
 }
 impl Trace {
     fn wire(&self, b: &State) -> Value {
@@ -1759,4 +1763,17 @@ fn many_spot_target() {
 #[ignore = "requires TypeScript oracle"]
 fn conflict() {
     conflict_test()
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

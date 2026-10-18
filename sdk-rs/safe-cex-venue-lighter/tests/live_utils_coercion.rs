@@ -1,3 +1,4 @@
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_json, to_json};
 use safe_cex_num::JsCoercionError;
 use safe_cex_venue_lighter::utils::*;
 use serde::Serialize;
@@ -36,6 +37,17 @@ fn outcome<T: Serialize>(result: Result<T, JsCoercionError>) -> Value {
         Ok(value) => json!({"ok":encode(serde_json::to_value(value).unwrap())}),
         Err(error) => json!({"error":{"name":error.name,"message":error.message}}),
     }
+}
+fn native_outcome<T: Serialize>(result: Result<T, Thrown>) -> Value {
+    match result {
+        Ok(value) => json!({"ok":encode(serde_json::to_value(value).unwrap())}),
+        Err(error) => {
+            json!({"error":{"name":error.value.get("name").unwrap().to_display(),"message":error.message()}})
+        }
+    }
+}
+fn native(value: Option<&Value>) -> Js {
+    value.map_or(Js::Undefined, |value| from_json(&decode(value)))
 }
 #[test]
 #[ignore = "requires Node and maintained TypeScript"]
@@ -98,7 +110,7 @@ fn lighter_utils_coercion_matches_live_typescript() {
             ),
             (
                 "normalizeNonNegativeNumber",
-                outcome(normalize_non_negative_number(v)),
+                native_outcome(normalize_non_negative_number(&native(v))),
                 "nonnegative",
             ),
         ] {
@@ -106,7 +118,7 @@ fn lighter_utils_coercion_matches_live_typescript() {
         }
     }
     for case in oracle["minimums"].as_array().unwrap() {
-        let market = serde_json::from_value(decode(&case["market"])).unwrap();
+        let market = native(Some(&case["market"]));
         let actual = get_lighter_order_minimums(&market);
         if let Ok(value) = &actual {
             for (field, number) in [
@@ -121,7 +133,7 @@ fn lighter_utils_coercion_matches_live_typescript() {
             }
         }
         assert_eq!(
-            outcome(actual),
+            native_outcome(actual),
             case["expected"],
             "getLighterOrderMinimums: {case}"
         );
@@ -148,31 +160,31 @@ fn lighter_utils_coercion_matches_live_typescript() {
     );
     let mut compared_cancel_fields = 0;
     for case in cancel_cases {
-        let markets = serde_json::from_value(decode(&case["markets"])).unwrap();
-        let orders: Vec<safe_cex_types::Order> =
-            serde_json::from_value(decode(&case["orders"])).unwrap();
-        let actual = resolve_lighter_cancel_targets(&orders, &markets);
+        let markets = native(Some(&case["markets"]));
+        let orders = native(Some(&case["orders"]));
+        let actual = resolve_lighter_cancel_targets(&orders, &markets).unwrap();
+        let rows = actual.array_values().unwrap();
         let expected = case["expected"].as_array().unwrap();
         assert_eq!(
-            actual.len(),
+            rows.len(),
             expected.len(),
             "resolveLighterCancelTargets inventory"
         );
-        for (index, (value, source)) in actual.iter().zip(expected).enumerate() {
+        for (index, (value, source)) in rows.iter().zip(expected).enumerate() {
             compared_cancel_fields += 2;
             assert_eq!(
-                value.order_id,
+                String::from_utf16(value.get("orderId").unwrap().as_str().unwrap()).unwrap(),
                 source["orderId"].as_str().unwrap(),
                 "resolveLighterCancelTargets[{index}].orderId native identity"
             );
             assert_eq!(
-                encode(json!(value.market_id)),
+                encode(json!(value.get("marketId").unwrap().as_f64().unwrap())),
                 source["marketId"],
                 "resolveLighterCancelTargets[{index}].marketId native identity"
             );
         }
         assert_eq!(
-            encode(serde_json::to_value(actual).unwrap()),
+            encode(to_json(&actual).unwrap()),
             case["expected"],
             "resolveLighterCancelTargets: {case}"
         );
@@ -190,8 +202,8 @@ fn lighter_utils_coercion_matches_live_typescript() {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert_eq!(
-            outcome(read_number(
-                source.as_ref().and_then(Value::as_object),
+            native_outcome(read_number(
+                &native(source.as_ref()),
                 &keys,
                 case.get("allowZero").map(|v| v.as_bool().unwrap())
             )),
@@ -217,14 +229,14 @@ fn lighter_utils_coercion_matches_live_typescript() {
         );
     }
     for case in oracle["decimalMarkets"].as_array().unwrap() {
-        let market = serde_json::from_value(decode(&case["market"])).unwrap();
+        let market = native(Some(&case["market"]));
         assert_eq!(
-            outcome(get_lighter_amount_decimals(&market)),
+            native_outcome(get_lighter_amount_decimals(&market)),
             case["amount"],
             "getLighterAmountDecimals {case}"
         );
         assert_eq!(
-            outcome(get_lighter_price_decimals(&market)),
+            native_outcome(get_lighter_price_decimals(&market)),
             case["price"],
             "getLighterPriceDecimals {case}"
         );

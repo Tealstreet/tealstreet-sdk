@@ -358,3 +358,8 @@ virtual clock. REST ticker IDs and position timestamps use that same source
 clock. Rate limiting, heartbeat timing and private refresh throttles retain their
 source monotonic or Date.now clocks. The native routing and private reopen
 regressions distinguish synced time from an unrelated host clock.
+
+The concrete leverage catch emits the helper-created native Error value rather
+than its message string. The constructed Exchange regression drives a successful
+account PATCH followed by a malformed position refresh, checks the committed
+leverage and single refresh, and inspects Error name/message before projection.

@@ -250,7 +250,7 @@ fn chaser_enrichment_retains_optional_field_identity() {
                 );
             }
             assert_eq!(
-                Some(actual.reduce_only),
+                actual.reduce_only.into_value(),
                 source["reduceOnly"].as_bool(),
                 "ENRICHMENT-OPTIONAL native reduceOnly"
             );

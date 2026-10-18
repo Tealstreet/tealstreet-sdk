@@ -1884,10 +1884,30 @@ fn remote_echo_data_reaches_http_inner_adapter_without_a_second_transform() {
     }))
     .unwrap();
     let requests = capture.0.lock().unwrap();
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let echoed = requests[0].body.as_ref().unwrap().untransformed().unwrap();
+    let Input::Object(fields) = echoed else {
+        panic!("remote echo must remain an object")
+    };
     assert_eq!(
-        requests[0].body.as_ref().unwrap().untransformed().ok(),
-        Some(&safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone()).unwrap()),
-        "HTTP inner adapter must preserve remote echoed object identity"
+        fields.len(),
+        1,
+        "HTTP inner adapter must preserve remote echoed object keys"
+    );
+    assert_eq!(fields[0].0, vec![u16::from(b'x')]);
+    let Input::Float(value) = fields[0].1 else {
+        panic!("remote JSON.parse must produce a native number")
+    };
+    assert_eq!(
+        value.to_bits(),
+        1.0_f64.to_bits(),
+        "HTTP inner adapter must preserve remote echoed number bits"
+    );
+    assert_eq!(
+        safe_cex_num::js_retained_json_stringify(echoed)
+            .unwrap()
+            .as_deref(),
+        Some(r#"{"x":1}"#)
     );
     assert!(
         requests[0].headers.is_empty(),

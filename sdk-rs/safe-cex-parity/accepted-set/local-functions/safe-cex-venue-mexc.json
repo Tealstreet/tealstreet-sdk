@@ -18,6 +18,6 @@
     "category": "decoder-helper",
     "runtimeOwner": "safe_cex_venue_mexc::utils::normalize_balance",
     "reason": "Inside normalize_balance: picks aliased balance fields from one raw row and coerces them to numbers, retaining the row as info. Raw JSON to typed Balance; its runtime owner's probes exercise it.",
-    "sourceSha256": "56f1c07575e1a144b6ace6398235e718c06c1ce949ec80050beeadd5cd9dd4ee"
+    "sourceSha256": "cc256268f5e0a1af606563e1d4427e0ef5deab6673d06ab231f02d790742267f"
   }
 }
