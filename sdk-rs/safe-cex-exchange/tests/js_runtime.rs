@@ -4316,7 +4316,10 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
 #[test]
 fn native_error_materialization_defines_own_stack_without_prototype_setters() {
     let seed = safe_cex_exchange::js_runtime::value::error_object("Error", "seed");
-    let prototype = seed.prototype().unwrap();
+    let Js::Object(object) = seed else {
+        panic!("native Error object")
+    };
+    let prototype = object.proto.borrow().clone().unwrap();
     let setter_called = Rc::new(std::cell::Cell::new(false));
     let called = setter_called.clone();
     prototype.define_accessor(
