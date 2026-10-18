@@ -758,6 +758,10 @@ holds a listen-key request, drops the original settlement and observes both
 clones before invoking a cloned reconnect arrow. These reviews do not classify
 raw-input decoders or widen accepted representations.
 
+LiveFlag constructor receipts classify typed callback/Cell state. Native retry
+proofs live in tests/support/live_flag_binding.rs; live-flag-controls.py requires
+independent compiled reader/conversion failures and exact source restorations.
+
 
 The private REST continuation aliases have finite native evidence in
 `tests/support/snapshot_future_binding.rs`. The actual PM exchange starts the
@@ -801,6 +805,7 @@ distinguishes transport rejection from malformed fulfilled-body validation.
 requires that assertion to fail and restores the genuine rejection path. This is
 a fixture-semantics check, separate from the two production continuation controls.
 
+
 The legacy `public_message`, `private_message`, `spot_public_message` and
 `public_candle_delegate` callback extractions have no production callers and were
 removed with `message_entry` and its standalone oracle/control receipts. All
@@ -816,3 +821,10 @@ rows on the live ExchangeState listener/dispatch members. The native candle,
 depth and historical-position witnesses and compiled live history flag control
 are documented in DELEGATED_ROUTE_REVIEW.md; do not recreate forwarding helpers
 to satisfy accepted-owner discovery.
+
+The ten `signing` accepted-set owners are outbound codecs and request-signing
+transformations, with individual non-decoder role records and exact compiler APIs.
+Their classification receipts do not execute signing or establish arbitrary-JS
+parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
+signer against the actual TS signer with installed Axios, qs and create-hmac.
+Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.

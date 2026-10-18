@@ -402,7 +402,11 @@ pub(crate) fn error_message(e: &Failure) -> EventValue {
         .cloned()
         .map(EventValue::from_json)
         .unwrap_or(EventValue::Undefined);
-    fallback(venue, string(&e.message))
+    let message = safe_cex_exchange::js_runtime::value::Thrown::from((**e).clone())
+        .value
+        .get("message")
+        .expect("fresh canonical error message");
+    fallback(venue, message)
 }
 fn console(b: &mut impl SnapshotBindings, args: Vec<SnapshotArgument>) -> Result<(), Failure> {
     b.capture(SnapshotMethod::ConsoleError)?(args)
