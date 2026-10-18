@@ -85,6 +85,106 @@ fn validation_diagnostic_runs_before_the_public_call_returns_its_waiter() {
     });
 }
 
+fn validation_source(setup: bool) -> Value {
+    let mut command = std::process::Command::new("node");
+    command
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/eager_sdk_source.cjs"),
+            "--validation-error",
+        ]);
+    if setup {
+        command.arg("--setup-error");
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = String::from_utf8(output.stdout).unwrap();
+    serde_json::from_str(output.lines().last().unwrap()).unwrap()
+}
+
+fn assert_validation_error(url: &str, source: Value) {
+    let tokio = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&tokio, async {
+        let (venue, _) = venue(json!({"key":"synthetic-key","secret":"synthetic-secret","overrideProxyUrl":url,"tuning":{"consoleLogging":false}}));
+        let logs = Rc::new(RefCell::new(vec![]));
+        let seen = logs.clone();
+        venue.base().on("log", Rc::new(move |_, value| {
+            let message = String::from_utf16(&value.to_js_string()?).unwrap();
+            if message.contains("Failed to get account:") || message.contains("Account validation failed:") {
+                seen.borrow_mut().push(message);
+            }
+            Ok(())
+        }));
+        let error = tokio::time::timeout(Duration::from_secs(10), venue.validate_account()).await.unwrap().unwrap_err();
+        assert_eq!(error.name, source["name"], "ASTER-VALIDATION-ERROR source Error class");
+        assert_eq!(error.code.as_ref().map(|value| value.to_display()), source["code"].as_str().map(str::to_owned), "ASTER-VALIDATION-ERROR source code");
+        assert_eq!(error.is_axios_error, source["isAxiosError"].as_bool().unwrap(), "ASTER-VALIDATION-ERROR Axios marker");
+        assert_eq!(error.message, source["message"], "ASTER-VALIDATION-ERROR enhanced message");
+        assert_eq!(json!(*logs.borrow()), source["logs"], "ASTER-VALIDATION-ERROR nested diagnostics");
+        venue.dispose().unwrap();
+    });
+}
+
+#[test]
+fn validation_setup_error_retains_the_source_axios_envelope() {
+    assert_validation_error("unsupported://fixture", validation_source(true));
+}
+
+#[test]
+fn validation_http_error_keeps_the_source_replacement_error() {
+    let source = validation_source(false);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let (mut socket, _) = loop {
+            match listener.accept() {
+                Ok(value) => break value,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("loopback validation accept: {error}"),
+            }
+        };
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut bytes = vec![];
+        let mut buffer = [0; 4096];
+        while !bytes.windows(4).any(|value| value == b"\r\n\r\n") {
+            let count = socket.read(&mut buffer).unwrap();
+            assert_ne!(count, 0);
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+        let header = String::from_utf8(bytes).unwrap();
+        let target = header.lines().next().unwrap();
+        assert!(target.contains("/fapi/v4/account?"), "{target}");
+        assert!(target.contains("signature="), "actual signing: {target}");
+        assert!(
+            header
+                .to_lowercase()
+                .contains("x-mbx-apikey: synthetic-key")
+        );
+        let body = r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}"#;
+        write!(socket, "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+    });
+    assert_validation_error(&url, source);
+    server.join().unwrap();
+}
+
 async fn request(receiver: &mpsc::Receiver<(String, String)>) -> (String, String) {
     tokio::time::timeout(Duration::from_secs(4), async {
         loop {
