@@ -783,7 +783,16 @@ impl FactoryBindings for Factorizer<'_> {
             adapter: self.imports.adapter.clone(),
             host: self.imports.host.clone(),
             runtime: runtime.clone(),
-            store: None,
+            store: Some(
+                self.imports
+                    .owner
+                    .borrow()
+                    .upgrade()
+                    .ok_or_else(|| failure("HTTP factory exchange owner released"))?
+                    .base
+                    .store
+                    .clone(),
+            ),
             stats: None,
             logs: None,
             every: vec![],

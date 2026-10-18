@@ -57,6 +57,14 @@ Default cargo tests remain hermetic.
 
 ## Integration boundaries
 
+The native API factory attaches the constructed exchange's canonical Store to
+every shared HTTP client, including the public no-proxy client. The shared
+factory observer owns outcome classification and silent counter increments;
+venue response interceptors must not count the same request again.
+`native-binance-request-stats.test.mjs` replays recorded public responses through
+the real TS worker and napi account, verifies five/six successful outcomes, and
+requires HTTP alone to produce no Store posts before a market commit ships them.
+
 Binance uses shared `PlaceOrderOpts`; concrete venues declare it explicitly as
 `Exchange::PlaceOpts`. Placement receives private venue-typed validated tokens.
 The Portfolio Margin constructor owns separate PAPI, FAPI, unlimited and public
