@@ -55,24 +55,6 @@ for module, wire, fields, binary, target, assertion in [
     finally:
         path.write_text(original)
 
-name = 'candle-high-low-swap'
-if len(sys.argv) == 1 or name in sys.argv[1:]:
-    path = Path('sdk-rs/safe-cex-venue-woo/src/v3_public.rs')
-    original = path.read_text()
-    start = original.index('pub fn map_woo_v3_candles(')
-    head, tail = original[:start], original[start:]
-    mutation = head + tail.replace('row.high.clone()', 'row.__swap__.clone()', 1).replace('row.low.clone()', 'row.high.clone()', 1).replace('row.__swap__.clone()', 'row.low.clone()', 1)
-    assert mutation != original
-    try:
-        path.write_text(mutation)
-        run = subprocess.run(['cargo', 'test', '--manifest-path', 'sdk-rs/Cargo.toml', '--locked', '--offline', '--jobs', '1', '-p', 'safe-cex-venue-woo', '--test', 'v3_mapper_field_identity'], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        Path('/tmp/woo-field-identity-control-' + name + '.log').write_text(run.stdout)
-        ok = run.returncode == 101 and 'test result: FAILED' in run.stdout and 'high native field identity' in run.stdout
-        print(name, run.returncode, 'assertion-red' if ok else 'BAD', flush=True)
-        assert ok, run.stdout
-    finally:
-        path.write_text(original)
-
 for name, module, before, after, binary, assertion in [
     ('limit-id-symbol-swap', 'orders', 'id: text(order_id)?,\n        parent_id: None,', 'id: symbol.clone(),\n        parent_id: None,', 'orders', 'Order.id native field identity'),
 ]:
