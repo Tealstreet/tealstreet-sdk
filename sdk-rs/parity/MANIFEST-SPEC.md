@@ -1523,6 +1523,25 @@ replace a later source conversion failure, skip the second historical timestamp,
 or turn the source's missing-order null result into a model error. See
 [§15](#closed-typed-output-boundary) and [§18](#divergence-taxonomy).
 
+
+Final strict-field decision (claude-ddi2il, 2026-10-17): constructed WEEX
+`fetchHistoricalFills` must retain the good rows of a page. Its one shared
+normalization pipeline distinguishes source failures from closed output-field
+projection refusals. For a maker or commission-asset refusal, the concrete
+binding emits the existing warning with the logical field and rejected value,
+then omits only that row through the existing truthy filter. An all-refused page
+resolves empty after reporting each refusal. It never coerces a flag, substitutes
+an asset, or stringifies a value into a model field. This is an accepted
+divergence: the maintained TS mapper retains those malformed fields and rows.
+
+The public single-row utility continues to return its original TypeError for
+that refusal. Capture/coercion failures remain separate, preserving the source
+scalar evaluation order, and a warning callback failure propagates normally.
+The actual constructed Exchange regression covers mixed pages, raw coin
+fallback, absent/true/false flags, all-refused pages and source commission-error
+precedence; the preexisting native-first `fills_error_order` source oracles stay
+unchanged. No shared Execution/HistoricalTrade type or transport API is widened.
+
 <a id="weex-record-shape-choice"></a>
 
 ### WEEX shared Market and response record choices
@@ -1552,6 +1571,20 @@ output-field paragraph. The response codecs represent declared shapes; they do
 not establish Axios runtime validation. Separate string and snapshot observations
 remain governed by [§19](#forced-surrogate-conflict) and
 [§16](#owned-snapshot-vs-live-alias).
+
+Final strict-field policy for the constructed WEEX market batch: a row whose
+required string field cannot inhabit `Market` is refused alone, with a visible
+field/value warning, retaining good rows and returning empty when all are refused.
+`normalize_market_row` completes source coercions before this projection; genuine
+source/capture failures retain the original outer catch and cached-market result.
+The public utility retains its standalone refusal. The maintained `fetchMarkets`
+and `normalizeMarket` source probe keeps the raw malformed fields in twelve mixed
+pages, so this row loss is explicitly CHOSEN. Keeping shared model fields strict
+avoids introducing malformed identities/assets into every downstream consumer;
+per-row refusal avoids discarding the valid snapshot. Constructed Exchange HTTP
+regressions independently pin native IDs/assets, warning values, empty-page
+semantics and source coercion precedence. No source-equivalent row claim is made.
+
 
 <a id="weex-class-assembly-choice"></a>
 
@@ -2030,18 +2063,22 @@ parser phase is inferred. No polling timer is implemented by this read body.
 Response field coercion, including string/null timestamps, uses shared JS number
 and parseFloat semantics. Inherited interval keys preserve stringification and
 NaN range arithmetic. Sort remains stable and compares timestamp differences.
-CHOSEN: mixed NaN/non-NaN timestamp collections are refused, because the source
-comparator is inconsistent and Rust requires a consistent ordering. A paired
-actual-source witness records V8 accepting `[3, 2, NaN, 1]` and ordering it as
-`[1, 2, 3, NaN]`; native refusal reports/emits a named TypeError and resolves
-empty. All-NaN collections retain source order.
+CHOSEN per-row admission: refuse only candles whose coerced timestamp is NaN,
+reporting each row index and `timestamp=NaN` through the existing error diagnostic.
+Sort and return every admitted row; an all-refused response returns empty after
+reporting every refusal. This follows decision 3's batch-retention rule. Source
+keeps NaN-timestamp rows, but their inconsistent comparator has no claimed
+ordering parity. Other numeric candle fields retain NaN and infinities. The
+constructed Exchange/HTTP witness compiles and fails on the prior whole-batch
+refusal, then passes with one or multiple refused rows and the all-refused case.
 
 Named ts-bug compatibility: missing candle data is diagnosed before an error is
 raised; the outer catch reports that error, emits its message or fallback text,
 and resolves empty. Failure of the missing-data diagnostic enters the catch;
 failure of the catch diagnostic or emitter propagates without flattening native
-error metadata. The actual-source supplement pins 47 cases, 74 records and 444
-direct numeric field comparisons. Capture records CPU/Node; only NaN is canonical.
+error metadata. The actual-source supplement pins 47 cases and 74 source records;
+native admission observes 73 rows and 438 numeric fields plus the refused row.
+Capture records CPU/Node; only NaN is canonical.
 
 
 ### Kraken Spot balance host

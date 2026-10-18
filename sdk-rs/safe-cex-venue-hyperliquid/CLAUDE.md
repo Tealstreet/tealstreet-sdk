@@ -168,6 +168,10 @@ Venue census159ported/106divergent/266pending. Original13FINDINGs remain named.
 15rows pending->ported:8json_models.rs declarations +7json_boundaries.rs leaves.
 json_values.rs supplies owned UTF-16-key/string and binary64 raw JSON snapshots,
 last duplicate selection before typed value decoding and JS integer-key order.
+The shared `RetainedJsonInput` capture preserves surviving lone UTF-16 code units
+like JSON.parse; its explicit UTF-8 Value projection refuses them. The duplicate
+selection control in `tests/divergence_types.rs` compares actual retained units
+against Node and separately requires projection refusal and syntax validation.
 Any-indexed UserRateLimit/OrderStatus also accept arrays in strict TypeScript.
 The helpers bind opaque JavaScript host primitive operations and preserve native
 object/error identity, receivers and catch boundaries, including revoked proxies.
@@ -386,3 +390,28 @@ retains23 source cases across8 files after removing only7 API cases and1 source.
 The public socket subscription bodies live only in ws_emission.rs and are installed
 by public_class.rs on the production Realm. The unused ws_public prepared-value
 copy and its standalone tests/oracle were removed; real listener coverage remains.
+
+The concrete resolveHyperliquidBuilder import returns a configured native value
+unchanged and samples testnet only for a nullish fallback. The actual builder
+consumer keeps feeTenthsBps as supplied in the signed action; it lowercases the
+address at the source callsite. Configured identity, lazy default getter reads,
+fresh fallback objects and action fee types have real Realm/source witnesses.
+No shared ExchangeOptions field types or Realm carriers are widened.
+
+
+The production orderRequestToOrderWire import reads native Realm fields directly.
+It formats price, size and trigger price before the HTTP JSON boundary, so NaN
+and infinities become the maintained wire strings rather than null. floatToWire
+uses the installed numeric/string operations, including source exponent-zero
+stripping; order-type limit objects and undefined fields retain their identities.
+The separate prepared signing API keeps its documented typed snapshot boundary.
+The actual constructed Exchange placement regression and native/source import
+matrix cover this adapter; no shared body or Realm carrier migration is implied.
+
+The constructed native ticker census tests in `binding` and `spot_binding`
+compare all Ticker numbers, including optional midPrice, with the maintained
+constructed TS exchanges and real DefaultStores. Futures covers eight mids
+and sixteen compressed fast-context frames; Spot covers eight mids frames.
+Malformed input sits between distinct good rows, with finite Store resets.
+The shared control runner misroutes midPrice independently in both live socket
+bodies and requires compiled native failures followed by exact-restored passes.

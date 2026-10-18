@@ -1,7 +1,7 @@
 //! Inspect actual handler posts before any trace JSON serialization.
 #[path = "support/error_post.rs"]
 mod error_post_support;
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 #[allow(dead_code)]
 mod runtime;
 use safe_cex_exchange::js_runtime::value::Js;
@@ -364,7 +364,7 @@ fn data_post_rejection_reaches_the_original_reply_catch() {
         let mut failure = ExchangeError::new("native post rejected");
         failure.name = "TypeError".into();
         failure.stack = Some("native stack".into());
-        failure.code = Some(json!(42));
+        failure.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(42)));
         let handler = CallMethodHandler::new(
             venue(),
             WorkerDataPost::new(Rc::new(move |payload| {

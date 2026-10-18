@@ -4,7 +4,7 @@ mod data_trace;
 mod error_post_support;
 #[path = "support/error_trace.rs"]
 mod error_trace;
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 #[path = "../../safe-cex-exchange/tests/support/store.rs"]
 mod test_store;
@@ -157,7 +157,10 @@ fn command_failures_echo_only_present_reqid_and_preserve_executor_results() {
         venue.base.on(
             event,
             Rc::new(move |name, data| {
-                sink.borrow_mut().push((name.into(), data.clone()));
+                sink.borrow_mut().push((
+                    name.into(),
+                    safe_cex_exchange::js_runtime::value::to_json(data).unwrap(),
+                ));
                 Ok(())
             }),
         );
@@ -191,11 +194,14 @@ fn command_failures_echo_only_present_reqid_and_preserve_executor_results() {
     register_command_executor(Rc::new(|exchange, _, _, req| {
         Box::pin(async move {
             if let Some(req) = req {
-                exchange.base().emit("exec-result",json!({"reqId":req,"handled":true,"success":false,"error":"risk rejected","data":{"orderIds":["id"]}}))?;
+                exchange.base().emit("exec-result",safe_cex_exchange::js_runtime::value::from_json(&json!({"reqId":req,"handled":true,"success":false,"error":"risk rejected","data":{"orderIds":["id"]}})))?;
             } else {
-                exchange
-                    .base()
-                    .emit("exec-log", json!({"message":"risk rejected"}))?;
+                exchange.base().emit(
+                    "exec-log",
+                    safe_cex_exchange::js_runtime::value::from_json(
+                        &json!({"message":"risk rejected"}),
+                    ),
+                )?;
             }
             Ok(())
         })
@@ -444,7 +450,7 @@ impl Exchange for MethodVenue {
             if symbol == "FAIL" {
                 let mut error = ExchangeError::new("bad");
                 error.stack = Some("trace".into());
-                error.code = Some(json!(42));
+                error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(42)));
                 return Err(error);
             }
             Ok(())
@@ -805,7 +811,10 @@ fn invalid_command_payloads_never_call_the_registered_executor() {
         venue.base.on(
             event,
             Rc::new(move |name, data| {
-                sink.borrow_mut().push((name.into(), data.clone()));
+                sink.borrow_mut().push((
+                    name.into(),
+                    safe_cex_exchange::js_runtime::value::to_json(data).unwrap(),
+                ));
                 Ok(())
             }),
         );

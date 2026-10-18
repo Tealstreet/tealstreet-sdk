@@ -584,6 +584,18 @@
     ]
   },
   {
+    "file": "safe-cex-exchange/src/throttle.rs",
+    "function": "symbol_metadata_throttler",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "update_symbol_metadata",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-exchange/src/websocket.rs",
     "function": "dispose",
     "edges": [
@@ -6634,7 +6646,7 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "name",
-        "count": 1
+        "count": 2
       }
     ]
   },
@@ -11417,18 +11429,6 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "set_leverage",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-webworker/src/call_method.rs",
-    "function": "new",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "update_symbol_metadata",
         "count": 1
       }
     ]

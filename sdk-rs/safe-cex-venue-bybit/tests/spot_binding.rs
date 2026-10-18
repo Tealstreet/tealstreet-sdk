@@ -322,6 +322,7 @@ fn spot_private_frames_deliver_live_orders_and_fills_without_positions() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             observed.borrow_mut().push(value.clone());
             Ok(())
         }),

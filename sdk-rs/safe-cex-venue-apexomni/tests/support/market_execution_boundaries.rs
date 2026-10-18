@@ -42,6 +42,19 @@ fn venue(host: &Rc<Host>, store: Rc<DefaultStore>) -> Rc<ApexOmniExchange> {
 #[test]
 fn market_filter_errors_precede_typed_output_admission() {
     let capture = boundary_rows(false);
+    let asset_rows = capture["assetRows"].as_array().unwrap();
+    assert_eq!(
+        asset_rows.len(),
+        24,
+        "independent source strict market fields"
+    );
+    for (index, row) in asset_rows.iter().enumerate() {
+        assert_eq!(
+            row["field"],
+            ["id", "symbol", "base", "quote", "active"][index / 5]
+        );
+        assert_eq!(row["result"]["values"].as_array().unwrap().len(), 3);
+    }
     let mut count = 0;
     for row in capture["rows"]
         .as_array()
@@ -67,18 +80,33 @@ fn market_filter_errors_precede_typed_output_admission() {
         let actual = futures::executor::block_on(exchange.fetch_markets_helper());
         if row["label"] == "nonboolean" || row["label"] == "numeric-id" {
             let nonboolean = row["label"] == "nonboolean";
-            let error =
-                actual.expect_err("APEX-BOUNDARY native Market refuses unsupported raw field");
-            assert_eq!(error.name, "Error", "{label} typed refusal kind");
-            assert_eq!(
-                error.message,
-                if nonboolean {
-                    "shared typed Market refuses non-boolean enableTrade"
-                } else {
-                    "shared typed record refuses a non-string field"
-                },
-                "{label} typed refusal message"
+            let markets = actual.expect("typed row is visibly omitted");
+            assert!(
+                markets.is_empty(),
+                "all refused rows produce a fresh empty result"
             );
+            let operations = host.operations.borrow();
+            let warnings = operations
+                .iter()
+                .filter_map(|operation| match operation {
+                    J::Array(values) if values.first() == Some(&s("log")) => Some(values),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(warnings.len(), 1, "one visible typed row refusal");
+            assert_eq!(warnings[0][2], s("warning"));
+            let J::String(message) = &warnings[0][1] else {
+                panic!("warning text")
+            };
+            assert!(
+                message.contains(if nonboolean {
+                    "active=String(\"truthy\")"
+                } else {
+                    "id=Number(17.0)"
+                }),
+                "{message}"
+            );
+            drop(operations);
             let J::Array(source) = native::input(&row["result"]["value"]) else {
                 panic!("source markets")
             };
@@ -155,8 +183,11 @@ fn market_filter_errors_precede_typed_output_admission() {
         let source_requests: Vec<_> = source_operations.into_iter().filter(|operation| {
             !matches!(operation, J::Array(fields) if fields.first() == Some(&s("store:zk")))
         }).collect();
+        let typed_refusal = matches!(row["label"].as_str(), Some("nonboolean" | "numeric-id"));
         native::native_eq(
-            &J::Array(host.operations.borrow().clone()),
+            &J::Array(host.operations.borrow().iter().filter(|operation| {
+                !typed_refusal || !matches!(operation,J::Array(values) if values.first()==Some(&s("log")))
+            }).cloned().collect()),
             &J::Array(source_requests),
             &format!("{label} native request sequence"),
         );

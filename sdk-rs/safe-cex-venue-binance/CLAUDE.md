@@ -505,3 +505,34 @@ and fail on master. Signed GET/POST wire bytes and HMACs compare against actual
 TypeScript with real qs/create-hmac in one two-case capture. Maintained typed
 exchange callers still supply ordinary string/number payloads; these BigInt cases
 cover the reachable native-host boundary, not a new typed DTO admission claim.
+
+Portfolio Margin account updates keep the source body's `info: position` reference
+until the concrete native Store adapter. That adapter applies the approved
+representation choice: a depth-one snapshot of the updated position's own fields,
+excluding `info`. Include the current price/contracts/PnL/side patch before
+capturing it; a previous-state snapshot has stale readable fields. Identity and
+recursive `info` reads remain an accepted divergence from TS's cycle. Never nest
+the previous owned info on every frame. The native `private_classes` growth and
+current-field regressions use the real socket and Store;
+`SAFE_CEX_TYPESCRIPT_PATH=<typescript> node scripts/pm-position-info.mjs` observes
+the maintained TS handler with the actual TS Store across sixteen changing frames.
+
+
+Concrete market reads apply the approved strict-asset row policy after complete
+source REST projection. Non-string base/quote/symbol or nonnumeric leverage-max rows emit their
+field and original value through the existing error path; valid siblings remain available to typed
+fetch and Store refresh. Raw REST helpers retain their source-owned values.
+
+Native depth application converts coercion failures through ExchangeError::from,
+retaining the source error name and cause. The production socket regression covers
+all three families, subsequent valid deltas and sequence-gap snapshot recovery.
+
+The constructed ticker census in `private_classes --features native` uses actual
+NativeImports and ExchangeOwner/PublicSocket dispatch for all three families.
+Futures and PM each cover80 field-independent packed frames through market and
+book sockets; Spot covers48. All native numeric fields compare by bits against
+the constructed maintained TS exchanges and DefaultStores after finite resets,
+with distinct good rows surrounding malformed input. The shared control runner
+misroutes the live last-price publication and requires all three family tests
+to compile and fail, then all three pass after exact restoration. Default-feature
+filtered runs cannot execute these native-host witnesses.

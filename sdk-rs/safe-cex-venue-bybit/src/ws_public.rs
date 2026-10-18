@@ -285,6 +285,7 @@ pub fn handle_tickers_event(
     store: &dyn safe_cex_store::Store,
     frame: &Value,
     is_spot: bool,
+    swap_volume: bool,
 ) -> Result<(), TickerEventError> {
     if frame.is_null() {
         return Err(TickerEventError::Source(
@@ -306,6 +307,11 @@ pub fn handle_tickers_event(
         return Ok(());
     };
     let mut update = safe_cex_store::model_patch::ModelPatch::default();
+    let (base_volume, quote_volume) = if swap_volume {
+        ("turnover24h", "volume24h")
+    } else {
+        ("volume24h", "turnover24h")
+    };
     for (source, target, multiplier) in [
         ("bid1Price", "bid", 1.),
         ("ask1Price", "ask", 1.),
@@ -316,8 +322,8 @@ pub fn handle_tickers_event(
         ("openInterest", "openInterest", 1.),
         ("fundingRate", "fundingRate", 1.),
         ("nextFundingTime", "fundingTime", 1.),
-        ("volume24h", "volume", 1.),
-        ("turnover24h", "quoteVolume", 1.),
+        (base_volume, "volume", 1.),
+        (quote_volume, "quoteVolume", 1.),
     ] {
         let value = &data[source];
         if !crate::api::truthy(value) || (is_spot && source == "nextFundingTime") {
@@ -372,8 +378,9 @@ impl PublicProtocol {
         }
     }
     // ts: BybitPublicWebsocket constructor `messageHandlers` — tickers and pong.
-    pub(crate) fn register_handlers(socket: &Rc<BaseWebSocket>) {
+    pub(crate) fn register_handlers(socket: &Rc<BaseWebSocket>, category: &str) {
         let store_socket = Rc::downgrade(socket);
+        let swap_volume = category == "inverse" && socket.emitter().name() != "bybitinverse";
         let tickers: safe_cex_exchange::websocket::MessageHandler = Rc::new(move |json| {
             let Some(socket) = store_socket.upgrade() else {
                 return Ok(());
@@ -382,6 +389,7 @@ impl PublicProtocol {
                 socket.store().as_ref(),
                 json,
                 socket.emitter().name() == "bybitspot",
+                swap_volume,
             )
             .map_err(|error| match error {
                 TickerEventError::Store(error) => error.into(),

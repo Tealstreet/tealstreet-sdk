@@ -13,3 +13,12 @@ toml.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+safe-cex-webworker = { path = "../safe-cex-webworker" }
+safe-cex-venue-asterdex.workspace = true
+safe-cex-exchange = { workspace = true, features = ["native"] }
+safe-cex-store.workspace = true
+safe-cex-types.workspace = true
+safe-cex-transport = { workspace = true, features = ["native"] }
+tokio = { workspace = true, features = ["rt", "time"] }

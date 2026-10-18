@@ -723,10 +723,10 @@
       }
     }
   },
-  "safe_cex_registry::native_account::JsonFuture": {
+  "safe_cex_registry::native_account::NativeAccountFuture": {
     "category": "non-decoder",
-    "evidence": "safe-cex-registry/src/native_account.rs::JsonFuture: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
-    "reason": "Pinned native account continuation returning typed success or an already produced JSON error value. The bool probe establishes only that fixed future identity; JSON account argument decoding is owned by the entrypoints.",
+    "evidence": "safe-cex-registry/src/native_account.rs::NativeAccountFuture: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Pinned native account continuation returning typed success or an already produced owned native error value. The bool/static probe establishes the fixed future identity and actual raw conversion trait set; it does not decode account inputs. emitter_error_tests polls a genuine native error and observes its NaN payload bits.",
     "target": {
       "resolved_path": {
         "path": "core::pin::Pin",
@@ -770,7 +770,7 @@
                                                             {
                                                               "type": {
                                                                 "resolved_path": {
-                                                                  "path": "serde_json::value::Value",
+                                                                  "path": "safe_cex_exchange::js_runtime::value::owned::OwnedJsValue",
                                                                   "args": null
                                                                 }
                                                               }
@@ -2828,49 +2828,10 @@
       }
     }
   },
-  "safe_cex_registry::native_account::exchange_error": {
-    "category": "non-decoder",
-    "reason": "Copies the already typed ExchangeError name, message and optional code into an outbound JSON object. It does not validate or decode an incoming error.",
-    "evidence": "safe-cex-registry/src/native_account.rs::exchange_error; native JSON account host output/lifecycle adapter. The incoming command and argument decoders retain separate required contracts.",
-    "api": {
-      "kind": "function",
-      "name": "exchange_error",
-      "signature": {
-        "inputs": [
-          [
-            "error",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "safe_cex_exchange::runtime::ExchangeError",
-                    "args": null
-                  }
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "serde_json::value::Value",
-            "args": null
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    }
-  },
   "safe_cex_registry::native_account::host_error": {
     "category": "non-decoder",
-    "reason": "Builds the outbound Error object from the supplied message text. The text remains a literal message without parsing.",
-    "evidence": "safe-cex-registry/src/native_account.rs::host_error; native JSON account host output/lifecycle adapter. The incoming command and argument decoders retain separate required contracts.",
+    "reason": "Builds the outbound owned native Error fields from literal message text, without parsing, schema validation or JSON serialization.",
+    "evidence": "safe-cex-registry/src/native_account.rs::host_error; emitter_error_tests::account_error_envelope_retains_native_code_presence_and_bits executes exact name/message and absent-code observations. Incoming command decoders retain separate contracts.",
     "api": {
       "kind": "function",
       "name": "host_error",
@@ -2910,7 +2871,7 @@
         ],
         "output": {
           "resolved_path": {
-            "path": "serde_json::value::Value",
+            "path": "safe_cex_exchange::js_runtime::value::owned::OwnedJsValue",
             "args": null
           }
         },
@@ -3124,71 +3085,6 @@
         "where_predicates": []
       }
     }
-  },
-  "safe_cex_registry::native_account::error_text": {
-    "category": "decoder",
-    "api": {
-      "kind": "function",
-      "name": "error_text",
-      "signature": {
-        "inputs": [
-          [
-            "error",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "serde_json::value::Value",
-                    "args": null
-                  }
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "alloc::string::String",
-            "args": null
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "evidence": "safe-cex-registry/src/native_account.rs::error_text is the actual hosted signer error projection: string message first, otherwise retained Value JSON display. Finite observations cover the native host format, not JavaScript Error instance admission.",
-    "call": "{ serde_json::json!($type($value)) }",
-    "cases": [
-      {
-        "input": {
-          "message": "signer offline",
-          "code": 7
-        },
-        "output": "signer offline"
-      },
-      {
-        "input": {
-          "message": 42
-        },
-        "output": "{\"message\":42}"
-      },
-      {
-        "input": [
-          "x",
-          false
-        ],
-        "output": "[\"x\",false]"
-      },
-      {
-        "input": null,
-        "output": "null"
-      }
-    ]
   },
   "safe_cex_registry::native_account::arg": {
     "category": "decoder",

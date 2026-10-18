@@ -636,10 +636,11 @@ fn hyro_rejected_and_timed_out_auth_close_the_session_without_subscription() {
             "HyroTrader private auth acknowledgement timed out"
         };
         assert!(
-            errors
-                .borrow()
-                .iter()
-                .any(|value| value.to_string().contains(expected)),
+            errors.borrow().iter().any(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|text| String::from_utf16_lossy(text).contains(expected))
+            }),
             "{:?}",
             errors.borrow()
         );
@@ -714,7 +715,7 @@ fn hyro_private_reconciliation_retries_changed_revision_and_publishes_atomically
         return;
     }
     let (h, private, core) = start_private();
-    let gate = std::rc::Rc::new(std::cell::Cell::new(false));
+    let gate = std::rc::Rc::new(support::release::Release::default());
     h.wire
         .response_gates
         .borrow_mut()
@@ -897,7 +898,6 @@ fn hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post() 
     }
     use safe_cex_exchange::exchange::Exchange;
     use std::{
-        cell::Cell,
         collections::VecDeque,
         future::Future,
         rc::Rc,
@@ -912,7 +912,7 @@ fn hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post() 
         500,
         json!({"retCode":10016,"retMsg":"unconfirmed"}),
     );
-    let gate = Rc::new(Cell::new(false));
+    let gate = Rc::new(support::release::Release::default());
     h.wire
         .response_gates
         .borrow_mut()
@@ -1110,7 +1110,6 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
     }
     use safe_cex_exchange::exchange::Exchange;
     use std::{
-        cell::Cell,
         future::Future,
         rc::Rc,
         task::{Context, Poll, Waker},
@@ -1128,7 +1127,7 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
         "/v5/order/create",
         json!({"orderId":"hyro-batch-second"}),
     );
-    let gate = Rc::new(Cell::new(false));
+    let gate = Rc::new(support::release::Release::default());
     h.wire
         .response_gates
         .borrow_mut()
@@ -1382,7 +1381,12 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     feed(json!({"topic":"order","data":[order.clone()]}));
     feed(json!({"topic":"order","data":[order.clone()]}));
     assert_eq!(
-        *fills.borrow(),
+        fills
+            .borrow()
+            .iter()
+            .map(safe_cex_exchange::js_runtime::value::to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("finite Hyro fill fixture"),
         vec![
             json!({"id":"hyro-frame","side":"buy","symbol":"BTCUSDT","price":25000.0,"amount":0.004})
         ]
@@ -1483,4 +1487,61 @@ fn hyro_option_reads_reject_with_inherited_source_guard() {
         "Hyro inherited option refusals: {}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events() {
+    if configured_child("hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events")
+    {
+        return;
+    }
+    use std::{cell::Cell, rc::Rc};
+    let (h, private, _) = start_private();
+    ack_private(&h, &private, "auth");
+    ack_private(&h, &private, "subscribe");
+    let before = h.store.balance().clone();
+    assert_eq!(before.upnl, 5.0);
+    let fills = Rc::new(Cell::new(0));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
+    let mut row = private_position("12");
+    row["unrealisedPnl"] = json!("17.25");
+    row["size"] = json!("0.75");
+    let requests = h.wire.requests.borrow().len();
+    feed_private(&h, &private, json!({"topic":"position","data":[row]}));
+    assert_eq!(h.store.positions()[0].contracts, 0.75);
+    assert_eq!(h.store.positions()[0].leverage, 12.0);
+    assert_eq!(h.store.positions()[0].unrealized_pnl, 17.25);
+    let mut expected = before;
+    expected.upnl = 17.25;
+    assert_eq!(
+        *h.store.balance(),
+        expected,
+        "acknowledged Hyro position frame updates only the unified balance PnL"
+    );
+    feed_private(
+        &h,
+        &private,
+        json!({"topic":"wallet","data":[{
+        "accountType":"UNIFIED","totalEquity":"999999","totalPerpUPL":"999"}]}),
+    );
+    assert_eq!(
+        *h.store.balance(),
+        expected,
+        "source does not subscribe to wallet updates"
+    );
+    assert_eq!(fills.get(), 0, "position and wallet frames emit no fills");
+    assert_eq!(
+        h.wire.requests.borrow().len(),
+        requests,
+        "private frame values did not come from REST"
+    );
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.venue().dispose().unwrap();
 }

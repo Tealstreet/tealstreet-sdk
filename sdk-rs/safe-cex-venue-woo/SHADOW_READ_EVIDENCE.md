@@ -1,3 +1,5 @@
+> Historical evidence: the test-only V3 comparison/canonical bodies, operation holders and their oracle commands are retired. The live legacy operation shape is retained; see CLAUDE.md.
+
 # WOO runtime shadow comparison
 
 Four remaining runtime-selector rows now have native implementations and

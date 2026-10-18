@@ -11,11 +11,11 @@ env=dict(os.environ)
 env.setdefault('SAFE_CEX_TYPESCRIPT_PATH', subprocess.check_output(['node','-p',"require.resolve('typescript')"],cwd=crate.parent,text=True).strip())
 mutations=[
  ('formatBalance','free: total - used,','free: total + used,','portfolio_formatBalance'),
- ('formatOpenPositions','contracts: to_typed(&position.get("quantity")?)','contracts: to_typed(&position.get("quantityNotional")?)','portfolio_formatOpenPositions'),
+ ('formatOpenPositions','let contracts = position.get("quantity")?;','let contracts = position.get("quantityNotional")?;','portfolio_formatOpenPositions'),
  ('formatPositions','side: (PositionSide::Long).into(),','side: (PositionSide::Short).into(),','portfolio_formatPositions'),
- ('formatOrders','filled: to_typed(&leg.get("filledQuantity")?)?,','filled: to_typed(&leg.get("remainingQuantity")?)?,','portfolio_formatOrders'),
- ('unknown-enum-refusal','safe_cex_num::TableHit::Missing => None,','safe_cex_num::TableHit::Missing => { refusal.get_or_insert_with(|| format!("Unrepresentable order {field}: {key}")); None },','portfolio_formatOrders'),
- ('inherited-deferred-refusal','            let last_update = {','            if let Some(error) = refusal.as_ref() { return Err(ExchangeError::new(error.clone())); }\n            let last_update = {','portfolio_formatOrders'),
+ ('formatOrders','let filled = leg.get("filledQuantity")?;','let filled = leg.get("remainingQuantity")?;','portfolio_formatOrders'),
+ ('unknown-enum-refusal','                    safe_cex_num::TableHit::Missing => Js::Undefined,','                    safe_cex_num::TableHit::Missing => { refusal.get_or_insert_with(|| format!("Unrepresentable order {field}: {key}")); Js::Undefined },','portfolio_formatOrders'),
+ ('inherited-deferred-refusal','            let date = ops::to_primitive(&order.get("transactionTime")?)?;','            if let Some(error) = refusal.as_ref() { return Err(ExchangeError::new(error.clone())); }\n            let date = ops::to_primitive(&order.get("transactionTime")?)?;','portfolio_formatOrders'),
  ('retained-info','js_deserialize_passthrough(d)','<Value as serde::Deserialize>::deserialize(d)','portfolio_formatBalance'),
  ('native-NaN-fallback','number != 0.0 && !number.is_nan()','number != 0.0','portfolio_formatBalance'),
 ]

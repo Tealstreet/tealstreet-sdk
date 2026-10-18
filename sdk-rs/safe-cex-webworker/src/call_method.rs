@@ -1,15 +1,15 @@
+use crate::handler::BaseHandler;
+use crate::payload::StoreWorkerOp;
+use crate::payload::StoreWorkerPayload;
 use crate::{
     data_post::{WorkerDataPayload, WorkerDataPost},
     error_post::WorkerErrorPost,
 };
-use crate::{
-    handler::BaseHandler,
-    payload::{StoreWorkerOp, StoreWorkerPayload},
-    throttle::ThrottleManager,
-};
+use safe_cex_exchange::throttle::ThrottleManager;
+use safe_cex_exchange::throttle::symbol_metadata_throttler;
 use safe_cex_exchange::{
     exchange::Exchange,
-    js_runtime::value::{Js, from_json, from_typed},
+    js_runtime::value::{Js, from_typed},
     runtime::{ExchangeError, ExchangeFuture},
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -77,25 +77,7 @@ impl CallMethodHandler {
         post: WorkerDataPost,
         error_post: WorkerErrorPost,
     ) -> Rc<Self> {
-        let venue = exchange.clone();
-        let throttler = ThrottleManager::new(
-            exchange.base().runtime.clone(),
-            move |symbol: String| {
-                let venue = venue.clone();
-                let runtime = venue.base().runtime.clone();
-                runtime.spawn_local(Box::pin(async move {
-                    if let Err(error) = venue.update_symbol_metadata(symbol).await {
-                        // TS leaves this Promise unawaited; the host receives its unhandled error.
-                        venue
-                            .base()
-                            .runtime
-                            .report_exception(&error, &json!({"method":"updateSymbolMetadata"}));
-                    }
-                }));
-            },
-            500,
-            String::clone,
-        );
+        let throttler = symbol_metadata_throttler(exchange.clone());
         let base = BaseHandler::new(
             exchange.clone(),
             "CallMethodHandler".into(),
@@ -176,7 +158,7 @@ impl CallMethodHandler {
                     ]);
                     if let Some(code) = &error.code {
                         serialized
-                            .define("code", from_json(code))
+                            .define("code", code.clone())
                             .expect("fresh error data");
                     }
                     if let Err(error) = reply.send(false, Some(serialized)) {

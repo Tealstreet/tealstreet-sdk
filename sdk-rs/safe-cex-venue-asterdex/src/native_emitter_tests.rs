@@ -38,7 +38,8 @@ fn watch(venue: &AsterDEXExchange, event: &str) -> Rc<RefCell<Vec<Value>>> {
     venue.base().on(
         event,
         Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut()
+                .push(safe_cex_exchange::js_runtime::value::to_json(value)?);
             Ok(())
         }),
     );
@@ -55,65 +56,21 @@ fn frame(venue: &AsterDEXExchange, value: Value) {
         .unwrap();
 }
 #[test]
-fn native_private_order_and_fill_have_source_event_arguments() {
-    run(|venue, store| {
-        let fills = watch(&venue, "fill");
-        let orders = watch(&venue, "order");
-        let posts = Rc::new(RefCell::new(vec![]));
-        let sink = posts.clone();
-        safe_cex_webworker::exchange_worker_start::install_exchange_event_bridge(
-            venue.base(),
-            Rc::new(move |payload| {
-                sink.borrow_mut().push(payload);
-                Ok(())
-            }),
-        );
-        frame(
-            &venue,
-            json!({"e":"ORDER_TRADE_UPDATE","o":{"i":7,"X":"NEW","s":"BTCUSDT","o":"LIMIT","S":"BUY","p":"100","q":"2","z":"0","T":1700000000000u64}}),
-        );
-        assert_eq!(store.orders().len(), 1);
-        frame(
-            &venue,
-            json!({"e":"ORDER_TRADE_UPDATE","o":{"i":7,"X":"FILLED","s":"BTCUSDT","S":"BUY","q":"2","z":"2","l":"2","L":"101","T":1700000000001u64}}),
-        );
-        assert_eq!(store.orders()[0].status, OrderStatus::Closed);
-        assert_eq!(
-            *fills.borrow(),
-            vec![
-                json!({"id":"7","orderId":"7","symbol":"BTCUSDT","side":"buy","price":101.0,"amount":2.0})
-            ],
-            "real venue fill is the first event argument"
-        );
-        assert_eq!(
-            *orders.borrow(),
-            vec![json!("7")],
-            "order event first argument is order.id"
-        );
-        let posts = posts.borrow();
-        let fills: Vec<_> = posts
-            .iter()
-            .filter(|p| p.op == safe_cex_webworker::payload::StoreWorkerOp::Fill)
-            .collect();
-        assert_eq!(fills.len(), 1);
-        assert_eq!(fills[0].data.as_ref().unwrap()["orderId"], "7");
-        assert!(fills[0].data.as_ref().unwrap().is_object());
-    });
-}
-
-#[test]
-fn native_worker_bridge_preserves_zero_single_array_and_multiple_arguments() {
+fn native_facade_preserves_zero_single_array_and_multiple_arguments() {
     run(|venue, _| {
         use safe_cex_exchange::js_runtime::value::{from_json, to_json};
         let posts = Rc::new(RefCell::new(vec![]));
         let sink = posts.clone();
-        safe_cex_webworker::exchange_worker_start::install_exchange_event_bridge(
-            venue.base(),
-            Rc::new(move |payload| {
-                sink.borrow_mut().push(payload);
-                Ok(())
-            }),
-        );
+        for event in ["warning", "log"] {
+            let sink = sink.clone();
+            venue.base().on_args(
+                event,
+                Rc::new(move |_, args| {
+                    sink.borrow_mut().push(to_json(&Js::array(args.to_vec()))?);
+                    Ok(())
+                }),
+            );
+        }
         let emitter = venue.rt.this.get("emitter").unwrap();
         for expected in [
             json!([]),
@@ -125,14 +82,14 @@ fn native_worker_bridge_preserves_zero_single_array_and_multiple_arguments() {
             args.extend(expected.as_array().unwrap().iter().map(from_json));
             emitter.call_method("emit", args).unwrap();
             assert_eq!(
-                posts.borrow().last().unwrap().data.as_ref(),
+                posts.borrow().last(),
                 Some(&expected),
-                "worker posts the actual emitted argument list"
+                "facade preserves the actual emitted argument list"
             );
         }
         venue.base().log("message", "info").unwrap();
         assert_eq!(
-            posts.borrow().last().unwrap().data,
+            posts.borrow().last().cloned(),
             Some(json!(["[asterdex] message", "info"])),
             "native base log keeps two arguments"
         );
@@ -151,7 +108,10 @@ fn native_worker_bridge_preserves_zero_single_array_and_multiple_arguments() {
                 ],
             )
             .unwrap();
-        venue.base().emit("positions", json!(["a", "b"])).unwrap();
+        venue
+            .base()
+            .emit("positions", from_json(&json!(["a", "b"])))
+            .unwrap();
         assert_eq!(*calls.borrow(), vec![json!([["a", "b"]])]);
     });
 }

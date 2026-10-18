@@ -405,3 +405,50 @@ win over close errors, while normal pair completion validates the return result.
 The constructed public class and its real operation table carry the regressions.
 The native exchange target also covers account_all orders, positions, fills and
 the source-throttled balance refresh through the real private socket.
+
+Account-tier extraction consumes live Js records, stopping at the first non-nullish
+alias even when its normalized tier is unknown. It preserves getter order, native
+number values, UTF-16 strings, unrelated cycles and original throws. The attributed
+placement regression drives overflow-number limits through the real client and
+signer, while live_tier retains the existing source corpus plus native-value cases.
+
+Private fill freshness uses Number.isFinite's non-coercing numeric guard before
+reading either clock. `private_fill_timestamp_types_match_the_maintained_handler`
+drives actual account_all data.fills frames against maintained TypeScript arrow
+bodies for 15 timestamp values, retaining the five-second boundary and future
+numeric timestamps while rejecting strings, arrays and other non-number inputs.
+
+Public REST payload parsers retain native arrays and row references. Book fallback
+selection stays lazy, ticker candidate capture stays eager, and guarded book-side
+reads occur twice as in the source. Native source tests retain UTF16 and sparse rows.
+
+Private market-payload flattening retains native JS rows and skips array holes
+without copying through JSON. The orders wrapper applies its object guard before
+calling the live owner helper; source oracles cover identity, numeric bits and UTF16.
+
+The TransactionClient JS decoder treats null trigger/expiry fields as absent and
+maps unknown order-type/time-in-force values to the source limit/GTC defaults.
+The real SDK/crypto regression compares 31 exact preimages and computed defaults.
+Nonce retry classification reads the original error's code and message directly.
+Both String conversions precede the final OR, so matching codes still observe
+message coercion failures. Unread surrogate fields and cycles stay untouched.
+
+The TransactionClient approval binding retains raw l1Signature metadata outside
+its typed signing parameters. Falsy values remain visible to callers and are
+omitted by the actual SDK request serializer, matching the maintained source.
+
+Signer class flag inputs use JavaScript truthiness for preimage bits and preserve
+original JS values in returned order metadata. Group validation shares one body
+with typed callers and receives strict raw-side equality from the JS binding.
+
+Cancellation and market-precision/minimum helper globals consume native JS fields,
+without whole Order/Market decoding. Keep market lookup and precision fallback
+lazy; unused properties and metadata must not be inspected or serialized.
+
+The constructed native ticker census in `tests/exchange_binding.rs` drives
+1,240 field-independent cases through 2,280 public socket frames. All numeric
+aliases, nested book-side forms, ticker batches and market-stat batches receive
+eight malformed/coercion values between distinct good rows. Native binary64
+fields are checked against the constructed TS exchange and DefaultStore, with
+finite resets before every case. The shared control runner misroutes mark/index
+in the live ingress body and requires compiled failure and restored success.

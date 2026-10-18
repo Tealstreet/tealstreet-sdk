@@ -9,7 +9,7 @@ Behavioral source: [worker guidance](../../packages/safe-cex/src/webworker/CLAUD
 and its linked subsystem guidance. This crate consumes Exchange and Store
 directly; hosts provide the existing ExchangeRuntime clock and local scheduler.
 
-Keyed ThrottleManager follows the source's leading call and resettable trailing
+The shared exchange-core keyed ThrottleManager follows the source's leading call and resettable trailing
 timer. This differs from the worker bridge's fixed-window lodash throttle.
 Clear cancels the timers still registered by key, including the source bug where
 an older orphan tail survives a newer leading call and clear. Drop cancels all
@@ -24,6 +24,12 @@ CallMethod results and OHLCV DATA posts use required WorkerDataPost with existin
 runtime Js, alongside separate native book and Error capabilities. DATA envelopes
 have no Serialize implementation; browser materialization retains native numbers
 and own undefined before postMessage. No default or JSON adapter is supplied.
+Native Error DATA retains its intrinsic prototype and hidden message/stack/cause
+properties before post, including UTF-16 message units. The real Wasm witness
+compares TypeError descriptors and structured clone with the host JS engine.
+Error DATA materialization ignores custom enumerable fields without invoking
+their getters; cause is retained only as an own data property. Standard
+name/message/stack reads stay observable, matching native Error structured clone.
 
 The CLI executor is injected and owns its emitted handled results; the handler
 never manufactures success from a resolved void future. Missing/rejected executors
@@ -670,4 +676,15 @@ Command dispatch rejects missing, null and primitive payloads before looking up
 or calling its executor; arrays retain the source object admission. Position
 failure replies use JavaScript Error string rules for empty names and messages.
 
+The exchange event bridge consumes `WorkerDataPost` directly: fill is one native
+value, and log/error events retain their variadic argument array. Assembly hosts
+must supply `post_event(WorkerDataPayload)`; ordinary JSON control payloads keep
+their separate `post_payload` capability. Do not serialize native emitter values
+before invoking the required DATA post.
+
 OHLCV fetch and subscription requests decode the shared AnyTimeframe interval. The exact 27 source literals are checked against the live type AST; both real handlers forward every interval, and native listeners must deliver each candle. Monthly, extended and seconds intervals must never disappear at worker decoding.
+
+Constructed AsterDEX private-frame/worker emitter witnesses live in
+`../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
+The venue retains private facade tests without importing the worker crate. Both paths preserve
+variadic event arguments; the real fill bridge retains Infinity and object identity.

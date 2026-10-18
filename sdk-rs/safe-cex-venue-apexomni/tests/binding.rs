@@ -2,6 +2,7 @@
 #[allow(dead_code)]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::js_runtime::value::to_typed;
 use safe_cex_store::Store;
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -227,5 +228,167 @@ fn bound_amendment_omits_undefined_side() {
     let calls = h.http.calls("/v3/order");
     assert_eq!(calls.len(), 1);
     assert!(!calls[0].data.as_object().unwrap().contains_key("side"));
+    done(&h);
+}
+
+fn market_field_refusal_case(field: &str, wire_field: &str) {
+    use std::{cell::RefCell, rc::Rc};
+    let values = if field == "active" {
+        vec![
+            Some(json!({"asset":"wrong"})),
+            Some(json!("truthy")),
+            Some(json!(17)),
+            Some(json!([])),
+        ]
+    } else {
+        vec![
+            Some(json!({"asset":"wrong"})),
+            Some(json!(false)),
+            Some(Value::Null),
+            Some(json!(17)),
+            None,
+        ]
+    };
+    let mut count = 0;
+    for value in values {
+        for refresh in [false, true] {
+            let h = fixture();
+            h.http
+                .routes
+                .borrow_mut()
+                .retain(|(method, path, _)| method != "GET" || path != "/v3/symbols");
+            let mut bad = contract();
+            bad["symbol"] = json!("BAD-USDC");
+            bad["crossSymbolName"] = json!("BADUSDC");
+            if let Some(value) = &value {
+                bad[wire_field] = value.clone();
+            } else {
+                bad.as_object_mut().unwrap().remove(wire_field);
+            }
+            let mut eth = contract();
+            eth["symbol"] = json!("ETH-USDC");
+            eth["crossSymbolName"] = json!("ETHUSDC");
+            eth["baseTokenId"] = json!("ETH");
+            h.http.ok(
+                "GET",
+                "/v3/symbols",
+                json!({"contractConfig":{"perpetualContract":[contract(),bad,eth]}}),
+            );
+            let logs = Rc::new(RefCell::new(Vec::new()));
+            let capture = logs.clone();
+            h.exchange.base().on_args(
+                "log",
+                Rc::new(move |_, args| {
+                    capture.borrow_mut().push(args.to_vec());
+                    Ok(())
+                }),
+            );
+            let markets = if refresh {
+                h.drive(h.venue().refresh_markets()).unwrap();
+                h.store.markets().to_vec()
+            } else {
+                h.drive(h.venue().fetch_markets()).unwrap()
+            };
+            assert_eq!(
+                markets
+                    .iter()
+                    .map(|m| m.symbol.as_str())
+                    .collect::<Vec<_>>(),
+                ["BTCUSDC", "ETHUSDC"],
+                "bad{field} refresh={refresh}"
+            );
+            let logs = logs.borrow();
+            let refusals = logs
+                .iter()
+                .filter(|args| {
+                    to_typed::<String>(&args[0])
+                        .unwrap()
+                        .contains("Refused ApexOmni market row")
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(refusals.len(), 1, "visible per-row refusal");
+            assert_eq!(to_typed::<String>(&refusals[0][1]).unwrap(), "warning");
+            let message = to_typed::<String>(&refusals[0][0]).unwrap();
+            assert!(
+                message.contains("row 1") && message.contains(&format!("{field}=")),
+                "{message}"
+            );
+            let expected = match value.as_ref() {
+                None => "Undefined".into(),
+                Some(Value::Null) => "Null".into(),
+                Some(value) if value.is_object() => "wrong".into(),
+                Some(value) if value.is_array() => "[]".into(),
+                Some(value) if value.is_string() => value.as_str().unwrap().to_owned(),
+                Some(value) => value.to_string(),
+            };
+            assert!(message.contains(&expected), "{message}");
+            drop(logs);
+            done(&h);
+            count += 1;
+        }
+    }
+    assert_eq!(count, if field == "active" { 8 } else { 10 });
+}
+#[test]
+fn market_id_row_refusals_keep_siblings() {
+    market_field_refusal_case("id", "symbol");
+}
+#[test]
+fn market_symbol_row_refusals_keep_siblings() {
+    market_field_refusal_case("symbol", "crossSymbolName");
+}
+#[test]
+fn market_base_row_refusals_keep_siblings() {
+    market_field_refusal_case("base", "baseTokenId");
+}
+#[test]
+fn market_quote_row_refusals_keep_siblings() {
+    market_field_refusal_case("quote", "settleAssetId");
+}
+#[test]
+fn market_active_row_refusals_keep_siblings() {
+    market_field_refusal_case("active", "enableTrade");
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::StoreUpdate;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("apexomni");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 64);
+    let h = fixture();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let socket = public_socket(&h);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("apexomni")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
     done(&h);
 }

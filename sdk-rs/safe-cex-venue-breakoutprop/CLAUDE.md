@@ -59,12 +59,14 @@ UTC conversion in a host whose local timezone differs.
 Portfolio mapping reads only the properties used by each source formatter.
 Unused declaration fields and unrelated balance/position/order collections never
 validate a response; strict declaration codecs remain separate. Actual HTTP
-binding regressions and sixty-eight maintained-source cases cover this boundary.
+binding regressions and eighty-two maintained-source cases cover this boundary.
+Native position intermediates remain native through balance reductions and symbol
+filtering; strict Order/Position projection follows complete source mapping.
 Unknown side/type/status strings map to own undefined shared ModelField values,
 matching the source lookup tables; JSON omits those fields. Inherited table
-results that are functions or objects remain outside the enum representation.
-Those refusals are staged until mapping completes: a later missing leg must
-still log and return stored orders. Missing first portfolios
+results that are functions or objects remain outside the final enum representation.
+Mapping finishes before projection; later property errors still report and return
+cached rows. Balance never projects side, entry price or contracts it does not return. Missing first portfolios
 remain undefined (`None`) for open positions and orders, distinct from `[]`.
 Balance catches its resulting reduce error; positions propagates its filter error.
 
@@ -178,6 +180,10 @@ mapping uses first USD replacement, first margin tier and separate amount/price
 increments. Only source-accessed fields are projected. Mapping property errors
 report their cause and return cached markets before inspecting later rows. Raw
 info retains unknown fields, signed zero and overflow lexemes.
+Ticker mapping reads only symbol/bid/ask; unused type/time fields never validate
+a response. Mapping property errors report and return cached tickers before strict scalar
+projection. Twenty-two additional source cases and four actual HTTP regressions
+cover these paths.
 Ticker events absent/null produce source undefined (`None`), while empty events
 produce `Some([])`. Session/account/HTTP failures report and return current stored
 tickers; reporter errors retain their original ExchangeError. The market combined
@@ -291,3 +297,18 @@ hook regressions fail the original defaults. Run
 `scripts/stream-binding-controls.py` exclusively for compiled dispatch, cleanup,
 empty/subset collection and TimeClip faults with exact restored passes. The
 runner checks disk space and restricts any required clean to this worktree target.
+
+
+Authentication is installed in the native client's request interceptor before
+constructor rate limiting. It reads the current session after dequeue and on
+every network retry; the one-shot 401 recovery remains in DxApi. The three
+`auth_pipeline_` production binding regressions fail on the previous early-auth
+placement and pass with the native pipeline hook.
+
+Amendment copies retain Order.clientOrderId into internal PreparedOrderOpts.
+Both fresh and replacement placement enter the same caller-ID preflight before
+market/session work, outside the placement catch. Source updateOrder cancels
+first, then unsupported caller IDs (including the empty string) emit one refusal
+and prevent replacement HTTP. The binding regression compares absent, own
+undefined, nonempty and empty IDs against actual source updateOrder/placeOrder
+and BaseExchange guard bodies, preserving valid cancel-then-place controls.

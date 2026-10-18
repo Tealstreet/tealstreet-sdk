@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import chalk from 'chalk';
 import { setProxyToken } from '@tealstreet/safe-cex/src/accessToken';
 import { loadConfig, saveConfig } from './config';
+import { BRAND } from './brand';
 
 /** Set by whichever path warns first; see `checkAndRefreshToken`. */
 export let warnedTokenExpiryThisProcess = false;
@@ -180,7 +181,7 @@ function decodeJwt(token: string): any {
  * 5. CLI receives token and saves it
  */
 export async function login(): Promise<boolean> {
-  console.log(chalk.cyan('Starting Tealstreet authentication...'));
+  console.log(chalk.cyan(`Starting ${BRAND.displayName} authentication...`));
 
   const state = generateState();
 
@@ -369,7 +370,7 @@ export function showAuthStatus(): void {
   const config = loadConfig();
   if (!config.auth?.accessToken) {
     console.log(chalk.yellow('Not logged in.'));
-    console.log(chalk.gray('Run "login" to authenticate with Tealstreet.'));
+    console.log(chalk.gray(`Run "login" to authenticate with ${BRAND.displayName}.`));
     return;
   }
 

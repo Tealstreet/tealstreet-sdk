@@ -555,7 +555,10 @@ fn fetch_ohlcv_matches_typescript() {
                 )
             })
             .collect::<Vec<safe_cex_venue_asterdex::types::AsterDEXKlineResponse>>();
-        let candles = transform_klines(&rows);
+        let rows = safe_cex_exchange::js_runtime::value::from_typed(&rows).unwrap();
+        let candles: Vec<safe_cex_types::Candle> =
+            safe_cex_exchange::js_runtime::value::to_typed(&transform_klines(&rows).unwrap())
+                .unwrap();
         let actual = serde_json::to_value(&candles).unwrap();
         same(
             &actual,
@@ -1377,7 +1380,10 @@ fn exchange_helpers_match_typescript() {
                     v => panic!("unknown number {v}"),
                 }
             });
-            brackets.insert("BTC".to_owned(), value);
+            brackets.insert(
+                "BTC".to_owned(),
+                safe_cex_exchange::js_runtime::value::Js::Number(value),
+            );
         }
         let market = transform_market(&input, &brackets).unwrap();
         let mut actual = json!(market);

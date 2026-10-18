@@ -1,4 +1,4 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 #[path = "../../safe-cex-exchange/tests/support/store.rs"]
 mod test_store;
@@ -112,7 +112,7 @@ fn tracked_orders_completion_and_logs_match_live_manager_and_pin_alias_boundary(
             Rc::new(move |event, message| {
                 log_events
                     .borrow_mut()
-                    .push(json!({"event":event,"message":message}));
+                    .push(json!({"event":event,"message":safe_cex_exchange::js_runtime::value::to_json(message).unwrap()}));
                 if reentrant {
                     target.data.borrow_mut().orders[0].status =
                         safe_cex_types::OrderStatus::Closed.into();
@@ -162,7 +162,7 @@ fn tracked_orders_completion_and_logs_match_live_manager_and_pin_alias_boundary(
             Rc::new(move |event, message| {
                 captured
                     .borrow_mut()
-                    .push(json!({"id":name,"event":event,"message":message}));
+                    .push(json!({"id":name,"event":event,"message":safe_cex_exchange::js_runtime::value::to_json(message).unwrap()}));
                 Ok(())
             }),
         );

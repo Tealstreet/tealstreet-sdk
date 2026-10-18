@@ -3,7 +3,7 @@
 #[path = "support/binding_runtime.rs"]
 mod host;
 use host::{Host, Routes};
-use safe_cex_exchange::{exchange::Exchange, runtime::ExchangeSigners};
+use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js, runtime::ExchangeSigners};
 use safe_cex_store::store::DefaultStore;
 use safe_cex_venue_hyperliquid::{
     binding::{HyperliquidDependencies, RuntimeClock},
@@ -491,4 +491,262 @@ fn bound_public_book_listener_dispatches_source_levels_and_cleanup() {
             .iter()
             .any(|v| v.contains("unsubscribe") && v.contains("l2Book"))
     );
+}
+
+fn private_socket(f: &Fixture) -> Rc<host::Wire> {
+    for wire in f.host.sockets.borrow().iter() {
+        wire.push(safe_cex_exchange::websocket::WsEvent::Open);
+    }
+    f.host.settle();
+    f.host
+        .sockets
+        .borrow()
+        .iter()
+        .find(|wire| {
+            wire.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text)
+                    .is_ok_and(|v| v["subscription"]["type"] == "userFills")
+            })
+        })
+        .expect("actual Spot private subscription")
+        .clone()
+}
+
+fn private_frame(f: &Fixture, wire: &host::Wire, value: Value) {
+    wire.push(safe_cex_exchange::websocket::WsEvent::Message(
+        safe_cex_transport::socket::SocketFrame::Text(value.to_string()),
+    ));
+    f.host.settle();
+    assert!(
+        f.host.reports.borrow().is_empty(),
+        "{:?}",
+        f.host.reports.borrow()
+    );
+}
+
+fn observe_private_fills(f: &Fixture) -> Rc<std::cell::RefCell<Vec<Js>>> {
+    let values = Rc::new(std::cell::RefCell::new(vec![]));
+    let saved = values.clone();
+    f.exchange.base().on(
+        "fill",
+        Rc::new(move |_, value| {
+            saved.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    values
+}
+
+#[test]
+fn private_spot_order_updates_preserve_rest_owned_orders_without_emitting_fills() {
+    let f = started();
+    let wire = private_socket(&f);
+    let store = &f.exchange.base().store;
+    store.add_or_update_orders(vec![order()]).unwrap();
+    let orders = store.orders().to_vec();
+    let positions = store.positions().to_vec();
+    let balance = store.balance().clone();
+    let fills = observe_private_fills(&f);
+    private_frame(
+        &f,
+        &wire,
+        json!({"channel":"orderUpdates","data":[{
+            "order":{"oid":555,"coin":"@0","side":"B","limitPx":"9","sz":"0","origSz":"1"},
+            "status":"filled","statusTimestamp":1700000000000u64
+        }]}),
+    );
+    assert_eq!(&*store.orders(), orders.as_slice());
+    assert_eq!(&*store.positions(), positions.as_slice());
+    assert_eq!(&*store.balance(), &balance);
+    assert!(
+        fills.borrow().is_empty(),
+        "source has no orderUpdates handler"
+    );
+}
+
+#[test]
+fn private_spot_live_fills_emit_exact_payload_and_refresh_real_balance() {
+    let f = started();
+    let wire = private_socket(&f);
+    let store = &f.exchange.base().store;
+    store.add_or_update_orders(vec![order()]).unwrap();
+    let orders = store.orders().to_vec();
+    let fills = observe_private_fills(&f);
+    let fill = json!({"tid":123,"coin":"@0","side":"B","px":"1.375","sz":"0.25"});
+    private_frame(
+        &f,
+        &wire,
+        json!({"channel":"userFills","data":{
+            "isSnapshot":true,"user":address(),"fills":[fill.clone()]
+        }}),
+    );
+    assert!(fills.borrow().is_empty(), "snapshot fills do not emit");
+    f.host.advance(1500.0);
+    let before = f.routes.count("info:spotClearinghouseState");
+    for (route, data) in f.routes.routes.borrow_mut().iter_mut() {
+        if route == "info:spotClearinghouseState" {
+            *data = json!({"balances":[{"coin":"USDC","token":0,"hold":"5","total":"200"}]});
+        }
+    }
+    private_frame(
+        &f,
+        &wire,
+        json!({"channel":"userFills","data":{
+            "isSnapshot":false,"user":address(),"fills":[fill]
+        }}),
+    );
+    {
+        let fills = fills.borrow();
+        assert_eq!(fills.len(), 1);
+        let fill = &fills[0];
+        assert_eq!(fill.own_keys().len(), 5);
+        for (key, expected) in [("id", "123"), ("side", "buy"), ("symbol", "PURR/USDC")] {
+            assert!(fill.has_own(key));
+            assert!(fill.get(key).unwrap().strict_equals(&Js::str(expected)));
+        }
+        for (key, expected) in [("price", 1.375_f64), ("amount", 0.25_f64)] {
+            assert!(fill.has_own(key));
+            assert_eq!(
+                fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+                expected.to_bits()
+            );
+        }
+    }
+    assert_eq!(f.routes.count("info:spotClearinghouseState"), before + 1);
+    assert_eq!(
+        (
+            store.balance().total,
+            store.balance().used,
+            store.balance().free
+        ),
+        (200.0, 5.0, 195.0)
+    );
+    assert_eq!(
+        &*store.orders(),
+        orders.as_slice(),
+        "Spot fills do not patch orders"
+    );
+}
+
+#[test]
+fn private_spot_balance_channels_publish_native_amounts_and_notional() {
+    let f = started();
+    let wire = private_socket(&f);
+    let fills = observe_private_fills(&f);
+    for (channel, nested, usdc, purr_amount) in [
+        ("spotClearinghouseState", false, 200.0, 20.0),
+        ("spotState", true, 300.0, 30.0),
+    ] {
+        let balances = json!([
+            {"coin":"USDC","token":0,"hold":"5","total":usdc.to_string()},
+            {"coin":"PURR","token":1,"hold":"2","total":purr_amount.to_string()}
+        ]);
+        let data = if nested {
+            json!({"spotState":{"balances":balances}})
+        } else {
+            json!({"balances":balances})
+        };
+        private_frame(&f, &wire, json!({"channel":channel,"data":data}));
+        let balance = f.exchange.base().store.balance();
+        let total = usdc + purr_amount * 1.25;
+        assert_eq!(
+            (balance.total, balance.used, balance.free, balance.upnl),
+            (total, 7.5, total - 7.5, 0.0),
+            "{channel}"
+        );
+        let purr = balance.currencies.as_ref().unwrap()["PURR"]
+            .as_balance()
+            .unwrap();
+        assert_eq!(
+            (purr.total, purr.used, purr.free),
+            (purr_amount, 2.0, purr_amount - 2.0)
+        );
+    }
+    assert!(fills.borrow().is_empty());
+}
+
+#[test]
+fn private_spot_asset_data_updates_closed_position_configuration() {
+    let f = started();
+    let wire = private_socket(&f);
+    let store = &f.exchange.base().store;
+    let mut positions = store.positions().to_vec();
+    assert_eq!(positions.len(), 1);
+    positions[0].leverage = 7.0;
+    positions[0].margin_type = safe_cex_types::MarginType::Isolated.into();
+    positions[0].position_mode = safe_cex_types::PositionMode::Hedged.into();
+    store.add_or_update_positions_full(positions).unwrap();
+    let fills = observe_private_fills(&f);
+    private_frame(
+        &f,
+        &wire,
+        json!({"channel":"activeAssetData","data":{
+            "coin":"@0","leverage":{"type":"isolated","value":50}
+        }}),
+    );
+    let positions = store.positions();
+    assert_eq!(positions[0].symbol, "PURR/USDC");
+    assert_eq!(positions[0].contracts, 0.0);
+    assert_eq!(positions[0].leverage, 1.0);
+    assert_eq!(positions[0].margin_type, safe_cex_types::MarginType::Cross);
+    assert_eq!(
+        positions[0].position_mode,
+        safe_cex_types::PositionMode::OneWay
+    );
+    assert!(fills.borrow().is_empty());
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("hyperliquidspot");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 8);
+    let f = started();
+    for wire in f.host.sockets.borrow().iter() {
+        wire.push(WsEvent::Open);
+    }
+    f.host.settle();
+    let wire = f
+        .host
+        .sockets
+        .borrow()
+        .iter()
+        .find(|wire| {
+            wire.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text)
+                    .is_ok_and(|v| v["subscription"]["type"] == "allMids")
+            })
+        })
+        .expect("constructed public subscription")
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.exchange.base().store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("hyperliquidspot")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            wire.push(WsEvent::Message(SocketFrame::Text(
+                frame.as_str().unwrap().into(),
+            )));
+            f.host.settle();
+        }
+        ticker_coercion::assert_native(&f.exchange.base().store.tickers(), case);
+    }
+    assert!(
+        f.host.reports.borrow().is_empty(),
+        "{:?}",
+        f.host.reports.borrow()
+    );
+    f.exchange.dispose().unwrap();
 }

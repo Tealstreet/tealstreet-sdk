@@ -139,7 +139,7 @@ fn options(i: usize) -> a::Options {
         take_profit: None,
         stop_loss: None,
         time_in_force: None,
-        reduce_only: false,
+        reduce_only: false.into(),
         tp_trigger_type: None,
         sl_trigger_type: None,
         client_order_id: None,
@@ -169,7 +169,7 @@ fn options(i: usize) -> a::Options {
             o.r#type = OrderType::Market.into();
             o.take_profit = Some(15.0);
             o.stop_loss = Some(8.0);
-            o.reduce_only = true;
+            o.reduce_only = true.into();
         }
         7 => o.price = Some(12.0),
         _ => panic!("independent case index"),
@@ -196,7 +196,7 @@ impl Orders {
         old.side = safe_cex_types::ModelField::Value(OrderSide::Sell);
         old.amount = 2.0;
         old.price = Some(9.0);
-        old.reduce_only = true;
+        old.reduce_only = true.into();
         old.time_in_force = Some(OrderTimeInForce::ImmediateOrCancel);
         Self {
             case: i,
@@ -420,7 +420,7 @@ fn replacement_native_source_options() {
                 "REPLACE native type"
             );
             assert_eq!(o.side, OrderSide::Sell);
-            assert!(o.reduce_only);
+            assert_eq!(o.reduce_only, true);
             assert!(o.trigger_price.is_none());
             string(
                 &result.unwrap()[0],

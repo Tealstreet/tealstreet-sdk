@@ -100,7 +100,9 @@ fn cases(f: &str) -> Vec<String> {
 fn error() -> Failure {
     let mut e = ExchangeError::new("position snapshot fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!(-1000));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        -1000
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"position venue detail"}}));
     Rc::new(e)
 }
@@ -487,7 +489,7 @@ fn native(k: Kind, name: &str) -> Value {
         assert!(Rc::ptr_eq(e, &h.primary), "native original Error Rc");
         assert_eq!(e.name, "RangeError");
         assert_eq!(e.message, "position snapshot fixture");
-        assert_eq!(e.code, Some(json!(-1000)));
+        assert_eq!(observed_error_code(&e.code), Some(json!(-1000)));
         assert_eq!(
             e.response,
             Some(json!({"status":503,"data":{"msg":"position venue detail"}}))
@@ -509,7 +511,7 @@ fn native(k: Kind, name: &str) -> Value {
     } else {
         vec![]
     };
-    json!({"name":name,"gets":h.gets.borrow().iter().map(|(c,e)|json!([if *c==SnapshotClient::Papi{"papi"}else{"private"},e])).collect::<Vec<_>>(),"ops":*h.ops.borrow(),"ids":h.ids.borrow().iter().map(|(s,side,m)|json!([s,wire(side),serde_json::to_value(m).unwrap()])).collect::<Vec<_>>(),"emits":h.emits.borrow().iter().map(wire).collect::<Vec<_>>(),"logs":h.logs.borrow().iter().map(|(m,s)|json!({"message":m,"severity":s.as_str()})).collect::<Vec<_>>(),"logged":h.logged.get(),"value":wire(&value),"failure":r.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&h.primary),"name":e.name,"message":e.message,"code":e.code,"response":e.response})),"refs":{"fallback":value.same(&h.cached),"balance":path(&value,&["balance"]).same(&h.balance),"positions":path(&value,&["positions"]).same(&h.current.borrow()),"originalInfo":rows.iter().filter(|p|input.iter().any(|i|prop(p,"info").same(i))).count(),"assets":path(&value,&["balance","info","assets"]).same(&path(&h.account,&["assets"])),"rest":!path(&value,&["balance","info"]).same(&h.account)},"marketCount":if let EventValue::Array(a)=&h.markets{a.borrow().len()}else{0}})
+    json!({"name":name,"gets":h.gets.borrow().iter().map(|(c,e)|json!([if *c==SnapshotClient::Papi{"papi"}else{"private"},e])).collect::<Vec<_>>(),"ops":*h.ops.borrow(),"ids":h.ids.borrow().iter().map(|(s,side,m)|json!([s,wire(side),serde_json::to_value(m).unwrap()])).collect::<Vec<_>>(),"emits":h.emits.borrow().iter().map(wire).collect::<Vec<_>>(),"logs":h.logs.borrow().iter().map(|(m,s)|json!({"message":m,"severity":s.as_str()})).collect::<Vec<_>>(),"logged":h.logged.get(),"value":wire(&value),"failure":r.as_ref().err().map(|e|json!({"original":Rc::ptr_eq(e,&h.primary),"name":e.name,"message":e.message,"code":observed_error_code(&e.code),"response":e.response})),"refs":{"fallback":value.same(&h.cached),"balance":path(&value,&["balance"]).same(&h.balance),"positions":path(&value,&["positions"]).same(&h.current.borrow()),"originalInfo":rows.iter().filter(|p|input.iter().any(|i|prop(p,"info").same(i))).count(),"assets":path(&value,&["balance","info","assets"]).same(&path(&h.account,&["assets"])),"rest":!path(&value,&["balance","info"]).same(&h.account)},"marketCount":if let EventValue::Array(a)=&h.markets{a.borrow().len()}else{0}})
 }
 fn check_positions(h: &Host, v: &EventValue, name: &str) {
     let fallback = h.rejecting()
@@ -1171,4 +1173,17 @@ fn pm_positions() {
 #[test]
 fn futures_balance() {
     compare(Kind::Balance)
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

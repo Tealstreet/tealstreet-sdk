@@ -1,10 +1,16 @@
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 // Scripted I/O support; callers allow unused helpers at module scope.
 use safe_cex_exchange::{
     exchange::ExchangeSettings,
     http::{HttpClientOptions, HttpFuture, HttpHost},
     js_runtime::base_exchange::BaseExchangeParts,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
-    websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
+    websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
 use safe_cex_store::{Store, store::DefaultStore};
 use safe_cex_transport::{
@@ -18,7 +24,7 @@ use safe_cex_venue_kucoin::kucoin_exchange::{
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     future::Future,
     pin::Pin,
     rc::Rc,
@@ -31,10 +37,13 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 /// Virtual-clock runtime: spawned work runs when `pump` polls it.
 #[derive(Default)]
 pub struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     pub now: Rc<Cell<f64>>,
     pub jobs: RefCell<Vec<Job>>,
     pub errors: RefCell<Vec<String>>,
+    pub console: RefCell<Vec<(String, String)>>,
     pub dials: RefCell<Vec<String>>,
+    pub sockets: RefCell<Vec<Rc<Socket>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -44,21 +53,32 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     pub fn pump(&self) {
-        for _ in 0..8 {
+        self.sleep_wakers.wake_due(self.now.get());
+        for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
+            if jobs.is_empty() {
+                return;
+            }
+            let signal = std::sync::Arc::new(virtual_time::WakeSignal::default());
+            let waker = signal.waker();
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
-            for (mut f, c) in jobs {
-                if !c.get()
-                    && f.as_mut()
-                        .poll(&mut Context::from_waker(Waker::noop()))
-                        .is_pending()
-                {
-                    pending.push((f, c));
+            let mut progressed = false;
+            for (mut future, cancelled) in jobs {
+                if cancelled.get() {
+                    continue;
+                }
+                if future.as_mut().poll(&mut cx).is_pending() {
+                    pending.push((future, cancelled));
+                } else {
+                    progressed = true;
                 }
             }
-            let mut jobs = self.jobs.borrow_mut();
-            pending.extend(jobs.drain(..));
-            *jobs = pending;
+            let added = !self.jobs.borrow().is_empty();
+            self.jobs.borrow_mut().extend(pending);
+            if !progressed && !added && !signal.take() {
+                return;
+            }
         }
     }
 }
@@ -70,12 +90,14 @@ impl ExchangeRuntime for Runtime {
         self.now.get()
     }
     fn sleep(&self, d: u64) -> ExchangeFuture<'static, ()> {
-        let at = self.now.get() + d as f64;
         let now = self.now.clone();
-        Box::pin(std::future::poll_fn(move |_| {
+        let at = now.get() + d as f64;
+        let sleeper = self.sleep_wakers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -85,7 +107,11 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((f, c.clone()));
         Box::new(Task(c))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console(&self, severity: &str, message: &str) {
+        self.console
+            .borrow_mut()
+            .push((severity.into(), message.into()));
+    }
     fn unique_id(&self) -> String {
         format!("id-{}", self.jobs.borrow().len())
     }
@@ -105,6 +131,41 @@ impl ExchangeRuntime for Runtime {
         Box::pin(async { Err(ExchangeError::new("Worker unused in native fixture")) })
     }
 }
+#[derive(Default)]
+pub struct Socket {
+    pub events: Rc<RefCell<VecDeque<WsEvent>>>,
+    pub sent: RefCell<Vec<String>>,
+    closed: Cell<bool>,
+}
+impl WsSocket for Socket {
+    fn ready_state(&self) -> u8 {
+        if self.closed.get() { 3 } else { 1 }
+    }
+    fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+        let events = self.events.clone();
+        Box::pin(std::future::poll_fn(move |_| {
+            events
+                .borrow_mut()
+                .pop_front()
+                .map_or(Poll::Pending, |e| Poll::Ready(Ok(e)))
+        }))
+    }
+    fn send(&self, message: &str) -> Result<(), ExchangeError> {
+        self.sent.borrow_mut().push(message.into());
+        Ok(())
+    }
+    fn close(&self) {
+        self.closed.set(true);
+    }
+    fn terminate(&self) {
+        self.closed.set(true);
+    }
+    fn reconnect(&self) {}
+    fn is_reconnecting(&self) -> bool {
+        false
+    }
+}
+
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
         Arc::new(safe_cex_transport::DirectTransport)
@@ -120,7 +181,10 @@ impl WsRuntime for Runtime {
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
         self.dials.borrow_mut().push(url);
-        Box::pin(async { Err(ExchangeError::new("No socket in the REST fixture")) })
+        let socket = Rc::new(Socket::default());
+        socket.events.borrow_mut().push_back(WsEvent::Open);
+        self.sockets.borrow_mut().push(socket.clone());
+        Box::pin(async move { Ok(socket as Rc<dyn WsSocket>) })
     }
     fn headers_capable(&self) -> bool {
         false
@@ -413,4 +477,53 @@ pub fn drive<F: Future>(rt: &Runtime, f: F) -> F::Output {
 #[allow(dead_code)]
 pub fn store(f: &Fixture) -> &dyn Store {
     f.store.as_ref()
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Runtime::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.now.set(runtime.now.get() + 9.0);
+    runtime.pump();
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.now.set(runtime.now.get() + 1.0);
+    runtime.pump();
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.now.set(runtime.now.get() + 10.0);
+    runtime.pump();
+    assert!(!latest.take(), "dropped sleep must not wake");
 }
