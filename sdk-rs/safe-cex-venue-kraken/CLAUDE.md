@@ -441,11 +441,16 @@ order controls fail before their respective cutovers. Symbol and ID Strings keep
 their explicit final shared output admission.
 
 The retained input admits lone UTF-16 surrogates. The read/utility boundary
-witnesses inspect those units before invoking the existing consumers: token and
-leverage wire conversion, fill/income model conversion, and scalar String
-admission still refuse their closed representations. Leverage reports that
-refusal once before any cache mutation. Depth and numeric-query refusals remain
-separate; all twelve utility source boundary cases are retained.
+witnesses inspect those units before invoking the existing consumers. Final
+closed String outputs use the shared U+FFFD projection: token output, leverage
+cache keys, fill IDs and income IDs are admitted, with every native numeric
+field and ordered effect still checked. `accepted_boundary_observers` reaches
+the constructed Scope, signed token/leverage/account-log clients and live fill
+host; original native response cells retain their unpaired units. Depth and
+numeric-query refusals remain separate; all twelve source cases are retained.
+Error response witnesses read signed zero through `retained_response_input`;
+`response_json_view` intentionally follows JSON.stringify and projects -0 to +0.
+See [RETAINED_BOUNDARY_REVIEW.md](RETAINED_BOUNDARY_REVIEW.md).
 
 ### REST read receiver coverage
 

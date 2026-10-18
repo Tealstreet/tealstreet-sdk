@@ -58,13 +58,30 @@ fn error_constructor_preserves_literal_message_distinct_snapshots_and_presence()
     assert_eq!(error.message, "literal {broken json}");
     assert_eq!(error.to_string(), "literal {broken json}");
     let output = Command::new("node")
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/error-retained-source.cjs"))
-        .output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/error-retained-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let source: Value = serde_json::from_slice(&output.stdout).unwrap();
     let retained_response = error.retained_response_input().unwrap();
-    let retained_bits = retained_response.get("fraction").unwrap().as_f64().unwrap().to_bits();
-    assert_eq!(retained_bits, (-0.0_f64).to_bits(), "native response retains negative zero");
+    let retained_bits = retained_response
+        .get("fraction")
+        .unwrap()
+        .as_f64()
+        .unwrap()
+        .to_bits();
+    assert_eq!(
+        retained_bits,
+        (-0.0_f64).to_bits(),
+        "native response retains negative zero"
+    );
     assert_eq!(format!("{retained_bits:016x}"), source["sourceNativeBits"]);
     assert_eq!(source["sourceIdentity"], true);
     let native_response = error.response_json_view().unwrap();
