@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, type TestContext } from 'node:test';
+import ts from 'typescript';
 import { extractSources, isSource, manifestPathForSource, sourcePrefix, walkFiles, type SourceSymbols } from '../src/extract.ts';
 import { parseManifest, reconcile, serializeManifest, type Manifest } from '../src/manifest.ts';
 
@@ -518,8 +519,20 @@ test('real safe-cex Program includes Bybit and BaseExchange callable instance fi
       .some((row) => row.ts === name && row.kind === kind), name);
   }
   for (const file of ['exchanges/registry.ts', 'exchanges/registry.native.ts']) {
-    assert.equal(files.find((source) => source.ts === sourcePrefix + file)?.symbols
-      .filter((row) => row.ts.startsWith('exchangeRegistry.') && row.kind === 'field-fn').length, 48);
+    const source = ts.createSourceFile(file, readFileSync(join(repoRoot, sourcePrefix, file), 'utf8'), ts.ScriptTarget.Latest, true);
+    const registry = source.statements.filter(ts.isVariableStatement)
+      .flatMap((statement) => statement.declarationList.declarations)
+      .find((declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === 'exchangeRegistry');
+    assert.ok(registry?.initializer && ts.isObjectLiteralExpression(registry.initializer), file);
+    const expected = registry.initializer.properties.map((property) => {
+      assert.ok(ts.isPropertyAssignment(property), file);
+      assert.ok(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name), file);
+      return `exchangeRegistry.${property.name.text}`;
+    });
+    assert.ok(expected.includes('exchangeRegistry.binanceinverse'), file);
+    const actual = files.find((source) => source.ts === sourcePrefix + file)?.symbols
+      .filter((row) => row.ts.startsWith('exchangeRegistry.') && row.kind === 'field-fn').map((row) => row.ts);
+    assert.deepEqual(actual?.sort(), expected.sort(), file);
   }
   const aster = files.find((source) => source.ts === sourcePrefix + 'exchanges/asterdex/asterdex.exchange.ts');
   assert.ok(!aster?.symbols.some((row) => row.ts === 'AsterDEXExchange.primaryAPI'));
