@@ -213,7 +213,7 @@ fn run_trading(name: &str) {
             store.as_ref(),
             StoreUpdate {
                 markets: Some(markets),
-                zk_link_config: Some(trading_corpus()["zk"].clone()),
+                zk_link_config: Some(trading_corpus()["zk"].clone().into()),
                 ..Default::default()
             },
             false,
@@ -245,7 +245,7 @@ fn run_trading(name: &str) {
             let mut raw = corpus()["fixtures"]["order"].clone();
             raw["size"] = json!("0.006");
             raw["cumSuccessFillSize"] = json!("0");
-            let mapped = venue.map_order(&J::from(raw)).unwrap();
+            let mapped = venue.map_order(&native::capture(&J::from(raw))).unwrap();
             store.add_or_update_orders_full(mapped).unwrap();
         }
         host.operations.borrow_mut().clear();
@@ -381,7 +381,7 @@ fn update_order_store_selection_begins_at_first_poll() {
         let mut raw = corpus()["fixtures"]["order"].clone();
         raw["size"] = json!("0.006");
         raw["cumSuccessFillSize"] = json!("0");
-        let mapped = venue.map_order(&J::from(raw)).unwrap();
+        let mapped = venue.map_order(&native::capture(&J::from(raw))).unwrap();
         assert_eq!(
             mapped.len(),
             3,

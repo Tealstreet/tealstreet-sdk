@@ -45,9 +45,13 @@ fn private_rows_preserve_lookup_order_and_typed_null_coercion_failures() {
         for (scenario, reads, writes, fails) in SCENARIOS {
             let store = ObservedStore::new();
             let market = normalize_market(
-                json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
-                    .as_object()
-                    .unwrap(),
+                &serde_json::Value::Object(
+                    (json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
+                        .as_object()
+                        .unwrap())
+                    .clone(),
+                )
+                .into(),
             )
             .unwrap();
             Store::update(

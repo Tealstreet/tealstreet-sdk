@@ -193,3 +193,9 @@ Their selected runner isolates rustdoc artifacts from the normal probe build.
 cohort: eleven Deserialize carriers, fourteen raw-input runtime owners and eight
 explicitly typed APIs. The selected runner uses CI's actual native probe path;
 constructor/conversion receipts remain distinct from decoder execution.
+
+Model `info` uses canonical `RetainedJsonInput` inside its existing presence
+wrapper. Read numbers and UTF-16 fields directly before any JSON report; source
+computed numbers use `Float`. Consumer coercion uses the shared retained Number,
+parseFloat and String helpers. JSON rendering belongs at the explicit output
+boundary, with no alternate model-info carrier.

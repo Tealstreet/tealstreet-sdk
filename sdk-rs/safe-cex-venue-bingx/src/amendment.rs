@@ -6,14 +6,15 @@ use crate::{
     read_history::BingxReadHistory,
 };
 use safe_cex_exchange::{error_reporting::ExchangeErrorInput, runtime::ExchangeError};
-use safe_cex_num::numeric_ingress::{JsNumberOutput, js_deserialize_passthrough, js_value_as_f64};
-use safe_cex_num::{adjust, js_number, js_string, js_truthy};
+
+use safe_cex_num::{adjust, js_retained_number, js_retained_string, js_string, js_truthy};
 use safe_cex_transport::{RestBody, RestRequest};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PreparedOrderOpts, UpdateOrderOpts,
     UpdateOrderOptsUpdate,
 };
-use serde::Serialize;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::rc::Rc;
 
@@ -23,49 +24,46 @@ pub struct BingxAmendment {
     pub placement: Rc<BingxPlacement>,
     pub transport: Rc<dyn ReadTransport>,
 }
-#[derive(Serialize)]
-#[serde(transparent)]
-struct Response {
-    value: Value,
-}
-impl JsNumberOutput for Response {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self,struct{} passthrough{value});
+fn set_field(fields: &mut Vec<(Vec<u16>, Input)>, key: Vec<u16>, value: Input) {
+    if let Some((_, old)) = fields.iter_mut().find(|(name, _)| name == &key) {
+        *old = value;
+    } else {
+        fields.push((key, value));
     }
 }
-fn alias<'a>(info: Option<&'a Value>, keys: &[&str]) -> Option<&'a Value> {
+fn alias<'a>(info: Option<&'a Input>, keys: &[&str]) -> Option<&'a Input> {
     keys.iter().enumerate().find_map(|(index, key)| {
-        info.and_then(|value| value.get(*key))
-            .filter(|value| index + 1 == keys.len() || !value.is_null())
+        info.and_then(|value| value.get(key))
+            .filter(|value| index + 1 == keys.len() || !value.is_nullish())
     })
 }
-fn text(value: Option<&Value>) -> Result<String, ExchangeError> {
-    js_string(value).map_err(|e| {
+fn text(value: Option<&Input>) -> Result<String, ExchangeError> {
+    js_retained_string(value).map_err(|e| {
         let mut error = ExchangeError::new(e.message);
         error.name = e.name.into();
         error
     })
 }
-fn number(value: Option<&Value>) -> Result<f64, ExchangeError> {
-    js_number(value).map_err(|e| {
+fn number(value: Option<&Input>) -> Result<f64, ExchangeError> {
+    js_retained_number(value).map_err(|e| {
         let mut error = ExchangeError::new(e.message);
         error.name = e.name.into();
         error
     })
 }
-fn upper(info: Option<&Value>, keys: &[&str]) -> Result<String, ExchangeError> {
+fn upper(info: Option<&Input>, keys: &[&str]) -> Result<String, ExchangeError> {
     Ok(text(
         alias(info, keys)
-            .filter(|v| !v.is_null())
-            .or(Some(&json!(""))),
+            .filter(|v| !v.is_nullish())
+            .or(Some(&Input::Text(vec![]))),
     )?
     .to_uppercase())
 }
-fn boolean(v: Option<&Value>) -> Option<bool> {
+fn boolean(v: Option<&Input>) -> Option<bool> {
     match v {
-        Some(Value::Bool(b)) => Some(*b),
-        Some(Value::String(s)) if s == "true" => Some(true),
-        Some(Value::String(s)) if s == "false" => Some(false),
+        Some(Input::Bool(b)) => Some(*b),
+        Some(v) if v.text_equals("true") => Some(true),
+        Some(v) if v.text_equals("false") => Some(false),
         _ => None,
     }
 }
@@ -85,8 +83,8 @@ fn raw_tif(v: &str) -> Option<OrderTimeInForce> {
 fn open_status(v: &str) -> bool {
     matches!(v, "NEW" | "OPEN" | "PENDING" | "WORKING")
 }
-fn protection(v: Option<&Value>) -> Result<bool, ExchangeError> {
-    let Some(v) = v.filter(|v| v.is_object() || v.is_array()) else {
+fn protection(v: Option<&Input>) -> Result<bool, ExchangeError> {
+    let Some(v) = v.filter(|v| matches!(v, Input::Object(_) | Input::Array(_))) else {
         return Ok(false);
     };
     for k in ["stopPrice", "quantity", "price"] {
@@ -149,7 +147,7 @@ impl BingxAmendment {
             .cloned()
             .ok_or_else(|| ExchangeError::new(format!("Market {} not found", order.symbol)))
     }
-    async fn post(&self, url: &str, body: Value) -> Result<Value, ExchangeError> {
+    async fn post(&self, url: &str, body: Value) -> Result<Input, ExchangeError> {
         let result = self
             .transport
             .send(RestRequest {
@@ -174,8 +172,7 @@ impl BingxAmendment {
         })
         .await;
         result?
-            .decode_with(|d| js_deserialize_passthrough(d).map(|value| Response { value }))
-            .map(|r| r.value)
+            .decode_with(Input::deserialize)
             .map_err(|e| ExchangeError::new(e.to_string()))
     }
     fn caught<T>(&self, result: Result<T, ExchangeError>) -> Result<T, ExchangeError> {
@@ -186,7 +183,7 @@ impl BingxAmendment {
                 .and_then(|r| r.get("data"))
                 .and_then(|d| d.get("msg"));
             let message = if js_truthy(wire) {
-                text(wire)?
+                js_string(wire).map_err(|e| ExchangeError::new(e.message))?
             } else if !error.message.is_empty() {
                 error.message.clone()
             } else {
@@ -199,7 +196,7 @@ impl BingxAmendment {
     pub async fn update_order(
         &self,
         request: &UpdateOrderOpts,
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         let order = &request.order;
         let (amount, price) = match &request.update {
             UpdateOrderOptsUpdate::Variant0(u) => (Some(u.amount), u.price),
@@ -262,7 +259,8 @@ impl BingxAmendment {
         if id.is_none()
             || text(id)? != order.id
             || symbol
-                .and_then(Value::as_str)
+                .and_then(|v| v.as_text())
+                .and_then(|v| String::from_utf16(v).ok())
                 .is_none_or(|s| s.replace('-', "") != order.symbol)
             || kind != "LIMIT"
             || raw_side(&side) != order.side.into_value()
@@ -281,8 +279,8 @@ impl BingxAmendment {
         }
         let parsed = raw_tif(&text(
             alias(info, &["timeInForce", "f"])
-                .filter(|v| !v.is_null())
-                .or(Some(&json!(""))),
+                .filter(|v| !v.is_nullish())
+                .or(Some(&Input::Text(vec![]))),
         )?);
         let tif = if boolean(alias(info, &["postOnly"])) == Some(true) {
             Some(OrderTimeInForce::PostOnly)
@@ -333,26 +331,28 @@ impl BingxAmendment {
                     json!({"orderId":order.id,"quantity":qty,"symbol":market.id}),
                 )
                 .await?;
-            if data.get("code").and_then(js_value_as_f64) != Some(0.0) {
-                return Err(ExchangeError::new(if js_truthy(data.get("msg")) {
-                    text(data.get("msg"))?
-                } else {
-                    format!(
-                        "BingX amend order failed with code {}",
-                        text(data.get("code"))?
-                    )
-                }));
+            if data.get("code").and_then(Input::as_f64) != Some(0.0) {
+                return Err(ExchangeError::new(
+                    if data.get("msg").is_some_and(Input::is_truthy) {
+                        text(data.get("msg"))?
+                    } else {
+                        format!(
+                            "BingX amend order failed with code {}",
+                            text(data.get("code"))?
+                        )
+                    },
+                ));
             }
             let d = data.get("data");
             if text(
                 alias(d, &["orderId"])
-                    .filter(|v| !v.is_null())
-                    .or(Some(&json!(""))),
+                    .filter(|v| !v.is_nullish())
+                    .or(Some(&Input::Text(vec![]))),
             )? != order.id
                 || text(
                     alias(d, &["symbol"])
-                        .filter(|v| !v.is_null())
-                        .or(Some(&json!(""))),
+                        .filter(|v| !v.is_nullish())
+                        .or(Some(&Input::Text(vec![]))),
                 )?
                 .replace('-', "")
                     != order.symbol
@@ -366,7 +366,7 @@ impl BingxAmendment {
                     order.id
                 )));
             }
-            Ok(vec![Some(json!(order.id))])
+            Ok(vec![Some(Input::from(json!(order.id)))])
         }
         .await;
         self.caught(result)
@@ -375,7 +375,7 @@ impl BingxAmendment {
         &self,
         order: &Order,
         next_price: f64,
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         if order.status != OrderStatus::Open
             || !matches!(
                 order.r#type,
@@ -396,8 +396,8 @@ impl BingxAmendment {
         let status = upper(info, &["status", "X"])?;
         let filled = number(
             alias(info, &["executedQty", "z"])
-                .filter(|v| !v.is_null())
-                .or(Some(&json!(0))),
+                .filter(|v| !v.is_nullish())
+                .or(Some(&Input::Float(0.0))),
         )?;
         let mapped = crate::constants::ORDER_TYPE
             .iter()
@@ -408,7 +408,8 @@ impl BingxAmendment {
             .map(safe_cex_types::ModelField::Value)
             .unwrap_or(order.r#type);
         if symbol
-            .and_then(Value::as_str)
+            .and_then(|v| v.as_text())
+            .and_then(|v| String::from_utf16(v).ok())
             .is_some_and(|s| s.replace('-', "") != order.symbol)
         {
             return self.reject(format!(
@@ -468,7 +469,7 @@ impl BingxAmendment {
         &self,
         order: &Order,
         next_price: f64,
-    ) -> Result<Vec<Option<Value>>, ExchangeError> {
+    ) -> Result<Vec<Option<Input>>, ExchangeError> {
         if order.status != OrderStatus::Open || order.r#type != OrderType::Limit {
             return self
                 .reject("BingX cancel-replace supports only exactly reconciled open LIMIT orders");
@@ -518,7 +519,8 @@ impl BingxAmendment {
         };
         if (id.is_some() && text(id)? != reconciled.id)
             || symbol
-                .and_then(Value::as_str)
+                .and_then(|v| v.as_text())
+                .and_then(|v| String::from_utf16(v).ok())
                 .is_some_and(|s| s.replace('-', "") != reconciled.symbol)
             || (!kind.is_empty() && kind != "LIMIT")
             || (!side.is_empty() && raw_side(&side) != reconciled.side.into_value())
@@ -538,8 +540,8 @@ impl BingxAmendment {
         let post = boolean(alias(info, &["postOnly"]));
         let parsed = raw_tif(&text(
             alias(info, &["timeInForce", "f"])
-                .filter(|v| !v.is_null())
-                .or(Some(&json!(""))),
+                .filter(|v| !v.is_nullish())
+                .or(Some(&Input::Text(vec![]))),
         )?);
         let tif = if post == Some(true) {
             Some(OrderTimeInForce::PostOnly)
@@ -599,7 +601,11 @@ impl BingxAmendment {
             .find(|(_, v)| *v == tif)
             .map(|(k, _)| *k)
             .ok_or_else(|| ExchangeError::new("unknown time in force"))?;
-        let Some(client) = client.and_then(Value::as_str).filter(|s| !s.is_empty()) else {
+        let Some(client) = client
+            .and_then(|v| v.as_text())
+            .and_then(|v| String::from_utf16(v).ok())
+            .filter(|s| !s.is_empty())
+        else {
             return self.reject(format!(
                 "BingX cannot safely replace {}: client order id is not reconciled",
                 order.id
@@ -623,21 +629,23 @@ impl BingxAmendment {
             let data = self
                 .post(crate::constants::ENDPOINTS[13].1, payload.clone())
                 .await?;
-            if data.get("code").and_then(js_value_as_f64) != Some(0.0) {
-                return Err(ExchangeError::new(if js_truthy(data.get("msg")) {
-                    text(data.get("msg"))?
-                } else {
-                    format!(
-                        "BingX cancel-replace failed with code {}",
-                        text(data.get("code"))?
-                    )
-                }));
+            if data.get("code").and_then(Input::as_f64) != Some(0.0) {
+                return Err(ExchangeError::new(
+                    if data.get("msg").is_some_and(Input::is_truthy) {
+                        text(data.get("msg"))?
+                    } else {
+                        format!(
+                            "BingX cancel-replace failed with code {}",
+                            text(data.get("code"))?
+                        )
+                    },
+                ));
             }
-            let d = data.get("data").filter(|v| js_truthy(Some(v)));
+            let d = data.get("data").filter(|v| v.is_truthy());
             let cancel = d.and_then(|v| v.get("cancelResult"));
             let replace = alias(d, &["newOrderResult", "replaceResult"]);
-            let success = |v: Option<&Value>| -> Result<bool, ExchangeError> {
-                Ok(v == Some(&json!(true))
+            let success = |v: Option<&Input>| -> Result<bool, ExchangeError> {
+                Ok(v == Some(&Input::Bool(true))
                     || matches!(text(v)?.to_uppercase().as_str(), "SUCCESS" | "TRUE"))
             };
             if !success(cancel)? || !success(replace)? {
@@ -645,22 +653,22 @@ impl BingxAmendment {
                     "BingX cancel-replace failed: cancel={}, new={}",
                     text(
                         cancel
-                            .filter(|v| js_truthy(Some(v)))
-                            .or(Some(&json!("unknown")))
+                            .filter(|v| v.is_truthy())
+                            .or(Some(&Input::Text("unknown".encode_utf16().collect())))
                     )?,
                     text(
                         replace
-                            .filter(|v| js_truthy(Some(v)))
-                            .or(Some(&json!("unknown")))
+                            .filter(|v| v.is_truthy())
+                            .or(Some(&Input::Text("unknown".encode_utf16().collect())))
                     )?
                 )));
             }
             let response = d
                 .and_then(|v| v.get("newOrderResponse"))
-                .filter(|v| js_truthy(Some(v)));
+                .filter(|v| v.is_truthy());
             let id = alias(d, &["newOrderId"])
-                .filter(|v| !v.is_null())
-                .or_else(|| alias(response, &["orderId", "orderID"]).filter(|v| !v.is_null()))
+                .filter(|v| !v.is_nullish())
+                .or_else(|| alias(response, &["orderId", "orderID"]).filter(|v| !v.is_nullish()))
                 .or_else(|| alias(d, &["orderId", "orderID"]));
             let Some(id) = id else {
                 return Err(ExchangeError::new(
@@ -668,19 +676,28 @@ impl BingxAmendment {
                 ));
             };
             let id = text(Some(id))?;
-            let mut raw = json!({});
-            for value in [response, info, Some(&payload)] {
-                if let Some(Value::Object(fields)) = value {
-                    raw.as_object_mut()
-                        .expect("replacement object")
-                        .extend(fields.clone());
+            let mut fields: Vec<(Vec<u16>, Input)> = vec![];
+            let retained_payload = Input::from(payload.clone());
+            for value in [response, info, Some(&retained_payload)] {
+                if let Some(Input::Object(source)) = value {
+                    for (key, value) in source {
+                        set_field(&mut fields, key.clone(), value.clone());
+                    }
                 }
             }
-            raw["orderId"] = json!(id);
-            raw["orderID"] = json!(id);
-            raw["status"] = json!("PENDING");
-            raw["origQty"] = json!(safe_cex_num::js_number_string(amount));
-            raw["executedQty"] = json!("0");
+            for (key, value) in [
+                ("orderId", Input::from(json!(id))),
+                ("orderID", Input::from(json!(id))),
+                ("status", Input::from(json!("PENDING"))),
+                (
+                    "origQty",
+                    Input::from(json!(safe_cex_num::js_number_string(amount))),
+                ),
+                ("executedQty", Input::from(json!("0"))),
+            ] {
+                set_field(&mut fields, key.encode_utf16().collect(), value);
+            }
+            let raw = Input::Object(fields);
             let replacement = map_order(
                 &raw,
                 &self.reads.base.store.orders(),
@@ -698,7 +715,7 @@ impl BingxAmendment {
                     .add_or_update_order(replacement)
                     .map_err(ExchangeError::from)?;
             }
-            Ok(vec![Some(json!(id))])
+            Ok(vec![Some(Input::from(json!(id)))])
         }
         .await;
         self.caught(result)

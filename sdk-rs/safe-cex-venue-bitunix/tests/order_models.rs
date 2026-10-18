@@ -1,5 +1,6 @@
-use safe_cex_num::{JsCoercionError, JsJsonValue, js_truthy};
-use safe_cex_types::{Order, OrderStopTriggerType, OrderType};
+use safe_cex_num::{JsCoercionError, js_truthy};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
+use safe_cex_types::{Order, OrderStopTriggerType};
 use safe_cex_venue_bitunix::{
     order_links,
     order_models::*,
@@ -49,24 +50,25 @@ fn text(v: &str) -> Value {
 fn undefined() -> Value {
     json!({"undefined":true})
 }
-fn obs(v: &JsJsonValue) -> Value {
+fn retained_text(value: impl AsRef<str>) -> Input {
+    Input::Text(value.as_ref().encode_utf16().collect())
+}
+fn obs(v: &Input) -> Value {
     match v {
-        JsJsonValue::Undefined => undefined(),
-        JsJsonValue::Null => Value::Null,
-        JsJsonValue::Bool(v) => json!(v),
-        JsJsonValue::Number(v) => bits(*v),
-        JsJsonValue::String(v) => text(v),
-        JsJsonValue::Array(v) => json!(v.iter().map(obs).collect::<Vec<_>>()),
-        JsJsonValue::Object(v) => {
-            json!({"entries":v.iter().map(|(k,v)|json!([k,obs(v)])).collect::<Vec<_>>()})
+        Input::Undefined => undefined(),
+        Input::Null => Value::Null,
+        Input::Bool(v) => json!(v),
+        Input::Float(v) => bits(*v),
+        Input::Lexeme(v) => bits(v.parse().unwrap()),
+        Input::Text(v) => json!({"units":v}),
+        Input::Array(v) => json!(v.iter().map(obs).collect::<Vec<_>>()),
+        Input::Object(v) => {
+            json!({"entries":v.iter().map(|(k,v)|json!([String::from_utf16(k).unwrap(),obs(v)])).collect::<Vec<_>>()})
         }
-        JsJsonValue::BigInt(_) => panic!("unexpected witness BigInt"),
     }
 }
-fn value_obs(v: &Value) -> Value {
-    let mut v = v.clone();
-    safe_cex_num::normalize_json_order(&mut v);
-    obs(&JsJsonValue::from(v))
+fn value_obs(v: &Input) -> Value {
+    obs(v)
 }
 fn error_obs(e: &Error) -> Value {
     json!({"error":[text(&e.name),text(&e.message)]})
@@ -79,43 +81,39 @@ fn ready<T>(f: impl Future<Output = T>) -> T {
         Poll::Pending => panic!("MODEL unexpected suspended projection"),
     }
 }
-fn key_value(row: &Value, key: &str) -> Option<Value> {
-    let mut snake = String::new();
-    for c in key.chars() {
-        if c.is_ascii_uppercase() {
-            snake.push('_');
-            snake.push(c.to_ascii_lowercase());
-        } else {
-            snake.push(c);
-        }
-    }
-    row.get(key).or_else(|| row.get(&snake)).cloned()
+fn key_value(row: &Input, key: &str) -> Option<Input> {
+    row.get(key)
+        .or_else(|| row.get(&safe_cex_num::lodash_snake_case(key)))
+        .or_else(|| row.get(&safe_cex_num::lodash_camel_case(key)))
+        .cloned()
 }
-fn canonical(v: &Value) -> Order {
-    let mut value = json!({"id":"","status":"open","symbol":"BTCUSDT","type":"conditional","side":"buy","price":0,"amount":0,"filled":0,"remaining":0,"reduceOnly":false,"lastUpdate":0});
-    for field in [
-        "id",
-        "symbol",
-        "type",
-        "side",
-        "price",
-        "amount",
-        "filled",
-        "remaining",
-        "reduceOnly",
-        "lastUpdate",
-        "info",
-        "tpTriggerType",
-        "slTriggerType",
-    ] {
-        if let Some(v) = v.get(field) {
-            value[field] = v.clone();
-        }
+fn canonical(v: &Input) -> Order {
+    use safe_cex_exchange::js_runtime::value::{from_json, from_retained_input, to_typed};
+    let value = from_json(
+        &json!({"id":"","status":"open","symbol":"BTCUSDT","type":"conditional","side":"buy","price":0,"amount":0,"filled":0,"remaining":0,"reduceOnly":false,"lastUpdate":0}),
+    );
+    for (key, field) in from_retained_input(v.clone()).own_entries().unwrap() {
+        value.set_key(&key, field).unwrap();
     }
-    if serde_json::from_value::<OrderType>(value["type"].clone()).is_err() {
-        value["type"] = json!("conditional");
+    if ![
+        "market",
+        "limit",
+        "conditional",
+        "stop_market",
+        "take_profit_market",
+        "trailing_stop_market",
+    ]
+    .iter()
+    .any(|kind| v.get("type").is_some_and(|v| v.text_equals(kind)))
+    {
+        value
+            .define(
+                "type",
+                safe_cex_exchange::js_runtime::value::Js::str("conditional"),
+            )
+            .unwrap();
     }
-    serde_json::from_value(value).unwrap()
+    to_typed(&value).unwrap()
 }
 struct Host {
     row: Value,
@@ -159,7 +157,7 @@ impl Host {
         self.orders()
             .map(|orders| orders.iter().map(canonical).collect())
     }
-    fn reason_value(&self, e: &Error, fallback: Option<&str>) -> JsJsonValue {
+    fn reason_value(&self, e: &Error, fallback: Option<&str>) -> Input {
         if let Some(message) = e
             .response
             .as_ref()
@@ -167,24 +165,26 @@ impl Host {
             .and_then(|r| r.get("msg"))
             .filter(|v| js_truthy(Some(v)))
         {
-            JsJsonValue::from(message.clone())
+            Input::from(message.clone())
         } else if !e.message.is_empty() {
-            JsJsonValue::String(e.message.clone())
+            retained_text(e.message.clone())
         } else {
-            fallback.map_or(JsJsonValue::String(e.message.clone()), |f| {
-                JsJsonValue::String(f.into())
-            })
+            fallback.map_or(retained_text(e.message.clone()), retained_text)
         }
     }
 }
 impl OrderModelHost for Host {
     type Error = Error;
-    fn caller_id(&mut self, opts: &Value) -> Result<Option<String>, Error> {
-        assert_eq!(opts, &self.options, "MODEL native option contents");
+    fn caller_id(&mut self, opts: &Input) -> Result<Option<String>, Error> {
+        assert_eq!(
+            opts,
+            &Input::from(self.options.clone()),
+            "MODEL native option contents"
+        );
         self.note("caller", vec![])?;
         Ok(self.row["fixture"]["caller"].as_str().map(str::to_owned))
     }
-    fn market(&mut self, symbol: &Value) -> Result<Option<Value>, Error> {
+    fn market(&mut self, symbol: &Input) -> Result<Option<Input>, Error> {
         self.note("market", vec![value_obs(symbol)])?;
         Ok(
             if self.row["fixture"]["market"].is_null()
@@ -192,21 +192,24 @@ impl OrderModelHost for Host {
             {
                 None
             } else {
-                Some(self.row["fixture"].get("market").cloned().unwrap_or_else(||json!({"symbol":"BTCUSDT","precision":{"price":0.5,"amount":0.1},"limits":{"amount":{"max":2}}})))
+                Some(self.row["fixture"].get("market").cloned().unwrap_or_else(||json!({"symbol":"BTCUSDT","precision":{"price":0.5,"amount":0.1},"limits":{"amount":{"max":2}}})).into())
             },
         )
     }
-    fn positions(&mut self) -> Result<Vec<Value>, Error> {
+    fn positions(&mut self) -> Result<Vec<Input>, Error> {
         self.note("positions", vec![])?;
-        Ok(self.positions.clone())
+        Ok(self.positions.iter().cloned().map(Into::into).collect())
     }
-    fn orders(&mut self) -> Result<Vec<Value>, Error> {
+    fn orders(&mut self) -> Result<Vec<Input>, Error> {
         self.note("orders", vec![])?;
-        Ok(self.orders.clone())
+        Ok(self.orders.iter().cloned().map(Into::into).collect())
     }
-    fn cached_position(&mut self, key: &str) -> Result<Option<Value>, Error> {
+    fn cached_position(&mut self, key: &str) -> Result<Option<Input>, Error> {
         self.note("cachePosition", vec![text(key)])?;
-        Ok(self.row["fixture"]["cache"].get(key).cloned())
+        Ok(self.row["fixture"]["cache"]
+            .get(key)
+            .cloned()
+            .map(Into::into))
     }
     fn uuid(&mut self) -> Result<String, Error> {
         self.note("uuid", vec![])?;
@@ -225,28 +228,28 @@ impl OrderModelHost for Host {
             Ok(())
         }
     }
-    fn cache_tif(&mut self, id: &str, tif: &Value) -> Result<(), Error> {
+    fn cache_tif(&mut self, id: &str, tif: &Input) -> Result<(), Error> {
         self.note("cacheTif", vec![text(id), value_obs(tif)])
     }
-    fn cache_reduce_only(&mut self, id: &str, reduce: &Value) -> Result<(), Error> {
+    fn cache_reduce_only(&mut self, id: &str, reduce: &Input) -> Result<(), Error> {
         self.note("cacheReduce", vec![text(id), value_obs(reduce)])
     }
-    fn emit(&mut self, message: JsJsonValue) -> Result<(), Error> {
+    fn emit(&mut self, message: Input) -> Result<(), Error> {
         self.note("emit", vec![obs(&message)])
     }
-    fn error(&mut self, message: JsJsonValue) -> Result<Error, Error> {
+    fn error(&mut self, message: Input) -> Result<Error, Error> {
         self.note("error", vec![obs(&message)])?;
         let message = match message {
-            JsJsonValue::String(s) => s,
-            JsJsonValue::Number(n) => safe_cex_num::js_number_string(n),
-            JsJsonValue::Bool(b) => b.to_string(),
-            JsJsonValue::Null => "null".into(),
-            JsJsonValue::Undefined => String::new(),
+            Input::Text(s) => String::from_utf16(&s).unwrap(),
+            Input::Float(n) => safe_cex_num::js_number_string(n),
+            Input::Bool(b) => b.to_string(),
+            Input::Null => "null".into(),
+            Input::Undefined => String::new(),
             _ => panic!("unexpected factory input"),
         };
         Ok(failure(message))
     }
-    fn reason(&mut self, error: &Error, fallback: Option<&str>) -> Result<JsJsonValue, Error> {
+    fn reason(&mut self, error: &Error, fallback: Option<&str>) -> Result<Input, Error> {
         assert_eq!(
             Rc::strong_count(&error.token),
             1,
@@ -257,7 +260,7 @@ impl OrderModelHost for Host {
     fn warning(&mut self, prefix: &'static str, e: &Error) -> Result<(), Error> {
         let reason = self.reason_value(e, None);
         let reason = match reason {
-            JsJsonValue::String(s) => s,
+            Input::Text(s) => String::from_utf16(&s).unwrap(),
             _ => panic!("unexpected warning reason"),
         };
         self.note(
@@ -265,14 +268,14 @@ impl OrderModelHost for Host {
             vec![text(&format!("{prefix}{reason}")), text("warning")],
         )
     }
-    async fn get(&mut self, endpoint: &'static str, config: JsJsonValue) -> Result<Value, Error> {
+    async fn get(&mut self, endpoint: &'static str, config: Input) -> Result<Input, Error> {
         self.note("get", vec![text(endpoint), obs(&config)])?;
         if let Some(error) = self.spec_error("getError") {
             return Err(error);
         }
-        Ok(json!({"data":{"data":self.data}}))
+        Ok(json!({"data":{"data":self.data}}).into())
     }
-    async fn post(&mut self, endpoint: &'static str, payload: JsJsonValue) -> Result<Value, Error> {
+    async fn post(&mut self, endpoint: &'static str, payload: Input) -> Result<Input, Error> {
         self.note("post", vec![text(endpoint), obs(&payload)])?;
         if let Some(error) = self.spec_error("postError") {
             return Err(error);
@@ -280,15 +283,16 @@ impl OrderModelHost for Host {
         Ok(self.row["fixture"]
             .get("reply")
             .cloned()
-            .unwrap_or_else(|| json!({"data":{"code":0,"data":{"orderId":"ACK"}}})))
+            .unwrap_or_else(|| json!({"data":{"code":0,"data":{"orderId":"ACK"}}}))
+            .into())
     }
     async fn post_limited(
         &mut self,
         endpoint: &'static str,
-        payload: JsJsonValue,
-    ) -> Result<Value, Error> {
+        payload: Input,
+    ) -> Result<Input, Error> {
         self.note("postLimited", vec![text(endpoint), obs(&payload)])?;
-        Ok(json!({"data":{"code":0}}))
+        Ok(json!({"data":{"code":0}}).into())
     }
     fn update_status(&mut self, ids: &[String]) -> Result<(), Error> {
         self.note("updateStatus", vec![json!(ids)])?;
@@ -303,18 +307,20 @@ impl OrderModelHost for Host {
         }
         Ok(())
     }
-    async fn place_replacement(&mut self, options: Value) -> Result<Vec<String>, Error> {
+    async fn place_replacement(&mut self, options: Input) -> Result<Vec<String>, Error> {
         self.note("placeReplacement", vec![value_obs(&options)])?;
         Ok(vec!["NEW".into()])
     }
-    fn cached_tif(&mut self, client: Option<&Value>) -> Result<Option<Value>, Error> {
+    fn cached_tif(&mut self, client: Option<&Input>) -> Result<Option<Input>, Error> {
         self.note("cachedTif", vec![client.map_or_else(undefined, value_obs)])?;
         Ok(client
-            .and_then(Value::as_str)
-            .and_then(|id| self.row["fixture"]["tifCache"].get(id))
-            .cloned())
+            .and_then(Input::as_text)
+            .and_then(|id| String::from_utf16(id).ok())
+            .and_then(|id| self.row["fixture"]["tifCache"].get(&id))
+            .cloned()
+            .map(Into::into))
     }
-    fn reduce_only(&mut self, raw: Option<&Value>, client: Option<&Value>) -> Result<bool, Error> {
+    fn reduce_only(&mut self, raw: Option<&Input>, client: Option<&Input>) -> Result<bool, Error> {
         let cache = self.row["fixture"]["reduceCache"]
             .as_object()
             .map(|map| {
@@ -327,22 +333,22 @@ impl OrderModelHost for Host {
             raw, client, false, &cache,
         )?)
     }
-    fn key(&mut self, row: &Value, key: &'static str) -> Result<Option<Value>, Error> {
+    fn key(&mut self, row: &Input, key: &'static str) -> Result<Option<Input>, Error> {
         self.note("key", vec![text(key)])?;
         Ok(key_value(row, key))
     }
-    fn raw_id(&mut self, order: &Value) -> Result<String, Error> {
+    fn raw_id(&mut self, order: &Input) -> Result<String, Error> {
         Ok(order_links::get_tpsl_raw_order_id(&canonical(order))?)
     }
     fn leg_id(
         &mut self,
         raw: &str,
-        position: Option<&Value>,
+        position: Option<&Input>,
         leg: &'static str,
         disambiguate: bool,
     ) -> Result<String, Error> {
         Ok(tpsl_helpers::get_tpsl_leg_order_id(
-            Some(&json!(raw)),
+            Some(&retained_text(raw)),
             position,
             if leg == "tp" {
                 TpslLeg::Tp
@@ -360,9 +366,13 @@ impl OrderModelHost for Host {
         self.note("fake", vec![])?;
         Ok(self.row["fixture"]["fake"] == true)
     }
-    fn attached_leg(&mut self, order: &Value) -> Result<Option<&'static str>, Error> {
-        if safe_cex_venue_bitunix::order_ids::get_virtual_tpsl_leg(order["id"].as_str().unwrap())
-            .is_none()
+    fn attached_leg(&mut self, order: &Input) -> Result<Option<&'static str>, Error> {
+        if safe_cex_venue_bitunix::order_ids::get_virtual_tpsl_leg(
+            safe_cex_num::js_retained_string(order.get("id"))
+                .unwrap()
+                .as_str(),
+        )
+        .is_none()
         {
             return Ok(None);
         }
@@ -372,21 +382,20 @@ impl OrderModelHost for Host {
             &orders,
         ))
     }
-    fn standalone(&mut self, order: &Value) -> Result<bool, Error> {
-        if !matches!(
-            order["type"].as_str(),
-            Some("stop_market" | "take_profit_market")
-        ) {
+    fn standalone(&mut self, order: &Input) -> Result<bool, Error> {
+        if !order.get("type").is_some_and(|value| {
+            value.text_equals("stop_market") || value.text_equals("take_profit_market")
+        }) {
             return Ok(false);
         }
         Ok(self.attached_leg(order)?.is_none())
     }
-    fn position_order(&mut self, order: &Value) -> Result<bool, Error> {
+    fn position_order(&mut self, order: &Input) -> Result<bool, Error> {
         Ok(order_links::is_position_tpsl_order(&canonical(order))?)
     }
     fn snapshot(
         &mut self,
-        order: &Value,
+        order: &Input,
         leg: &'static str,
     ) -> Result<Option<order_state::TpslLegSnapshot>, Error> {
         let leg_type = if leg == "tp" {
@@ -394,7 +403,11 @@ impl OrderModelHost for Host {
         } else {
             "stop_market"
         };
-        let actual = if order["type"] == leg_type && self.standalone(order)? {
+        let actual = if order
+            .get("type")
+            .is_some_and(|value| value.text_equals(leg_type))
+            && self.standalone(order)?
+        {
             vec![]
         } else {
             self.source_orders()?
@@ -410,15 +423,19 @@ impl OrderModelHost for Host {
             &actual,
         )?)
     }
-    fn trigger(&mut self, trigger: Option<&Value>, raw: Option<&Value>) -> Result<String, Error> {
-        let trigger =
-            trigger.and_then(|v| serde_json::from_value::<OrderStopTriggerType>(v.clone()).ok());
+    fn trigger(&mut self, trigger: Option<&Input>, raw: Option<&Input>) -> Result<String, Error> {
+        let trigger = trigger.and_then(|v| {
+            safe_cex_exchange::js_runtime::value::to_typed::<OrderStopTriggerType>(
+                &safe_cex_exchange::js_runtime::value::from_retained_input(v.clone()),
+            )
+            .ok()
+        });
         Ok(tpsl_helpers::get_bitunix_trigger_type(trigger, raw)?.into())
     }
     async fn update_standalone(
         &mut self,
-        order: &Value,
-        update: &Value,
+        order: &Input,
+        update: &Input,
     ) -> Result<Vec<String>, Error> {
         update_standalone_tpsl_order(self, order, update).await
     }
@@ -473,22 +490,23 @@ fn run(name: &str, floor: usize) {
             data: serde_json::from_str(row["dataJson"].as_str().unwrap()).unwrap(),
             serial: 0,
         };
-        let options = host.options.clone();
-        let order = host.order.clone();
+        let options = host.options.clone().into();
+        let order = host.order.clone().into();
         let update = row["fixture"]
             .get("update")
             .cloned()
-            .unwrap_or_else(|| json!({"price":110.25}));
+            .unwrap_or_else(|| json!({"price":110.25}))
+            .into();
         let result = match name {
             "formatCreateOrder" => format_create_order(&mut host, &options),
             "formatTPSLOrder" => format_tpsl_order(&mut host, &options),
             "fetchRegularOrders" => ready(fetch_regular_orders(&mut host)),
             "fetchTpslOrders" => ready(fetch_tpsl_orders(&mut host)),
             "updateOrder" => ready(update_order(&mut host, &order, &update))
-                .map(|ids| ids.into_iter().map(JsJsonValue::String).collect()),
+                .map(|ids| ids.into_iter().map(retained_text).collect()),
             "updateStandaloneTpslOrder" => {
                 ready(update_standalone_tpsl_order(&mut host, &order, &update))
-                    .map(|ids| ids.into_iter().map(JsJsonValue::String).collect())
+                    .map(|ids| ids.into_iter().map(retained_text).collect())
             }
             _ => panic!("unknown model family"),
         };

@@ -4145,3 +4145,48 @@ binding25pass (/tmp/bybit-unbound-refreshed-inventories.log). No changed body ha
 cancellation/override pin. Actual final inventory lists only the11 owned names.
 The parity manifest uses indexed core WsProtocol/BaseWebSocket/reset-body targets;
 its note identifies the actual non-indexed PrivateProtocol trait implementation.
+
+## Retained-input consumer gates (#901, 2026-10-18)
+
+This cohort starts from #901 checkpoint `54b2d5de04`; it is not a claim that all
+Bybit accepted-set debt is classified. The direct retained-input response oracle
+compares 8,488 maintained-source cases, including signed-zero code and the
+explicit final `ret_msg` UTF-8 refusal. The ticker reader source target compares
+179 cases; options/inverse covers 26 symbols, eight instrument rows and five
+positions. The market mapper source target executes 606 cases across all three
+families. `option_binding` retains the actual receiver/Store/typed option terms
+and Greeks witness.
+
+The unchanged market oracle compiled and failed at case 40: a non-coercible
+`qtyStep` returned `TypeError: Cannot convert object to primitive value` where
+source `err.message` is `Cannot convert object to primitive value`. The new
+constructed primary/demo regression independently compiled and failed at that
+same name/message boundary. The actual option-category receiver reproduced the
+same added prefix in its warning; its source best-effort fallback still returns
+the previously stored option markets. The fix changes only the four market
+coercion conversions and `options::num` to forward `JsCoercionError.message`.
+The existing binding still supplies the TypeError name. No source catch, typed
+admission, opaque metadata or Store fallback policy changes.
+
+`accepted-retained-info-contracts.mjs` selects exactly nine compiler-discovered
+function owners and executes 54 independently authored native cases. It retains
+actual Input shape/UTF-16 units, native number bits and mapper info before output
+comparison. Response-envelope parsing excludes both direct and parsed arrays;
+the separate present raw-response DTO field retains its existing object/array
+admission. The final message-string refusal remains separately labelled.
+The full maintained-source gates and real binding witnesses remain companions;
+these helper contracts do not replace them or substitute generic host behavior.
+
+`exchange_state::get_position_reliability_score` is a typed Position consumer,
+not a raw-input function selected by this compiler inventory. Its actual
+constructed binding and maintained-source position selection witness remain in
+the retained-info target. The six original native retained-info regressions and
+the response-factory retained-envelope/message-refusal regression are preserved.
+Full package discovery has additional unsupported receiver classifications; this
+cohort adds no exemption and makes no whole-package accepted-set claim.
+
+The only pre-existing Bybit local-function pin is the unchanged
+`ws_public::round_numbers` normalization helper. Neither changed synchronous
+coercion body has a cancellation/override pin. The new contract APIs come from
+fresh pinned-compiler discovery; shared/core inventory ownership stays with the
+#901 coordinator.

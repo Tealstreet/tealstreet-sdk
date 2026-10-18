@@ -48,17 +48,15 @@ fn optional_raw(value: &Value) -> Option<Value> {
 fn absent() -> Value {
     json!({"undefined":true})
 }
-fn capture(v: &Value) -> Value {
-    match v {
-        Value::Number(_) => {
-            let f = safe_cex_num::numeric_ingress::js_value_as_f64(v).unwrap();
-            json!({"number":format!("{:016x}",if f.is_nan(){0x7ff8000000000000}else{f.to_bits()})})
-        }
-        Value::Array(a) => Value::Array(a.iter().map(capture).collect()),
-        Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (k.clone(), capture(v))).collect()),
-        v => v.clone(),
-    }
+#[path = "../../parity/evidence/retained_model_values.rs"]
+pub mod retained_model_values;
+fn capture(value: &(impl serde::Serialize + ?Sized)) -> Value {
+    retained_model_values::observe(
+        value,
+        |value: f64| json!({"number":format!("{:016x}",if value.is_nan(){0x7ff8000000000000}else{value.to_bits()})}),
+    )
 }
+
 #[test]
 fn trigger_live_oracle() {
     for case in cardinality::cases("helpers", "triggers", oracle()) {

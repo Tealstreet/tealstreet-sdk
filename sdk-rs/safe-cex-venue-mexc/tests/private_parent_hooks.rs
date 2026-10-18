@@ -53,9 +53,13 @@ fn private_parent_hook_errors_abort_at_the_original_call_and_preserve_committed_
     for (kind, hook, fail_at) in ROOTS {
         let store = ObservedStore::new();
         let market = normalize_market(
-            json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
-                .as_object()
-                .unwrap(),
+            &serde_json::Value::Object(
+                (json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20})
+                    .as_object()
+                    .unwrap())
+                .clone(),
+            )
+            .into(),
         )
         .unwrap();
         Store::update(

@@ -252,7 +252,7 @@ pub async fn fetch_positions<E: std::fmt::Display>(
                 unrealized_pnl: 0.0,
                 contracts: 0.0,
                 liquidation_price: 0.0,
-                info: (Some(json!({}))).into(),
+                info: (Some(json!({}).into())).into(),
                 extra: (None).into(),
                 realized_pnl: (None).into(),
                 margin_size: (None).into(),
@@ -338,7 +338,15 @@ pub async fn fetch_balance_and_positions<E: std::fmt::Display>(
             let info = p.info.as_ref().ok_or_else(|| {
                 input("Cannot read properties of undefined (reading 'maintenanceMargin')")
             })?;
-            let value = parse(field(info, "maintenanceMargin")?)?;
+            if info.is_nullish() {
+                return Err(input(if info.is_null() {
+                    "Cannot read properties of null (reading 'maintenanceMargin')"
+                } else {
+                    "Cannot read properties of undefined (reading 'maintenanceMargin')"
+                }));
+            }
+            let value = safe_cex_num::js_retained_parse_float(info.get("maintenanceMargin"))
+                .map_err(ServiceError::Coercion)?;
             maintenance = Some(maintenance.map_or(value, |sum| sum + value));
             pnl = Some(pnl.map_or(p.unrealized_pnl, |sum| sum + p.unrealized_pnl));
         }
@@ -349,7 +357,7 @@ pub async fn fetch_balance_and_positions<E: std::fmt::Display>(
             free: subtract(total_collateral, used),
             total: subtract(total_collateral, upnl),
             upnl,
-            info: bal.cloned(),
+            info: bal.cloned().map(Into::into),
             currencies: None,
             coins: None,
         };

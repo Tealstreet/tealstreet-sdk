@@ -531,7 +531,7 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "50f5838689c45ce39d02c1e738f28c017d189ca816c1bce4a3b21cbd0c99a594",
+      "producer_sha256": "436c274fe1d1f19f62dcfc3e385c563e1373c7154320bb7a6cbfb0e20a0e5140",
       "classification": "no-owned-latch",
       "reason": "Lookup owns its returned/order/request-local values; no shared cancellation slot is reserved by this base fallback."
     },
@@ -881,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "d05b936aaa030c5b0449f3cc6a42763754a3080bded034d5305a804478e87ae1"
+            "sha256": "63df62970d09a308c2a813583acedf3fbdae52bbaed2f4a21b0689a3de682f99"
         }
       ],
       "guards": [
@@ -2352,7 +2352,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "d05b936aaa030c5b0449f3cc6a42763754a3080bded034d5305a804478e87ae1"
+            "sha256": "63df62970d09a308c2a813583acedf3fbdae52bbaed2f4a21b0689a3de682f99"
         }
       ],
       "guards": [

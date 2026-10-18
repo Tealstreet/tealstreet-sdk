@@ -156,7 +156,7 @@ pub(crate) fn map_position_deferred(
         contracts,
         liquidation_price,
         margin_size: ((margin > 0.).then_some(margin)).into(),
-        info: (Some(raw.clone())).into(),
+        info: (Some(raw.clone().into())).into(),
         extra: (Some(PositionExtra {
             contracts_native: Some(contracts_native),
             unrealized_pnl_native: Some(pnl),

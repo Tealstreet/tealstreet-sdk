@@ -150,6 +150,45 @@ pub fn js_number(value: Option<&serde_json::Value>) -> Result<f64, JsCoercionErr
     })
 }
 
+/// Number(any) over native retained data, without a JSON projection.
+pub fn js_retained_number(
+    value: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+) -> Result<f64, JsCoercionError> {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    Ok(match value {
+        None | Some(Input::Undefined) => f64::NAN,
+        Some(Input::Null) => 0.0,
+        Some(Input::Bool(value)) => f64::from(u8::from(*value)),
+        Some(Input::Float(value)) => *value,
+        Some(Input::Lexeme(value)) => value.parse().unwrap_or(f64::NAN),
+        Some(value) => {
+            let units = safe_cex_types::js_coercion::js_retained_string_utf16(value)?;
+            String::from_utf16(&units).map_or(f64::NAN, |text| crate::number_from_string(&text))
+        }
+    })
+}
+
+/// String(any) at a caller's explicit UTF-8 string boundary.
+pub fn js_retained_string(
+    value: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+) -> Result<String, JsCoercionError> {
+    use safe_cex_types::{js_coercion::js_retained_string_utf16, retained_json::RetainedJsonInput};
+    let units = js_retained_string_utf16(value.unwrap_or(&RetainedJsonInput::Undefined))?;
+    String::from_utf16(&units).map_err(|_| JsCoercionError {
+        name: "TypeError",
+        message: "Cannot represent JavaScript UTF-16 string as UTF-8",
+    })
+}
+
+/// parseFloat stops at every surrogate just as it stops at other nonnumeric units.
+pub fn js_retained_parse_float(
+    value: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+) -> Result<f64, JsCoercionError> {
+    use safe_cex_types::{js_coercion::js_retained_string_utf16, retained_json::RetainedJsonInput};
+    let units = js_retained_string_utf16(value.unwrap_or(&RetainedJsonInput::Undefined))?;
+    Ok(parse_float(&String::from_utf16_lossy(&units)))
+}
+
 /// Primitive results of host-provided JavaScript object conversion hooks.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsPrimitive {

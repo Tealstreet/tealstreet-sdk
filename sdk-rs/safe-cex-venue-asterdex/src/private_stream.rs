@@ -476,7 +476,7 @@ impl PrivateStream {
                 remaining: amount - filled,
                 reduce_only: (js_truthy(d.get("R")) || js_truthy(d.get("cp"))).into(),
                 last_update: self.parent.virtual_time_ms(),
-                info: (Some(d.clone())).into(),
+                info: (Some(d.clone().into())).into(),
                 close: (None).into(),
                 time_in_force: (None).into(),
                 trigger_type: (None).into(),

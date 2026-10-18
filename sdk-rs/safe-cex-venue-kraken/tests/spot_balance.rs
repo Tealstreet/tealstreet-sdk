@@ -1,5 +1,4 @@
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::js_value_as_f64;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::{Balance, Ticker};
 use safe_cex_venue_kraken::spot_balance;
@@ -22,14 +21,12 @@ fn complete<F: Future>(future: F) -> F::Output {
 fn number(v: f64) -> Value {
     json!({"number":format!("{:016x}",if v.is_nan(){0x7ff8000000000000}else{v.to_bits()})})
 }
-fn capture(v: &Value) -> Value {
-    match v {
-        Value::Number(_) => number(js_value_as_f64(v).unwrap()),
-        Value::Object(v) => Value::Object(v.iter().map(|(k, v)| (k.clone(), capture(v))).collect()),
-        Value::Array(v) => Value::Array(v.iter().map(capture).collect()),
-        v => v.clone(),
-    }
+#[path = "../../parity/evidence/retained_model_values.rs"]
+pub mod retained_model_values;
+fn capture(value: &(impl serde::Serialize + ?Sized)) -> Value {
+    retained_model_values::observe(value, number)
 }
+
 fn fallback(n: f64) -> Balance {
     Balance {
         free: n + 1.0,
@@ -37,7 +34,7 @@ fn fallback(n: f64) -> Balance {
         total: n + 3.0,
         upnl: n + 4.0,
         coins: None,
-        info: Some(json!({"tag":"fallback"})),
+        info: Some(json!({"tag":"fallback"}).into()),
         currencies: Some(
             [(
                 String::from("OLD"),
@@ -48,7 +45,7 @@ fn fallback(n: f64) -> Balance {
                     upnl: n + 8.0,
                     coins: None,
                     currencies: None,
-                    info: Some(json!({"tag":"old"})),
+                    info: Some(json!({"tag":"old"}).into()),
                 }
                 .into(),
             )]

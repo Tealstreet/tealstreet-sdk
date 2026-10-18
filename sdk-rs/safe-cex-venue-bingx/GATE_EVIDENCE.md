@@ -1503,3 +1503,28 @@ Hyperliquid base_exchange_class body hashes from master; all39 BingX rows match.
 Control receipts precede this master integration; positive suites reran afterward.
 Logs /tmp/bingx-hosted-{before,after,controls,full,native-final,clippy,wasm,fmt,
 parity,audits}.txt. No live credentials, venue requests or deployment used.
+
+The retained-info cutover executes the library test
+`binding::exchange::retained_info_native::native_private_socket_and_store_keep_opaque_bingx_info`.
+A real NativeRuntime WebSocket receives an actual ORDER_TRADE_UPDATE text frame;
+the production SocketCore dispatcher maps and commits its Order to DefaultStore.
+Maintained `handleOrderEvents` supplies the expected raw info observations,
+including overflow infinities, negative zero, nested arrays and lone UTF-16.
+The same test compiled against archived master
+`2e703b7b8ee3a2a083e63530bde1a657b340f601` fails to commit the order because the
+old private parser refuses the opaque lone surrogate. The retained implementation
+passes. Numeric bits and UTF-16 units are observed directly from the native info.
+
+`scripts/retained-info-contracts.mjs` runs the canonical inventory and native
+production probes for 2 selected retained-input decoder owners. Each contract
+observes direct typed fields plus numeric bits or UTF-16 units on distinct
+positive cases and rejected inputs. These selected contracts pass independently
+of whole-package accepted-set coverage; no package-wide green claim is made.
+
+Former raw UTF-8-refusal assertions in account/data reads and private dispatch
+are superseded: retained balance rows/info compare actual source UTF-16 units,
+and a lone-surrogate private ping now compares the entire source diagnostic/Pong
+sequence. Numeric-account comparisons use order-preserving removal of the separately
+bit-observed userId, so the assertion itself does not reorder source keys. The
+retained read adapter preserves source exact/snake/camel lookup using canonical
+lodash case functions and the shared native in-operator.

@@ -91,8 +91,8 @@ fn native_info_patch_retains_reserved_key_object() {
                 "STORE-INFO exact key population"
             );
             assert_eq!(
-                actual["$serde_json::private::Number"],
-                json!("17"),
+                actual.get("$serde_json::private::Number").unwrap(),
+                &safe_cex_types::retained_json::RetainedJsonInput::from(json!("17")),
                 "STORE-INFO literal key value"
             );
             cases += 1;

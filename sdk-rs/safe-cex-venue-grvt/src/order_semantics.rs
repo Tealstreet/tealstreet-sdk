@@ -1,4 +1,5 @@
 //! Execution semantics reconstructed from GRVT wire records.
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{OrderStatus, OrderTimeInForce};
 use serde_json::{Map, Value};
 
@@ -68,39 +69,58 @@ fn alias<'a>(value: Option<&'a Value>, full: &str, lite: &str) -> Option<&'a Val
     })
 }
 
+fn retained_alias<'a>(value: Option<&'a Input>, full: &str, lite: &str) -> Option<&'a Input> {
+    value.and_then(|value| {
+        value
+            .get(full)
+            .filter(|value| !value.is_nullish())
+            .or_else(|| value.get(lite))
+    })
+}
+
 /// ts: getGrvtTriggerMetadata
 pub fn get_grvt_trigger_metadata(
-    order: &Map<String, Value>,
+    order: &safe_cex_types::retained_json::RetainedJsonInput,
 ) -> Result<Option<crate::records::GrvtTriggerMetadata>, safe_cex_num::JsCoercionError> {
     use crate::types::GrvtTriggerKind;
     use safe_cex_types::OrderStopTriggerType;
     let metadata = order
         .get("metadata")
-        .filter(|v| !v.is_null())
+        .filter(|v| !v.is_nullish())
         .or_else(|| order.get("m"));
-    let trigger = alias(metadata, "trigger", "t");
-    if !safe_cex_num::js_truthy(trigger) {
+    let trigger = retained_alias(metadata, "trigger", "t");
+    if !trigger.is_some_and(Input::is_truthy) {
         return Ok(None);
     }
-    let kind = match alias(trigger, "trigger_type", "tt").and_then(Value::as_str) {
-        Some("STOP_LOSS") => GrvtTriggerKind::StopLoss,
-        Some("TAKE_PROFIT") => GrvtTriggerKind::TakeProfit,
+    let kind = match retained_alias(trigger, "trigger_type", "tt").and_then(Input::as_text) {
+        Some(value) if value.iter().copied().eq("STOP_LOSS".encode_utf16()) => {
+            GrvtTriggerKind::StopLoss
+        }
+        Some(value) if value.iter().copied().eq("TAKE_PROFIT".encode_utf16()) => {
+            GrvtTriggerKind::TakeProfit
+        }
         _ => return Ok(None),
     };
-    let tpsl = alias(trigger, "tpsl", "t");
-    let price = safe_cex_num::js_number(alias(tpsl, "trigger_price", "tp"))?;
-    let trigger_type = match alias(tpsl, "trigger_by", "tb").and_then(Value::as_str) {
-        Some("LAST") => Some(OrderStopTriggerType::LastPrice),
-        Some("MARK") => Some(OrderStopTriggerType::MarkPrice),
-        Some("INDEX") => Some(OrderStopTriggerType::IndexPrice),
+    let tpsl = retained_alias(trigger, "tpsl", "t");
+    let price = safe_cex_num::js_retained_number(retained_alias(tpsl, "trigger_price", "tp"))?;
+    let trigger_type = match retained_alias(tpsl, "trigger_by", "tb").and_then(Input::as_text) {
+        Some(value) if value.iter().copied().eq("LAST".encode_utf16()) => {
+            Some(OrderStopTriggerType::LastPrice)
+        }
+        Some(value) if value.iter().copied().eq("MARK".encode_utf16()) => {
+            Some(OrderStopTriggerType::MarkPrice)
+        }
+        Some(value) if value.iter().copied().eq("INDEX".encode_utf16()) => {
+            Some(OrderStopTriggerType::IndexPrice)
+        }
         _ => None,
     };
     Ok(Some(crate::records::GrvtTriggerMetadata {
         r#type: kind,
         trigger_price: price.is_finite().then_some(price),
         trigger_type,
-        close: alias(tpsl, "close_position", "cp").and_then(Value::as_bool),
-        is_split_position: alias(tpsl, "is_split_position", "is").and_then(Value::as_bool),
+        close: retained_alias(tpsl, "close_position", "cp").and_then(Input::as_bool),
+        is_split_position: retained_alias(tpsl, "is_split_position", "is").and_then(Input::as_bool),
     }))
 }
 

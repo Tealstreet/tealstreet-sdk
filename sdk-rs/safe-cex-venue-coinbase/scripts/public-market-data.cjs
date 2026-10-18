@@ -11,8 +11,21 @@ const text=[variable(source('safe-cex/src/exchanges/coinbase/coinbase.types.ts')
 const out={},traceState={trace:[]},timers=[];
 const realDayjs=require('dayjs');realDayjs.extend(require('dayjs/plugin/utc')); const dayjs=(...args)=>realDayjs(args.length&&args[0]!==undefined?args[0]:1700000000000);
 vm.runInNewContext(ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:out,dayjs,nanoid:()=> 'inner',Error,console:{warn:(message,value)=>traceState.trace.push({kind:'warn',message,value})},setTimeout:(fn,delay)=>{traceState.trace.push({kind:'timer',delay});timers.push(fn);}});
-function capture(v){if(v===undefined)return {$undefined:true};if(typeof v==='number'){const b=Buffer.alloc(8);b.writeDoubleBE(v);return {$bits:b.toString('hex')};}if(v instanceof Error||require('node:util').types.isNativeError(v))return {name:v.name,message:v.message};if(v&&typeof v==='object'){if(Array.isArray(v))return v.map(capture);return Object.fromEntries(Object.entries(v).map(([k,v])=>[k,capture(v)]));}if(typeof v==='function')return {};return v;}
+function capture(v){if(v===undefined)return {$undefined:true};if(typeof v==='number'){const b=Buffer.alloc(8);b.writeDoubleBE(v);return {$bits:b.toString('hex')};}if(v instanceof Error||require('node:util').types.isNativeError(v))return {name:v.name,message:v.message};if(v&&typeof v==='object'){if(Array.isArray(v))return v.map(capture);const entries=Object.entries(v);if(entries.some(([k])=>/[\ud800-\udfff]/u.test(k)))return {$entries:entries.map(([k,v])=>[Array.from({length:k.length},(_,i)=>k.charCodeAt(i)),capture(v)])};return Object.fromEntries(entries.map(([k,v])=>[k,capture(v)]));}if(typeof v==='function')return {};if(typeof v==='string'&&/[\ud800-\udfff]/u.test(v))return {$utf16:Array.from({length:v.length},(_,i)=>v.charCodeAt(i))};return v;}
 function clone(v){return JSON.parse(JSON.stringify(v));}
+if(process.argv.includes('--retained-info')) {
+  (async()=>{
+    const data=JSON.parse(fs.readFileSync(0,'utf8')),item=data.products[0];
+    item.native={nan:NaN,undefined:undefined,array:[NaN,Infinity,-0,undefined,'\udfff']};
+    const receiver=new out.Reads();receiver.isPublicDataOnly=false;
+    receiver.getSupportedTypes=async()=>['spot'];receiver.xhr={get:async()=>({data})};
+    receiver.emitAndLogError=error=>{throw error;};
+    const markets=await receiver.fetchMarkets();assert.equal(markets.length,1);
+    assert.equal(markets[0].info,item,'source keeps raw provenance');
+    process.stdout.write(JSON.stringify(capture(markets[0].info)));
+  })().catch(error=>{console.error(error);process.exitCode=1;});
+  return;
+}
 const fixture=JSON.parse(fs.readFileSync(path.join(__dirname,'../tests/fixtures/public-market-data.json'),'utf8'));assert.equal(fixture.reads.length,22,'independent public-read floor');assert.equal(fixture.listeners.length,16,'independent public-listener floor');
 function reads(input){const r=new out.Reads(),calls=[],emits=[],items=[],cached=[],types=clone(input.supported??[]);r.isPublicDataOnly=input.publicOnly??false;r.store={markets:cached};r.dailyCandles={};if(input.daily)r.dailyCandles[input.opts.symbol]=clone(input.daily);r.getSupportedTypes=()=>Promise.resolve(types);r.emitAndLogError=message=>emits.push(message);let index=0;r.xhr={get(endpoint,options){calls.push({endpoint,params:options?.params});if(input.shrink)types.pop();if(input.mutateOpts){input.opts.symbol='CHANGED';input.opts.interval='1m';}const p=input.replies[index++];assert(p,'independent response plan');const a=p.data??p.error?.response?.data;if(Array.isArray(a))items.push(...a);if(Object.hasOwn(p,'error'))return Promise.reject(p.error);return Promise.resolve({data: endpoint.includes('instruments')?p.data:input.op==='fetchOHLCV'?{candles:p.data}:{products:p.data}});}};return {r,calls,emits,items,cached};}
 (async()=>{const result={reads:[],listeners:[]};

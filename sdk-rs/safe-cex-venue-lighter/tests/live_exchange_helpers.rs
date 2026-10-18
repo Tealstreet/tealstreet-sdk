@@ -438,7 +438,7 @@ fn lighter_exchange_helpers_match_live_typescript() {
         let value = case.get("value").map(decode);
         assert_eq!(
             outcome(
-                parse_margin_mode(value.as_ref())
+                parse_margin_mode(value.map(Into::into).as_ref())
                     .map(|v| v.map(|v| number(f64::from(v))).unwrap_or(Value::Null))
             ),
             case["expected"],

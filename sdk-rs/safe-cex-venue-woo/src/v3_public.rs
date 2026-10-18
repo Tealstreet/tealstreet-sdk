@@ -488,7 +488,7 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                     },
                     price: None,
                 },
-                info: Some(serde_json::to_value(row).map_err(|e| e.to_string())?),
+                info: Some(serde_json::to_value(row).map_err(|e| e.to_string())?.into()),
                 pretty_symbol: None,
                 contract_size: None,
                 is_expiring: None,

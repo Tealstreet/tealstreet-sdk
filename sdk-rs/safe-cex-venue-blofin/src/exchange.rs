@@ -900,7 +900,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
     pub async fn format_trigger_order(
         &self,
         opts: &PreparedOrderOpts,
-        source: Option<&UtilityInput>,
+        source: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<OrderPayload, ServiceError<H::Error>> {
         let host = self.format_host();
         order_formatters::format_trigger_order(opts, source, self.context.store.as_ref(), &host)
@@ -1152,19 +1152,13 @@ impl<H: BlofinExchangeHost> rest_lifecycle::LifecycleHost for ExchangeLifecycle<
     }
     fn fetch_tickers_raw(
         &self,
-    ) -> rest_lifecycle::LifecycleFuture<'_, Option<UtilityInput>, H::Error> {
-        Box::pin(async move {
-            self.owner
-                .fetch_tickers_raw()
-                .await
-                .map(|v| v.map(|v| UtilityInput::from_retained(v.retained().clone())))
-        })
+    ) -> rest_lifecycle::LifecycleFuture<'_, Option<crate::tickers::TickerInput>, H::Error> {
+        Box::pin(self.owner.fetch_tickers_raw())
     }
     fn format_tickers(
         &self,
-        raw: Option<UtilityInput>,
+        raw: Option<crate::tickers::TickerInput>,
     ) -> Result<Vec<Ticker>, ServiceError<H::Error>> {
-        let raw = raw.map(|r| crate::tickers::TickerInput::from_retained(r.json().clone()));
         self.owner
             .format_tickers(raw.as_ref())
             .map_err(ServiceError::Host)

@@ -99,17 +99,7 @@ pub fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
             "Cannot use 'in' operator to search for '{key}' in {rhs}"
         )));
     }
-    if obj.has_own(key) {
-        return Ok(true);
-    }
-    match obj {
-        Js::Object(o) => match o.proto.borrow().as_ref() {
-            Some(proto) if !matches!(proto, Js::Null) => in_operator(proto, key),
-            _ => Ok(false),
-        },
-        Js::Array(_) => Ok(key == "length"),
-        _ => Ok(false),
-    }
+    Ok(obj.has_property(&super::value::utf16(key)))
 }
 
 /// lodash compareAscending: undefined, then null, then NaN sort last.

@@ -8,14 +8,28 @@ pub enum TickerValue {
     Null,
     Bool(bool),
     Number(f64),
-    String(String),
+    String(Vec<u16>),
     Array(Rc<RefCell<Vec<TickerValue>>>),
-    Object(Rc<RefCell<BTreeMap<String, TickerValue>>>),
+    Object(Rc<RefCell<BTreeMap<Vec<u16>, TickerValue>>>),
+}
+pub(crate) fn string_items(text: &[u16]) -> Vec<TickerValue> {
+    safe_cex_exchange::js_runtime::value::Js::utf16(text)
+        .iterable_values()
+        .expect("String spread")
+        .into_iter()
+        .map(|value| {
+            TickerValue::String(value.to_js_string().expect("String iterator item").to_vec())
+        })
+        .collect()
 }
 impl TickerValue {
     fn property(&self, key: &str) -> Self {
         match self {
-            Self::Object(fields) => fields.borrow().get(key).cloned().unwrap_or(Self::Undefined),
+            Self::Object(fields) => fields
+                .borrow()
+                .get(&key.encode_utf16().collect::<Vec<_>>())
+                .cloned()
+                .unwrap_or(Self::Undefined),
             _ => Self::Undefined,
         }
     }
@@ -32,7 +46,7 @@ impl TickerValue {
             Self::Null => "null".into(),
             Self::Bool(v) => v.to_string(),
             Self::Number(v) => safe_cex_num::js_number_string(*v),
-            Self::String(v) => v.clone(),
+            Self::String(v) => String::from_utf16_lossy(v),
             _ => "[object Object]".into(),
         }
     }
@@ -90,9 +104,7 @@ fn spread_into<E>(
 ) -> Result<(), E> {
     match set {
         TickerValue::Array(rows) => tickers.extend(rows.borrow().iter().cloned()),
-        TickerValue::String(text) => {
-            tickers.extend(text.chars().map(|c| TickerValue::String(c.to_string())))
-        }
+        TickerValue::String(text) => tickers.extend(string_items(&text)),
         _ => return Err(type_error(not_iterable)),
     }
     Ok(())
@@ -126,7 +138,9 @@ pub fn fetch_tickers_raw<E, F: Future<Output = Result<TickerValue, E>>>(
             )?;
         }
         if tickers.iter().any(|row| matches!(row, TickerValue::Null)) {
-            emit(TickerValue::String("Failed to fetch tickers".into()))?;
+            emit(TickerValue::String(
+                "Failed to fetch tickers".encode_utf16().collect(),
+            ))?;
             Ok(TickerValue::Null)
         } else {
             Ok(TickerValue::Array(Rc::new(RefCell::new(tickers))))
@@ -167,9 +181,7 @@ where
         for set in found {
             match set {
                 TickerValue::Array(rows) => tickers.extend(rows.borrow().iter().cloned()),
-                TickerValue::String(text) => {
-                    tickers.extend(text.chars().map(|c| TickerValue::String(c.to_string())))
-                }
+                TickerValue::String(text) => tickers.extend(string_items(&text)),
                 TickerValue::Null => {
                     return Err(type_error(
                         "tickerSet is not iterable (cannot read property null)",
@@ -189,7 +201,9 @@ where
         }
         let tickers = TickerValue::Array(Rc::new(RefCell::new(tickers)));
         if tickers.has_null(&type_error)? {
-            emit(TickerValue::String("Failed to fetch tickers".into()))?;
+            emit(TickerValue::String(
+                "Failed to fetch tickers".encode_utf16().collect(),
+            ))?;
             Ok(TickerValue::Null)
         } else {
             Ok(tickers)
@@ -213,8 +227,8 @@ pub fn fetch_tickers_raw_helper<E, F: Future<Output = Result<TickerValue, E>>>(
             TickerValue::Object(fields) => {
                 let fields = fields.borrow();
                 fields
-                    .get("retMsg")
-                    .or_else(|| fields.get("ret_msg"))
+                    .get(&"retMsg".encode_utf16().collect::<Vec<_>>())
+                    .or_else(|| fields.get(&"ret_msg".encode_utf16().collect::<Vec<_>>()))
                     .cloned()
                     .unwrap_or(TickerValue::Undefined)
             }
@@ -228,7 +242,7 @@ pub fn fetch_tickers_raw_helper<E, F: Future<Output = Result<TickerValue, E>>>(
                 )));
             }
         };
-        if !matches!(&message,TickerValue::String(m) if m=="OK") {
+        if !matches!(&message,TickerValue::String(m) if m.iter().copied().eq("OK".encode_utf16())) {
             emit(message)?;
             return Ok(TickerValue::Array(Rc::new(RefCell::new(vec![
                 TickerValue::Null,

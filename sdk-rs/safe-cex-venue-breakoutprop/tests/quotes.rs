@@ -1,7 +1,5 @@
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::numeric_ingress::{
-    JsNumberInput, js_from_str, js_from_value_ref, js_value_as_f64,
-};
+use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str, js_from_value_ref};
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::provider::RestBody;
 use safe_cex_types::{Market, Ticker};
@@ -36,14 +34,10 @@ static ORACLE: LazyLock<Value> = LazyLock::new(|| {
 fn number(v: f64) -> Value {
     json!({"number":format!("{:016x}",if v.is_nan(){0x7ff8000000000000}else{v.to_bits()})})
 }
-fn observe(v: &Value) -> Value {
-    match v {
-        Value::Number(_) => number(js_value_as_f64(v).unwrap()),
-        Value::Array(a) => Value::Array(a.iter().map(observe).collect()),
-        Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (k.clone(), observe(v))).collect()),
-        v => v.clone(),
-    }
-}
+#[path = "support/retained_info_values.rs"]
+mod retained_info_values;
+use retained_info_values::observe;
+
 fn optional(v: &mut Value, key: &str, x: Option<Value>) {
     if let Some(x) = x {
         v[key] = x;
@@ -319,11 +313,25 @@ fn quotes_owned_info_boundary() {
         let report = |_| Ok(());
         if index == 0 {
             let mut rows = run(fetch_markets(|| ready(Ok(input)), &store, &report)).unwrap();
-            rows[0].info.as_mut().unwrap()["instrument"]["description"] = json!("changed");
+            *rows[0]
+                .info
+                .as_mut()
+                .unwrap()
+                .get_mut("instrument")
+                .unwrap()
+                .get_mut("description")
+                .unwrap() = json!("changed").into();
             let unchanged = run(fetch_markets(|| ready(Ok(saved)), &store, &report)).unwrap();
-            assert_eq!(
-                unchanged[0].info.as_ref().unwrap()["instrument"]["description"],
-                "instrument",
+            assert!(
+                unchanged[0]
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("instrument")
+                    .unwrap()
+                    .get("description")
+                    .unwrap()
+                    .text_equals("instrument"),
                 "QUOTES-OWNED market info"
             );
         } else {
@@ -344,7 +352,7 @@ fn quotes_owned_info_boundary() {
             }
             .unwrap()
             .unwrap();
-            rows[0].info.as_mut().unwrap()["symbol"] = json!("changed");
+            *rows[0].info.as_mut().unwrap().get_mut("symbol").unwrap() = json!("changed").into();
             let unchanged = run(fetch_tickers_for_symbols(
                 vec![],
                 || ready(Ok("".into())),
@@ -355,9 +363,14 @@ fn quotes_owned_info_boundary() {
             ))
             .unwrap()
             .unwrap();
-            assert_eq!(
-                unchanged[0].info.as_ref().unwrap()["symbol"],
-                "A",
+            assert!(
+                unchanged[0]
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("symbol")
+                    .unwrap()
+                    .text_equals("A"),
                 "QUOTES-OWNED ticker info"
             );
         }

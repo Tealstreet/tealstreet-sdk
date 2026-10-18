@@ -8,7 +8,7 @@ use safe_cex_exchange::{
     js_runtime::{
         client,
         promise::{Promise, await_js},
-        value::{Js, Thrown, arg, to_js_json},
+        value::{Js, Thrown, arg, to_js_json, to_retained_input},
     },
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
 };
@@ -51,7 +51,10 @@ impl ApiBridge {
         }
         Ok(Rc::new(Self { _api: api, host }))
     }
-    pub async fn request(&self, request: ApexRequest) -> Result<J, ExchangeError> {
+    pub async fn request(
+        &self,
+        request: ApexRequest,
+    ) -> Result<safe_cex_types::retained_json::RetainedJsonInput, ExchangeError> {
         let config = Js::object(vec![
             ("method", Js::str(request.method)),
             ("url", Js::str(request.path)),
@@ -80,7 +83,7 @@ impl ApiBridge {
         // Source callers destructure Axios response.data before reading data/code.
         response
             .get("data")
-            .and_then(|data| to_js_json(&data))
+            .and_then(|data| to_retained_input(&data))
             .map_err(error)
     }
 }
@@ -202,14 +205,13 @@ impl ApexApiHost for ApiHost {
                         let owner = api
                             .upgrade()
                             .ok_or_else(|| Thrown::error("Error", "Apex API released"))?;
-                        let response = to_js_json(&arg(&args, 0))?;
+                        let response = arg(&args, 0);
                         Ok(Js::Promise(Promise::spawn(
                             &runtime,
                             Box::pin(async move {
                                 owner
                                     .response_handler(&response)
                                     .await
-                                    .map(|v| js(&v))
                                     .map_err(Thrown::from)
                             }),
                         )))
@@ -258,23 +260,9 @@ impl ApexApiHost for ApiHost {
         }
         Ok(())
     }
-    fn request_retry(&self, config: J) -> ExchangeFuture<'_, J> {
+    fn request_retry(&self, config: Js) -> ExchangeFuture<'_, Js> {
         Box::pin(async move {
-            let config = js(&config);
-            // The typed response ABI omits functions. Per-request capabilities
-            // are not exposed by ApexRequest; restore this client's original
-            // adapter/serializer defaults when preparing a legacy resend.
-            for (name, value) in self
-                .client()
-                .get("defaults")
-                .map_err(error)?
-                .own_entries()
-                .map_err(error)?
-            {
-                if value.is_callable() && config.get_key(&name).map_err(error)?.is_undefined() {
-                    config.define_key(&name, value).map_err(error)?;
-                }
-            }
+            // Native response/config retains the original adapter and serializer.
             let response = await_js(
                 self.client()
                     .call_method("request", vec![config])
@@ -282,7 +270,7 @@ impl ApexApiHost for ApiHost {
             )
             .await
             .map_err(error)?;
-            to_js_json(&response).map_err(error)
+            Ok(response)
         })
     }
 }

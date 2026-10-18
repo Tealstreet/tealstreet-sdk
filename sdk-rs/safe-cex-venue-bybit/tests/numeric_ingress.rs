@@ -122,10 +122,18 @@ fn numeric_ingress_preserves_all_registered_records() {
                     v.ret_code.unwrap()
                 } else {
                     let raw_path = p.strip_prefix("/rawResponse").unwrap();
-                    safe_cex_num::numeric_ingress::js_value_as_f64(
-                        v.raw_response.as_ref().unwrap().pointer(raw_path).unwrap(),
-                    )
-                    .unwrap()
+                    raw_path
+                        .split('/')
+                        .skip(1)
+                        .fold(v.raw_response.as_ref().unwrap(), |value, key| {
+                            if let Some(array) = value.as_array() {
+                                &array[key.parse::<usize>().unwrap()]
+                            } else {
+                                value.get(key).unwrap()
+                            }
+                        })
+                        .as_f64()
+                        .unwrap()
                 }
             }),
             "BybitExecutionAmounts" => check::<BybitExecutionAmounts>(case, |v, p| match p {

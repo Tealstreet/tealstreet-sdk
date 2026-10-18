@@ -1,20 +1,18 @@
-use safe_cex_num::{JsCoercionError, numeric_ingress::js_deserialize_passthrough};
+use safe_cex_num::JsCoercionError;
 use safe_cex_types::OrderStopTriggerType;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_venue_bitunix::tpsl_helpers::{
     TpslLeg, get_bitunix_reduce_only, get_bitunix_trigger_type, get_tpsl_leg_order_id,
 };
 use serde_json::{Value, json};
 use std::{collections::HashMap, process::Command};
-fn input(value: &Value) -> Result<Option<Value>, ()> {
-    match value.as_str() {
-        None => Ok(None),
-        Some(raw) => js_deserialize_passthrough(&mut serde_json::Deserializer::from_str(raw))
-            .map(Some)
-            .map_err(|_| {
-                assert_eq!(raw, r#""\ud800""#, "TPSL only UTF8 refusal");
-            }),
-    }
+fn input(value: &Value) -> Option<Input> {
+    value.as_str().map(|raw| {
+        Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>())
+            .expect("maintained source supplied valid retained JSON")
+    })
 }
+
 fn string_result(value: Result<impl AsRef<str>, JsCoercionError>) -> Value {
     match value {
         Ok(s) => json!({"type":"string","units":s.as_ref().encode_utf16().collect::<Vec<_>>()}),
@@ -58,32 +56,59 @@ fn actual_typescript_tpsl_helpers() {
             .into_iter()
             .collect();
     assert_eq!(cache.len(), 7, "TPSL cache inventory");
+    let output_refusals = corpus["ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["result"]["type"] == "string")
+        .filter(|row| {
+            let units = row["result"]["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|unit| u16::try_from(unit.as_u64().unwrap()).unwrap())
+                .collect::<Vec<_>>();
+            String::from_utf16(&units).is_err()
+        })
+        .count();
+    assert_eq!(
+        output_refusals, 102,
+        "independent source final ID output boundary"
+    );
     let mut counts = [0; 3];
     let mut refused = [0; 3];
     for row in corpus["ids"].as_array().unwrap() {
-        let (Ok(raw), Ok(position)) = (input(&row["raw"]), input(&row["position"])) else {
-            if row["raw"] == r#""\ud800""# && row["disambiguate"] == false {
-                assert_eq!(
-                    row["result"],
-                    json!({"type":"string","units":[55296]}),
-                    "TPSL source surrogate ID"
-                );
-            }
-            refused[0] += 1;
-            continue;
-        };
+        let (raw, position) = (input(&row["raw"]), input(&row["position"]));
         let leg = match row["leg"].as_str().unwrap() {
             "tp" => TpslLeg::Tp,
             "sl" => TpslLeg::Sl,
             _ => panic!("TPSL invalid leg"),
         };
+        let result = get_tpsl_leg_order_id(
+            raw.as_ref(),
+            position.as_ref(),
+            leg,
+            row["disambiguate"].as_bool().unwrap(),
+        );
+        if let Err(error) = &result {
+            if row["result"]["type"] == "string" {
+                assert_eq!(error.name, "TypeError");
+                let units = row["result"]["units"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|unit| u16::try_from(unit.as_u64().unwrap()).unwrap())
+                    .collect::<Vec<_>>();
+                assert!(
+                    String::from_utf16(&units).is_err(),
+                    "only the final UTF8 ID output is refused"
+                );
+                refused[0] += 1;
+                continue;
+            }
+        }
         assert_eq!(
-            string_result(get_tpsl_leg_order_id(
-                raw.as_ref(),
-                position.as_ref(),
-                leg,
-                row["disambiguate"].as_bool().unwrap()
-            )),
+            string_result(result),
             row["result"],
             "TPSL native leg ID {row}"
         );
@@ -96,20 +121,7 @@ fn actual_typescript_tpsl_helpers() {
             "last" => Some(OrderStopTriggerType::LastPrice),
             _ => panic!("TPSL invalid trigger"),
         };
-        let Ok(raw) = input(&row["raw"]) else {
-            let expected = if choice == Some(OrderStopTriggerType::LastPrice) {
-                "LAST_PRICE"
-            } else {
-                "MARK_PRICE"
-            };
-            assert_eq!(
-                row["result"],
-                string_result(Ok(expected)),
-                "TPSL source surrogate trigger"
-            );
-            refused[1] += 1;
-            continue;
-        };
+        let raw = input(&row["raw"]);
         assert_eq!(
             string_result(get_bitunix_trigger_type(choice, raw.as_ref())),
             row["result"],
@@ -119,17 +131,7 @@ fn actual_typescript_tpsl_helpers() {
     }
     for row in corpus["reduce"].as_array().unwrap() {
         let fallback = row["fallback"].as_bool().unwrap();
-        let (Ok(raw), Ok(client)) = (input(&row["raw"]), input(&row["client"])) else {
-            if row["raw"] == r#""\ud800""# && row["client"].is_null() {
-                assert_eq!(
-                    row["result"],
-                    json!({"type":"boolean","value":fallback}),
-                    "TPSL source surrogate fallback"
-                );
-            }
-            refused[2] += 1;
-            continue;
-        };
+        let (raw, client) = (input(&row["raw"]), input(&row["client"]));
         let actual = match get_bitunix_reduce_only(raw.as_ref(), client.as_ref(), fallback, &cache)
         {
             Ok(v) => json!({"type":"boolean","value":v}),
@@ -138,6 +140,10 @@ fn actual_typescript_tpsl_helpers() {
         assert_eq!(actual, row["result"], "TPSL native reduce-only {row}");
         counts[2] += 1;
     }
-    assert_eq!(counts, [1156, 69, 578], "TPSL independent native counts");
-    assert_eq!(refused, [140, 3, 70], "TPSL UTF8 refusal counts");
+    assert_eq!(counts, [1194, 72, 648], "TPSL independent native counts");
+    assert_eq!(
+        refused,
+        [102, 0, 0],
+        "TPSL final ID UTF8 output refusals only"
+    );
 }
