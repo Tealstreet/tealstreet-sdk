@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "225 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "226 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -2981,6 +2981,26 @@
       "classification": "delegated",
       "delegate": "src/exchange.rs::Exchange::fetch_and_set_private_snapshot",
       "reason": "Weak WS bridge resolves the concrete venue then delegates the snapshot; it owns no second task or resync latch."
+    },
+    {
+      "owner": "src/eager.rs::start_eager",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "5246516938535676e1fe71b84f61123e497aa973aa24ffdf0bed65013c0d4a37",
+      "classification": "delegated",
+      "delegate": "src/js_runtime/promise.rs::Promise::spawn / PromiseWait",
+      "reason": "The canonical Promise driver eagerly runs and independently owns the body; this typed adapter only retains a per-call native result cell. Dropping an unpolled or polled returned waiter cannot cancel the producer. The value moves out once after fulfillment, without Clone or serialization; native rejection metadata remains in Thrown.native. No external reservation, cache entry, or latch is installed. Reviewed body and both await boundaries; actual NativeRuntime drop/prefix, native-value and error-origin witnesses pass.",
+      "witnesses": [
+        "tests/eager_start.rs::synchronous_prefix_and_continuation_survive_dropping_the_waiter",
+        "tests/eager_start.rs::a_nonclone_nonserializable_result_moves_once_with_native_number_bits",
+        "tests/eager_start.rs::native_error_metadata_and_origin_identity_survive_rejection"
+      ]
     }
   ]
 }
