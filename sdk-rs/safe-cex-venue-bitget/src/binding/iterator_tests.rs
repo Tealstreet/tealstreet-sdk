@@ -366,3 +366,48 @@ fn retained_plan_type_matches_source_through_constructed_exchange() {
         }
     }
 }
+
+#[test]
+fn constructed_order_mappers_retain_unread_native_info() {
+    use safe_cex_exchange::js_runtime::value::from_json;
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetusdc,
+        ExchangeName::Bitgetinverse,
+    ] {
+        let h = harness::harness(name.clone(), harness::options(), |_| {});
+        let raw = from_json(
+            &serde_json::json!({"orderId":"native-info","status":"new","orderType":"limit","side":"buy","symbol":"BTCUSDT","size":"2","price":"10","baseVolume":"0"}),
+        );
+        raw.define("opaque", Js::utf16(&[0xd800, 65, 0xdc00]))
+            .unwrap();
+        raw.define("nan", Js::Number(f64::NAN)).unwrap();
+        raw.define("infinity", Js::Number(f64::INFINITY)).unwrap();
+        raw.define("zero", Js::Number(-0.0)).unwrap();
+        raw.define("undefined", Js::Undefined).unwrap();
+        let result = h
+            .exchange
+            .rt
+            .this
+            .call_method("mapOrder", vec![raw])
+            .expect("constructed mapper admits opaque info");
+        assert_eq!(result.get("length").unwrap().as_f64(), Some(1.0));
+        let info = result.get("0").unwrap().get("info").unwrap();
+        assert_eq!(
+            info.get("opaque").unwrap().as_str().unwrap().as_ref(),
+            &[0xd800, 65, 0xdc00],
+            "{name:?}"
+        );
+        assert!(info.get("nan").unwrap().as_f64().unwrap().is_nan());
+        assert_eq!(
+            info.get("infinity").unwrap().as_f64().unwrap().to_bits(),
+            f64::INFINITY.to_bits()
+        );
+        assert_eq!(
+            info.get("zero").unwrap().as_f64().unwrap().to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert!(info.has_own("undefined"));
+        assert!(info.get("undefined").unwrap().is_undefined());
+    }
+}
