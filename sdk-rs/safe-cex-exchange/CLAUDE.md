@@ -2071,3 +2071,8 @@ The differential rejects other Node versions: inconsistent comparator ordering i
 engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
+
+Native sockets with a separate callback owner use `install_native_handler_stats`
+to bind selected-key live counts into Base's record/pong/cleanup/reconciliation
+algorithm. They never copy callbacks into Base's registry or bypass the shared
+statistics writes. See [the owner census](NATIVE_HANDLER_STATS_REVIEW.md).

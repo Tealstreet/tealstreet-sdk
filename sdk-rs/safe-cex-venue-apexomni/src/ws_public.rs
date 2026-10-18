@@ -55,6 +55,13 @@ impl ApexOmniPublicWebsocket {
         socket.register("pong", Rc::new(move |_| host.handle_pong(None)));
         Ok(socket)
     }
+    pub(crate) fn handler_count(&self, topic: &str) -> Option<usize> {
+        self.handlers
+            .borrow()
+            .iter()
+            .find(|(key, _)| key == topic)
+            .map(|(_, handlers)| handlers.len())
+    }
     fn register(&self, topic: &str, handler: Handler) -> u64 {
         let id = self.next_handler.get();
         self.next_handler.set(id + 1);

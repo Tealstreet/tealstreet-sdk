@@ -155,6 +155,36 @@ impl CoinbaseExchange {
         });
         let dyn_venue: Rc<dyn Exchange> = venue.clone();
         *venue.host.shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
+        let public = venue
+            .class
+            .public_websocket
+            .borrow()
+            .clone()
+            .ok_or_else(|| ExchangeError::new("Coinbase public socket is not assembled"))?;
+        let receiver = Rc::downgrade(&public.receiver);
+        let socket =
+            venue.host.shared.extra.public_socket.get().ok_or_else(|| {
+                ExchangeError::new("Coinbase public socket facade is not assembled")
+            })?;
+        let core =
+            safe_cex_exchange::js_runtime::sockets::core_of(&venue.host.shared.sockets, socket)
+                .ok_or_else(|| ExchangeError::new("Coinbase public socket core is not assembled"))?
+                .base()
+                .map_err(|error| error.to_exchange_error())?;
+        safe_cex_exchange::websocket::install_native_handler_stats(
+            &core,
+            Rc::new(move |topic| {
+                let receiver = receiver
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("Coinbase public registry owner released"))?;
+                let count = receiver
+                    .message_handlers
+                    .borrow()
+                    .get(topic)
+                    .map(|handlers| handlers.borrow().len());
+                Ok(count)
+            }),
+        );
         Ok(venue)
     }
     pub fn fetch_balance(&self) -> ExchangeFuture<'_, Balance> {
