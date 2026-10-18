@@ -522,3 +522,7 @@ ACCEPT; the live rows are tracked in FIX_AUDIT_LEDGER.md. See ACCOUNT_WRITE_REVI
 The three order tables and mapLimitOrder FIX-audit leads are accepted against the
 constructed exchange, including inherited referent identity and live info aliases.
 See LIVE_ORDER_REVIEW.md; typed own-entry slices do not replace runtime lookup.
+
+History candidates and transaction parsing retain canonical Input through field
+selection and numeric coercion. HISTORY_PARSER_REVIEW.md records the signed native
+regression; strict typed historical output/option boundaries remain separate.

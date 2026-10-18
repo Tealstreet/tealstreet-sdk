@@ -12,6 +12,7 @@ use safe_cex_exchange::{
     runtime::ExchangeError,
 };
 use safe_cex_transport::{RestAdapter, RestFailure};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Execution, ExecutionsOptions, HistoricalTrade, HistoricalTradeOptions};
 use serde_json::Value;
 
@@ -43,20 +44,16 @@ fn report(venue: &dyn Exchange, error: ExchangeError) -> Result<(), ExchangeErro
         .base()
         .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)
 }
-fn parse_rows(rows: Vec<Value>) -> Result<Vec<ParsedWooTransaction>, ExchangeError> {
+fn parse_rows(rows: Vec<Input>) -> Result<Vec<ParsedWooTransaction>, ExchangeError> {
     let mut parsed = Vec::new();
     for row in rows {
-        let Some(row) = row.as_object() else {
-            safe_cex_num::get_key::v_unknown(Some(&row), "symbol")
-                .map_err(|error| ExchangeError::new(error.message))?;
-            continue;
-        };
-        if let Some(row) = parse_transaction_history_row(row).map_err(ExchangeError::new)? {
+        if let Some(row) = parse_transaction_history_row(&row).map_err(ExchangeError::new)? {
             parsed.push(row);
         }
     }
     Ok(parsed)
 }
+
 fn select(
     rows: &mut Vec<ParsedWooTransaction>,
     symbol: Option<&str>,
@@ -95,7 +92,9 @@ fn select(
 fn asset(row: &ParsedWooTransaction) -> Result<Option<String>, ExchangeError> {
     match &row.commission_asset {
         None => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(Input::Text(value)) => String::from_utf16(value).map(Some).map_err(|_| {
+            ExchangeError::new("history commissionAsset cannot cross the typed String output")
+        }),
         Some(_) => Err(ExchangeError::new(
             "history commissionAsset cannot cross the typed String output",
         )),

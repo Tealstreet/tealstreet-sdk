@@ -11,7 +11,11 @@ use crate::{
     historical_fills, history_fetch, legacy_fills, legacy_fills::WooLegacyFillsQuery,
     legacy_lifecycle, order_pages, orders, response, transaction,
 };
-use safe_cex_exchange::{exchange::Exchange, runtime::ExchangeError};
+use safe_cex_exchange::{
+    exchange::Exchange,
+    js_runtime::value::{from_retained_input, to_retained_input},
+    runtime::ExchangeError,
+};
 use serde_json::{Map, Value};
 use std::rc::{Rc, Weak};
 
@@ -81,6 +85,10 @@ fn rows(values: Vec<Value>) -> Js {
     Js::array(values.iter().map(from_json).collect())
 }
 
+fn retained_rows(values: Vec<safe_cex_types::retained_json::RetainedJsonInput>) -> Js {
+    Js::array(values.into_iter().map(from_retained_input).collect())
+}
+
 fn parsed_transaction(row: transaction::ParsedWooTransaction) -> Result<Js, Thrown> {
     Ok(Js::object(vec![
         ("symbol", Js::str(&row.symbol)),
@@ -102,8 +110,7 @@ fn parsed_transaction(row: transaction::ParsedWooTransaction) -> Result<Js, Thro
         (
             "commissionAsset",
             row.commission_asset
-                .as_ref()
-                .map_or(Js::Undefined, from_json),
+                .map_or(Js::Undefined, from_retained_input),
         ),
         ("realizedPnl", number_or_undefined(row.realized_pnl)),
         ("positionSide", from_typed(&row.position_side)?),
@@ -224,8 +231,10 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         // ts: WOOXExchange#parseTransactionHistoryRow
         "parseTransactionHistoryRow" => sync(
             name,
-            |_, a| match transaction::parse_transaction_history_row(&object(&arg(&a, 0))?)
-                .map_err(|e| Thrown::type_error(&e))?
+            |_, a| match transaction::parse_transaction_history_row(&to_retained_input(&arg(
+                &a, 0,
+            ))?)
+            .map_err(|e| Thrown::type_error(&e))?
             {
                 Some(row) => parsed_transaction(row),
                 None => Ok(Js::Null),
@@ -236,8 +245,8 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         "parseTransactionRowsFromResponse" => sync(
             name,
             |_, a| {
-                let data = to_json(&arg(&a, 0))?;
-                Ok(rows(
+                let data = to_retained_input(&arg(&a, 0))?;
+                Ok(retained_rows(
                     response::parse_transaction_rows_from_response(&data).to_vec(),
                 ))
             },
@@ -249,7 +258,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
                 let query = history_query(&arg(&a, 0))?;
                 let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 match legacy_fills::fetch_legacy_transaction_history_rows(&adapter, &query).await {
-                    Ok(values) => Ok(rows(values)),
+                    Ok(values) => Ok(retained_rows(values)),
                     Err(failure) => Err(adapter.thrown(failure)),
                 }
             })
@@ -260,7 +269,7 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
                 let query = history_query(&arg(&a, 0))?;
                 let adapter = JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("xhr")?);
                 match history_fetch::fetch_transaction_history_rows(&adapter, &query).await {
-                    Ok(values) => Ok(rows(values)),
+                    Ok(values) => Ok(retained_rows(values)),
                     Err(failure) => Err(adapter.thrown(failure)),
                 }
             })
