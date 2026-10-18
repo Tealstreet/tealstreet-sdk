@@ -14,6 +14,7 @@ mod data {
         "/tests/support/exchange_data.rs"
     ));
 }
+#[allow(unused_imports)]
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::value::{Js, to_json},
@@ -59,15 +60,15 @@ pub fn setup_markets(
     store: &safe_cex_store::store::DefaultStore,
 ) {
     let markets = drive(runtime, venue.fetch_markets()).unwrap();
-    store
-        .update(
-            safe_cex_store::StoreUpdate {
-                markets: Some(markets),
-                ..Default::default()
-            },
-            false,
-        )
-        .unwrap();
+    safe_cex_store::Store::update(
+        store,
+        safe_cex_store::StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
 }
 pub fn events(
     base: &safe_cex_exchange::exchange::BaseExchange,
@@ -98,17 +99,45 @@ pub fn seed_tickers(
     store: &safe_cex_store::store::DefaultStore,
 ) {
     let tickers = drive(runtime, venue.fetch_tickers()).unwrap();
-    store
-        .update(
-            safe_cex_store::StoreUpdate {
-                tickers: Some(tickers),
-                ..Default::default()
-            },
-            false,
-        )
-        .unwrap();
+    safe_cex_store::Store::update(
+        store,
+        safe_cex_store::StoreUpdate {
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
 }
 pub fn balance(store: &safe_cex_store::store::DefaultStore) -> Value {
     let value = store.balance();
     json!({"total":format!("{:016x}",value.total.to_bits()),"free":format!("{:016x}",value.free.to_bits()),"used":format!("{:016x}",value.used.to_bits())})
+}
+pub fn parameter(wire: &support::Wire, key: &str) -> String {
+    let requests = wire.requests.borrow();
+    let request = requests.last().expect("real terminal HTTP request");
+    let query = request.url.split_once('?').expect("signed wire query").1;
+    let encoded = query
+        .split('&')
+        .find_map(|pair| {
+            let (name, value) = pair.split_once('=')?;
+            (name == key).then_some(value)
+        })
+        .expect("requested field in real signed query");
+    let mut bytes = Vec::new();
+    let mut input = encoded.as_bytes().iter().copied();
+    while let Some(byte) = input.next() {
+        match byte {
+            b'%' => {
+                let high = input.next().unwrap();
+                let low = input.next().unwrap();
+                bytes.push(
+                    u8::from_str_radix(std::str::from_utf8(&[high, low]).unwrap(), 16).unwrap(),
+                );
+            }
+            b'+' => bytes.push(b' '),
+            value => bytes.push(value),
+        }
+    }
+    String::from_utf8(bytes).unwrap()
 }

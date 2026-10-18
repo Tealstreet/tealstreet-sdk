@@ -26094,7 +26094,7 @@
         "opts",
         "post_only"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed source JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let project=|v:&$type| serde_json::json!({\"ok\":true,\"order\":serde_json::json!({\"symbol\":&v.order.symbol,\"type\":format!(\"{:?}\",v.order.r#type),\"side\":format!(\"{:?}\",v.order.side),\"amount\":format!(\"{:016x}\",(v.order.amount).to_bits()),\"price\":(v.order.price).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"trigger_price\":(v.order.trigger_price).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"stop_loss\":(v.order.stop_loss).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"take_profit\":(v.order.take_profit).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"reduce_only\":(v.order.reduce_only).as_ref().map(|item|serde_json::json!(&item)),\"time_in_force\":(v.order.time_in_force).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"trigger_type\":(v.order.trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"tp_trigger_type\":(v.order.tp_trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"sl_trigger_type\":(v.order.sl_trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"client_order_id\":(v.order.client_order_id).as_ref().map(|item|serde_json::json!(&item)),\"max_slippage_pct\":(v.order.max_slippage_pct).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"close\":(v.order.close).as_ref().map(|item|serde_json::json!(&item)),\"implied_volatility\":(v.order.implied_volatility).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits())))}),\"stp_mode\":v.stp_mode.as_ref().map(|x|format!(\"{:?}\",x))}); let observe=|v:$type| { let actual=project(&v); assert_eq!(actual,project(&v.clone()),\"ASTER alternate DTO native Clone\"); actual }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) { (Ok(a),Ok(b),Ok(c),Ok(d))=>{decoder.end().unwrap(); let actual=observe(a); assert_eq!(actual,observe(b)); assert_eq!(actual,observe(c)); assert_eq!(actual,observe(d)); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER alternate DTO route disagreement\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed source JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let project=|v:&$type| serde_json::json!({\"ok\":true,\"opts\":serde_json::json!({\"order\":serde_json::json!({\"symbol\":&v.opts.order.symbol,\"type\":format!(\"{:?}\",v.opts.order.r#type),\"side\":format!(\"{:?}\",v.opts.order.side),\"amount\":format!(\"{:016x}\",(v.opts.order.amount).to_bits()),\"price\":(v.opts.order.price).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"trigger_price\":(v.opts.order.trigger_price).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"stop_loss\":(v.opts.order.stop_loss).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"take_profit\":(v.opts.order.take_profit).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"reduce_only\":(v.opts.order.reduce_only).as_ref().map(|item|serde_json::json!(&item)),\"time_in_force\":(v.opts.order.time_in_force).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"trigger_type\":(v.opts.order.trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"tp_trigger_type\":(v.opts.order.tp_trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"sl_trigger_type\":(v.opts.order.sl_trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"client_order_id\":(v.opts.order.client_order_id).as_ref().map(|item|serde_json::json!(&item)),\"max_slippage_pct\":(v.opts.order.max_slippage_pct).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"close\":(v.opts.order.close).as_ref().map(|item|serde_json::json!(&item)),\"implied_volatility\":(v.opts.order.implied_volatility).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits())))}),\"stp_mode\":v.opts.stp_mode.as_ref().map(|x|format!(\"{:?}\",x))}),\"post_only\":v.post_only}); let observe=|v:$type| { let actual=project(&v); assert_eq!(actual,project(&v.clone()),\"ASTER alternate DTO native Clone\"); actual }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) { (Ok(a),Ok(b),Ok(c),Ok(d))=>{decoder.end().unwrap(); let actual=observe(a); assert_eq!(actual,observe(b)); assert_eq!(actual,observe(c)); assert_eq!(actual,observe(d)); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),other=>panic!(\"ASTER alternate DTO route disagreement: {raw}; {other:?}\") } }",
       "cases": [
         {
           "label": "full-left",
@@ -28849,7 +28849,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{impl $type {pub(crate) fn __accepted_alternate_scope(&self)->crate::binding::Rt{self.rt.clone()}}#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let symbols:Vec<String>=serde_json::from_value($value.clone()).unwrap();let rows=f::drive(&runtime,venue.fetch_positions(Some(symbols))).unwrap();serde_json::json!(rows.iter().map(|p|serde_json::json!({\"symbol\":p.symbol,\"size\":format!(\"{:016x}\",p.contracts.to_bits())})).collect::<Vec<_>>())}",
+        "call": "{#[allow(non_local_definitions)] impl $type {pub(crate) fn __accepted_alternate_scope(&self)->crate::binding::Rt{self.rt.clone()}}#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let symbols:Vec<String>=serde_json::from_value($value.clone()).unwrap();let rows=f::drive(&runtime,venue.fetch_positions(Some(symbols))).unwrap();serde_json::json!(rows.iter().map(|p|serde_json::json!({\"symbol\":p.symbol,\"size\":format!(\"{:016x}\",p.contracts.to_bits())})).collect::<Vec<_>>())}",
         "cases": [
           {
             "input": [
@@ -28973,7 +28973,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let symbols:Vec<String>=serde_json::from_value($value.clone()).unwrap();let rows=f::drive(&runtime,venue.fetch_orders(Some(symbols))).unwrap();serde_json::json!(rows.iter().map(|p|serde_json::json!({\"symbol\":p.symbol,\"id\":p.id,\"amount\":format!(\"{:016x}\",p.amount.to_bits())})).collect::<Vec<_>>())}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let symbols:Vec<String>=serde_json::from_value($value.clone()).unwrap();let rows=f::drive(&runtime,venue.fetch_orders(Some(symbols))).unwrap();serde_json::json!(rows.iter().map(|p|serde_json::json!({\"symbol\":p.symbol,\"id\":p.id,\"amount\":format!(\"{:016x}\",p.amount.to_bits())})).collect::<Vec<_>>())}",
         "cases": [
           {
             "input": [
@@ -29053,7 +29053,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();match f::drive(&runtime,venue.fetch_symbol_max_leverage($value.as_str().unwrap().into())){Ok(value)=>serde_json::json!({\"bits\":format!(\"{:016x}\",value.to_bits())}),Err(e)=>serde_json::json!({\"error\":e.message})}}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);match f::drive(&runtime,venue.fetch_symbol_max_leverage($value.as_str().unwrap().into())){Ok(value)=>serde_json::json!({\"bits\":format!(\"{:016x}\",value.to_bits())}),Err(e)=>serde_json::json!({\"error\":e.message})}}",
         "cases": [
           {
             "input": "BTCUSDT",
@@ -29156,7 +29156,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();f::setup_markets(&venue,&runtime,&store);let symbol=$value[\"symbol\"].as_str().unwrap();let leverage=$value[\"leverage\"].as_f64().unwrap();match f::drive(&runtime,venue.set_leverage(symbol.into(),leverage,None)){Ok(())=>{let requests=wire.requests.borrow();let params=requests.last().unwrap().params.as_ref().unwrap();serde_json::json!({\"leverage\":format!(\"{:016x}\",params[\"leverage\"].as_f64().unwrap().to_bits())})},Err(e)=>serde_json::json!({\"error\":e.message,\"name\":e.name})}}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);f::setup_markets(&venue,&runtime,&store);let symbol=$value[\"symbol\"].as_str().unwrap();let leverage=$value[\"leverage\"].as_f64().unwrap();match f::drive(&runtime,venue.set_leverage(symbol.into(),leverage,None)){Ok(())=>{let value=f::parameter(&wire,\"leverage\").parse::<f64>().unwrap();serde_json::json!({\"leverage\":format!(\"{:016x}\",value.to_bits())})},Err(e)=>serde_json::json!({\"error\":e.message,\"name\":e.name})}}",
         "cases": [
           {
             "input": {
@@ -29266,7 +29266,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let value=$value.as_bool().unwrap();f::drive(&runtime,venue.change_position_mode(value,None)).unwrap();serde_json::json!({\"is_hedged\":store.options().is_hedged})}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let value=$value.as_bool().unwrap();f::drive(&runtime,venue.change_position_mode(value,None)).unwrap();serde_json::json!({\"is_hedged\":store.options().is_hedged})}",
         "cases": [
           {
             "input": true,
@@ -29360,12 +29360,12 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let symbol=$value.as_str().unwrap();f::drive(&runtime,venue.change_margin_type(true,Some(symbol.into()))).unwrap();let r=wire.requests.borrow();let last=r.last().unwrap();let params=last.params.as_ref().unwrap();serde_json::json!({\"method\":last.method,\"symbol\":params[\"symbol\"],\"marginType\":params[\"marginType\"]})}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let symbol=$value.as_str().unwrap();f::drive(&runtime,venue.change_margin_type(true,Some(symbol.into()))).unwrap();serde_json::json!({\"method\":wire.requests.borrow().last().unwrap().method,\"symbol\":f::parameter(&wire,\"symbol\"),\"marginType\":f::parameter(&wire,\"marginType\")})}",
         "cases": [
           {
             "input": "BTCUSDT",
             "output": {
-              "method": "POST",
+              "method": "post",
               "symbol": "BTCUSDT",
               "marginType": "ISOLATED"
             }
@@ -29373,7 +29373,7 @@
           {
             "input": "ETHUSDT",
             "output": {
-              "method": "POST",
+              "method": "post",
               "symbol": "ETHUSDT",
               "marginType": "ISOLATED"
             }
@@ -29475,7 +29475,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();if $value.as_bool().unwrap(){wire.responses.borrow_mut().insert(\"/fapi/v1/trades\".into(),serde_json::json!([]));}let result=f::drive(&runtime,venue.fetch_public_trades(\"BTCUSDT\".into(),Some(2.)));serde_json::json!({\"ok\":result.is_ok()})}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);if $value.as_bool().unwrap(){wire.responses.borrow_mut().insert(\"/fapi/v1/trades\".into(),serde_json::json!([]));}let result=f::drive(&runtime,venue.fetch_public_trades(\"BTCUSDT\".into(),Some(2.)));serde_json::json!({\"ok\":result.is_ok()})}",
         "cases": [
           {
             "input": true,
@@ -29600,7 +29600,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let symbol=$value.as_str().unwrap();let cleanup=venue.listen_order_book(symbol.into(),std::rc::Rc::new(|_|{})).unwrap();let state=rt.shared.extra.public.get().unwrap().subscriptions.state();cleanup().unwrap();serde_json::json!({\"topics\":state.topics,\"remaining\":rt.shared.extra.public.get().unwrap().subscriptions.state().books.len()})}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let symbol=$value.as_str().unwrap();let cleanup=venue.listen_order_book(symbol.into(),std::rc::Rc::new(|_|{})).unwrap();let state=rt.shared.extra.public.get().unwrap().subscriptions.state();cleanup().unwrap();serde_json::json!({\"topics\":state.topics,\"remaining\":rt.shared.extra.public.get().unwrap().subscriptions.state().books.len()})}",
         "cases": [
           {
             "input": "BTCUSDT",
@@ -29727,7 +29727,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let value=$value.as_bool().unwrap();venue.after_method_called_in_worker(&serde_json::Value::Null,safe_cex_exchange::worker::CallableMethodsInWorker::ChangePositionMode,&[serde_json::json!(value)]).unwrap();serde_json::json!({\"is_hedged\":store.options().is_hedged})}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let value=$value.as_bool().unwrap();venue.after_method_called_in_worker(&serde_json::Value::Null,safe_cex_exchange::worker::CallableMethodsInWorker::ChangePositionMode,&[serde_json::json!(value)]).unwrap();serde_json::json!({\"is_hedged\":store.options().is_hedged})}",
         "cases": [
           {
             "input": true,
@@ -29825,7 +29825,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=from_json($value);f::native(&host.get(&object,\"field\").unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=from_json($value);f::native(&host.get(&object,\"field\").unwrap())}",
         "cases": [
           {
             "input": {
@@ -29955,7 +29955,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=from_json($value);let values=host.destructure(object,&[\"a\",\"b\"],\"pair\").unwrap();serde_json::json!(values.iter().map(f::native).collect::<Vec<_>>())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=from_json($value);let values=host.destructure(object,&[\"a\",\"b\"],\"pair\").unwrap();serde_json::json!(values.iter().map(f::native).collect::<Vec<_>>())}",
         "cases": [
           {
             "input": {
@@ -30076,7 +30076,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=Js::object(vec![]);host.set(&object,\"field\",from_json($value)).unwrap();assert!(object.has_own(\"field\"));f::native(&object.get(\"field\").unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=Js::object(vec![]);host.set(&object,\"field\",from_json($value)).unwrap();assert!(object.has_own(\"field\"));f::native(&object.get(\"field\").unwrap())}",
         "cases": [
           {
             "input": 1.25,
@@ -30184,7 +30184,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=Js::object(vec![]);host.define(&object,\"field\",from_json($value)).unwrap();assert!(object.has_own(\"field\"));f::native(&object.get(\"field\").unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=Js::object(vec![]);host.define(&object,\"field\",from_json($value)).unwrap();assert!(object.has_own(\"field\"));f::native(&object.get(\"field\").unwrap())}",
         "cases": [
           {
             "input": 1.25,
@@ -30283,7 +30283,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=Js::object(vec![(\"present\",Js::Bool(true))]);host.delete(&object,$value.as_str().unwrap()).unwrap();serde_json::json!(object.has_own(\"present\"))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=Js::object(vec![(\"present\",Js::Bool(true))]);host.delete(&object,$value.as_str().unwrap()).unwrap();serde_json::json!(object.has_own(\"present\"))}",
         "cases": [
           {
             "input": "present",
@@ -30366,7 +30366,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=host.object(vec![(\"field\",from_json($value))]);f::native(&object.get(\"field\").unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let object=host.object(vec![(\"field\",from_json($value))]);f::native(&object.get(\"field\").unwrap())}",
         "cases": [
           {
             "input": 1.25,
@@ -30427,7 +30427,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);f::native(&host.text($value.as_str().unwrap()))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);f::native(&host.text($value.as_str().unwrap()))}",
         "cases": [
           {
             "input": "λ",
@@ -30532,7 +30532,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let value=host.import(\"parseFloat\",vec![from_json($value)]).unwrap();f::native(&value)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);let value=host.import(\"parseFloat\",vec![from_json($value)]).unwrap();f::native(&value)}",
         "cases": [
           {
             "input": "1.25tail",
@@ -30595,7 +30595,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);f::native(&host.constant($value.as_str().unwrap()))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);f::native(&host.constant($value.as_str().unwrap()))}",
         "cases": [
           {
             "input": "Info",
@@ -30700,7 +30700,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);rt.this.define(\"positionStateVersion\",from_json($value)).unwrap();let function=host.member(\"markPositionStateUpdatedByWebsocket\",&rt.this).unwrap();function.call(Js::Undefined,vec![]).unwrap();f::native(&rt.this.get(\"positionStateVersion\").unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);rt.this.define(\"positionStateVersion\",from_json($value)).unwrap();let function=host.member(\"markPositionStateUpdatedByWebsocket\",&rt.this).unwrap();function.call(Js::Undefined,vec![]).unwrap();f::native(&rt.this.get(\"positionStateVersion\").unwrap())}",
         "cases": [
           {
             "input": 0,
@@ -30800,7 +30800,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::runtime_host::RuntimeHost as _;use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);match host.construct($value.as_str().unwrap(),vec![]){Ok(value)=>serde_json::json!({\"connect\":value.get(\"connectAndSubscribe\").unwrap().is_callable()}),Err(e)=>serde_json::json!({\"error\":e.get(\"message\").unwrap().to_display()})}}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::runtime_host::RuntimeHost as _;#[allow(unused_imports)] use crate::exchange_runtime::AssemblyHost as _;let host=$type::new(&rt);match host.construct($value.as_str().unwrap(),vec![]){Ok(value)=>serde_json::json!({\"connect\":value.get(\"connectAndSubscribe\").unwrap().is_callable()}),Err(e)=>serde_json::json!({\"error\":e.get(\"message\").unwrap().to_display()})}}",
         "cases": [
           {
             "input": "AsterDEXPublicWebsocket",
@@ -30889,7 +30889,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::virtual_clock::ClockHttp as _;let host=$type{http:rt.shared.http.clone(),runtime:runtime.clone()};let path=$value.as_str().unwrap();wire.responses.borrow_mut().insert(path.into(),serde_json::json!({\"serverTime\":12.5}));let value=f::drive(&runtime,host.get(path.into(),1250)).unwrap();let req=wire.requests.borrow();let req=req.last().unwrap();serde_json::json!({\"data\":value,\"url\":req.url,\"timeout\":req.timeout_ms})}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::virtual_clock::ClockHttp as _;let host=$type{http:rt.shared.http.clone(),runtime:runtime.clone()};let path=$value.as_str().unwrap();wire.responses.borrow_mut().insert(path.into(),serde_json::json!({\"serverTime\":12.5}));let value=f::drive(&runtime,host.get(path.into(),1250)).unwrap();let req=wire.requests.borrow();let req=req.last().unwrap();serde_json::json!({\"data\":value,\"url\":req.url,\"timeout\":req.timeout_ms})}",
         "cases": [
           {
             "input": "/clock-a",
@@ -30982,7 +30982,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::virtual_clock::ClockHttp as _;let host=$type{http:rt.shared.http.clone(),runtime:runtime.clone()};serde_json::json!(host.with_public_cors_proxy($value.as_str().unwrap()).unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::virtual_clock::ClockHttp as _;let host=$type{http:rt.shared.http.clone(),runtime:runtime.clone()};serde_json::json!(host.with_public_cors_proxy($value.as_str().unwrap()).unwrap())}",
         "cases": [
           {
             "input": "https://a.test/time",
@@ -31075,7 +31075,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsParent as _;use crate::public_stream::PublicStreamParent as _;use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};parent.log($value.as_str().unwrap(),safe_cex_exchange::runtime::LogSeverity::Info).unwrap();serde_json::json!(runtime.console.borrow().last().unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};parent.log($value.as_str().unwrap(),safe_cex_exchange::runtime::LogSeverity::Info).unwrap();serde_json::json!(runtime.console.borrow().last().unwrap())}",
         "cases": [
           {
             "input": "α log",
@@ -31165,7 +31165,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsParent as _;use crate::public_stream::PublicStreamParent as _;use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"owner-probe\");parent.emit(\"owner-probe\",$value.as_str().unwrap()).unwrap();serde_json::json!(*values.borrow())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"owner-probe\");parent.emit(\"owner-probe\",$value.as_str().unwrap()).unwrap();serde_json::json!(*values.borrow())}",
         "cases": [
           {
             "input": "α emit",
@@ -31306,7 +31306,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsParent as _;use crate::public_stream::PublicStreamParent as _;use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let message=$value.as_str().unwrap().to_owned();venue.base().on(\"error\",std::rc::Rc::new(move|_,_|Err(safe_cex_exchange::runtime::ExchangeError::new(message.clone()))));f::result(parent.emit_and_log_error(\"native error\",None,None))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let message=$value.as_str().unwrap().to_owned();venue.base().on(\"error\",std::rc::Rc::new(move|_,_|Err(safe_cex_exchange::runtime::ExchangeError::new(message.clone()))));f::result(parent.emit_and_log_error(\"native error\",None,None))}",
         "cases": [
           {
             "input": "α listener error",
@@ -31420,7 +31420,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsParent as _;use crate::public_stream::PublicStreamParent as _;use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"ticker\");let ticker=f::drive(&runtime,venue.fetch_tickers()).unwrap().remove(0);parent.emit_ticker(\"ticker\",$value,&ticker).unwrap();serde_json::json!(values.borrow()[0][0])}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"ticker\");let ticker=f::drive(&runtime,venue.fetch_tickers()).unwrap().remove(0);parent.emit_ticker(\"ticker\",$value,&ticker).unwrap();serde_json::json!(values.borrow()[0][0])}",
         "cases": [
           {
             "input": "BTCUSDT",
@@ -31479,7 +31479,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsParent as _;use crate::public_stream::PublicStreamParent as _;use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};serde_json::json!(parent.get_fapi_path($value.as_str().unwrap()))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};serde_json::json!(parent.get_fapi_path($value.as_str().unwrap()))}",
         "cases": [
           {
             "input": "time",
@@ -31552,7 +31552,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsParent as _;use crate::public_stream::PublicStreamParent as _;use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let key=$value.as_str().unwrap();wire.responses.borrow_mut().insert(\"/fapi/v1/listenKey\".into(),serde_json::json!({\"listenKey\":key}));serde_json::json!(f::drive(&runtime,parent.post_listen_key(\"/fapi/v1/listenKey\".into())).unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let key=$value.as_str().unwrap();wire.responses.borrow_mut().insert(\"/fapi/v1/listenKey\".into(),serde_json::json!({\"listenKey\":key}));serde_json::json!(f::drive(&runtime,parent.post_listen_key(\"/fapi/v1/listenKey\".into())).unwrap())}",
         "cases": [
           {
             "input": "key-α",
@@ -31631,7 +31631,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsParent as _;use crate::public_stream::PublicStreamParent as _;use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};f::drive(&runtime,parent.put_listen_key(\"/fapi/v1/listenKey\".into(),$value.as_str().unwrap().into())).unwrap();serde_json::json!(wire.requests.borrow().last().unwrap().params.as_ref().unwrap()[\"listenKey\"])}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};f::drive(&runtime,parent.put_listen_key(\"/fapi/v1/listenKey\".into(),$value.as_str().unwrap().into())).unwrap();serde_json::json!(f::parameter(&wire,\"listenKey\"))}",
         "cases": [
           {
             "input": "key-α",
@@ -31712,7 +31712,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsParent as _;use crate::public_stream::PublicStreamParent as _;use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"account\");parent.emit_account($value).unwrap();serde_json::json!(*values.borrow())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"account\");parent.emit_account($value).unwrap();serde_json::json!(*values.borrow())}",
         "cases": [
           {
             "input": {
@@ -31793,7 +31793,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::listen_key::ListenKeyParent as _;let stream=rt.shared.extra.private.get().unwrap();let parent=$type{stream:std::rc::Rc::downgrade(stream),parent:stream.parent.clone()};serde_json::json!(parent.get_fapi_path($value.as_str().unwrap()))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::listen_key::ListenKeyParent as _;let stream=rt.shared.extra.private.get().unwrap();let parent=$type{stream:std::rc::Rc::downgrade(stream),parent:stream.parent.clone()};serde_json::json!(parent.get_fapi_path($value.as_str().unwrap()))}",
         "cases": [
           {
             "input": "time",
@@ -31866,7 +31866,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::listen_key::ListenKeyParent as _;let stream=rt.shared.extra.private.get().unwrap();let parent=$type{stream:std::rc::Rc::downgrade(stream),parent:stream.parent.clone()};let key=$value.as_str().unwrap();wire.responses.borrow_mut().insert(\"/fapi/v1/listenKey\".into(),serde_json::json!({\"listenKey\":key}));serde_json::json!(f::drive(&runtime,parent.post_listen_key(\"/fapi/v1/listenKey\".into())).unwrap())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::listen_key::ListenKeyParent as _;let stream=rt.shared.extra.private.get().unwrap();let parent=$type{stream:std::rc::Rc::downgrade(stream),parent:stream.parent.clone()};let key=$value.as_str().unwrap();wire.responses.borrow_mut().insert(\"/fapi/v1/listenKey\".into(),serde_json::json!({\"listenKey\":key}));serde_json::json!(f::drive(&runtime,parent.post_listen_key(\"/fapi/v1/listenKey\".into())).unwrap())}",
         "cases": [
           {
             "input": "key-α",
@@ -31945,7 +31945,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::listen_key::ListenKeyParent as _;let stream=rt.shared.extra.private.get().unwrap();let parent=$type{stream:std::rc::Rc::downgrade(stream),parent:stream.parent.clone()};f::drive(&runtime,parent.put_listen_key(\"/fapi/v1/listenKey\".into(),$value.as_str().unwrap().into())).unwrap();serde_json::json!(wire.requests.borrow().last().unwrap().params.as_ref().unwrap()[\"listenKey\"])}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::listen_key::ListenKeyParent as _;let stream=rt.shared.extra.private.get().unwrap();let parent=$type{stream:std::rc::Rc::downgrade(stream),parent:stream.parent.clone()};f::drive(&runtime,parent.put_listen_key(\"/fapi/v1/listenKey\".into(),$value.as_str().unwrap().into())).unwrap();serde_json::json!(f::parameter(&wire,\"listenKey\"))}",
         "cases": [
           {
             "input": "key-α",
@@ -32029,7 +32029,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::public_subscriptions::PublicSubscriptionIo as _;let stream=rt.shared.extra.public.get().unwrap();let io=$type{socket:stream.socket.clone(),runtime:runtime.clone()};f::drive(&runtime,stream.connect_and_subscribe()).unwrap();runtime.pump();runtime.sent.borrow_mut().clear();io.send($value.as_str().unwrap()).unwrap();serde_json::json!(*runtime.sent.borrow())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::public_subscriptions::PublicSubscriptionIo as _;let stream=rt.shared.extra.public.get().unwrap();let io=$type{socket:stream.socket.clone(),runtime:runtime.clone()};f::drive(&runtime,stream.connect_and_subscribe()).unwrap();runtime.pump();runtime.sent.borrow_mut().clear();io.send($value.as_str().unwrap()).unwrap();serde_json::json!(*runtime.sent.borrow())}",
         "cases": [
           {
             "input": "α wire",
@@ -32111,7 +32111,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use crate::public_subscriptions::PublicSubscriptionIo as _;let stream=rt.shared.extra.public.get().unwrap();let io=$type{socket:stream.socket.clone(),runtime:runtime.clone()};stream.socket.message_handlers.borrow_mut().insert(\"one\".into(),std::rc::Rc::new(std::cell::RefCell::new(vec![std::rc::Rc::new(|_:&serde_json::Value|Ok(()))])));stream.socket.record_message_handler_stats(\"one\").unwrap();io.cleanup_message_handler_stats($value.as_str().unwrap()).unwrap();serde_json::json!(stream.socket.message_handlers_stats.borrow().keys().cloned().collect::<Vec<_>>())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use crate::public_subscriptions::PublicSubscriptionIo as _;let stream=rt.shared.extra.public.get().unwrap();let io=$type{socket:stream.socket.clone(),runtime:runtime.clone()};stream.socket.message_handlers.borrow_mut().insert(\"one\".into(),std::rc::Rc::new(std::cell::RefCell::new(vec![std::rc::Rc::new(|_:&serde_json::Value|Ok(()))])));stream.socket.record_message_handler_stats(\"one\").unwrap();io.cleanup_message_handler_stats($value.as_str().unwrap()).unwrap();serde_json::json!(stream.socket.message_handlers_stats.borrow().keys().cloned().collect::<Vec<_>>())}",
         "cases": [
           {
             "input": "one",
@@ -32302,7 +32302,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let clean=subscriptions.listen_order_book($value.as_str().unwrap(),std::rc::Rc::new(|_|Ok(()))).unwrap();let state=subscriptions.state();clean().unwrap();serde_json::json!({\"topics\":state.topics,\"remaining\":subscriptions.state().books.len()})}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let clean=subscriptions.listen_order_book($value.as_str().unwrap(),std::rc::Rc::new(|_|Ok(()))).unwrap();let state=subscriptions.state();clean().unwrap();serde_json::json!({\"topics\":state.topics,\"remaining\":subscriptions.state().books.len()})}",
         "cases": [
           {
             "input": "BTCUSDT",
@@ -32401,7 +32401,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let _clean=subscriptions.listen_order_book(\"BTCUSDT\",std::rc::Rc::new(|_|Ok(()))).unwrap();subscriptions.unsubscribe_order_book_listener($value.as_str().unwrap(),1.).unwrap();serde_json::json!(subscriptions.state().books.len())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let _clean=subscriptions.listen_order_book(\"BTCUSDT\",std::rc::Rc::new(|_|Ok(()))).unwrap();subscriptions.unsubscribe_order_book_listener($value.as_str().unwrap(),1.).unwrap();serde_json::json!(subscriptions.state().books.len())}",
         "cases": [
           {
             "input": "btcusdt@depth20@100ms",
@@ -32497,7 +32497,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();subscriptions.subscribe_to_kline($value.as_str().unwrap(),std::rc::Rc::new(|_|Ok(()))).unwrap();serde_json::json!(subscriptions.state().klines)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();subscriptions.subscribe_to_kline($value.as_str().unwrap(),std::rc::Rc::new(|_|Ok(()))).unwrap();serde_json::json!(subscriptions.state().klines)}",
         "cases": [
           {
             "input": "btcusdt@kline_1m",
@@ -32574,7 +32574,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();subscriptions.subscribe_to_kline(\"btcusdt@kline_1m\",std::rc::Rc::new(|_|Ok(()))).unwrap();subscriptions.unsubscribe_from_kline($value.as_str().unwrap()).unwrap();serde_json::json!(subscriptions.state().klines)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();subscriptions.subscribe_to_kline(\"btcusdt@kline_1m\",std::rc::Rc::new(|_|Ok(()))).unwrap();subscriptions.unsubscribe_from_kline($value.as_str().unwrap()).unwrap();serde_json::json!(subscriptions.state().klines)}",
         "cases": [
           {
             "input": "btcusdt@kline_1m",
@@ -32664,7 +32664,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let captured=std::rc::Rc::new(std::cell::Cell::new(0.));let cell=captured.clone();let _clean=subscriptions.listen_order_book(\"BTCUSDT\",std::rc::Rc::new(move|book|{cell.set(book.bids[0].price);Ok(())})).unwrap();let book=safe_cex_types::OrderBook{bids:vec![safe_cex_types::OrderBookOrders{price:$value.as_f64().unwrap(),amount:2.,total:2.}],asks:vec![]};subscriptions.deliver_book(\"btcusdt@depth20@100ms\",&book).unwrap();serde_json::json!(format!(\"{:016x}\",captured.get().to_bits()))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let captured=std::rc::Rc::new(std::cell::Cell::new(0.));let cell=captured.clone();let _clean=subscriptions.listen_order_book(\"BTCUSDT\",std::rc::Rc::new(move|book|{cell.set(book.bids[0].price);Ok(())})).unwrap();let book=safe_cex_types::OrderBook{bids:vec![safe_cex_types::OrderBookOrders{price:$value.as_f64().unwrap(),amount:2.,total:2.}],asks:vec![]};subscriptions.deliver_book(\"btcusdt@depth20@100ms\",&book).unwrap();serde_json::json!(format!(\"{:016x}\",captured.get().to_bits()))}",
         "cases": [
           {
             "input": 1.25,
@@ -32746,7 +32746,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let captured=std::rc::Rc::new(std::cell::Cell::new(0.));let cell=captured.clone();subscriptions.subscribe_to_kline(\"btcusdt@kline_1m\",std::rc::Rc::new(move|c|{assert_eq!(c.timestamp,Some(serde_json::json!(\"opaque timestamp\")));cell.set(c.close);Ok(())})).unwrap();subscriptions.deliver_kline(\"btcusdt@kline_1m\",crate::ws_helpers::PublicKlineCandle{timestamp:Some(serde_json::json!(\"opaque timestamp\")),open:1.,high:2.,low:0.,close:$value.as_f64().unwrap(),volume:3.}).unwrap();serde_json::json!(format!(\"{:016x}\",captured.get().to_bits()))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let subscriptions:std::rc::Rc<$type>=rt.shared.extra.public.get().unwrap().subscriptions.clone();let captured=std::rc::Rc::new(std::cell::Cell::new(0.));let cell=captured.clone();subscriptions.subscribe_to_kline(\"btcusdt@kline_1m\",std::rc::Rc::new(move|c|{assert_eq!(c.timestamp,Some(serde_json::json!(\"opaque timestamp\")));cell.set(c.close);Ok(())})).unwrap();subscriptions.deliver_kline(\"btcusdt@kline_1m\",crate::ws_helpers::PublicKlineCandle{timestamp:Some(serde_json::json!(\"opaque timestamp\")),open:1.,high:2.,low:0.,close:$value.as_f64().unwrap(),volume:3.}).unwrap();serde_json::json!(format!(\"{:016x}\",captured.get().to_bits()))}",
         "cases": [
           {
             "input": 1.25,
@@ -32860,7 +32860,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let listeners:std::rc::Rc<$type>=rt.shared.extra.listeners.clone();let clean=listeners.listen_ohlcv($value.as_str().unwrap(),safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),std::rc::Rc::new(|_|Ok(()))).unwrap();let keys=rt.shared.extra.public.get().unwrap().subscriptions.state().klines;clean().unwrap();serde_json::json!({\"keys\":keys,\"remaining\":rt.shared.extra.public.get().unwrap().subscriptions.state().klines.len()})}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let listeners:std::rc::Rc<$type>=rt.shared.extra.listeners.clone();let clean=listeners.listen_ohlcv($value.as_str().unwrap(),safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),std::rc::Rc::new(|_|Ok(()))).unwrap();let keys=rt.shared.extra.public.get().unwrap().subscriptions.state().klines;clean().unwrap();serde_json::json!({\"keys\":keys,\"remaining\":rt.shared.extra.public.get().unwrap().subscriptions.state().klines.len()})}",
         "cases": [
           {
             "input": "BTCUSDT",
@@ -32955,7 +32955,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let listeners:std::rc::Rc<$type>=rt.shared.extra.listeners.clone();let clean=listeners.listen_order_book($value.as_str().unwrap(),std::rc::Rc::new(|_|Ok(()))).unwrap();let keys=rt.shared.extra.public.get().unwrap().subscriptions.state().books.into_iter().map(|(s,_,_)|s).collect::<Vec<_>>();clean().unwrap();serde_json::json!(keys)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let listeners:std::rc::Rc<$type>=rt.shared.extra.listeners.clone();let clean=listeners.listen_order_book($value.as_str().unwrap(),std::rc::Rc::new(|_|Ok(()))).unwrap();let keys=rt.shared.extra.public.get().unwrap().subscriptions.state().books.into_iter().map(|(s,_,_)|s).collect::<Vec<_>>();clean().unwrap();serde_json::json!(keys)}",
         "cases": [
           {
             "input": "BTCUSDT",
@@ -33060,7 +33060,7 @@
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs."
       }
     ],
-    "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();use safe_cex_exchange::websocket::WsProtocol as _;let stream=rt.shared.extra.public.get().unwrap();f::drive(&runtime,stream.connect_and_subscribe()).unwrap();runtime.pump();let protocol=$type(std::rc::Rc::downgrade(stream));protocol.on_error(&stream.socket,$value.as_str().unwrap()).unwrap();runtime.pump();runtime.now.set(runtime.now.get()+1001.);runtime.pump();serde_json::json!({\"dials\":runtime.urls.borrow().len()})}",
+    "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsProtocol as _;let stream=rt.shared.extra.public.get().unwrap();f::drive(&runtime,stream.connect_and_subscribe()).unwrap();runtime.pump();let protocol=$type(std::rc::Rc::downgrade(stream));protocol.on_error(&stream.socket,$value.as_str().unwrap()).unwrap();runtime.pump();runtime.now.set(runtime.now.get()+1001.);runtime.pump();serde_json::json!({\"dials\":runtime.urls.borrow().len()})}",
     "cases": [
       {
         "input": "error α",
@@ -33287,7 +33287,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let account:&$type=rt.shared.extra.account.get().unwrap();let symbols:Vec<String>=serde_json::from_value($value.clone()).unwrap();let rows=f::drive(&runtime,account.fetch_positions(Some(&symbols))).unwrap();serde_json::json!(rows.iter().map(|row|serde_json::json!({\"symbol\":row.symbol,\"value\":format!(\"{:016x}\",row.contracts.to_bits())})).collect::<Vec<_>>())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let account:&$type=rt.shared.extra.account.get().unwrap();let symbols:Vec<String>=serde_json::from_value($value.clone()).unwrap();let rows=f::drive(&runtime,account.fetch_positions(Some(&symbols))).unwrap();serde_json::json!(rows.iter().map(|row|serde_json::json!({\"symbol\":row.symbol,\"value\":format!(\"{:016x}\",row.contracts.to_bits())})).collect::<Vec<_>>())}",
         "cases": [
           {
             "input": [
@@ -33405,7 +33405,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let account:&$type=rt.shared.extra.account.get().unwrap();let symbols:Vec<String>=serde_json::from_value($value.clone()).unwrap();let rows=f::drive(&runtime,account.fetch_orders(Some(&symbols))).unwrap();serde_json::json!(rows.iter().map(|row|serde_json::json!({\"symbol\":row.symbol,\"value\":format!(\"{:016x}\",row.amount.to_bits())})).collect::<Vec<_>>())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let account:&$type=rt.shared.extra.account.get().unwrap();let symbols:Vec<String>=serde_json::from_value($value.clone()).unwrap();let rows=f::drive(&runtime,account.fetch_orders(Some(&symbols))).unwrap();serde_json::json!(rows.iter().map(|row|serde_json::json!({\"symbol\":row.symbol,\"value\":format!(\"{:016x}\",row.amount.to_bits())})).collect::<Vec<_>>())}",
         "cases": [
           {
             "input": [
@@ -33516,7 +33516,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let account:&$type=rt.shared.extra.account.get().unwrap();f::setup_markets(&venue,&runtime,&store);let symbol=$value[\"symbol\"].as_str().unwrap();let leverage=$value[\"leverage\"].as_f64().unwrap();match f::drive(&runtime,account.set_leverage(symbol,leverage,None)){Ok(())=>{let requests=wire.requests.borrow();let params=requests.last().unwrap().params.as_ref().unwrap();serde_json::json!({\"leverage\":format!(\"{:016x}\",params[\"leverage\"].as_f64().unwrap().to_bits())})},Err(e)=>serde_json::json!({\"error\":e.message,\"name\":e.name})}}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let account:&$type=rt.shared.extra.account.get().unwrap();f::setup_markets(&venue,&runtime,&store);let symbol=$value[\"symbol\"].as_str().unwrap();let leverage=$value[\"leverage\"].as_f64().unwrap();match f::drive(&runtime,account.set_leverage(symbol,leverage,None)){Ok(())=>{let value=f::parameter(&wire,\"leverage\").parse::<f64>().unwrap();serde_json::json!({\"leverage\":format!(\"{:016x}\",value.to_bits())})},Err(e)=>serde_json::json!({\"error\":e.message,\"name\":e.name})}}",
         "cases": [
           {
             "input": {
@@ -33629,7 +33629,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let account:&$type=rt.shared.extra.account.get().unwrap();f::drive(&runtime,account.change_position_mode($value.as_bool().unwrap(),None)).unwrap();serde_json::json!({\"is_hedged\":store.options().is_hedged})}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let account:&$type=rt.shared.extra.account.get().unwrap();f::drive(&runtime,account.change_position_mode($value.as_bool().unwrap(),None)).unwrap();serde_json::json!({\"is_hedged\":store.options().is_hedged})}",
         "cases": [
           {
             "input": true,
@@ -33813,7 +33813,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let stream:&$type=rt.shared.extra.private.get().unwrap();stream.handle_order_trade_update($value).unwrap();serde_json::json!(store.orders().iter().map(|o|serde_json::json!({\"id\":o.id,\"symbol\":o.symbol,\"amount\":format!(\"{:016x}\",o.amount.to_bits()),\"remaining\":format!(\"{:016x}\",o.remaining.to_bits())})).collect::<Vec<_>>())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();stream.handle_order_trade_update($value).unwrap();serde_json::json!(store.orders().iter().map(|o|serde_json::json!({\"id\":o.id,\"symbol\":o.symbol,\"amount\":format!(\"{:016x}\",o.amount.to_bits()),\"remaining\":format!(\"{:016x}\",o.remaining.to_bits())})).collect::<Vec<_>>())}",
         "cases": [
           {
             "input": {
@@ -33951,7 +33951,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let stream:&$type=rt.shared.extra.private.get().unwrap();let update=crate::account_helpers::AssetBalanceUpdate{asset:\"USDT\".into(),total:$value[0].as_f64().unwrap(),free:$value[1].as_f64().unwrap(),used:$value[2].as_f64().unwrap()};assert!(!stream.apply_balance_updates(&[update],&[]).unwrap());f::balance(&store)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();let update=crate::account_helpers::AssetBalanceUpdate{asset:\"USDT\".into(),total:$value[0].as_f64().unwrap(),free:$value[1].as_f64().unwrap(),used:$value[2].as_f64().unwrap()};assert!(!stream.apply_balance_updates(&[update],&[]).unwrap());f::balance(&store)}",
         "cases": [
           {
             "input": [
@@ -34043,7 +34043,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let stream:&$type=rt.shared.extra.private.get().unwrap();let events=f::events(venue.base(),\"account\");stream.handle_account_update($value).unwrap();assert_eq!(events.borrow().as_slice(),&[serde_json::json!([$value.clone()])]);f::balance(&store)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();let events=f::events(venue.base(),\"account\");stream.handle_account_update($value).unwrap();assert_eq!(events.borrow().as_slice(),&[serde_json::json!([$value.clone()])]);f::balance(&store)}",
         "cases": [
           {
             "input": {
@@ -34143,7 +34143,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let stream:&$type=rt.shared.extra.private.get().unwrap();stream.handle_account_position_update($value).unwrap();f::balance(&store)}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let stream:&$type=rt.shared.extra.private.get().unwrap();stream.handle_account_position_update($value).unwrap();f::balance(&store)}",
         "cases": [
           {
             "input": {
@@ -34355,7 +34355,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();stream.handle_ticker_update($value).unwrap();let values=store.tickers();let t=&values[0];serde_json::json!({\"last\":format!(\"{:016x}\",t.last.to_bits()),\"percentage\":format!(\"{:016x}\",t.percentage.to_bits()),\"volume\":format!(\"{:016x}\",t.volume.to_bits()),\"quote_volume\":format!(\"{:016x}\",t.quote_volume.to_bits())})}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();stream.handle_ticker_update($value).unwrap();let values=store.tickers();let t=&values[0];serde_json::json!({\"last\":format!(\"{:016x}\",t.last.to_bits()),\"percentage\":format!(\"{:016x}\",t.percentage.to_bits()),\"volume\":format!(\"{:016x}\",t.volume.to_bits()),\"quote_volume\":format!(\"{:016x}\",t.quote_volume.to_bits())})}",
         "cases": [
           {
             "input": {
@@ -34453,7 +34453,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();stream.handle_mark_price_update($value).unwrap();let values=store.tickers();let t=&values[0];serde_json::json!({\"mark\":format!(\"{:016x}\",t.mark.to_bits()),\"index\":format!(\"{:016x}\",t.index.to_bits()),\"funding_rate\":format!(\"{:016x}\",t.funding_rate.to_bits()),\"funding_time\":format!(\"{:016x}\",t.funding_time.to_bits())})}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();stream.handle_mark_price_update($value).unwrap();let values=store.tickers();let t=&values[0];serde_json::json!({\"mark\":format!(\"{:016x}\",t.mark.to_bits()),\"index\":format!(\"{:016x}\",t.index.to_bits()),\"funding_rate\":format!(\"{:016x}\",t.funding_rate.to_bits()),\"funding_time\":format!(\"{:016x}\",t.funding_time.to_bits())})}",
         "cases": [
           {
             "input": {
@@ -34551,7 +34551,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();let events=f::events(venue.base(),\"trade\");stream.handle_trade_update($value).unwrap();let rows=events.borrow();let event=&rows[0][0];let ticker=store.tickers();serde_json::json!({\"last\":format!(\"{:016x}\",ticker[0].last.to_bits()),\"side\":event[\"side\"],\"symbol\":event[\"symbol\"]})}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();let events=f::events(venue.base(),\"trade\");stream.handle_trade_update($value).unwrap();let rows=events.borrow();let event=&rows[0][0];let ticker=store.tickers();serde_json::json!({\"last\":format!(\"{:016x}\",ticker[0].last.to_bits()),\"side\":event[\"side\"],\"symbol\":event[\"symbol\"]})}",
         "cases": [
           {
             "input": {
@@ -34647,7 +34647,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();stream.handle_depth_snapshot($value).unwrap();let values=store.tickers();let t=&values[0];serde_json::json!({\"bid\":format!(\"{:016x}\",t.bid.to_bits()),\"ask\":format!(\"{:016x}\",t.ask.to_bits())})}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();stream.handle_depth_snapshot($value).unwrap();let values=store.tickers();let t=&values[0];serde_json::json!({\"bid\":format!(\"{:016x}\",t.bid.to_bits()),\"ask\":format!(\"{:016x}\",t.ask.to_bits())})}",
         "cases": [
           {
             "input": {
@@ -34757,7 +34757,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} use safe_cex_exchange::exchange::Exchange as _; use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();let captured=std::rc::Rc::new(std::cell::Cell::new(0.));let cell=captured.clone();stream.subscriptions.subscribe_to_kline(\"btcusdt@kline_1m\",std::rc::Rc::new(move|c|{cell.set(c.close);Ok(())})).unwrap();stream.handle_kline_update($value).unwrap();serde_json::json!(format!(\"{:016x}\",captured.get().to_bits()))}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);f::seed_tickers(&venue,&runtime,&store);let stream:&$type=rt.shared.extra.public.get().unwrap();let captured=std::rc::Rc::new(std::cell::Cell::new(0.));let cell=captured.clone();stream.subscriptions.subscribe_to_kline(\"btcusdt@kline_1m\",std::rc::Rc::new(move|c|{cell.set(c.close);Ok(())})).unwrap();stream.handle_kline_update($value).unwrap();serde_json::json!(format!(\"{:016x}\",captured.get().to_bits()))}",
         "cases": [
           {
             "input": {
