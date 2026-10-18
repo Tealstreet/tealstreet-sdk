@@ -318,7 +318,7 @@ console.log(JSON.stringify({node:process.versions.node,engine:process.versions.v
         let mut state = seed ^ 0x9e37_79b9;
         let mut calls = 0u64;
         let mut trace = 2166136261u32;
-        safe_cex_exchange::js_runtime::sorting::stable_sort(&mut rows, |a, b| {
+        safe_cex_num::sorting::stable_sort::<_, Thrown>(&mut rows, |a, b| {
             calls += 1;
             trace = (trace ^ a.0 as u32).wrapping_mul(16777619);
             trace = (trace ^ b.0 as u32).wrapping_mul(16777619);

@@ -23,6 +23,24 @@ function fixture(hosted=false){let now=0,next=0,events=[],posts=[],stores=[],tim
  const options={key:'',secret:'',hostedMode:hosted},settings={placeOrder:{tpTriggerType:'mark_price',slTriggerType:'last_price'}},metadata={supportedTPSLTriggerTypes:[],privateProxyIps:[]};worker=new c.WorkerClass(ctx,'a','bybit',options,settings,metadata,'s','i');
  return {c,ctx,worker,state,events,posts,stores,timers,init:{op:'init',data:{accountName:'a',exchangeName:'bybit',options:{key:'',secret:''},settings,metadata,sessionKey:'s',store:{latency:7}}},async flush(){for(let iteration=0;iteration<32;iteration++)await Promise.resolve();},release(){startRelease();},releaseClock(){clockRelease();},releaseLoader(){loaderRelease();},fire(id,time){now=time;const timer=timers.get(id);assert.ok(timer);timers.delete(id);timer.fn();},setWorker(v){worker=v;}};
 }
+if(process.argv.includes('--config-carriers')) {
+ const f=fixture();f.setWorker(undefined);f.c.sessionStart(f.ctx,false);
+ const tokens=['-0','-0.0','0','1e400','-1e400','1e-400','-1e-400','1.25','1e3','-1e-4000'];
+ const bits=[],bytes=new DataView(new ArrayBuffer(8));let configs=0,dumps=0,observed;f.c.registerConfig(cfg=>{observed=cfg;});
+ for(const token of tokens){
+  const value=JSON.parse(token),frame={atMs:value,msg:{value,own:undefined,text:'\ud800X\udc00'}},record={version:2,recordedAtMs:value,durationMs:value,frames:[frame]},config={mode:'external-mode',intervalMs:value,fixture:record,loop:null};
+  const knobs={tickIntervalMultipliers:{bybit:value},perfFixture:config};observed=undefined;
+  await f.ctx.listener({data:{op:'__workerConfig',data:knobs}});
+  assert.equal(observed,knobs);assert.equal(f.state.tickArg,knobs.tickIntervalMultipliers);assert.equal(f.state.perfArg,config);configs++;
+  f.state.fixtureDump=record;await f.ctx.listener({data:{op:'__perfFixtureDump'}});
+  assert.equal(f.posts.at(-1).data,record);assert.equal(f.posts.at(-1).data.frames[0],frame);assert.ok(Object.hasOwn(frame.msg,'own'));dumps++;
+  bytes.setFloat64(0,value);bits.push(bytes.getBigUint64(0).toString(16).padStart(16,'0'));
+ }
+ for(const value of [null,true,'untyped',[],{mode:'off',fixture:null,intervalMs:null,loop:null}]){
+  await f.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:value}}});assert.equal(f.state.perfArg,value);configs++;
+ }
+ process.stdout.write(JSON.stringify({configs,dumps,tokens,bits}));process.exit(0);
+}
 if(process.argv.includes('--session-native')) {
  const lifetime=fixture();lifetime.setWorker(undefined);lifetime.c.sessionStart(lifetime.ctx,false);
  await lifetime.ctx.listener({data:{op:'__worker_ping__'}});

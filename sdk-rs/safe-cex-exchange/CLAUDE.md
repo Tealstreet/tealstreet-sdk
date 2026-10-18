@@ -1384,7 +1384,7 @@ full-string, whitespace and arbitrary-length binary64 rounding rules. The native
 host `js_string_number` target compares 93 Node results through installed Number,
 including signed radix refusals, large values, overflow and signed zero.
 
-Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
+Array `sort` and Lodash `orderBy` use the shared safe-cex-num fallible V8 TimSort.
 JavaScript callbacks need not define a Rust total order: NaN comparison results
 mean equality, and inconsistent callbacks must not panic. The first source throw
 stops comparisons immediately. Default Array sorting compares original UTF-16
@@ -2082,7 +2082,7 @@ The js_construction Node comparison covers bound constructors, primitive left
 operands, null prototypes and invalid prototypes; native getter checks preserve
 original thrown identity. Hyro validation consumes this operation directly.
 
-`js_runtime::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
+`safe_cex_num::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
 natural-run detection, minrun, binary insertion, stack collapse, directional merges
 and adaptive galloping. Comparators may be inconsistent or equate NaN; callers
 retain source comparisons and the first failure. The 4096-case real Node
