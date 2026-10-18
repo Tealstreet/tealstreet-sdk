@@ -323,7 +323,7 @@ fn sort_levels(levels: &Js, ascending: bool) -> Result<(), Thrown> {
     let Some(mut values) = levels.array_values()? else {
         return Err(Thrown::type_error("orderBook levels are not an array"));
     };
-    safe_cex_exchange::js_runtime::sorting::stable_sort(&mut values, |a, b| {
+    safe_cex_num::sorting::stable_sort::<_, Thrown>(&mut values, |a, b| {
         let (left, right) = if ascending { (a, b) } else { (b, a) };
         let left = left.get("price")?;
         let right = right.get("price")?;
