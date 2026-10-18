@@ -11,7 +11,10 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::Store;
 use safe_cex_types::*;
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    task::{Context, Poll, Waker},
+};
 
 pub struct BingxDependencies {
     pub runtime: Rc<dyn WsRuntime>,
@@ -25,6 +28,16 @@ pub struct BingxExchange {
     inner: Rc<Bodies>,
     host: Rc<Host>,
     capabilities: ExchangeCapabilities,
+}
+impl Drop for BingxExchange {
+    fn drop(&mut self) {
+        if let Err(error) = self.dispose() {
+            self.host.scope.runtime.report_exception(
+                &error,
+                &serde_json::json!({"operation":"BingX drop"}).into(),
+            );
+        }
+    }
 }
 impl BingxExchange {
     pub fn new(
@@ -235,13 +248,31 @@ impl Exchange for BingxExchange {
         inherited()
     }
     fn fetch_ohlcv(&self, opts: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
-        Box::pin(async move { self.inner.history.fetch_ohlcv(&opts).await })
+        let mut operation: ExchangeFuture<'_, Vec<Candle>> =
+            Box::pin(async move { self.inner.history.fetch_ohlcv(&opts).await });
+        // Source async arrows execute their prefix before returning a promise.
+        // Keep the original pending future, including its live request/receiver.
+        match operation
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            Poll::Ready(result) => Box::pin(async move { result }),
+            Poll::Pending => operation,
+        }
     }
     fn fetch_historical_fills(
         &self,
         opts: ExecutionsOptions,
     ) -> ExchangeFuture<'_, Vec<Execution>> {
-        Box::pin(async move { self.inner.history.fetch_historical_fills(&opts).await })
+        let mut operation: ExchangeFuture<'_, Vec<Execution>> =
+            Box::pin(async move { self.inner.history.fetch_historical_fills(&opts).await });
+        match operation
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            Poll::Ready(result) => Box::pin(async move { result }),
+            Poll::Pending => operation,
+        }
     }
     fn listen_ohlcv(
         &self,
@@ -290,3 +321,7 @@ mod retained_info_native;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "../../tests/support/handler_list_native.rs"]
 mod structural_alias_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "../../tests/support/divergence_native.rs"]
+mod divergence_native;
