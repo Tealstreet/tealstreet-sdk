@@ -263,7 +263,7 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
     r.call_method(&emitter, "emit", &[Value::str("arity")])
         .unwrap();
     let array = r.new_array(vec![Value::Number(7.0), Value::str("eight")]);
-    r.call_method(&emitter, "emit", &[Value::str("arity"), array])
+    r.call_method(&emitter, "emit", &[Value::str("arity"), array.clone()])
         .unwrap();
     let metadata = r.object_from(vec![("code", Value::Number(42.0))]);
     r.call_method(
@@ -322,6 +322,12 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
             "real JS stringify emitter arguments {index}"
         );
     }
+
+    r.set_str(&array, "0", Value::Number(8.0)).unwrap();
+    let Js::Number(number) = seen[1].1[0].get("0").unwrap() else {
+        panic!("HL_REALM_ORIGINAL_ARRAY_IDENTITY native number type");
+    };
+    assert_eq!(number.to_bits(), 8.0_f64.to_bits(), "HL_REALM_ORIGINAL_ARRAY_IDENTITY source mutation remains visible");
 }
 
 #[test]
