@@ -243,3 +243,7 @@ fields, raw numeric overflow and signed zero. It compares all eleven native numb
 fields before JSON; approved decision-3 refusal preserves the entire bad row.
 `parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
 behavior, requiring a compiled native failure and exact restored pass.
+
+Ticker row admission runs after the real Store lookup. Inherited dictionary targets
+without a matching ticker remain source no-ops. Only numeric typed patch errors
+from the native Store are deferred; source and subscriber errors still propagate.
