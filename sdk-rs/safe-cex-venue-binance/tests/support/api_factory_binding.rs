@@ -53,8 +53,6 @@ impl RestAdapter for ApiHttp {
 }
 #[test]
 fn native_factory_retries_unsigned_listen_post_and_encodes_signed_query() {
-    use safe_cex_store::Store;
-
     let runtime = Rc::new(Runtime::default());
     let http = Arc::new(ApiHttp {
         sent: Mutex::new(vec![]),
