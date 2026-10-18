@@ -145,3 +145,22 @@ source fingerprint (stored d8f2c7e2 versus actual 41f010fd), routed to #1154's
 owner. runtime.rs and that nested function are unchanged by this PR. The real
 Exchange default-trait pin test above passes; the broader inventory refusal is
 not presented as an inventory pass.
+
+The final approved normal master/cache merge is `48db6f3042`. Its immutable addon
+SHA-256 is `95ce1cf57c90ff8ca6238b3d2e75541210d76c7a6bef0e78e67c2962ccd8cdc7`.
+The sole merge conflict was the reviewed Value/OnceCell/Rc import union; all
+master cache bodies and health signatures are preserved. The real binding7,
+receipt API1, request-stats2, touched runtime tests, strict native all-targets
+and Wasm Clippy, index (7563 rows /16352 public items), cancellation, scanner,
+fmt, default-trait test, full376 CI-wiring audit and21 Coinbase controls pass.
+Canonical extractor check mode reports zero changed manifests/added/orphaned
+symbols. Root typecheck/lint/test pass again. The broader compiler inventory
+reproduces only the separately routed runtime fingerprint refusal described above
+(#1204); the Binance fixture failure remains the same #1195 exception.
+
+CI additionally reproduces the inherited Binance accepted_receivers test
+`event_stock_reads_keep_current_realm_referents_and_later_properties:202`: six
+other cases pass, but EventOps::read toString identity differs for the current
+realm. That test exercises no Store or health path and is unchanged here. The
+coordinator identifies it as the same failure affecting #848, assigns its repair
+to yxekk5, and authorizes disclosure in #1167. No receiver code is changed here.
