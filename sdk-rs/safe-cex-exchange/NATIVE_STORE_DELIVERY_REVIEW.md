@@ -69,7 +69,7 @@ An instrumented clock driver records an attempted 17-second advance without a
 reply. A later three-second sample at 40 seconds after launch has 2,079 samples
 under native account refresh, 1,699 under BaseExchange refresh, and 1,537 under
 Bybit `invoke<Vec<Market>> -> to_typed -> decode_native/strict_codecs` while
-returning 8,110 markets. This active typed-result decoding phase supersedes an
+decoding the expected 8,110-market result. This active typed-result phase supersedes an
 earlier parked sample as the current diagnosis; it is not evidence of a limiter
 deadlock. The remaining typed fetchMarkets cost is assigned to a separate lane.
 This PR does not claim options completion or widen that return boundary.
