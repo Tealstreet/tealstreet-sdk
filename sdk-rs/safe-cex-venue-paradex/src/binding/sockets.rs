@@ -491,6 +491,50 @@ pub(super) fn sync(rt: &Rt, n: &str, a: &[Js], captures: &[Js]) -> Result<Option
             },
             &x,
         )?,
+        "maybeRecoverOhlcvTradeStream" => {
+            let key = arg(a, 1);
+            let cached_time = |name: &str| {
+                let value = rt.this.get(name)?.call_method("get", vec![key.clone()])?;
+                if value.truthy() {
+                    Ok(Some(value.to_number()?))
+                } else {
+                    Ok(None)
+                }
+            };
+            crate::public_ingress::maybe_recover_ohlcv_trade_stream(
+                || {
+                    rt.global("Date.now")?
+                        .call(Js::Undefined, vec![])?
+                        .to_number()
+                },
+                || cached_time("ohlcvLastTradeAt"),
+                || cached_time("ohlcvLastRecoveryAt"),
+                |now| {
+                    rt.this
+                        .get("ohlcvLastRecoveryAt")?
+                        .call_method("set", vec![key.clone(), Js::Number(now)])?;
+                    Ok(())
+                },
+                || {
+                    Ok((
+                        x.get("symbol")?.to_js_string()?.to_vec(),
+                        x.get("interval")?.to_js_string()?.to_vec(),
+                    ))
+                },
+                |message| {
+                    let host = Host::new(rt);
+                    host.log(host.logger()?, message, "warning")
+                },
+                |force| {
+                    rt.this
+                        .call_method(
+                            "sendTradeSubscribe",
+                            vec![x.get("symbol")?, Js::Bool(force)],
+                        )
+                        .map(|_| ())
+                },
+            )?;
+        }
         "handleTradesUpdate" => crate::public_ingress::handle_trades_update(
             &super::ingress::SocketHost {
                 rt,
