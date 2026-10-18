@@ -71,3 +71,25 @@ returns two production runtime results, 31 explicit classifications and zero
 failed owners. The native and wasm receipts together pass the scoped ratchet;
 the shared defect ledger is unchanged. This package has no additional feature
 combinations.
+
+## Referral constructor ownership audit
+
+`ReferralApi.constructor` is ACCEPT under decision 2 (owned native values).
+The maintained complete TS class stores the exact client in an enumerable,
+writable, configurable own property. Replacing it routes the next query to the
+replacement; deleting it makes the next query reject with TypeError. These
+property descriptors and deletion remain explicit differences from the typed
+Rust facade, which supports replacement with another typed client.
+
+`tests/api_reads.rs::referral_constructor_retains_routes_replaces_and_releases_exact_client`
+executes the mapped production constructor and query with terminal ReadHost
+primitives. Construction retains exactly one client reference and starts no
+request or task. Both clients receive their own query, replacement releases the
+first client, settled work releases its temporary references, and dropping the
+facade releases the second client. Weak references prove neither client leaks.
+The companion source oracle executes the maintained complete ReferralApi class
+for descriptor, replacement, deletion and request-routing observations.
+
+The ownership control inserts an extra retained reference into the production
+constructor. It compiles and fails `REFERRAL constructor one retained client`;
+restoring the exact constructor passes. No production change is needed.
