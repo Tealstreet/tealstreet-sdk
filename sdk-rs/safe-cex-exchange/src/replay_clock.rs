@@ -19,6 +19,13 @@ impl Drop for Guard {
         self.0.finished.set(true);
     }
 }
+// Keep this lifetime-bearing guard visible to the compiler's type inventory.
+struct Advancing<'a>(&'a Cell<bool>);
+impl Drop for Advancing<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
 pub struct ReplayClock {
     epoch: f64,
     time: Cell<f64>,
@@ -94,12 +101,6 @@ pub async fn advance(clock: &ReplayClock, target: f64) -> Result<(), ExchangeErr
         return Err(ExchangeError::new(
             "replay clock advance is already running",
         ));
-    }
-    struct Advancing<'a>(&'a Cell<bool>);
-    impl Drop for Advancing<'_> {
-        fn drop(&mut self) {
-            self.0.set(false);
-        }
     }
     let _guard = Advancing(&clock.advancing);
     let mut turns = 0;

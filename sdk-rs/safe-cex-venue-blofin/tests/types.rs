@@ -761,11 +761,52 @@ fn live_typescript_declarations() {
             "POSITIONS_RESPONSE" => js_from_str::<PositionsResponse>(raw).is_ok(),
             name => panic!("uncovered_probe_type: {name}"),
         };
-        assert_eq!(
-            accepted,
-            !probe["reject"].as_bool().unwrap(),
-            "record_boundary: {probe}"
-        );
+        let string_surrogate = if probe["reason"] == "surrogate" {
+            let mut field_shape = &oracle["schemas"][probe["name"].as_str().unwrap()];
+            for key in probe["path"]
+                .as_str()
+                .unwrap()
+                .split('.')
+                .filter(|key| !key.is_empty())
+            {
+                field_shape = if key.parse::<usize>().is_ok() {
+                    &field_shape["array"]
+                } else {
+                    &field_shape["fields"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|field| field["name"] == key)
+                        .unwrap()["shape"]
+                };
+            }
+            field_shape["string"] == true
+        } else {
+            false
+        };
+        if string_surrogate {
+            macro_rules! observe {
+                ($t:ty) => {
+                    typed_utf16::assert_projection(raw, &js_from_str::<$t>(raw).unwrap())
+                };
+            }
+            match probe["name"].as_str().unwrap() {
+                "FETCH_POSITION_RESPONSE" => observe!(FetchPositionResponse),
+                "POSITION_MODE_RESPONSE" => observe!(PositionModeResponse),
+                "FETCH_MARGIN_MODE_RESPONSE" => observe!(FetchMarginModeResponse),
+                "FETCH_BATCH_LEV_RESPONSE" => observe!(FetchBatchLevResponse),
+                "ORDERS_RESPONSE" => observe!(OrdersResponse),
+                "POSITIONS_RESPONSE" => observe!(PositionsResponse),
+                name => panic!("uncovered_probe_type: {name}"),
+            }
+            assert!(accepted, "typed surrogate record retains the frame");
+        } else {
+            assert_eq!(
+                accepted,
+                !probe["reject"].as_bool().unwrap(),
+                "record_boundary: {probe}"
+            );
+        }
         if probe["reason"] == "duplicate_key" {
             let native_code = match probe["name"].as_str().unwrap() {
                 "FETCH_POSITION_RESPONSE" => {
@@ -883,10 +924,21 @@ fn live_typescript_declarations() {
     pin.finish("boundaries-b-4", pin.count("/boundaries"));
     for index in 0..pin.count("/boundaries") {
         let b = &oracle["boundaries"][index];
-        assert!(
-            js_from_str::<OrdersResponse>(b["raw"].as_str().unwrap()).is_err(),
-            "typed_boundary_OrdersResponse"
-        );
+        if index == 0 {
+            let raw = b["raw"].as_str().unwrap();
+            let native: OrdersResponse = js_from_str(raw).unwrap();
+            assert_eq!(native.code, "\u{fffd}", "typed code replacement");
+            assert!(
+                native.msg.is_none() && native.data.is_none(),
+                "optional fields remain absent"
+            );
+            typed_utf16::assert_projection(raw, &native);
+        } else {
+            assert!(
+                js_from_str::<OrdersResponse>(b["raw"].as_str().unwrap()).is_err(),
+                "typed_boundary_OrdersResponse"
+            );
+        }
         pin.hit("boundaries-b-5");
     }
     pin.finish("boundaries-b-5", pin.count("/boundaries"));
@@ -900,3 +952,6 @@ fn live_typescript_declarations() {
     }
     pin.finish("boundaries-b-6", pin.count("/boundaries"));
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

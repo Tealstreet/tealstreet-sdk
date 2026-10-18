@@ -884,9 +884,10 @@ fn check_row<T: for<'de> Deserialize<'de> + serde::Serialize + JsNumberOutput>(
         assert_eq!(row["boundary"], Value::Null);
     } else {
         assert_eq!(row["boundary"]["units"], json!([0xd800]));
-        assert!(
-            js_from_str::<T>(row["boundary"]["raw"].as_str().unwrap()).is_err(),
-            "{name} shared UTF-8 representation refusal"
+        typed_utf16::assert_projection(
+            row["boundary"]["raw"].as_str().unwrap(),
+            &(js_from_str::<T>(row["boundary"]["raw"].as_str().unwrap()))
+                .expect("typed surrogate record is retained"),
         );
     }
     let samples = row["samples"].as_array().unwrap();
@@ -1100,8 +1101,12 @@ fn change_pubkey_types_native() {
 #[test]
 fn transaction_string_boundary() {
     assert_eq!(corpus()["boundary"]["units"], json!([0xd800]));
-    assert!(
-        js_from_str::<TxSignature>(corpus()["boundary"]["raw"].as_str().unwrap()).is_err(),
-        "TxSignature shared UTF-8 representation refusal"
+    typed_utf16::assert_projection(
+        corpus()["boundary"]["raw"].as_str().unwrap(),
+        &(js_from_str::<TxSignature>(corpus()["boundary"]["raw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -98,10 +98,11 @@ fn kline_returned_string_is_native_before_whole_tuple_refusal() {
         }
     }
     assert_eq!(compared, 8, "WEEX kline native route floor");
-    refuse::<WeexKlineRow>(
-        r#"["\ud800","1","2","3","4","5",6,"7",8,"9","10"]"#,
-        "WEEX returned kline unit",
-    );
+    let raw = r#"["\ud800","1","2","3","4","5",6,"7",8,"9","10"]"#;
+    for native in routes::<WeexKlineRow>(raw) {
+        assert!(matches!(&native.0, WeexNumberOrString::String(value) if value == "\u{fffd}"));
+        typed_utf16::assert_projection(raw, &native);
+    }
     for observation in source_profile::observe(
         "tests/divergence-observations.cjs",
         "kline-unit",
@@ -355,10 +356,26 @@ fn exchange_info_names_are_native_before_whole_record_refusal() {
         }
     }
     assert_eq!(compared, 8, "WEEX response name route floor");
-    refuse::<WeexExchangeInfoResponse>(
-        r#"{"assets":[{"name":"\ud800"}],"symbols":[]}"#,
-        "WEEX exchange info returned unit",
-    );
+    let raw = r#"{"assets":[{"name":"\ud800"}],"symbols":[]}"#;
+    for native in routes::<WeexExchangeInfoResponse>(raw) {
+        let assets = native.assets.as_ref().unwrap();
+        assert_eq!(assets.len(), 1);
+        assert!(native.symbols.as_ref().unwrap().is_empty());
+        assert_eq!(record_name(&assets[0]), "\u{fffd}");
+        let WeexExchangeInfoRecord::Object(fields) = &assets[0] else {
+            panic!("native asset object")
+        };
+        let typed_value: safe_cex_types::retained_json::RetainedJsonInput = fields
+            .iter()
+            .find(|(key, _)| key.as_str() == "name")
+            .unwrap()
+            .1
+            .clone()
+            .decode()
+            .unwrap();
+        assert_eq!(typed_value.as_text(), Some([0xfffd].as_slice()));
+        typed_utf16::assert_projection(raw, &native);
+    }
     for observation in source_profile::observe(
         SOURCE,
         "weex-response-unit",
@@ -405,10 +422,13 @@ fn order_result_ids_are_native_before_whole_record_refusal() {
         }
     }
     assert_eq!(compared, 8, "WEEX result id route floor");
-    refuse::<WeexOrderResult>(
-        r#"{"success":true,"orderId":"\ud800","clientOrderId":"ordinary"}"#,
-        "WEEX order result returned unit",
-    );
+    let raw = r#"{"success":true,"orderId":"\ud800","clientOrderId":"ordinary"}"#;
+    for native in routes::<WeexOrderResult>(raw) {
+        assert_eq!(native.order_id.as_deref(), Some("\u{fffd}"));
+        assert_eq!(native.client_order_id.as_deref(), Some("ordinary"));
+        assert_eq!(native.success, Some(true));
+        typed_utf16::assert_projection(raw, &native);
+    }
     for observation in source_profile::observe(
         FULL_SOURCE,
         "weex-order-result-unit",
@@ -545,9 +565,23 @@ fn fake_positions_keep_native_symbols_and_price_market_admission() {
     let text = market_value("B/Q").to_string();
     assert_eq!(text.matches("\"base\":\"B\"").count(), 1);
     let unused_unit = text.replace("\"base\":\"B\"", "\"base\":\"\\ud800\"");
-    refuse::<Market>(&unused_unit, "WEEX unread Market base admission");
     let symbol_unit = text.replace("\"symbol\":\"B/Q\"", "\"symbol\":\"\\ud800\"");
-    refuse::<Market>(&symbol_unit, "WEEX returned fake position symbol unit");
+    for (raw, symbol) in [(&unused_unit, "B/Q"), (&symbol_unit, "\u{fffd}")] {
+        assert!(
+            serde_json::from_str::<Market>(raw).is_err(),
+            "upstream standalone String decoder still refuses the raw unit"
+        );
+        let market: Market = js_from_str(raw).unwrap();
+        assert_eq!(market.symbol, symbol);
+        let positions =
+            fake_positions_for_market(&market, PositionMode::OneWay, MarginType::Cross, 3.0);
+        assert_eq!(positions.len(), 2);
+        for position in positions {
+            assert_eq!(position.symbol, symbol);
+            assert_eq!(position.id, symbol);
+        }
+        typed_utf16::assert_projection(raw, &market);
+    }
     let deep = format!("{}1{}", "[".repeat(150), "]".repeat(150));
     let deep_market = text.replacen('{', &format!("{{\"info\":{{\"ignored\":{deep}}},"), 1);
     refuse::<Market>(&deep_market, "WEEX unread Market info depth admission");
@@ -681,3 +715,6 @@ fn market_numeric_errors_precede_string_admission() {
         }
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

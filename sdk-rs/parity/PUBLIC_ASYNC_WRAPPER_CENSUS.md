@@ -71,3 +71,23 @@ host prefix. This is a core dial boundary, not a new venue SDK wrapper family.
 It does not close native CONNECTING-handle presence during a held handshake;
 that independently compiled Bitget finding remains open. See
 `safe-cex-venue-bitget/EAGER_DIAL_AUDIT.md` for scope and controls.
+
+## Native final-handle destruction
+
+The coordinator lifetime ruling requires deterministic full teardown when the
+final native Exchange handle is dropped. Venue `Drop` implementations must use the single
+`safe_cex_exchange::native_final_drop(base, venue_cleanup)` entrypoint. It marks
+the shared disposed flag, runs venue state/task cleanup, then completes native
+base cleanup even if venue cleanup or Store observers return errors. This is a
+native-only lifetime policy, classified once at the canonical core entrypoint in
+the override gate; it makes no TypeScript dispose/super claim. Existing no-super
+and chosen-base rejection controls remain mandatory. Backpack and BingX use this
+entrypoint with real constructed-owner teardown probes. Stored native timers use
+weak owners so they cannot prevent final-handle destruction; they must still run
+while the caller holds the original Exchange.
+
+Backpack's measured mixed-native Task repair covers all 23 owned Task entrypoints
+using shared start_eager. Its real held HTTP probes preserve request-start timing
+and verify post-response catch/log and reconciliation after waiter drop. The
+original source timer callback body is shared with the weak native timer binding;
+no duplicate subscription or reconciliation algorithm is introduced.

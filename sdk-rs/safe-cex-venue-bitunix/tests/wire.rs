@@ -161,13 +161,15 @@ fn actual_typescript_wire_declarations_and_numeric_bits() {
                 json!([case["surrogate"]]),
                 "actual TS lone surrogate capture"
             );
-            assert!(
-                js_from_str::<GetPendingPositionsResponse>(raw).is_err(),
-                "chosen UTF-8 surrogate refusal"
+            typed_utf16::assert_projection(
+                raw,
+                &(js_from_str::<GetPendingPositionsResponse>(raw))
+                    .expect("typed surrogate record is retained"),
             );
-            assert!(
-                serde_json::from_str::<GetPendingPositionsResponse>(raw).is_err(),
-                "direct UTF-8 surrogate refusal"
+            typed_utf16::assert_projection(
+                raw,
+                &(serde_json::from_str::<GetPendingPositionsResponse>(raw))
+                    .expect("typed surrogate record is retained"),
             );
             continue;
         }
@@ -294,3 +296,6 @@ fn actual_typescript_wire_declarations_and_numeric_bits() {
         corpus["intervals"].as_array().unwrap().len()
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

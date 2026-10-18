@@ -2530,13 +2530,13 @@
         "await",
         "await"
       ],
-      "producer_sha256": "957e996cb3e8468d93bf9bdc49d58e054c5a3e69a4885574ca497d31f02681bb",
+      "producer_sha256": "ab97219a3bcfe482abc63e1302235160a40ff1d049ae795d702319563a6171a7",
       "classification": "guarded",
       "reason": "The advancing latch is set only when this async future is polled; the immediately constructed Advancing Drop guard clears it on completion, error or in-flight cancellation. Waiter references are temporary and no RefCell borrow spans yield_now. Cancellation preserves already advanced time and leaves each sleep owned by its caller, which may finish or drop it before the next advance.",
       "source_dependencies": [
         {
           "file": "src/replay_clock.rs",
-          "sha256": "4cbf9d82cca30291687848b31232c24d5dd0b5dcc07c8f5bdb5a2b6714e8402b"
+          "sha256": "09c923b1e43d8e74470ed7acb7a4cee1456ee765ed282957793dc8f9a5a62676"
         }
       ],
       "witnesses": [
@@ -2565,7 +2565,7 @@
       "source_dependencies": [
         {
           "file": "src/replay_clock.rs",
-          "sha256": "4cbf9d82cca30291687848b31232c24d5dd0b5dcc07c8f5bdb5a2b6714e8402b"
+          "sha256": "09c923b1e43d8e74470ed7acb7a4cee1456ee765ed282957793dc8f9a5a62676"
         }
       ],
       "witnesses": [

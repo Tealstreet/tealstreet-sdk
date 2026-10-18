@@ -185,9 +185,10 @@ fn actual_typescript_account_corpus() {
     }
     assert_eq!(compared, 19, "account_completed_comparisons");
     assert_eq!(corpus["surrogateCodeUnit"], 0xd800);
-    assert!(
-        serde_json::from_str::<AccountResponse>(corpus["surrogateRaw"].as_str().unwrap()).is_err(),
-        "account_utf8_refusal"
+    typed_utf16::assert_projection(
+        corpus["surrogateRaw"].as_str().unwrap(),
+        &(serde_json::from_str::<AccountResponse>(corpus["surrogateRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     assert_eq!(corpus["uncheckedType"], "undefined");
     assert!(
@@ -195,3 +196,6 @@ fn actual_typescript_account_corpus() {
         "account_declared_ingress_refusal"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -627,9 +627,10 @@ fn actual_typescript_mapper_batch() {
         json!(channel_units),
         "channel_source_surrogate"
     );
-    assert!(
-        js_from_str::<String>(corpus["boundary"]["surrogateRaw"].as_str().unwrap()).is_err(),
-        "batch_utf8_boundary_refusal"
+    typed_utf16::assert_projection(
+        corpus["boundary"]["surrogateRaw"].as_str().unwrap(),
+        &(js_from_str::<String>(corpus["boundary"]["surrogateRaw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     // Wire reflection differs for the source's own undefined property.
     assert!(
@@ -640,3 +641,6 @@ fn actual_typescript_mapper_batch() {
         "order_owned_undefined_wire_boundary"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
