@@ -1,3 +1,5 @@
+mod log_observer;
+
 mod virtual_time {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -134,7 +136,7 @@ impl ExchangeRuntime for Runtime {
         Box::new(Task(job, self.cancel_hook.clone()))
     }
     fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
-        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let rendered = log_observer::venue_log_text(severity, message);
         let message = rendered.as_str();
         self.logs
             .borrow_mut()
