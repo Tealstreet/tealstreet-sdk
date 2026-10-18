@@ -1163,6 +1163,103 @@ fn spot_private_order_frame() -> Value {
 }
 
 #[test]
+fn constructed_private_ingress_keeps_surrogate_frames_neighbors_and_raw_info() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-ingress-source.cjs"
+        ))
+        .output()
+        .expect("maintained Kraken onMessage oracle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        cases.len(),
+        12,
+        "four real source socket classes, three unit profiles"
+    );
+    let expected: Vec<_> = [
+        "kraken.ws-public",
+        "kraken.ws-private",
+        "krakenspot.ws-public",
+        "krakenspot.ws-private",
+    ]
+    .into_iter()
+    .flat_map(|family| {
+        ["high", "low", "pair"]
+            .into_iter()
+            .map(move |id| (family, id))
+    })
+    .collect();
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| (
+                case["family"].as_str().unwrap(),
+                case["id"].as_str().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let futures = private_frame_fixture();
+    let spot = spot_private_fixture();
+    let mut comparisons = 0;
+    for case in cases {
+        let h = match case["family"].as_str().unwrap() {
+            "kraken.ws-private" => &futures,
+            "krakenspot.ws-private" => &spot,
+            _ => continue,
+        };
+        let units = match case["id"].as_str().unwrap() {
+            "high" => vec![0xd800],
+            "low" => vec![0xdc00],
+            "pair" => vec![0xd83d, 0xde80],
+            _ => unreachable!(),
+        };
+        assert_eq!(case["units"], serde_json::to_value(&units).unwrap());
+        let socket = h.runtime.sockets.borrow()[1].1.clone();
+        socket
+            .events
+            .borrow_mut()
+            .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                safe_cex_transport::socket::SocketFrame::Text(case["raw"].as_str().unwrap().into()),
+            ));
+        h.runtime.pump();
+        let orders = h.store.orders();
+        assert_eq!(
+            orders
+                .iter()
+                .map(|order| order.id.as_str())
+                .collect::<Vec<_>>(),
+            ["retained-order", "neighbor"],
+            "constructed private socket must keep the complete surrogate-bearing frame: {} {}",
+            case["family"],
+            case["id"]
+        );
+        let info = orders[0].info.as_ref().expect("source order info");
+        assert!(
+            matches!(info.get("marker"), Some(Input::Text(actual)) if *actual == units),
+            "raw info units must remain lossless: {info:?}"
+        );
+        assert_eq!(
+            orders[1].info.as_ref().unwrap().get("marker"),
+            Some(&Input::Text("ordinary".encode_utf16().collect()))
+        );
+        assert_eq!(orders[0].amount, 3.0);
+        comparisons += 1;
+    }
+    assert_eq!(
+        comparisons, 6,
+        "both actual private socket bindings and all profiles"
+    );
+}
+
+#[test]
 fn constructed_spot_private_orders_frame_updates_real_store() {
     let h = spot_private_fixture();
     private_frame(&h, spot_private_order_frame());
@@ -1380,10 +1477,14 @@ fn constructed_public_book_frames_keep_source_string_iterables() {
                 json!({"channel":"book","type":if snapshot {"snapshot"} else {"update"},
                     "data":[{"symbol":symbol,"bids":bids,"asks":asks,"checksum":123}]})
             };
+            // A valid unknown string must not make either public binding drop
+            // the book frame. The maintained onMessage oracle independently
+            // observes lone-unit parsing before dispatch.
+            let text = raw.to_string().replacen('{', r#"{"ignored":"\ud800","#, 1);
             socket
                 .events
                 .borrow_mut()
-                .push_back(WsEvent::Message(SocketFrame::Text(raw.to_string())));
+                .push_back(WsEvent::Message(SocketFrame::Text(text)));
             h.runtime.pump();
         };
         let source_snapshot = source["books"]

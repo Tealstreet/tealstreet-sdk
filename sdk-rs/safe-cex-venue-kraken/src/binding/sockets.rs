@@ -335,17 +335,19 @@ fn spot_frame(method: &str, params: Vec<(String, JsJsonValue)>) -> JsJsonValue {
 /// the tolerant Futures private reader yields null for an unparsable frame.
 fn parse_frame(data: &Js, tolerant: bool) -> Result<Js, ExchangeError> {
     let text = match data {
-        Js::String(s) => lossy(s),
-        Js::Undefined | Js::Null => String::new(),
-        other => lossy(&other.to_js_string().map_err(ex)?),
+        Js::String(s) => s.to_vec(),
+        Js::Undefined | Js::Null => Vec::new(),
+        other => other.to_js_string().map_err(ex)?.to_vec(),
     };
     let text = if text.is_empty() && !tolerant {
-        "{}".to_owned()
+        "{}".encode_utf16().collect()
     } else {
         text
     };
-    match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(v) => Ok(from_json(&v)),
+    match safe_cex_types::retained_json::RetainedJsonInput::parse_json(&text) {
+        Ok(value) => Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+            value,
+        )),
         Err(_) if tolerant => Ok(Js::Null),
         Err(e) => {
             let mut error = ExchangeError::new(e.to_string());
