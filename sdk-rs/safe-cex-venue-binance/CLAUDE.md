@@ -588,3 +588,22 @@ zero and replacement generations before serialization. The separate
 updates independently, requires the named native assertion to fail, restores exact
 source bytes and requires a pass after each fault. The selected alias inventory
 runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
+
+### Position snapshot callback alias receipts
+
+`position_snapshots::{Emit,Log}` are executable capabilities captured from the
+actual ExchangeState. `node scripts/snapshot-alias-contracts.mjs` (cwd this
+crate) uses fresh authenticated compiler discovery and runs the two native alias
+trait/type probes. These are classification receipts, not callback execution.
+The concrete execution witnesses are in `tests/support/snapshot_aliases.rs`,
+included by the native `private_classes` target. They construct the production
+native dependencies/ExchangeOwner, drive signed Futures/PM positions failures
+and Futures account balance aggregation through native HTTP, and observe Base
+error/log callbacks, one-time logging, native balance bits and listener errors.
+Run them with `cargo test --locked --jobs 1 -p safe-cex-venue-binance --features
+native --test private_classes snapshot_aliases` from `sdk-rs`.
+`python3 safe-cex-venue-binance/scripts/snapshot-alias-controls.py` independently
+faults Emit forwarding and Log severity in the production capture bodies,
+requires the corresponding compiled native assertion to fail, then restores the
+exact file and requires GREEN. This cohort makes no claim for other aliases or
+Wasm callback execution.
