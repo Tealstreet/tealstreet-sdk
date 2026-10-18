@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { createAPI, createPublicAPI } from '../exchanges/binance/binance.api';
 import { ENDPOINTS } from '../exchanges/binance/binance.types';
+import { createAPI as createInverseAPI, createPublicAPI as createInversePublicAPI } from '../exchanges/binance/binanceinverse.api';
+import { ENDPOINTS as INVERSE_ENDPOINTS } from '../exchanges/binance/binanceinverse.types';
 import { createPAPI, createPublicAPI as createPmPublicAPI } from '../exchanges/binance/binancepm.api';
 import { ENDPOINTS as PM_ENDPOINTS } from '../exchanges/binance/binancepm.types';
 
@@ -76,5 +78,14 @@ describe('binance remote-signing skip tags', () => {
       isTagged(await capture(createPmPublicAPI(HOSTED as any, stubExchange('binancepm')), PM_ENDPOINTS.MARKETS)),
     ).toBe(true);
     expect(isTagged(await capture(papi, PM_ENDPOINTS.ACCOUNT))).toBe(false);
+  });
+
+  it('binanceinverse: tags listenKey and public, never a private endpoint', async () => {
+    const dapi = createInverseAPI(HOSTED as any, stubExchange('binanceinverse'));
+    expect(isTagged(await capture(dapi, INVERSE_ENDPOINTS.LISTEN_KEY, 'post'))).toBe(true);
+    expect(
+      isTagged(await capture(createInversePublicAPI(HOSTED as any, stubExchange('binanceinverse')), INVERSE_ENDPOINTS.MARKETS)),
+    ).toBe(true);
+    expect(isTagged(await capture(dapi, INVERSE_ENDPOINTS.ACCOUNT))).toBe(false);
   });
 });

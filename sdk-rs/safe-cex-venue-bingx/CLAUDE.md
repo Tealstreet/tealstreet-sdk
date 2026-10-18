@@ -266,3 +266,7 @@ objects, NaN, overflow and signed zero; large finite values exercise derived
 prices. All eleven stored numeric fields are compared by bits with the maintained
 TS constructor and actual DefaultStore. The shared fault runner misroutes mark
 to index and requires a compiled native assertion failure and exact restored pass.
+
+Held HTTP fixtures use the shared wake-aware Release gate. The registry native
+listen-key witness holds a real reqwest response across the old socket Close
+acknowledgement and verifies one replacement dial after release.

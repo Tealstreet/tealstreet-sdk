@@ -158,7 +158,7 @@ Venue code implements hooks that receive validated payloads; callers invoke the
 base entrypoints with ordinary `PlaceOrderOpts`. No venue constructs the private
 validated fields. This example runs as a crate doctest: it constructs the production Store and all
 five BaseExchange arguments, places one order and one native batch, and verifies
-a rejected batch sends nothing. The recording runtime implements all ten host
+a rejected batch sends nothing. The recording runtime implements the required host
 methods explicitly; its unused I/O paths panic rather than pretending to work.
 
 ```rust
@@ -167,6 +167,7 @@ use safe_cex_exchange::{
     client_order_id::{pattern_client_order_id_rule, ClientOrderIdRuleOverrides},
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedOrder, ValidatedBatch},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    js_runtime::value::Js,
 };
 use safe_cex_store::{store::DefaultStore, Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, PlaceOrderOpts};
@@ -183,12 +184,12 @@ impl ExchangeRuntime for RecordingRuntime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("unexpected detached task")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[Js]) {}
     fn unique_id(&self) -> String { "fixture-id".into() }
     fn is_worker(&self) -> bool { false }
     fn random(&self) -> f64 { 0.5 }
     fn report_exception(&self, error: &ExchangeError, _: &Value) { eprintln!("{}: {}", error.name, error.message); }
-    fn report_raw_exception(&self, _: &Value, _: &Value) { panic!("unexpected raw exception report") }
+    fn report_raw_exception(&self, _: &Js, _: &Value) { panic!("unexpected raw exception report") }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         panic!("unexpected worker request")
     }
@@ -955,6 +956,25 @@ The exchanges-level audit and retained options gap are tracked in
 entrypoints execute their initial source calls before returning their futures;
 caller-drop and reporting choices cite MANIFEST-SPEC.md#exchange-runtime-callback-choice.
 
+The shared function `call` member invokes the original target with the supplied
+strict receiver and remaining arguments. It preserves native values, returned
+references/promises and arbitrary thrown values without awaiting or JSON.
+Non-callable receivers reject before reading conversion hooks. Own function
+`call` properties/getters retain precedence. The native/Node witness
+is `tests/js_function_call.rs`.
+
+Functions retain their allocation realm's native Function prototype on the same
+referent. Parent reads/writes preserve inherited accessor receivers, readonly
+refusals, own shadows and cycle rejection. Bound functions retain the target's
+parent. Call/bind now resolve to the existing canonical intrinsic identities;
+their old per-read wrappers are removed. `tests/js_function_prototypes.rs`
+compares these operations with Node, including cross-realm identities. Intrinsic
+parent metadata is independent of the shadowable `__proto__` string property.
+Unknown surrogate keys miss inherited UTF8 intrinsic fields without replacement;
+intrinsic writes retain their existing explicit native-primitive boundary.
+Construction/new.target, accessor flags and function own-key reflection remain
+separate consolidation capabilities.
+
 The shared JS runtime supplies `Function.prototype.bind` for venue callbacks,
 retaining the target receiver and prepending bound arguments even when the result
 is rebound or called by an array helper. Own function properties take precedence.
@@ -1620,3 +1640,11 @@ whitespace predicate. `tests/js_string_utf16.rs` compares 4,109 Node cases per
 method through the installed String builtin on NativeRuntime, including every
 surrogate unit, paired astral letters, Greek sigma and whitespace boundaries.
 All three regressions compile and fail against the original production bodies.
+
+The typed `ExchangeRuntime::console` default forwards one unchanged string argument
+to `console_values`; production NativeRuntime inherits it. The real BaseExchange
+log witness in `tests/native_console_default.rs` checks exact native stderr and
+listener arguments, including Unicode, NUL, empty strings and formatting tokens.
+`scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
+missing classifications or changed default bodies; the receiver classification
+applies only to this typed forwarding method.

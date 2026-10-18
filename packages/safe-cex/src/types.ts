@@ -13,6 +13,7 @@ export type ExchangeName =
   | 'asterdex'
   | 'backpack'
   | 'binance'
+  | 'binanceinverse'
   | 'binancespot'
   | 'binancepm'
   | 'bingx'
