@@ -1,12 +1,12 @@
 {
   "safe-cex-venue-kraken/src/binding/host.rs::LOCAL_FUNCTION:keys": {
     "category": "non-decoder",
-    "reason": "Inside qs_stringify: collects existing outgoing object entries and optionally sorts their text keys with the configured root collator. It prepares query serialization and admits no inbound record. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification.",
-    "sourceSha256": "a5b8cebef7eace00122a6a05b00eeb71386821b3cf7f3b2b04a46ba5f58b1e00"
+    "reason": "Inside qs_stringify: collects existing outgoing object entries and optionally sorts their text keys with the configured root collator. It prepares query serialization and admits no inbound record. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification. Re-reviewed after the ReadHost::keyed inherited-membership cutover: only that unrelated receiver method changes; the qs helper body remains unchanged.",
+    "sourceSha256": "6b80e620826c2fdcbb37a93c10c954dcb6c50902fe295e63aa0372e4819d9d1d"
   },
   "safe-cex-venue-kraken/src/binding/host.rs::LOCAL_FUNCTION:walk": {
     "category": "non-decoder",
-    "reason": "Inside qs_stringify: recursively emits outgoing bracket query pairs, null empty values, repeated arrays and scalar JS string coercion. This is request encoding over existing VM values, not response/model decoding. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification.",
-    "sourceSha256": "a5b8cebef7eace00122a6a05b00eeb71386821b3cf7f3b2b04a46ba5f58b1e00"
+    "reason": "Inside qs_stringify: recursively emits outgoing bracket query pairs, null empty values, repeated arrays and scalar JS string coercion. This is request encoding over existing VM values, not response/model decoding. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification. Re-reviewed after the ReadHost::keyed inherited-membership cutover: only that unrelated receiver method changes; the qs helper body remains unchanged.",
+    "sourceSha256": "6b80e620826c2fdcbb37a93c10c954dcb6c50902fe295e63aa0372e4819d9d1d"
   }
 }
