@@ -6,12 +6,9 @@ export const publicReadMethods = [
   'fetchOHLCV',
   'fetchOrderBook',
   'fetchPublicTrades',
-  'fetchOptionMarkets',
   'fetchOptionChain',
   'fetchOptionExpiries',
   'fetchSymbolMaxLeverage',
-  'fetchTickersRaw',
-  'fetchTickersWithoutParse',
   'fetchTickersIntx',
   'fetchTickersCfm',
   'fetchTickersSpot',
@@ -60,18 +57,10 @@ export function publicRestPlan(exchange, description, epoch, { enableOptions = t
     ...(!description.tradeOverride ? { skip: 'NO_TS_REST_METHOD: inherited empty public-trade fallback' } : {}),
   });
   if (['bybit', 'bybitdemo'].includes(exchange)) {
-    plan.push({ label: 'option-markets', method: 'fetchOptionMarkets', args: [] });
     plan.push({ label: 'option-expiries', method: 'fetchOptionExpiries', args: ['BTC'] });
     plan.push({ label: 'option-chain', method: 'fetchOptionChain', args: [{ underlying: 'BTC' }] });
   }
-  for (const method of [
-    'fetchSymbolMaxLeverage',
-    'fetchTickersRaw',
-    'fetchTickersWithoutParse',
-    'fetchTickersIntx',
-    'fetchTickersCfm',
-    'fetchTickersSpot',
-  ]) {
+  for (const method of ['fetchSymbolMaxLeverage', 'fetchTickersIntx', 'fetchTickersCfm', 'fetchTickersSpot']) {
     if (!(description.overrides ?? []).includes(method)) continue;
     if (coinbase && ['fetchTickersCfm', 'fetchTickersSpot'].includes(method)) {
       plan.push({ label: method, method, args: [], skip: 'AUTH_REQUIRED: TS Coinbase brokerage products require JWT' });
