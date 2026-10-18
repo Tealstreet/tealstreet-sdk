@@ -62,3 +62,26 @@ fn retained_store_tables_read_current_native_entries() {
     );
     assert!(matches!(snapshots[2].get("bid").unwrap(), Js::Number(value) if value == 1.0));
 }
+
+#[test]
+fn returned_store_model_values_are_independent_snapshots() {
+    let native = Rc::new(DefaultStore::new());
+    let update: StoreUpdate = serde_json::from_value(json!({
+        "markets":[{"id":"m","symbol":"BTCUSD","base":"BTC","quote":"USD","active":true,
+            "precision":{"amount":1,"price":0.5},"limits":{"amount":{"min":1,"max":1000},"leverage":{"min":1,"max":100}}}]
+    })).unwrap();
+    Store::update(native.as_ref(), update, false).unwrap();
+    let facade = store::facade(native.clone());
+    let first = facade.get("marketsById").unwrap().get("m").unwrap();
+    let patch = ModelPatch::from(json!({"active":false}).as_object().unwrap().clone());
+    Store::update_market(native.as_ref(), "m", &patch).unwrap();
+    let second = facade.get("marketsById").unwrap().get("m").unwrap();
+    assert!(matches!(first.get("active").unwrap(), Js::Bool(true)));
+    assert!(matches!(second.get("active").unwrap(), Js::Bool(false)));
+    assert!(!first.same_reference(&second));
+    first.set("active", Js::Bool(true)).unwrap();
+    assert!(
+        !native.markets()[0].active,
+        "mutating a returned DTO does not write the native Store"
+    );
+}

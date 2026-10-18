@@ -46,14 +46,16 @@ for(const c of storeCases)assert.equal(c.observed,c.value,c.name+' retained tabl
 
 // Independent Node Proxy observations specify the bounded native view operations.
 // This is a language witness, not an implementation of the Store or Rust hooks.
-const state=new Map([['10',10],['2',2],['empty',undefined],['word',17]]);
-const parent={inherited:23};const target=Object.create(parent);
+const token={native:'alias'};
+const state=new Map([['10',10],['2',2],['empty',undefined],['word',17],['unit\uD800',token],['negZero',-0],['nan',NaN]]);
+const parent={inherited:23,get receiver(){return this}};const target=Object.create(parent);
 Object.defineProperty(target,'shadow',{value:31,enumerable:false,configurable:true});
 let receiverSeen=false,reads=0,keysCalls=0,failLookup=false,failKeys=false;
 const lookupError={failure:'lookup'},keysError={failure:'keys'};
 const proxy=new Proxy(target,{
- get(target,key,receiver){if(Reflect.has(target,key))return Reflect.get(target,key,receiver);
-  if(failLookup)throw lookupError;reads++;receiverSeen=receiver===proxy;return state.get(key);},
+ get(target,key,receiver){if(Reflect.getOwnPropertyDescriptor(target,key))return Reflect.get(target,key,receiver);
+  if(failLookup)throw lookupError;reads++;receiverSeen=receiver===proxy;
+  return state.has(key)?state.get(key):Reflect.get(target,key,receiver);},
  ownKeys(target){if(failKeys)throw keysError;keysCalls++;
   return [...Reflect.ownKeys(Object.fromEntries(state)),...Reflect.ownKeys(target).filter(k=>!state.has(k))];},
  getOwnPropertyDescriptor(target,key){const own=Reflect.getOwnPropertyDescriptor(target,key);if(own)return own;
@@ -67,8 +69,11 @@ const ownNames=Object.getOwnPropertyNames(proxy);const beforeReads=reads;
 Object.keys(proxy);assert.equal(reads,beforeReads,'key enumeration does not materialize values');
 state.set('late',41);const spread={...proxy};const json=JSON.stringify(proxy);
 assert.equal(receiverSeen,true);assert.equal(presentUndefined,true);assert.equal(absent,true);
-assert.deepEqual(keysBefore,['2','10','empty','word']);assert.equal(spread.late,41);
+assert.deepEqual(keysBefore,['2','10','empty','word','unit\uD800','negZero','nan']);assert.equal(spread.late,41);
 assert.equal(Object.hasOwn(spread,'empty'),true);assert.equal(inherited,23);
+assert.equal(proxy.receiver,proxy);const child=Object.create(proxy);assert.equal(child.receiver,child);
+assert.equal(proxy['unit\uD800'],token);assert.equal(spread['unit\uD800'],token);
+assert.equal(Object.is(proxy.negZero,-0),true);assert.equal(Number.isNaN(proxy.nan),true);
 const failures=[];
 failLookup=true;try{proxy.missing}catch(e){failures.push(e===lookupError)}failLookup=false;
 failKeys=true;
