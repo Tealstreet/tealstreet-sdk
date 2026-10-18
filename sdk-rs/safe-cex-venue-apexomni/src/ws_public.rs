@@ -198,7 +198,11 @@ impl ApexOmniPublicWebsocket {
                 return Ok(());
             }
             self.host.record_stats(topic)?;
-            let json = J::from(safe_cex_transport::how::json_parse(raw));
+            let json = J::from(
+                safe_cex_transport::how::json_parse(raw)
+                    .into_value()
+                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+            );
             if !truthy(&json) {
                 return Ok(());
             }

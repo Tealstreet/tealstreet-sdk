@@ -1,7 +1,12 @@
 {
   "safe-cex-venue-backpack/src/native_http.rs::LOCAL_FUNCTION:query": {
     "category": "non-decoder",
+<<<<<<< HEAD
     "reason": "Inside qs_repeat: maps an outbound JsJsonValue request parameter tree to QueryValue for query-string serialization. Outbound encoding only; no inbound decode. Reviewed complete changes through merge 18a37819e8: reusable primary/secondary client routing, limiter acquisition before per-attempt signing, response settlement and synchronized signing-clock plumbing are outside qs_repeat/query. The nested outbound QueryValue conversion body is unchanged. Reviewed the native Error-code/emitter carrier migration through 508dc8a9be; it preserves code strings and emitted error fields outside qs_repeat, whose nested outbound query body is unchanged.",
     "sourceSha256": "8786f1b805ea5639923d0e91d3611b6087b1de3ffe99896ba17522db1fcd02e2"
+=======
+    "reason": "Inside qs_repeat: maps an outbound JsJsonValue request parameter tree to QueryValue for query-string serialization. Outbound encoding only; no inbound decode. Reviewed phase2: Only body ingress changes to the direct native adapter, response model views are explicit/fallible, and the legacy error view is named; nested query rendering is unchanged. Additional master review: complete changes through merge 18a37819e8: reusable primary/secondary client routing, limiter acquisition before per-attempt signing, response settlement and synchronized signing-clock plumbing are outside qs_repeat/query. The nested outbound QueryValue conversion body is unchanged.",
+    "sourceSha256": "fee4fdd57d3cc17ddf207d2905b6b977ef94ad61839bc62ddbc2ba953ea323c4"
+>>>>>>> 17db38d155a4549eb6593c06a098843ba0f9f183
   }
 }

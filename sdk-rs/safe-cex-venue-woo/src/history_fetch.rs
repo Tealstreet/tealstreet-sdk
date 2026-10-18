@@ -39,11 +39,16 @@ async fn request_rows(
         Ok(params) => params,
         Err(error) => return Err(RestFailure::pre_transmit(error.to_string(), request)),
     });
-    let response = adapter.execute(request).await?;
+    let response = adapter.execute(request.clone()).await?;
     let data = match response.body.into_data() {
-        Value::String(text) => safe_cex_transport::how::json_parse(&text),
+        RetainedJsonInput::Text(text) => {
+            RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Null)
+        }
         native => native,
     };
+    let data = data
+        .into_value()
+        .map_err(|error| RestFailure::pre_transmit(error.to_string(), request))?;
     Ok(crate::response::parse_transaction_rows_from_response(&data).to_vec())
 }
 
