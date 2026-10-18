@@ -1062,19 +1062,17 @@ fn protective_side_matches_source_coercion_and_exact_one_position() {
                 "PROTECTIVE native side case {index}"
             );
         } else {
-            let primitive =
-                !case["order"].is_null() && !case["order"].is_object() && !case["order"].is_array();
             assert_eq!(
                 {
                     let error = record_return(venue.infer_protective_order_side(&case["order"]))
                         .unwrap_err();
                     format!("{}: {}", error.name, error.message)
                 },
-                if primitive {
-                    "TypeError: Bybit field lookup requires an object"
-                } else {
+                format!(
+                    "{}: {}",
+                    source_error.as_str().unwrap(),
                     case["message"].as_str().unwrap()
-                },
+                ),
                 "PROTECTIVE coercion error case {index}"
             );
         }

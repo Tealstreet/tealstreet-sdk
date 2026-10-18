@@ -63,6 +63,16 @@ impl Store for TestStore {
         *self.data.borrow_mut() = Self::default().data.into_inner();
         self.notify(false)
     }
+    fn subscribe_native(
+        &self,
+        callback: safe_cex_store::contract::NativeStoreSubscriber,
+    ) -> Box<dyn Fn()> {
+        self.subscribe(Box::new(move |data, from_worker| {
+            let value = safe_cex_exchange::js_runtime::value::from_typed(data)
+                .map_err(|cause| StoreSubscriberError::new(cause.message()))?;
+            callback(&value, from_worker)
+        }))
+    }
     fn subscribe(&self, callback: StoreSubscriber) -> Box<dyn Fn()> {
         let callback: Subscriber = Rc::from(callback);
         let id = self.next_subscriber_id.get();
