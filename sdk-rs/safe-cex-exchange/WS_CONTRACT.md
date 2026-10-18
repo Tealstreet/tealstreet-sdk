@@ -154,3 +154,8 @@ handshakes and the constructed Bitget secondary market callback against
 `connecting_socket_source.cjs`, which executes the maintained Bitget/BaseWebSocket
 and real WebSocket over a held local upgrade. Core's native connecting tests pin
 immediate cancellation and waiter registration release independently.
+Event delivery uses the existing queued native consumer under the
+[callback choice](../parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice).
+The Bitget witness checks handle presence at callback entry and the resulting
+lifecycle effects after event delivery; it does not claim Node EventTarget's
+synchronous close-callback stack.
