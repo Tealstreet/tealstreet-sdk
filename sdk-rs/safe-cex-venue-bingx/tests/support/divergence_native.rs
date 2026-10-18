@@ -1,7 +1,5 @@
 //! Assigned lifecycle rows exercised on the real assembled owner and hosts.
-#[path = "binding_harness.rs"]
-#[allow(dead_code)]
-mod harness;
+use super::binding_test_harness as harness;
 use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js};
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::ExchangeName;

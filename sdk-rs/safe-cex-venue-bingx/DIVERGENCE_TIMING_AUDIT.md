@@ -46,3 +46,23 @@ boundary now uses the same shared start_eager driver before scheduling its resul
 reporter; it does not spawn an existing JS Promise again. The tick timer callback
 also invokes the already-eager tick before returning its waiter. The private
 message bridge retains its original Promise ownership.
+
+The shared driver requires fixture runtimes to execute their spawned jobs.
+`tests/read_streams.rs` now pumps those jobs while waiting for tick; all six
+existing tests pass with every source/corpus, Store, opaque error and alias
+identity assertion intact. The two native child modules reuse one harness module,
+so strict Clippy does not load the same file twice.
+
+Validation after integrating shared eager-start PR #1050: 131 tests across 19
+native targets pass, including all constructed bindings and history witnesses.
+The full suite then stops at the existing `tests/types.rs:106` expectation that
+shared decoding rejects a lone-surrogate `BINGX_BALANCE.userId`. That expectation
+is stale after decoder PR #1041. The decoder owner has the focused expectation
+migration; no typed-input, identity or corpus guard is relaxed by this PR. Full
+crate GREEN is not claimed. All nine production controls compiled RED and passed
+after exact restoration; original private listen-key source bytes are unchanged.
+
+Final scoped gates pass: strict native all-target Clippy, separate wasm library
+Clippy, pinned formatting, all-features cancellation inventory (6 passed, one
+existing discovery-export ignore), and the Node cancellation source suite.
+The dependency PR #1050 is merged; this branch integrates master normally.

@@ -296,6 +296,11 @@ impl Exchange for BingxExchange {
     }
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "../../tests/support/binding_harness.rs"]
+#[allow(dead_code)]
+mod binding_test_harness;
+
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/retained_info_native.rs"]
