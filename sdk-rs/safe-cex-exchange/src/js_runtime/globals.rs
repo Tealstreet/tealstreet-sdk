@@ -1,6 +1,7 @@
 //! Venue-agnostic module scope: JS builtins and the safe-cex type enums.
 //! Venues add their own protocol constants and imported helpers.
 use super::{
+    iterator::IteratorRecord,
     promise,
     scope::{ScopeShared, scope_of},
     value::{Js, Str, Thrown, arg, error_constructor},
@@ -143,7 +144,7 @@ fn json_stringify(
 }
 
 /// GetIterator once, preserving live iteration and abrupt completion.
-fn iterate(value: &Js) -> Result<Option<Js>, Thrown> {
+fn iterate(value: &Js) -> Result<Option<IteratorRecord>, Thrown> {
     if value.is_nullish() {
         return Ok(None);
     }
@@ -152,40 +153,21 @@ fn iterate(value: &Js) -> Result<Option<Js>, Thrown> {
         return Ok(None);
     }
     let iterator = method.call(value.clone(), vec![])?;
-    if !iterator.is_object() {
-        return Err(Thrown::type_error("Iterator result is not an object"));
-    }
-    Ok(Some(iterator))
+    IteratorRecord::from_iterator(iterator).map(Some)
 }
 
 fn consume_iterator(
-    iterator: Js,
+    iterator: IteratorRecord,
     mut visit: impl FnMut(Js, usize) -> Result<(), Thrown>,
 ) -> Result<(), Thrown> {
-    let next = iterator.get("next")?;
     let mut index = 0;
-    loop {
-        let step = next.call(iterator.clone(), vec![])?;
-        if !step.is_object() {
-            return Err(Thrown::type_error("Iterator result is not an object"));
-        }
-        if step.get("done")?.truthy() {
-            return Ok(());
-        }
-        let result = step.get("value").and_then(|value| visit(value, index));
-        if let Err(error) = result {
-            // IteratorClose with a throwing completion preserves that error.
-            let _ = iterator.get("return").and_then(|method| {
-                if method.is_nullish() {
-                    Ok(Js::Undefined)
-                } else {
-                    method.call(iterator.clone(), vec![])
-                }
-            });
-            return Err(error);
+    while let Some(value) = iterator.step_value()? {
+        if let Err(error) = visit(value, index) {
+            return Err(iterator.close_after_throw(error));
         }
         index += 1;
     }
+    Ok(())
 }
 
 /// How V8 names an operand in a TypeError (`number 5`, `string "x"`, `object null`).

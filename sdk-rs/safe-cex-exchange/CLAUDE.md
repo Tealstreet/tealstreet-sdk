@@ -1673,3 +1673,16 @@ configuration initializers and compares accessors with Node, including getter
 identity, strict writes, setter receivers, validation order and JS stringify.
 scripts/js-property-descriptor-controls.py compiles an accessor-configurability
 fault, requires the named failure, restores exact bytes and reruns the witnesses.
+
+Synchronous IteratorRecord owns the original iterator, cached next method and
+terminal flag over shared Js referents. IteratorStep omits value reads for array
+elisions; IteratorStepValue terminates on abrupt next/done/value access. Normal
+IteratorClose propagates cleanup errors and rejects primitive return results.
+Throwing completion preserves the original error after cleanup effects. Existing
+Array.from, Map/Set construction and iterable collection reuse these operations.
+The installed-global witness compares Node next/done/value/body failures, while
+normal-close cases cover skipped getters, replaced next members, original bound
+references and return methods/getters/classes. These are core prerequisites;
+Hyperliquid still uses Realm until its atomic family cutover. The independent
+js-iterator-record-controls.py fault must compile, fail normal-close validation,
+restore exact bytes and pass the native/source cases.

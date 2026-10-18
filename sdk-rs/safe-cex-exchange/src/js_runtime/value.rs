@@ -573,19 +573,12 @@ impl Js {
     }
     /// Consume the shared iterator protocol for spread/Array.from adapters.
     pub fn iterable_values(&self) -> Result<Vec<Js>, Thrown> {
-        let iterator = self.iterator()?;
-        let next = iterator.get("next")?;
+        let iterator = super::iterator::IteratorRecord::get(self)?;
         let mut values = vec![];
-        loop {
-            let item = next.call(iterator.clone(), vec![])?;
-            if !item.is_object() {
-                return Err(Thrown::type_error("Iterator result is not an object"));
-            }
-            if item.get("done")?.truthy() {
-                return Ok(values);
-            }
-            values.push(item.get("value")?);
+        while let Some(value) = iterator.step_value()? {
+            values.push(value);
         }
+        Ok(values)
     }
     pub fn is_undefined(&self) -> bool {
         matches!(self, Js::Undefined)
