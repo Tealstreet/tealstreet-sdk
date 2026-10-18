@@ -2519,9 +2519,11 @@ impl crate::private_session::ModeBindings for ExchangeState {
 }
 
 fn emit_json(base: &BaseExchange, value: &Value) -> Result<(), ExchangeError> {
-    let text = safe_cex_num::js_string(Some(value)).map_err(|e| ExchangeError::new(e.message))?;
+    // The source forwards raw msg; Base owns its kind-dependent formatting and reporting.
     base.emit_and_log_error(
-        safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(text),
+        safe_cex_exchange::error_reporting::ExchangeErrorInput::Raw(
+            crate::private_session::native(value.clone()),
+        ),
         None,
         None,
     )

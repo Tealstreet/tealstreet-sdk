@@ -1,5 +1,14 @@
 # Binance family port
 
+The public REST receipt group executes ten private production decoders directly,
+observing borrowed row identity, native numeric bits and mapper fields before
+reporting. Its finite stock JSON/UTF8 cases use the maintained TS REST oracle and
+Node coercion/property outcomes. Endpoint lookup, inclusion predicate and strict
+equality have separate non-decoder roles; those receipts do not execute behavior.
+Canonical `--measure --module=public_rest` retains full compiler discovery and
+existing alias/helper obligations. It does not claim arbitrary JS graphs or the
+native feature matrix; public socket owners have a separate receipt group.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/binance/CLAUDE.md).
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
@@ -881,6 +890,19 @@ Their classification receipts do not execute signing or establish arbitrary-JS
 parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
+
+The exchange assembly's legacy JSON error port forwards the selected raw value
+to BaseExchange. Do not String-coerce it first: Base distinguishes strings,
+falsy values, objects and primitives when formatting and reporting an error.
+`json_error_binding --features native` constructs the actual Futures/PM venues,
+configured signers/clients and Store, rejecting only terminal HTTP. The object
+profile checks native reporter name/message/detail bits and console/reporter
+identity before diagnostic projection. Its ignored source test constructs the
+whole maintained classes and real Axios/Store for six profiles. Run
+`scripts/json-error-controls.py` to compile the old String conversion, require
+both named native failures, then restore exact bytes and require all three
+tests to pass. This preserves the existing JSON input boundary; it does not
+claim arbitrary input graph identity across that boundary.
 
 The seven `public_ticker_events` function contracts execute the real raw-data
 readers; they are not typed/non-decoder exemptions. Native bit and ordered-effect

@@ -29857,5 +29857,2037 @@
         "output": {"ok":true,"bits":"0000000000000000"}
       }
     ]
+  },
+  "safe_cex_venue_binance::public_rest::endpoint": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::public_rest::RestVenue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Looks up an existing generated endpoint by typed venue and source-owned key; returns static outbound route text rather than decoding a payload.",
+    "evidence": "src/public_rest.rs source role; separate fetchMarkets/fetchTickers/fetchOHLCV TypeScript comparisons in tests/public_rest.rs and scripts/public-rest.mjs. This classifies the decoder role, not arbitrary-JS equivalence."
+  },
+  "safe_cex_venue_binance::public_rest::eligible": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "eligible",
+      "signature": {
+        "inputs": [
+          [
+            "m",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "A boolean predicate over already decoded market fields deciding inclusion by contractType and marginAsset, without constructing a domain record.",
+    "evidence": "src/public_rest.rs source role; separate fetchMarkets/fetchTickers/fetchOHLCV TypeScript comparisons in tests/public_rest.rs and scripts/public-rest.mjs. This classifies the decoder role, not arbitrary-JS equivalence."
+  },
+  "safe_cex_venue_binance::public_rest::strict_eq": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "strict_eq",
+      "signature": {
+        "inputs": [
+          [
+            "a",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "b",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Compares existing optional JSON referents using primitive equality and object identity; no representation is admitted or transformed into a domain value.",
+    "evidence": "src/public_rest.rs source role; separate fetchMarkets/fetchTickers/fetchOHLCV TypeScript comparisons in tests/public_rest.rs and scripts/public-rest.mjs. This classifies the decoder role, not arbitrary-JS equivalence."
+  },
+  "safe_cex_venue_binance::public_rest::float": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "float",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production helper; direct native f64 bit observation before JSON. Ten Node parseFloat(String(value)) cases include missing, null, negative zero, infinity, arrays and throwing String coercion. Stock JSON/UTF8 input profile only.",
+    "call": "{match $type($value.get(\"value\")){Ok(n)=>serde_json::json!({\"bits\":if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())}}),Err(e)=>serde_json::json!({\"name\":e.name,\"message\":e.message})}}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": {
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "-0"
+        },
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity"
+        },
+        "output": {
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": " 12.5suffix"
+        },
+        "output": {
+          "bits": "4029000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": []
+        },
+        "output": {
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            "-0"
+          ]
+        },
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": null
+          }
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::float_or": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "float_or",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fallback",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production helper; native binary64 bits distinguish negative zero and infinity from fallback. Source expression is parseFloat(String(value)) || fallback. Stock JSON/UTF8 input scope.",
+    "call": "{match $type($value.get(\"value\"), 7.0){Ok(n)=>serde_json::json!({\"bits\":if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())}}),Err(e)=>serde_json::json!({\"name\":e.name,\"message\":e.message})}}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "bits": "401c000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-0"
+        },
+        "output": {
+          "bits": "401c000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "2.5x"
+        },
+        "output": {
+          "bits": "4004000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity"
+        },
+        "output": {
+          "bits": "7ff0000000000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::vf": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "vf",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production property/numeric helper; own snake-case alias resolves before shared String and parseFloat. Direct native f64 bits retain signed zero and infinity; source shared get-key.ts property order is retained. Stock JSON/UTF8 profile.",
+    "call": "{match $type($value.get(\"value\"), \"markPrice\"){Ok(n)=>serde_json::json!({\"bits\":if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())}}),Err(e)=>serde_json::json!({\"name\":e.name,\"message\":e.message})}}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "markPrice": "-0"
+          }
+        },
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "mark_price": "2.5rest"
+          }
+        },
+        "output": {
+          "bits": "4004000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "markPrice": "Infinity"
+          }
+        },
+        "output": {
+          "bits": "7ff0000000000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::prop": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "prop",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": "'a",
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production borrowed property lookup; nonmissing rows assert original reference identity before output observation. Missing is separate from own null. Stock JSON, fixed symbol property only; no arbitrary getter/prototype claim.",
+    "call": "{match $type($value.get(\"value\"), \"symbol\"){Ok(Some(v))=>{let original=&$value[\"value\"][\"symbol\"];assert!(std::ptr::eq(v,original));serde_json::json!({\"value\":v})},Ok(None)=>serde_json::json!({\"missing\":true}),Err(e)=>serde_json::json!({\"name\":e.name,\"message\":e.message})}}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'symbol')"
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'symbol')"
+        }
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "value": 1
+        },
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "value": "hello"
+        },
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "value": [
+            1
+          ]
+        },
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "symbol": "BTCUSDT"
+          }
+        },
+        "output": {
+          "value": "BTCUSDT"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "symbol": null
+          }
+        },
+        "output": {
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "missing": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::keyed": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "keyed",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": "'a",
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production borrowed property lookup; nonmissing rows assert original reference identity before output observation. Missing is separate from own null. Stock JSON, fixed symbol property only; no arbitrary getter/prototype claim.",
+    "call": "{match $type($value.get(\"value\"), \"symbol\"){Ok(Some(v))=>{let original=&$value[\"value\"][\"symbol\"];assert!(std::ptr::eq(v,original));serde_json::json!({\"value\":v})},Ok(None)=>serde_json::json!({\"missing\":true}),Err(e)=>serde_json::json!({\"name\":e.name,\"message\":e.message})}}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "Cannot use 'in' operator to search for 'symbol' in false"
+        }
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "Cannot use 'in' operator to search for 'symbol' in true"
+        }
+      },
+      {
+        "input": {
+          "value": 1
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "Cannot use 'in' operator to search for 'symbol' in 1"
+        }
+      },
+      {
+        "input": {
+          "value": "hello"
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "Cannot use 'in' operator to search for 'symbol' in hello"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            1
+          ]
+        },
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "symbol": "BTCUSDT"
+          }
+        },
+        "output": {
+          "value": "BTCUSDT"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "symbol": null
+          }
+        },
+        "output": {
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "missing": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::rows": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "rows",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::public_rest::RestVenue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "ep",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "slice": {
+                            "resolved_path": {
+                              "path": "serde_json::value::Value",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production response validator for Futures/PM/Spot. Successful nonempty slices assert original array storage identity before observation; null rejection retains the native error name. No custom collection or arbitrary property claim.",
+    "call": "{use crate::public_rest::RestVenue;let venue=match $value[\"venue\"].as_str().unwrap(){\"futures\"=>RestVenue::Futures,\"pm\"=>RestVenue::PM,_=>RestVenue::Spot};match $type(venue,\"/fixture\",$value.get(\"value\")){Ok(rows)=>{let original=$value[\"value\"].as_array().unwrap();assert_eq!(rows.len(),original.len());if !rows.is_empty(){assert!(std::ptr::eq(rows.as_ptr(),original.as_ptr()));}serde_json::json!({\"value\":rows})},Err(e)=>serde_json::json!({\"name\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "venue": "futures",
+          "value": [
+            {
+              "symbol": "BTC"
+            },
+            17
+          ]
+        },
+        "output": {
+          "value": [
+            {
+              "symbol": "BTC"
+            },
+            17
+          ]
+        }
+      },
+      {
+        "input": {
+          "venue": "pm",
+          "value": [
+            {
+              "symbol": "BTC"
+            },
+            17
+          ]
+        },
+        "output": {
+          "value": [
+            {
+              "symbol": "BTC"
+            },
+            17
+          ]
+        }
+      },
+      {
+        "input": {
+          "venue": "spot",
+          "value": [
+            {
+              "symbol": "BTC"
+            },
+            17
+          ]
+        },
+        "output": {
+          "value": [
+            {
+              "symbol": "BTC"
+            },
+            17
+          ]
+        }
+      },
+      {
+        "input": {
+          "venue": "futures",
+          "value": null
+        },
+        "output": {
+          "name": "Error"
+        }
+      },
+      {
+        "input": {
+          "venue": "pm",
+          "value": null
+        },
+        "output": {
+          "name": "Error"
+        }
+      },
+      {
+        "input": {
+          "venue": "spot",
+          "value": null
+        },
+        "output": {
+          "name": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::filter": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "filter",
+      "signature": {
+        "inputs": [
+          [
+            "filters",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "serde_json::value::Value",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "kind",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "spot",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": "'a",
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production filter search. A successful result is the original first matching row, verified by pointer identity before serialization; missing, duplicate and null rows cover search/error paths. Fixed LOT_SIZE property under stock JSON semantics.",
+    "call": "{let rows=$value[\"rows\"].as_array().unwrap();match $type(rows,\"LOT_SIZE\",$value[\"spot\"].as_bool().unwrap()){Ok(Some(found))=>{assert!(rows.iter().any(|row|std::ptr::eq(found,row)));serde_json::json!({\"value\":found})},Ok(None)=>serde_json::json!({\"missing\":true}),Err(e)=>serde_json::json!({\"name\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "rows": [
+            {
+              "filterType": "PRICE_FILTER"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "-0"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "9"
+            }
+          ],
+          "spot": true
+        },
+        "output": {
+          "value": {
+            "filterType": "LOT_SIZE",
+            "stepSize": "-0"
+          }
+        }
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "filterType": "PRICE_FILTER"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "-0"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "9"
+            }
+          ],
+          "spot": false
+        },
+        "output": {
+          "value": {
+            "filterType": "LOT_SIZE",
+            "stepSize": "-0"
+          }
+        }
+      },
+      {
+        "input": {
+          "rows": [],
+          "spot": true
+        },
+        "output": {
+          "missing": true
+        }
+      },
+      {
+        "input": {
+          "rows": [
+            null
+          ],
+          "spot": true
+        },
+        "output": {
+          "name": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::derivative_market": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "derivative_market",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::public_rest::RestVenue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "m",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "brackets",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "serde_json::value::Value",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_binance::public_rest::RestMarket",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production private mapper executed directly on two maintained normal fetchMarkets rows (BTC/ETH); expected identity/raw fields and five native numeric bits come from actual TS Futures fetchMarkets. PM missing filters separately returns None. This is finite stock JSON/UTF8 data, not arbitrary JS input acceptance or alias equivalence.",
+    "call": "{use crate::public_rest::RestVenue;let venue=if $value[\"venue\"]==\"pm\"{RestVenue::PM}else{RestVenue::Futures};match $type(venue,&$value[\"market\"],$value[\"brackets\"].as_array().unwrap()){Ok(Some(m))=>serde_json::json!({\"id\":m.id,\"symbol\":m.symbol,\"base\":m.base,\"quote\":m.quote,\"active\":m.active,\"isSpot\":m.is_spot,\"bits\":([m.precision.amount,m.precision.price,m.amount.min,m.amount.max,m.leverage_min].map(|n|if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())})),\"leverageMax\":m.leverage_max}),Ok(None)=>serde_json::json!({\"missing\":true}),Err(e)=>serde_json::json!({\"name\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "venue": "futures",
+          "market": {
+            "symbol": "BTCUSDT",
+            "baseAsset": "BTC",
+            "quoteAsset": "USDT",
+            "marginAsset": "USDT",
+            "contractType": "PERPETUAL",
+            "status": "TRADING",
+            "baseAssetPrecision": "3",
+            "quoteAssetPrecision": "4",
+            "filters": [
+              {
+                "filterType": "PRICE_FILTER",
+                "tickSize": "0.25"
+              },
+              {
+                "filterType": "LOT_SIZE",
+                "stepSize": "0.1",
+                "minQty": "0.1",
+                "maxQty": "100"
+              },
+              {
+                "filterType": "MARKET_LOT_SIZE",
+                "minQty": "0.2",
+                "maxQty": "90"
+              }
+            ]
+          },
+          "brackets": [
+            {
+              "symbol": "BTCUSDT",
+              "brackets": [
+                {
+                  "initialLeverage": "125"
+                }
+              ]
+            },
+            {
+              "symbol": "ETHUSDC",
+              "brackets": [
+                {
+                  "initialLeverage": 20
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "id": "BTC/USDT:USDT",
+          "symbol": "BTCUSDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "isSpot": null,
+          "bits": [
+            "3fb999999999999a",
+            "3fd0000000000000",
+            "3fc999999999999a",
+            "4056800000000000",
+            "3ff0000000000000"
+          ],
+          "leverageMax": "125"
+        }
+      },
+      {
+        "input": {
+          "venue": "futures",
+          "market": {
+            "symbol": "ETHUSDC",
+            "baseAsset": "ETH",
+            "quoteAsset": "USDC",
+            "marginAsset": "USDC",
+            "contractType": "TRADIFI_PERPETUAL",
+            "status": "BREAK",
+            "baseAssetPrecision": "3",
+            "quoteAssetPrecision": "4",
+            "filters": [
+              {
+                "filterType": "PRICE_FILTER",
+                "tickSize": "0.05"
+              },
+              {
+                "filterType": "LOT_SIZE",
+                "stepSize": "2",
+                "minQty": "1",
+                "maxQty": "60"
+              },
+              {
+                "filterType": "MARKET_LOT_SIZE",
+                "minQty": "3",
+                "maxQty": "40"
+              }
+            ]
+          },
+          "brackets": [
+            {
+              "symbol": "BTCUSDT",
+              "brackets": [
+                {
+                  "initialLeverage": "125"
+                }
+              ]
+            },
+            {
+              "symbol": "ETHUSDC",
+              "brackets": [
+                {
+                  "initialLeverage": 20
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "id": "ETH/USDC:USDC",
+          "symbol": "ETHUSDC",
+          "base": "ETH",
+          "quote": "USDC",
+          "active": false,
+          "isSpot": null,
+          "bits": [
+            "4000000000000000",
+            "3fa999999999999a",
+            "4008000000000000",
+            "4044000000000000",
+            "3ff0000000000000"
+          ],
+          "leverageMax": 20
+        }
+      },
+      {
+        "input": {
+          "venue": "pm",
+          "market": {
+            "symbol": "SKIP"
+          },
+          "brackets": []
+        },
+        "output": {
+          "missing": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::spot_market": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "spot_market",
+      "signature": {
+        "inputs": [
+          [
+            "m",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::public_rest::RestMarket",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual production Spot market mapper. Expected rows are independently obtained from maintained TypeScript Spot fetchMarkets; native DTO identifiers/raw field Options and five binary64 fields are observed before serialization. A malformed filters member retains TypeError. Finite stock JSON/UTF8 profile only.",
+    "call": "{match $type($value){Ok(m)=>serde_json::json!({\"id\":m.id,\"symbol\":m.symbol,\"base\":m.base,\"quote\":m.quote,\"active\":m.active,\"isSpot\":m.is_spot,\"bits\":([m.precision.amount,m.precision.price,m.amount.min,m.amount.max,m.leverage_min].map(|n|if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())})),\"leverageMax\":m.leverage_max}),Err(e)=>serde_json::json!({\"name\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "symbol": "BTCUSDT",
+          "baseAsset": "BTC",
+          "quoteAsset": "USDT",
+          "marginAsset": "USDT",
+          "contractType": "PERPETUAL",
+          "status": "TRADING",
+          "baseAssetPrecision": "3",
+          "quoteAssetPrecision": "4",
+          "filters": [
+            {
+              "filterType": "PRICE_FILTER",
+              "tickSize": "0.25"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "0.1",
+              "minQty": "0.1",
+              "maxQty": "100"
+            },
+            {
+              "filterType": "MARKET_LOT_SIZE",
+              "minQty": "0.2",
+              "maxQty": "90"
+            }
+          ]
+        },
+        "output": {
+          "id": "BTC/USDT",
+          "symbol": "BTCUSDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "isSpot": true,
+          "bits": [
+            "3fb999999999999a",
+            "3fd0000000000000",
+            "3fb999999999999a",
+            "4059000000000000",
+            "3ff0000000000000"
+          ],
+          "leverageMax": 1
+        }
+      },
+      {
+        "input": {
+          "symbol": "ETHUSDC",
+          "baseAsset": "ETH",
+          "quoteAsset": "USDC",
+          "marginAsset": "USDC",
+          "contractType": "TRADIFI_PERPETUAL",
+          "status": "BREAK",
+          "baseAssetPrecision": "3",
+          "quoteAssetPrecision": "4",
+          "filters": [
+            {
+              "filterType": "PRICE_FILTER",
+              "tickSize": "0.05"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "2",
+              "minQty": "1",
+              "maxQty": "60"
+            },
+            {
+              "filterType": "MARKET_LOT_SIZE",
+              "minQty": "3",
+              "maxQty": "40"
+            }
+          ]
+        },
+        "output": {
+          "id": "ETH/USDC",
+          "symbol": "ETHUSDC",
+          "base": "ETH",
+          "quote": "USDC",
+          "active": false,
+          "isSpot": true,
+          "bits": [
+            "4000000000000000",
+            "3fa999999999999a",
+            "3ff0000000000000",
+            "404e000000000000",
+            "3ff0000000000000"
+          ],
+          "leverageMax": 1
+        }
+      },
+      {
+        "input": {
+          "symbol": "SKIP",
+          "baseAsset": "SKIP",
+          "quoteAsset": "USDT",
+          "marginAsset": "BUSD",
+          "contractType": "CURRENT_QUARTER",
+          "status": "TRADING",
+          "baseAssetPrecision": "3",
+          "quoteAssetPrecision": "4",
+          "filters": [
+            {
+              "filterType": "PRICE_FILTER",
+              "tickSize": "0.25"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "0.1",
+              "minQty": "0.1",
+              "maxQty": "100"
+            },
+            {
+              "filterType": "MARKET_LOT_SIZE",
+              "minQty": "0.2",
+              "maxQty": "90"
+            }
+          ]
+        },
+        "output": {
+          "id": "SKIP/USDT",
+          "symbol": "SKIP",
+          "base": "SKIP",
+          "quote": "USDT",
+          "active": true,
+          "isSpot": true,
+          "bits": [
+            "3fb999999999999a",
+            "3fd0000000000000",
+            "3fb999999999999a",
+            "4059000000000000",
+            "3ff0000000000000"
+          ],
+          "leverageMax": 1
+        }
+      },
+      {
+        "input": {
+          "filters": false
+        },
+        "output": {
+          "name": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_rest::ticker": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "ticker",
+      "signature": {
+        "inputs": [
+          [
+            "m",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_rest::MarketIdentity",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "book",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "daily",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "price",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "spot",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Ticker",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual private mapper called with typed MarketIdentity and maintained normal response rows. Actual TS Futures and Spot fetchTickers independently supply eleven numeric outputs; native f64 bits and absent auxiliary fields are observed before JSON. Stock JSON/UTF8 profile, not arbitrary property/accessor admission.",
+    "call": "{let m=crate::public_rest::MarketIdentity{id:$value[\"id\"].as_str().unwrap().into(),symbol:$value[\"symbol\"].as_str().unwrap().into()};match $type(&m,&$value[\"book\"],&$value[\"daily\"],&$value[\"price\"],$value[\"spot\"].as_bool().unwrap()){Ok(t)=>serde_json::json!({\"id\":t.id,\"symbol\":t.symbol,\"bits\":([t.bid,t.ask,t.last,t.mark,t.index,t.percentage,t.funding_rate,t.funding_time,t.volume,t.quote_volume,t.open_interest].map(|n|if n.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",n.to_bits())})),\"midAbsent\":t.mid_price.is_none(),\"timestampAbsent\":t.timestamp.is_none(),\"infoAbsent\":t.info.is_none()}),Err(e)=>serde_json::json!({\"name\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "spot": false,
+          "id": "BTC/USDT",
+          "symbol": "BTCUSDT",
+          "book": {
+            "symbol": "BTCUSDT",
+            "bid_price": "10.1tail",
+            "askPrice": "10.9"
+          },
+          "daily": {
+            "symbol": "BTCUSDT",
+            "bid_price": "10.1tail",
+            "askPrice": "10.9",
+            "lastPrice": "12.3",
+            "price_change_percent": "3.6",
+            "volume": "27.1",
+            "quoteVolume": "44.2"
+          },
+          "price": {
+            "symbol": "BTCUSDT",
+            "mark_price": "12.4",
+            "indexPrice": "12.5",
+            "last_funding_rate": "0.002",
+            "nextFundingTime": "8000"
+          }
+        },
+        "output": {
+          "id": "BTC/USDT",
+          "symbol": "BTCUSDT",
+          "bits": [
+            "4024333333333333",
+            "4025cccccccccccd",
+            "402899999999999a",
+            "4028cccccccccccd",
+            "4029000000000000",
+            "400ccccccccccccd",
+            "3f60624dd2f1a9fc",
+            "40bf400000000000",
+            "403b19999999999a",
+            "404619999999999a",
+            "0000000000000000"
+          ],
+          "midAbsent": true,
+          "timestampAbsent": true,
+          "infoAbsent": true
+        }
+      },
+      {
+        "input": {
+          "spot": true,
+          "id": "BTC/USDT",
+          "symbol": "BTCUSDT",
+          "book": {
+            "symbol": "BTCUSDT",
+            "bid_price": "10.1tail",
+            "askPrice": "10.9",
+            "lastPrice": "12.3",
+            "price_change_percent": "3.6",
+            "volume": "27.1",
+            "quoteVolume": "44.2"
+          },
+          "daily": {
+            "symbol": "BTCUSDT",
+            "bid_price": "10.1tail",
+            "askPrice": "10.9",
+            "lastPrice": "12.3",
+            "price_change_percent": "3.6",
+            "volume": "27.1",
+            "quoteVolume": "44.2"
+          },
+          "price": {
+            "symbol": "BTCUSDT",
+            "bid_price": "10.1tail",
+            "askPrice": "10.9",
+            "lastPrice": "12.3",
+            "price_change_percent": "3.6",
+            "volume": "27.1",
+            "quoteVolume": "44.2"
+          }
+        },
+        "output": {
+          "id": "BTC/USDT",
+          "symbol": "BTCUSDT",
+          "bits": [
+            "4024333333333333",
+            "4025cccccccccccd",
+            "402899999999999a",
+            "402899999999999a",
+            "402899999999999a",
+            "400ccccccccccccd",
+            "0000000000000000",
+            "0000000000000000",
+            "403b19999999999a",
+            "404619999999999a",
+            "0000000000000000"
+          ],
+          "midAbsent": true,
+          "timestampAbsent": true,
+          "infoAbsent": true
+        }
+      }
+    ]
   }
 }

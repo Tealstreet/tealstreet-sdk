@@ -397,3 +397,10 @@ keys/values, own undefined and nonfinite numeric metadata reach model `info`
 without a JSON projection. Request/signing prepared inputs retain their existing
 typed policy. The two native routing regressions fail on the old response bridge
 and compare the maintained source interceptor/market method before native checks.
+
+The accepted receiver inventory reviews `MessageValue::equals_string` and
+`NativeValue::field` on the shared Js receiver with exact compiler impl hashes.
+The two native receiver tests in `adapter_classes.rs` cover strict UTF-16
+comparison and own-field forwarding, including native cell identity, presence,
+number bits and nullish refusal. These entries classify existing receiver roles;
+they do not widen the adapter's prepared-data profile.
