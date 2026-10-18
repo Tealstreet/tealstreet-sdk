@@ -485,3 +485,14 @@ Keep original `Thrown`/message cells until the post-report fresh Error ToString;
 never reintroduce an intermediate typed UTF-8 error. The existing fourteen-case
 Spot cancellation corpus and nine independent compiled controls remain scoped
 to these paths. Module-array and shared Store identity are separately owned.
+
+### Trading protocol and tick receiver coverage
+
+`RUNTIME_RECEIVER_REVIEW.md` covers TradingHost iterable/send and TickHost's typed
+error emission. Spread must use the native iterator protocol, retaining one
+method lookup and the original values/errors through shared IteratorRecord.
+`tests/support/accepted_runtime_receivers.rs` reaches the constructed Scope;
+`runtime-receiver-source.cjs` executes the live spread/tick source and
+`runtime-receiver-controls.py` compiles one semantic fault per receiver, requiring
+named failures and exact restored passes. Keep limited/unlimited client selection
+observable through the real signed HTTP pipeline.
