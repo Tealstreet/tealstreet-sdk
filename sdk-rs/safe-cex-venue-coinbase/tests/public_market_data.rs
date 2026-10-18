@@ -58,10 +58,14 @@ fn assert_num(actual: f64, expected: &Value, name: &str) {
 }
 fn assert_frame(actual: Option<Frame>, expected: &Value, name: &str) {
     if expected.get("$undefined") == Some(&json!(true)) {
-        assert!(actual.is_none(), "{name}: native undefined");
+        assert!(
+            matches!(actual, None | Some(Frame::Undefined)),
+            "{name}: native undefined"
+        );
         return;
     }
     match actual.expect("native property") {
+        Frame::Undefined => assert_eq!(expected["$undefined"], true, "native undefined"),
         Frame::Null => assert!(expected.is_null(), "{name}: null"),
         Frame::Bool(v) => assert_eq!(Some(v), expected.as_bool(), "{name}: bool"),
         Frame::Number(v) => assert_num(v, expected, name),

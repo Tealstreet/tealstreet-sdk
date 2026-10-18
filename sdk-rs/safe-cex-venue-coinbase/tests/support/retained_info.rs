@@ -13,7 +13,11 @@ pub fn assert_info(actual: Option<&Input>, expected: &Value, label: &str) {
     let actual = actual.unwrap();
     match actual {
         Input::Float(_) | Input::Lexeme(_) => {
-            let number = actual.as_f64().unwrap();
+            let number = match actual {
+                Input::Float(value) => *value,
+                Input::Lexeme(value) => value.parse::<f64>().unwrap(),
+                _ => unreachable!(),
+            };
             let expected = expected
                 .get("$bits")
                 .and_then(Value::as_str)
@@ -36,15 +40,37 @@ pub fn assert_info(actual: Option<&Input>, expected: &Value, label: &str) {
             }
         }
         Input::Object(fields) => {
+            if let Some(entries) = expected.get("$entries") {
+                let entries = entries.as_array().unwrap();
+                assert_eq!(
+                    fields.len(),
+                    entries.len(),
+                    "{label}: own UTF16 field count"
+                );
+                for entry in entries {
+                    let key: Vec<u16> = serde_json::from_value(entry[0].clone()).unwrap();
+                    let value = fields
+                        .iter()
+                        .find(|(name, _)| name == &key)
+                        .map(|(_, value)| value);
+                    assert_info(value, &entry[1], label);
+                }
+                return;
+            }
             let expected = expected.as_object().unwrap();
             assert_eq!(fields.len(), expected.len(), "{label}: own field count");
             for (key, expected) in expected {
-                assert_info(actual.get(key), expected, label);
+                let key: Vec<u16> = key.encode_utf16().collect();
+                let value = fields
+                    .iter()
+                    .find(|(name, _)| name == &key)
+                    .map(|(_, value)| value);
+                assert_info(value, expected, label);
             }
         }
         _ => assert_eq!(
             actual,
-            &Input::from(expected.clone()),
+            &Input::from_value(expected.clone()).unwrap(),
             "{label}: native scalar"
         ),
     }

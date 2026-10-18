@@ -183,7 +183,7 @@ impl BingxSubscriptions {
                 .and_then(|v| v.get("klineInfosVo"))
                 .and_then(|v| v.get(0))
                 .ok_or_else(|| error("Cannot read properties of undefined (reading 'time')"))?;
-            callback(candle(row)?)
+            callback(candle(&row.clone().into())?)
         });
         self.wait(topic.clone(), parser.clone(), None)?;
         let owner = self.clone();

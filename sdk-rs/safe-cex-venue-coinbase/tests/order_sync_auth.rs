@@ -135,10 +135,14 @@ fn value(a: Option<&Value>, e: &Value, n: &str) {
 }
 fn frame(a: Option<Frame>, e: &Value, n: &str) {
     if e.get("$undefined") == Some(&json!(true)) {
-        assert!(a.is_none(), "{n}: native undefined");
+        assert!(
+            matches!(a, None | Some(Frame::Undefined)),
+            "{n}: native undefined"
+        );
         return;
     }
     match a.expect("native frame") {
+        Frame::Undefined => assert_eq!(e["$undefined"], true, "native undefined"),
         Frame::Null => assert!(e.is_null(), "{n}: null"),
         Frame::Bool(v) => assert_eq!(Some(v), e.as_bool(), "{n}: bool"),
         Frame::Number(v) => num(v, e, n),

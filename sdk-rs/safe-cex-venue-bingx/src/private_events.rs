@@ -7,7 +7,6 @@ use safe_cex_types::{
     MarginType, Order, OrderStatus, OrderTimeInForce, OrderType, Position, PositionMode,
     PositionSide, model_utils::create_position_id,
 };
-use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -53,13 +52,7 @@ fn number(value: Option<&Input>) -> Result<f64, ExchangeError> {
 fn strict_true(value: Option<&Input>) -> bool {
     value.is_some_and(|v| matches!(v, Input::Bool(true)) || v.text_equals("true"))
 }
-pub fn map_order<I: Clone + Into<Input>>(
-    o: &I,
-    orders: &[Order],
-    now: f64,
-) -> Result<Option<Order>, ExchangeError> {
-    let retained: Input = o.clone().into();
-    let o = &retained;
+pub fn map_order(o: &Input, orders: &[Order], now: f64) -> Result<Option<Order>, ExchangeError> {
     let id = first(o, &["orderId", "orderID", "i"]);
     let symbol = first(o, &["symbol", "s"])
         .and_then(Input::as_text)
@@ -380,9 +373,17 @@ impl BingxPrivateEvents {
                             .ok_or_else(|| type_error("fill symbol has no replace method"))?
                             .replace('-', "");
                         let side = table(&constants::ORDER_SIDE, &text(data.get("S"))?)?;
-                        let mut payload = Input::from(
-                            json!({"symbol":symbol,"price":finite_or_zero(price),"amount":amount}),
-                        );
+                        let mut payload = Input::Object(vec![
+                            (
+                                "symbol".encode_utf16().collect(),
+                                Input::Text(symbol.encode_utf16().collect()),
+                            ),
+                            (
+                                "price".encode_utf16().collect(),
+                                Input::Float(finite_or_zero(price)),
+                            ),
+                            ("amount".encode_utf16().collect(), Input::Float(amount)),
+                        ]);
                         if let Some(id) = data.get("i") {
                             payload
                                 .as_object_mut()

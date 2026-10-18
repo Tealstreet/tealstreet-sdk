@@ -80,13 +80,11 @@ fn resolve_amount_native(config: &ResolvedOrderConfig<'_>) -> Option<f64> {
 // ts: mapCoinbaseRestOrder
 // ts-bug: mapCoinbaseRestOrder reads inherited ORDER_STATUS object members.
 // CORRECTED: OrderStatus admits actual statuses, never a function/prototype object.
-pub fn map_coinbase_rest_order<I: Clone + Into<Input>>(
-    raw_order: &I,
+pub fn map_coinbase_rest_order(
+    raw_order: &Input,
     market: &Market,
     last_update: f64,
 ) -> Option<Order> {
-    let retained: Input = raw_order.clone().into();
-    let raw_order = &retained;
     let resolved = resolve_order_configuration(raw_order)?;
     let amount_native = resolve_amount_native(&resolved)?;
     let filled_native = parse_unsigned_decimal(raw_order.get("filled_size")).unwrap_or(0.0);
@@ -94,7 +92,7 @@ pub fn map_coinbase_rest_order<I: Clone + Into<Input>>(
         return None;
     }
     let contract_size = if market.is_expiring.unwrap_or(false) {
-        normalize_cfm_contract_size(&serde_json::json!(market.contract_size))?
+        normalize_cfm_contract_size(&Input::Float(market.contract_size?))?
     } else {
         1.0
     };

@@ -10,7 +10,11 @@ pub fn observe(value: &Input) -> Value {
             .map(Value::String)
             .unwrap_or_else(|_| json!({"utf16":units})),
         Input::Float(_) | Input::Lexeme(_) => {
-            let value = value.as_f64().unwrap();
+            let value = match value {
+                Input::Float(value) => *value,
+                Input::Lexeme(value) => value.parse::<f64>().unwrap(),
+                _ => unreachable!(),
+            };
             json!({"number":if value.is_nan() { "NaN".to_owned() } else { format!("{:016x}", value.to_bits()) }})
         }
         Input::Array(values) => Value::Array(values.iter().map(observe).collect()),

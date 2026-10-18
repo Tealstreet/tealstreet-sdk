@@ -498,7 +498,7 @@ pub fn fetch_open_positions_cfm<H: MarketPositionHost + 'static>(
                 let market = r.host.market_by_id(&lookup_id);
                 let contract = market.and_then(|m| {
                     let m = m.borrow();
-                    if m.is_expiring == Some(true) {normalize_cfm_contract_size(&json!(m.contract_size))} else {None}
+                    if m.is_expiring == Some(true) {m.contract_size.and_then(|size| normalize_cfm_contract_size(&Input::Float(size)))} else {None}
                 });
                 let Some(contract) = contract else {
                     let symbol = text(item.borrow().get("product_id"))?;

@@ -57,10 +57,10 @@ fn type_error(message: impl Into<String>) -> ExchangeError {
 }
 fn field<'a>(value: Option<&'a Input>, key: &str) -> Result<Option<&'a Input>, ExchangeError> {
     match value {
-        None => Err(type_error(format!(
+        None | Some(Input::Undefined) => Err(type_error(format!(
             "Cannot read properties of undefined (reading '{key}')"
         ))),
-        Some(Input::Null | Input::Undefined) => Err(type_error(format!(
+        Some(Input::Null) => Err(type_error(format!(
             "Cannot read properties of null (reading '{key}')"
         ))),
         Some(value) => Ok(value.get(key)),
