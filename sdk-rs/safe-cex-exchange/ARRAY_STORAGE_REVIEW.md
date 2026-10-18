@@ -51,3 +51,11 @@ canonical Store target retains its 18 generation/alias/poisoned-row controls.
 The browser `safe-cex-webworker/scripts/array-data-controls.py` independently drops
 a named property in the production materializer, requires the real Wasm/JS
 structuredClone assertion to fail, restores exact source and repeats it.
+
+The actual Wasm example also tests sparse length 2^32-1: push, splice at the
+end and a splice that shifts a hole each compiled and failed on usize arithmetic.
+Intermediate write indices now use u64 and final length uses exact f64 addition,
+so the existing canonical ArraySetLength produces RangeError after precisely the
+same named/indexed writes as JavaScript. The Node witness compares these partial
+completions, own properties and negative-zero bits without cloning the huge sparse
+array. All three independent old-body Wasm RED logs are retained with the proof.

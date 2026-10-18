@@ -79,3 +79,22 @@ for(const message of [arrayMessage,structuredClone(arrayMessage)]) {
  assert.equal(array.tag,array[3]);assert.equal(array.read,array.tag,'WORKER-ARRAY enumerable getter result aliases');assert.equal(array.self,array,'WORKER-ARRAY original cycle');
 }
 console.log('WORKER-ARRAY actual WASM canonical holes, named properties, getter receiver, aliases/cycle and native bits PASS');
+
+const arrayEdgeModes=['push','splice-end','splice-shift'];
+for(const [mode,label] of arrayEdgeModes.entries()) {
+ if(process.env.ARRAY_EDGE_MODE && process.env.ARRAY_EDGE_MODE!==label)continue;
+ const expected=[];expected.length=4294967295;
+ let name;
+ try {if(mode===0)expected.push(-0);else expected.splice(mode===1?4294967295:4294967294,0,...(mode===1?[-0]:[11,-0]));}
+ catch(e){name=e.name;}
+ assert.equal(name,'RangeError','ARRAY-EDGE actual JS refusal');
+ let message;
+ assert.doesNotThrow(()=>wasm.post_worker_array_edge(value=>{message=value;},mode),`ARRAY-EDGE ${label} checked completion`);
+ const actual=message.data;
+ assert.equal(actual.name,name,`ARRAY-EDGE ${label} native error name`);
+ assert.equal(actual.length,expected.length);assert.equal(actual.namedOwn,Object.hasOwn(expected,'4294967295'));
+ assert(Object.is(actual.named,expected[4294967295]),`ARRAY-EDGE ${label} signed zero after refusal`);
+ assert.equal(actual.lastOwn,Object.hasOwn(expected,'4294967294'));assert.equal(actual.last,expected[4294967294]);
+ assert.equal(actual.higherOwn,Object.hasOwn(expected,'4294967296'));
+}
+console.log('ARRAY-EDGE actual WASM push/splice uint32 boundary completions match JS PASS');

@@ -334,7 +334,7 @@ fn items(this: &Js) -> Result<Vec<Option<Js>>, Thrown> {
 pub(crate) fn array_member(this: Js, name: &str) -> Option<Js> {
     Some(match name {
         "push" => method(name, move |a| {
-            let mut len = array_length(&this)?;
+            let mut len = array_length(&this)? as u64;
             for value in a {
                 this.set(&len.to_string(), value)?;
                 len += 1;

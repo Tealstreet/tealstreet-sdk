@@ -196,7 +196,7 @@ impl Js {
             }
         } else if added > count {
             for from in (start + count..len).rev() {
-                let to = from - count + added;
+                let to = from as u64 - count as u64 + added as u64;
                 if self.has_index(from) {
                     self.set(&to.to_string(), self.get(&from.to_string())?)?;
                 } else {
@@ -205,9 +205,9 @@ impl Js {
             }
         }
         for (index, value) in insert.into_iter().enumerate() {
-            self.set(&(start + index).to_string(), value)?;
+            self.set(&(start as u64 + index as u64).to_string(), value)?;
         }
-        self.set("length", Js::Number((len - count + added) as f64))
+        self.set("length", Js::Number((len - count) as f64 + added as f64))
     }
     pub(super) fn own_descriptor(&self, key: &[u16]) -> Option<Prop> {
         if let Js::Array(array) = self
