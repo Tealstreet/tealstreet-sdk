@@ -1733,9 +1733,12 @@ Whole mapper inputs use shared `JsNumberInput` capture and its 128-level recursi
 budget, including ignored fields. Mirroring unrestricted nested input here would
 bypass the shared parser budget and create a second ingestion policy in this venue.
 The live supplement runs the actual TypeScript mappers with a 140-deep ignored
-field and escaped lone surrogates, captures their outputs, and asserts Rust
-representation/depth refusal for those same raw bytes. These are accepted source
-inputs, not invalid JSON. No replacement characters or silent dropping are used.
+field and escaped lone surrogates and captures their outputs. The shared parser
+retains raw UTF-16 units; final closed Rust Strings use the shared U+FFFD
+projection. The twelve-case utility supplement compares all native mapped fields
+and number bits after that explicit String projection, while separately checking
+the original retained units. The 140-deep cases still assert the independent
+depth refusal. These are accepted source inputs, not invalid JSON.
 
 Within that domain each source function is mapped separately. Shared numeric
 capture precedes untagged buffering; a private wire enum registers every variant
@@ -1773,7 +1776,9 @@ construction. JavaScript stack/prototype/descriptors and executable error inputs
 are not carried across this host error ABI. Mirroring them in a venue-local error
 class would bypass the shared HTTP/exchange error plumbing and merely move the
 loss to its next conversion. Message, name and distinct metadata fields are
-asserted directly on native Rust values, not serialized roundtrips.
+asserted directly on native Rust values, not serialized roundtrips. Signed zero
+is observed through `retained_response_input`; the separately tested
+`response_json_view` follows JSON.stringify and projects -0 to +0.
 
 `createKrakenSpotClientOrderId` exposes a generator factory with host-supplied
 fallible CSPRNG filling. Create it once per SDK runtime/module and share it among
@@ -1810,9 +1815,10 @@ Promise. No detached task is created by these body adapters. Pending exchange
 assembly must explicitly own and poll the future, and must not claim Promise
 lifecycle/cancellation parity from these row witnesses. A JSON-shaped data
 snapshot replaces live JavaScript objects, getters and prototype customization.
-The supported domain, UTF-8/depth refusal and explicit date-host adapter are the
-same as [kraken-utility-wire-domain](#kraken-utility-wire-domain); the live corpus
-measures a source lone-surrogate token and an ignored deep field that Rust refuses.
+The supported domain, closed String projection/depth refusal and explicit date
+host adapter are the same as [kraken-utility-wire-domain](#kraken-utility-wire-domain); the live corpus
+measures a source lone-surrogate token (retained raw units, U+FFFD typed output)
+and the separate ignored deep field that Rust refuses.
 Executable objects and mutation through aliases are outside this owned boundary.
 The numeric query input requires the source's declared two number fields; actual
 TypeScript forwards string-valued fields too, which the Rust adapter deliberately
@@ -1864,7 +1870,9 @@ reporting their TypeError. Null preference entries preserve their source failure
 The 33-case actual-source supplement witnesses result guards, clear/set order,
 truthiness, duplicate primitive keys, distinct equal-shaped object/array keys,
 synchronous and asynchronous read failures, cache failures, console failures,
-partial effects, nonfinite numbers, negative zero, and lone-surrogate refusal.
+partial effects, nonfinite numbers, negative zero, and lone-surrogate cache-key
+projection. Constructed native token/leverage/account-log clients and the fill
+host separately prove those paths are reachable without changing raw input cells.
 The original read oracle stays byte-identical; one Node invocation executes the
 original corpus and both supplements. Source totals/per-case operation and cache
 counts are pinned independently, with 33 completed native case comparisons.

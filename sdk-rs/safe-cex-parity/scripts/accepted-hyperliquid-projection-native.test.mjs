@@ -12,7 +12,16 @@ import { verifiedMacroOrigins } from './accepted-macro-origins.mjs';
 import { buildScanner } from './accepted-scanner.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const specs = Object.fromEntries(Object.entries(loadPolicy('generic-aliases')).filter(([name]) => name.startsWith('safe_cex_venue_hyperliquid::')));
+const projectionNames = [
+  'safe_cex_venue_hyperliquid::private_class::PrivateValue',
+  'safe_cex_venue_hyperliquid::private_class::PrivateError',
+  'safe_cex_venue_hyperliquid::public_class::PublicValue',
+  'safe_cex_venue_hyperliquid::public_class::PublicError',
+  'safe_cex_venue_hyperliquid::core_exchange_class::ExchangeValue',
+  'safe_cex_venue_hyperliquid::core_exchange_class::ExchangeError',
+];
+const specs = Object.fromEntries(Object.entries(loadPolicy('generic-aliases')).filter(([name]) => projectionNames.includes(name)));
+assert.deepEqual(Object.keys(specs).sort(), [...projectionNames].sort(), 'all six reviewed associated projections remain selected');
 function command(binary, args) {
   const result = spawnSync(binary, args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, RUSTC_BOOTSTRAP: '1', CARGO_BUILD_JOBS: '1' } });
@@ -50,7 +59,7 @@ async function production(mode, selected) {
     const url = new URL('./accepted-probes.mjs', import.meta.url).href;
     registerHooks({ load(urlToLoad, context, next) {
       const loaded = next(urlToLoad, context); if (urlToLoad !== url) return loaded;
-      const source = String(loaded.source), anchor = '    const command = wasm ?';
+      const source = String(loaded.source), anchor = '    const command = node ?';
       assert.equal(source.split(anchor).length, 2, 'one post-validation copied-production mutation');
       const injected = `    const mutationFile = path.join(sandbox, workspaceRelative, 'safe-cex-venue-hyperliquid/src/realm/value.rs');
     remember(mutationFile); const before = fs.readFileSync(mutationFile, 'utf8');

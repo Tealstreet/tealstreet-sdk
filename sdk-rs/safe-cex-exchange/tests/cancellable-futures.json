@@ -1672,9 +1672,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "3bfc58247c50f7c67d3974ce4846402c330de18748d3bd40798f761e58621c12",
+      "producer_sha256": "4f6fcf74e4492c13965bf5f1065c8c325422de741a731b6d5e25e902b2319506",
       "classification": "no-owned-latch",
-      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership. Reviewed hosted-string ingress retains synchronous typed data provenance before the same signing/send child await; this adds no registration, task or shared owner. Reviewed retained signer rejection projection is synchronous after the existing transport await; its owned error value introduces no task, latch, registration or borrow across suspension."
+      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership. Reviewed hosted-string ingress retains synchronous typed data provenance before the same signing/send child await; this adds no registration, task or shared owner. Reviewed retained signer rejection projection is synchronous after the existing transport await; its owned error value introduces no task, latch, registration or borrow across suspension. Reviewed owned-error retry recovery: canonical ExchangeError-to-Thrown materialization and effective request config attachment are synchronous after the same adapter await. The request/adapter futures remain caller-owned; no new task, timer, waiter, registration or latch is introduced."
     },
     {
       "owner": "src/js_runtime/client.rs::chain_step",
@@ -2289,7 +2289,7 @@
       "source_dependencies": [
         {
           "file": "src/native.rs",
-          "sha256": "07835c2d6c0ddd392229da71575d28b96839a40c562f0ade94d24aa19163e12c"
+          "sha256": "32f5e0c54b9f5547540ffd3dc7e786c257a7e32f37b0f2f459389ff8bfaa20d9"
         },
         {
           "file": "src/waiters.rs",
@@ -2882,7 +2882,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "dc3160a8a6b000a32625c3f4c09676df72607326879c1ae2bc046b368de47c45"
+          "sha256": "f1bbf777eb277c26d24044d19ed62445f4e3a5804a1268ff1641ec88118ecc03"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2927,7 +2927,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "dc3160a8a6b000a32625c3f4c09676df72607326879c1ae2bc046b368de47c45"
+          "sha256": "f1bbf777eb277c26d24044d19ed62445f4e3a5804a1268ff1641ec88118ecc03"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -3031,7 +3031,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "dc3160a8a6b000a32625c3f4c09676df72607326879c1ae2bc046b368de47c45"
+          "sha256": "f1bbf777eb277c26d24044d19ed62445f4e3a5804a1268ff1641ec88118ecc03"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -3075,7 +3075,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "dc3160a8a6b000a32625c3f4c09676df72607326879c1ae2bc046b368de47c45"
+          "sha256": "f1bbf777eb277c26d24044d19ed62445f4e3a5804a1268ff1641ec88118ecc03"
         }
       ],
       "guards": [
@@ -3144,7 +3144,7 @@
       "source_dependencies": [
         {
           "file": "src/native.rs",
-          "sha256": "07835c2d6c0ddd392229da71575d28b96839a40c562f0ade94d24aa19163e12c"
+          "sha256": "32f5e0c54b9f5547540ffd3dc7e786c257a7e32f37b0f2f459389ff8bfaa20d9"
         },
         {
           "file": "src/owned_tasks.rs",
