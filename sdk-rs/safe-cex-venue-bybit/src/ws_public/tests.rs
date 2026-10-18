@@ -443,9 +443,16 @@ fn dispatch_and_subscription_match_live_source() {
         let (socket, _, _) = fixture();
         let calls = Rc::new(Cell::new(0));
         let count = calls.clone();
+        let kind = case["kind"].as_str().unwrap().to_owned();
+        let callback_kind = kind.clone();
         socket.message_handlers.borrow_mut().insert(
             "tickers".into(),
-            Rc::new(RefCell::new(vec![Rc::new(move |_| {
+            Rc::new(RefCell::new(vec![Rc::new(move |value| {
+                match callback_kind.as_str() {
+                    "overflow" => assert!(matches!(value.get("data")?, Js::Number(number) if number == f64::INFINITY)),
+                    "surrogate" => assert!(matches!(value.get("data")?, Js::String(units) if units.as_ref() == [0xd800])),
+                    _ => panic!("unreached prototype callback"),
+                }
                 count.set(count.get() + 1);
                 Ok(())
             })])),
@@ -453,8 +460,8 @@ fn dispatch_and_subscription_match_live_source() {
         on_message(&socket, case["data"].as_str().unwrap()).unwrap();
         assert_eq!(
             calls.get(),
-            0,
-            "Rust typed-map/scalar-boundary refusal: {case}"
+            usize::from(kind != "prototype"),
+            "retained scalar delivery matches the maintained source: {case}"
         );
         let has_stats = socket
             .message_handlers_stats
