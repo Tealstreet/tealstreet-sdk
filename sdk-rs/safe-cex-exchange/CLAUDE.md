@@ -9,6 +9,9 @@ and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
 The typed REST host recovers owned callback errors through the canonical
 ExchangeError-to-Thrown conversion and attaches the effective request config.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
+Native network rejections retain the actual RestRequest as an opaque request
+capability, so Axios enhancement selects its network branch. Setup refusals have
+no request; the native adapter retains its existing name/code and Axios flag.
 
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
