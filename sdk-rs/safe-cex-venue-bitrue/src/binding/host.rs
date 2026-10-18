@@ -12,7 +12,7 @@ use safe_cex_exchange::js_runtime::{
 };
 
 pub(super) fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
-    v.array_values()
+    v.array_values()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))
 }
 pub(super) fn text(v: &Js) -> Result<String, Thrown> {

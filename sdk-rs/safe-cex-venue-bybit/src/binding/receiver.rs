@@ -493,7 +493,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(&this, rt, "submitCreateOrders", |rt, a| {
         let rt = rt.clone();
         let payloads = arg(&a, 0)
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("payloads is not an array"))?;
         let opts = arg(&a, 1);
         Ok(rt.clone().spawn(Box::pin(async move {

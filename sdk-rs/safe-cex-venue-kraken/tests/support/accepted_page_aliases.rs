@@ -82,7 +82,10 @@ fn page_future_keeps_held_native_http_completion_and_exact_wire_params() {
         waker.wake();
     }
     let value = settle(&h, page).unwrap();
-    let rows = value.array_values().expect("native page array");
+    let rows = value
+        .array_values()
+        .expect("native page array")
+        .expect("native array");
     assert_eq!(
         rows.len(),
         2,
@@ -180,7 +183,10 @@ fn income_range_uses_page_callback_with_source_window_and_page_limit() {
         )),
     )
     .unwrap();
-    assert_eq!(result.array_values().unwrap().len(), 0);
+    assert_eq!(
+        result.array_values().unwrap().expect("native array").len(),
+        0
+    );
     let requests = h.http.calls("/history/v3/account-log");
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");

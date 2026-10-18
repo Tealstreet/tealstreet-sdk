@@ -391,8 +391,14 @@ fn lighter_pure_helpers_match_live_typescript() {
         if !book.is_undefined() {
             let bids = book.get("bids").unwrap();
             let asks = book.get("asks").unwrap();
-            let bids = bids.array_values().unwrap();
-            let asks = asks.array_values().unwrap();
+            let bids = bids
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap();
+            let asks = asks
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap();
             native_totals[0] += 1;
             native_totals[1] += bids.len();
             native_totals[2] += asks.len();
@@ -439,6 +445,7 @@ fn lighter_pure_helpers_match_live_typescript() {
         let tickers = safe_cex_venue_lighter::ws_public::parse_rest_ticker_items(input.as_ref())
             .unwrap()
             .array_values()
+            .expect("fixture array property reads")
             .unwrap();
         native_totals[3] += tickers.len();
         assert_eq!(
@@ -485,8 +492,18 @@ fn lighter_pure_helpers_match_live_typescript() {
             safe_cex_venue_lighter::ws_public::parse_rest_order_book_levels(Some(&input)).unwrap();
         let expected_book = native("bookJson");
         for side in ["bids", "asks"] {
-            let actual = book.get(side).unwrap().array_values().unwrap();
-            let expected = expected_book.get(side).unwrap().array_values().unwrap();
+            let actual = book
+                .get(side)
+                .unwrap()
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap();
+            let expected = expected_book
+                .get(side)
+                .unwrap()
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap();
             assert_eq!(actual.len(), expected.len());
             for (actual, expected) in actual.iter().zip(&expected) {
                 assert_eq!(
@@ -498,8 +515,12 @@ fn lighter_pure_helpers_match_live_typescript() {
         let tickers = safe_cex_venue_lighter::ws_public::parse_rest_ticker_items(Some(&input))
             .unwrap()
             .array_values()
+            .expect("fixture array property reads")
             .unwrap();
-        let expected = native("tickersJson").array_values().unwrap();
+        let expected = native("tickersJson")
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(tickers.len(), expected.len());
         for (actual, expected) in tickers.iter().zip(&expected) {
             assert_eq!(

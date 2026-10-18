@@ -72,6 +72,7 @@ fn input() -> Vec<Js> {
 fn bits(values: &Js) -> Vec<u64> {
     let mut bits = values
         .array_items()
+        .expect("fixture array property reads")
         .unwrap()
         .into_iter()
         .flatten()
@@ -148,14 +149,11 @@ fn native_sort_preserves_stability_holes_utf16_and_first_throw() {
             Js::Undefined,
             Js::utf16(&[0xd800]),
         ]);
-        let Js::Array(cells) = &array else {
-            unreachable!()
-        };
-        cells.borrow_mut().push(None);
+        array.set("length", Js::Number(4.0)).unwrap();
         array.call_method("sort", vec![]).unwrap();
         assert_eq!(&*array.get("0").unwrap().to_js_string().unwrap(), &[0xd800]);
-        assert!(matches!(cells.borrow()[2], Some(Js::Undefined)));
-        assert!(cells.borrow()[3].is_none());
+        assert!(array.has_own("2") && array.get("2").unwrap().is_undefined());
+        assert!(!array.has_own("3"));
         let error = Js::array(vec![])
             .call_method("sort", vec![Js::Null])
             .unwrap_err();
@@ -235,6 +233,7 @@ console.log(JSON.stringify([0,1,2,3,4,7,8,9,21,22,31,32,33,63,64,65,129].map(n=>
                 .unwrap();
             let actual: Vec<usize> = values
                 .array_items()
+                .expect("fixture array property reads")
                 .unwrap()
                 .into_iter()
                 .flatten()

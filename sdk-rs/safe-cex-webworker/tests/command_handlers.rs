@@ -275,7 +275,8 @@ impl Host {
         Rc::new(HandlerContext{account_name:RefCell::new("account".into()),exchange_name:ExchangeName::Bybit,exchange:RefCell::new(self.exchange.clone()),ctx:self.clone(),settings:Rc::new(RefCell::new(serde_json::from_value(json!({"placeOrder":{"tpTriggerType":"mark_price","slTriggerType":"last_price"}})).unwrap())),metadata:Rc::new(RefCell::new(serde_json::from_value(json!({"supportedTPSLTriggerTypes":[],"privateProxyIps":[],"fetchLeverageOnMarginSymbolChange":true})).unwrap()))})
     }
     fn drain(&self) {
-        for mut f in std::mem::take(&mut *self.spawned.borrow_mut()) {
+        let tasks = std::mem::take(&mut *self.spawned.borrow_mut());
+        for mut f in tasks {
             match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
                 Poll::Pending => self.spawned.borrow_mut().push(f),
                 Poll::Ready(Err(e)) => self
@@ -624,6 +625,7 @@ fn twap_restore_and_commands_pin_native_partial_effects() {
         1,
         "TWAP native restore catches once"
     );
+    h.drain();
     h.replace_state.set(true);
     h.post_failure.set(false);
     handler

@@ -181,13 +181,13 @@ impl Host for Frame {
             return Err(Thrown::type_error("r.symbol.split is not a function"));
         }
         let parts = method.call(v.clone(), vec![Js::str(separator)])?;
-        Ok(parts.array_values().unwrap_or_default())
+        Ok(parts.array_values()?.unwrap_or_default())
     }
     fn is_array(&self, v: &Js) -> bool {
         v.is_array()
     }
     fn length(&mut self, v: &Js, method: &str) -> Result<usize, Thrown> {
-        if let Some(items) = v.array_items() {
+        if let Js::Array(items) = v {
             return Ok(items.len());
         }
         if method != "length" || v.is_nullish() {
@@ -201,7 +201,7 @@ impl Host for Frame {
         })
     }
     fn has_index(&mut self, v: &Js, index: usize) -> Result<bool, Thrown> {
-        Ok(v.has_own(&index.to_string()))
+        Ok(v.has_index(index))
     }
     fn index(&mut self, v: &Js, index: usize) -> Result<Js, Thrown> {
         v.get(&index.to_string())

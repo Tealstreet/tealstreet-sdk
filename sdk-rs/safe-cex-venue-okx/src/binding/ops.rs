@@ -159,7 +159,7 @@ fn callable(f: &Js) -> Result<(), Thrown> {
 }
 
 fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
-    v.array_values()
+    v.array_values()?
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", v.to_display())))
 }
 
@@ -289,7 +289,7 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
             let mut out = vec![];
             for x in items(&v)? {
                 let r = f(x)?;
-                match r.array_values() {
+                match r.array_values()? {
                     Some(inner) => out.extend(inner),
                     None => out.push(r),
                 }
