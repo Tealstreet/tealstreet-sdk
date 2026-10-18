@@ -1074,7 +1074,7 @@ mod js_sockets {
     }
 
     #[test]
-    fn listeners_are_removed_by_identity_and_errors_reach_them() {
+    fn listeners_are_removed_by_identity_and_base_stops_error_listeners() {
         let (venue, runtime, _store, _) = fixture();
         let context = JsSocketContext::new(runtime.clone());
         *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
@@ -1104,7 +1104,11 @@ mod js_sockets {
             .borrow_mut()
             .push_back(WsEvent::Error("boom".into()));
         runtime.pump();
-        assert_eq!((kept.get(), removed.get(), errors.get()), (1, 0, 1));
+        assert_eq!(
+            (kept.get(), removed.get(), errors.get()),
+            (1, 0, 0),
+            "the base error listener precedes and stops the later plain-socket listener"
+        );
     }
 
     #[test]
