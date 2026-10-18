@@ -97,6 +97,10 @@ artifacts before native Serde/conversion probes and compiled identity controls.
 `PROJECTION_CONTRACT_REVIEW.md` records twenty nonce/builder/request/projection
 function contracts, actual-source/native observations and isolated compiled controls.
 
+`BUILDER_BINDING_CONTRACT_REVIEW.md` records the nineteen builder/approval/member
+contracts, their native and source witnesses, and the bounded constructor-phase
+listener profile. Other package owners retain separate acceptance obligations.
+
 Order cancellation forwards `__suppressAsterUnknownOrderError` through the shared
 request config-extension carrier. The real API interceptors suppress only the
 already-gone `-2011` response; cancellation still logs completion.
@@ -149,6 +153,16 @@ REST candles map raw shared Js rows by the six fields actually read by TS.
 The declared twelve-column tuple does not gate runtime response admission.
 The real V1/V3 binding regression checks short rows, numeric prices, opaque unused
 columns and missing-volume NaN against the maintained fetchOHLCV method.
+
+
+The constructed ticker census in `tests/exchange_trait.rs::production_ticker_coercion_matches_constructed_typescript`
+uses the maintained TS exchange and DefaultStore via `parity/scripts/ticker-strict-source.cjs`.
+252 cases / 372 frames cover bare and wrapped ticker/mark batches, trade last and every validated depth price/amount input. The copied fundingTime field has twelve complete-row refusals; falsey times retain source omission.
+The corpus includes null, strings, NaN-producing inputs, objects, booleans, missing
+fields, raw numeric overflow and signed zero. It compares all eleven native number
+fields before JSON; approved decision-3 refusal preserves the entire bad row.
+`parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
+behavior, requiring a compiled native failure and exact restored pass.
 
 `WIRE_CONTRACT_REVIEW.md` records the 42 private module-scope Deserialize
 companions and their direct shape/native-value witnesses. The focused

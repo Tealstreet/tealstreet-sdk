@@ -3,7 +3,7 @@
 use super::{
     promise,
     scope::{ScopeShared, scope_of},
-    value::{Js, Thrown, arg, error_constructor},
+    value::{Js, Str, Thrown, arg, error_constructor},
 };
 use std::{
     cell::Cell,
@@ -12,21 +12,51 @@ use std::{
 
 use safe_cex_types::js_coercion::json_quote_utf16 as json_quote;
 
+/// JSON.stringify's replacer argument: a ReplacerFunction or an array's PropertyList.
+enum Replacer {
+    None,
+    Function(Js),
+    PropertyList(Vec<Str>),
+}
+
+impl Replacer {
+    /// Array items that are strings or numbers become keys, first occurrence kept.
+    fn from_argument(replacer: Js) -> Result<Self, Thrown> {
+        if replacer.is_callable() {
+            return Ok(Replacer::Function(replacer));
+        }
+        let Some(items) = replacer.array_items() else {
+            return Ok(Replacer::None);
+        };
+        let mut keys: Vec<Str> = vec![];
+        for item in items.into_iter().flatten() {
+            if !matches!(item, Js::String(_) | Js::Number(_)) {
+                continue;
+            }
+            let key: Str = item.to_js_string()?;
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+        Ok(Replacer::PropertyList(keys))
+    }
+}
+
 /// The shared JSON.stringify operation for native data without a replacer.
 pub fn stringify_json(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
     json_stringify(
         &Js::object(vec![("", value.clone())]),
         &[],
-        None,
+        &Replacer::None,
         &mut Vec::new(),
     )
 }
 
-/// SerializeJSONProperty with an optional callable replacer; `None` is undefined.
+/// SerializeJSONProperty; `None` is undefined.
 fn json_stringify(
     holder: &Js,
     key: &[u16],
-    replacer: Option<&Js>,
+    replacer: &Replacer,
     stack: &mut Vec<Js>,
 ) -> Result<Option<Vec<u16>>, Thrown> {
     let mut value = holder.get_key(key)?;
@@ -40,7 +70,7 @@ fn json_stringify(
             value = to_json_member.call(value.clone(), vec![Js::utf16(key)])?;
         }
     }
-    if let Some(replacer) = replacer {
+    if let Replacer::Function(replacer) = replacer {
         value = replacer.call(holder.clone(), vec![Js::utf16(key), value])?;
     }
     let container = value.is_object() || value.is_array();
@@ -85,7 +115,11 @@ fn json_stringify(
             let mut out = vec![b'{' as u16];
             let mut first = true;
             // Key enumeration precedes traversal; getters/replacers can alter later values.
-            for key in value.own_keys() {
+            let keys = match replacer {
+                Replacer::PropertyList(keys) => keys.clone(),
+                _ => value.own_keys(),
+            };
+            for key in keys {
                 let Some(text) = json_stringify(&value, &key, replacer, stack)? else {
                     continue;
                 };
@@ -613,6 +647,23 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 }),
             ),
             (
+                "getOwnPropertyNames",
+                Js::function("getOwnPropertyNames", |_, a| {
+                    let v = arg(&a, 0);
+                    if v.is_nullish() {
+                        return Err(Thrown::type_error(
+                            "Cannot convert undefined or null to object",
+                        ));
+                    }
+                    Ok(Js::array(
+                        v.own_property_names()?
+                            .into_iter()
+                            .map(Js::String)
+                            .collect(),
+                    ))
+                }),
+            ),
+            (
                 "values",
                 Js::function("values", |_, a| {
                     let v = arg(&a, 0);
@@ -667,15 +718,10 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 "stringify",
                 Js::function("stringify", |_, a| {
                     let v = arg(&a, 0);
-                    let replacer = arg(&a, 1);
+                    let replacer = Replacer::from_argument(arg(&a, 1))?;
                     let holder = Js::object(vec![("", v)]);
-                    Ok(json_stringify(
-                        &holder,
-                        &[],
-                        replacer.is_callable().then_some(&replacer),
-                        &mut Vec::new(),
-                    )?
-                    .map_or(Js::Undefined, |t| Js::utf16(&t)))
+                    Ok(json_stringify(&holder, &[], &replacer, &mut Vec::new())?
+                        .map_or(Js::Undefined, |t| Js::utf16(&t)))
                 }),
             ),
             (
@@ -875,13 +921,9 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let console = |severity: &'static str| {
         let rt = rt.clone();
         Js::function(severity, move |_, a| {
-            let mut parts = Vec::with_capacity(a.len());
-            for value in &a {
-                parts.push(String::from_utf16_lossy(&value.to_js_string()?));
-            }
             scope_of(&rt)?
                 .exchange_runtime()
-                .console(severity, &parts.join(" "));
+                .console_values(severity, &a);
             Ok(Js::Undefined)
         })
     };
@@ -890,6 +932,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         Js::object(vec![
             ("error", console("error")),
             ("warn", console("warn")),
+            ("log", console("log")),
             ("info", console("info")),
             ("debug", console("debug")),
         ]),

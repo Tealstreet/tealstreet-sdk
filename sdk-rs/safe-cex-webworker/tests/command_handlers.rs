@@ -51,13 +51,19 @@ impl ExchangeRuntime for Clock {
     fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.inner.spawn_local(f)
     }
-    fn console(&self, l: &str, m: &str) {
+    fn console_values(&self, l: &str, m: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(m);
+        let m = rendered.as_str();
         self.logs.borrow_mut().push((l.into(), m.into()));
     }
     fn is_worker(&self) -> bool {
         true
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, v: &Value) {
