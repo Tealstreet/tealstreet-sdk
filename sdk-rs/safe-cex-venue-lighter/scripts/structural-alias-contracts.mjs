@@ -44,7 +44,7 @@ assert.deepEqual(results.map(result => result.name).sort(), names.slice().sort()
 if (args.includes('--expect-unclassified')) {
   assert.ok(results.every(result => result.failures.some(failure =>
     failure.includes('public alias needs an accepted-set contract'))));
-  console.log('The actual Lighter structural aliases fails missing classification by name.');
+  console.log('The actual Lighter structural aliases fail missing classification by name.');
 } else {
   for (const result of results) assert.deepEqual(result.failures, [], result.name);
   console.log('The actual Lighter structural aliases pass native compiler trait probes.');

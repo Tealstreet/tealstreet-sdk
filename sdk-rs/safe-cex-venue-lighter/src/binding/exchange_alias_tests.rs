@@ -292,6 +292,17 @@ fn structural_alias_private_warning_map_is_shared_and_keeps_cooldown() {
     );
     assert!(events.borrow()[0][1].get("forceToast").unwrap().truthy());
     let count = world.runtime.logs.borrow().len();
+    let sibling = class
+        .construct(vec![world.venue.this.borrow().clone()], None)
+        .unwrap();
+    sibling
+        .call_method("emitReadonlyFallbackWarning", vec![Js::Bool(true)])
+        .unwrap();
+    assert_eq!(
+        world.runtime.logs.borrow().len(),
+        count,
+        "one class cooldown spans distinct socket instances"
+    );
     warn();
     assert_eq!(
         world.runtime.logs.borrow().len(),
