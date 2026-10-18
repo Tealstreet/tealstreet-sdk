@@ -104,9 +104,20 @@ fn actual_quote_reads() {
         let input = js_from_str::<JsNumberInput>(case["raw"].as_str().unwrap());
         if name == "surrogate" {
             assert_eq!(case["expected"]["codeUnit"], 55296);
-            assert!(input.is_err(), "QUOTES-UTF8 boundary {method}");
-            comparisons += 1;
-            continue;
+            let retained: safe_cex_types::retained_json::RetainedJsonInput =
+                input.as_ref().unwrap().clone().decode().unwrap();
+            let symbol = if method == "fetchMarkets" {
+                retained.as_array().unwrap()[0]
+                    .get("instrument")
+                    .unwrap()
+                    .get("symbol")
+                    .unwrap()
+            } else {
+                retained.get("events").unwrap().as_array().unwrap()[0]
+                    .get("symbol")
+                    .unwrap()
+            };
+            assert_eq!(symbol.as_text(), Some([0xd800].as_slice()));
         }
         let errors = RefCell::new(Vec::<Value>::new());
         let trace = RefCell::new(Vec::<Value>::new());
@@ -210,6 +221,37 @@ fn actual_quote_reads() {
                 )
             })
         };
+        if name == "surrogate" {
+            if method == "fetchMarkets" {
+                assert_eq!(
+                    result.unwrap(),
+                    Value::Array(store.markets().iter().map(market).collect()),
+                    "closed market symbol uses source mapping catch"
+                );
+                assert_eq!(
+                    errors.borrow().len(),
+                    1,
+                    "market projection failure reported once"
+                );
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    !error.message.is_empty(),
+                    "closed ticker symbol visibly refuses after mapping"
+                );
+                assert!(
+                    errors.borrow().is_empty(),
+                    "ticker projection remains outside source catch"
+                );
+            }
+            assert_eq!(
+                json!(*trace.borrow()),
+                case["trace"],
+                "surrogate request effects {method}"
+            );
+            comparisons += 1;
+            continue;
+        }
         let actual = match result {
             Ok(value) => json!({"ok":value,"errors":errors.borrow().clone()}),
             Err(error) => {

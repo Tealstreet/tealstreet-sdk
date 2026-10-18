@@ -53,8 +53,18 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, _: &ExchangeError, _: &Value) {}
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
+    fn report_exception(
+        &self,
+        _: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+    }
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+    }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
     }
@@ -179,7 +189,10 @@ impl World {
         self.http.sent.borrow().clone()
     }
     fn settle(&self, value: Js) -> Result<Js, Thrown> {
-        let mut future = Box::pin(await_js(value));
+        let mut future = Box::pin(await_js(
+            &(self.runtime.clone() as Rc<dyn ExchangeRuntime>),
+            value,
+        ));
         for _ in 0..64 {
             if let Poll::Ready(v) = future
                 .as_mut()

@@ -141,9 +141,12 @@ impl BitrueExchange {
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            let value = await_js(this.call_method(name, args).map_err(err)?)
-                .await
-                .map_err(err)?;
+            let value = await_js(
+                &self.rt.exchange_runtime(),
+                this.call_method(name, args).map_err(err)?,
+            )
+            .await
+            .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
@@ -159,7 +162,7 @@ impl BitrueExchange {
                 Ok(value) => callback(value),
                 Err(error) => reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source":"bitrue listener payload"}),
+                    &serde_json::json!({"source":"bitrue listener payload"}).into(),
                 ),
             }
             Ok(Js::Undefined)
@@ -177,9 +180,12 @@ impl BitrueExchange {
     fn unit(&self, name: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            await_js(this.call_method(name, args).map_err(err)?)
-                .await
-                .map_err(err)?;
+            await_js(
+                &self.rt.exchange_runtime(),
+                this.call_method(name, args).map_err(err)?,
+            )
+            .await
+            .map_err(err)?;
             Ok(())
         })
     }

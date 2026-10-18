@@ -371,6 +371,7 @@ pub(crate) fn frame(weak: &W, receiver: &Js) -> Rc<StreamOps<Js, Thrown>> {
     let captures = weak.clone();
     let receiver = receiver.clone();
     let spawns = weak.clone();
+    let waits = weak.clone();
     Rc::new(StreamOps {
         get: Rc::new(|v, k| v.get(k)),
         set: Rc::new(|v, k, value| v.set(k, value)),
@@ -394,7 +395,10 @@ pub(crate) fn frame(weak: &W, receiver: &Js) -> Rc<StreamOps<Js, Thrown>> {
         map: Rc::new(map),
         filter: Rc::new(filter),
         for_of: Rc::new(|input, f| for_of(input, &*f)),
-        await_value: Rc::new(|v| Box::pin(await_js(v))),
+        await_value: Rc::new(move |v| {
+            let waits = waits.clone();
+            Box::pin(async move { await_js(&scope_of(&waits)?.exchange_runtime(), v).await })
+        }),
         spawn: Rc::new(move |task| {
             spawn_detached(
                 &spawns,

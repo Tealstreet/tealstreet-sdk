@@ -154,9 +154,12 @@ impl CryptocomExchange {
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            let value = await_js(this.call_method(member, args).map_err(err)?)
-                .await
-                .map_err(err)?;
+            let value = await_js(
+                &self.rt.exchange_runtime(),
+                this.call_method(member, args).map_err(err)?,
+            )
+            .await
+            .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
@@ -173,7 +176,7 @@ impl CryptocomExchange {
                 Ok(typed) => callback(typed),
                 Err(error) => reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source": "cryptocom listener payload"}),
+                    &serde_json::json!({"source": "cryptocom listener payload"}).into(),
                 ),
             }
             Ok(Js::Undefined)
@@ -193,9 +196,12 @@ impl CryptocomExchange {
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            await_js(this.call_method(member, args).map_err(err)?)
-                .await
-                .map_err(err)?;
+            await_js(
+                &self.rt.exchange_runtime(),
+                this.call_method(member, args).map_err(err)?,
+            )
+            .await
+            .map_err(err)?;
             Ok(())
         })
     }

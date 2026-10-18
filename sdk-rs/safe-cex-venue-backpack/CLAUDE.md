@@ -377,3 +377,15 @@ Native HTTP executions belong to BaseExchange shared operations. A rejected
 ticker Promise.all drops its waiter while the already-started mark-price request
 continues through response interceptors. The native registry proxy test holds
 that response until after fetchTickers rejects, then observes both error events.
+
+The adapter HTTP fixtures drain the actual exchange-owned runtime jobs before
+asserting completion. The checkpoint driver never advances the clock: rate-bound
+requests remain pending until the test explicitly opens the next window. The
+constructed-client proof observes pending work before pumping, one real terminal
+request afterward, unchanged clock bits, and the original response. Primary and
+secondary budgets and signing-after-dequeue assertions remain in their existing
+real-client tests. A single initial Future poll is not a completion guarantee.
+
+The API/signing corpus captures lone-surrogate prepared values through canonical
+retained numeric ingress and compares native UTF-16 units. Legacy UTF-8 prepared
+helper/output limits are separate from that capture; their existing source cases remain.

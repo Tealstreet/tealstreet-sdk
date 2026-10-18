@@ -327,7 +327,7 @@ fn symbol_runtime() -> crate::symbol_settings::WeexSymbolSettingsRuntime<Host, J
         truthy: Js::truthy,
         fetch: |h, symbol| {
             let pending = h.call("fetchSymbolConfigs", std::vec![Js::utf16(symbol)]);
-            Box::pin(async move { await_js(pending?).await })
+            Box::pin(async move { await_js(&h.0.exchange_runtime(), pending?).await })
         },
         fetched: |_, configs, symbol| configs.call_method("get", std::vec![Js::utf16(symbol)]),
         account_position_mode: |h| to_typed(&h.root("accountPositionMode")?),

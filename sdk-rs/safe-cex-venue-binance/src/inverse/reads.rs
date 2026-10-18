@@ -1,5 +1,11 @@
 //! binanceinverse.exchange.ts read methods; raw response graphs remain native.
-use super::{Rt, ops::*};
+use super::{
+    Rt,
+    ops::{
+        contains, emit, enum_value, error_message, global, install_async, install_sync, optional,
+        or, parse, parse_or_zero, request, require_array, store, text, v,
+    },
+};
 use safe_cex_exchange::js_runtime::{
     promise::JsFuture,
     value::{Js, Thrown, arg},
@@ -173,7 +179,9 @@ fn fetch_tickers(rt: Rt, _: Vec<Js>) -> JsFuture<'static> {
                 requests.push(xhr.call_method("get", vec![endpoints.get(key)?])?);
             }
             let all = global(&rt, "Promise.all", vec![Js::array(requests)])?;
-            let data = safe_cex_exchange::js_runtime::promise::await_js(all).await?;
+            let data =
+                safe_cex_exchange::js_runtime::promise::await_js(&rt.exchange_runtime(), all)
+                    .await?;
             let daily = require_array(&endpoints.get("TICKERS_24H")?, data.get("0")?.get("data")?)?;
             let books =
                 require_array(&endpoints.get("TICKERS_BOOK")?, data.get("1")?.get("data")?)?;

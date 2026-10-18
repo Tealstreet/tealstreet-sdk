@@ -114,11 +114,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, data: &serde_json::Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports
             .borrow_mut()
             .push(json!({"error":{"name":error.name,"message":error.message},"data":data}));
@@ -316,7 +320,11 @@ fn base_error_events_match_live_typescript_oracle() {
             base.emit_and_log_error(
                 error_input(&case["input"]),
                 case["msg"].as_str(),
-                case.get("extra"),
+                case.get("extra")
+                    .map(|value| {
+                        safe_cex_types::retained_json::RetainedJsonInput::from(value.clone())
+                    })
+                    .as_ref(),
             )
             .unwrap();
             let mut actual = json!({"events":events.borrow().clone(),"reports":runtime.reports.borrow().clone()});

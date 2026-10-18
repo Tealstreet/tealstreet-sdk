@@ -64,10 +64,18 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         panic!("unexpected background exception: {error}")
     }
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         panic!("unexpected raw exception")
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -159,8 +167,11 @@ pub(super) fn classifier_host() -> (Realm, super::Host) {
     (realm, host)
 }
 
-fn settle(runtime: &Runtime, value: Js) -> Result<Js, Thrown> {
-    let mut future = Box::pin(await_js(value));
+fn settle(runtime: &Rc<Runtime>, value: Js) -> Result<Js, Thrown> {
+    let mut future = Box::pin(await_js(
+        &(runtime.clone() as Rc<dyn ExchangeRuntime>),
+        value,
+    ));
     for _ in 0..10_000 {
         if let Poll::Ready(result) = future
             .as_mut()

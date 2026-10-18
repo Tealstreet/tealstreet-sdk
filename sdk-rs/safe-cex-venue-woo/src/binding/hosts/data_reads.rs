@@ -160,7 +160,7 @@ pub(crate) fn schedule(
     let task = runtime.clone().spawn_local(Box::pin(async move {
         loop {
             if let Err(e) = runtime.sleep(ms).await {
-                runtime.report_exception(&e, &serde_json::json!({ "source": source }));
+                runtime.report_exception(&e, &serde_json::json!({ "source": source }).into());
                 return;
             }
             match callback() {
@@ -174,7 +174,7 @@ pub(crate) fn schedule(
                             if let Err(e) = task.await {
                                 reporter.report_exception(
                                     &e.to_exchange_error(),
-                                    &serde_json::json!({ "source": source }),
+                                    &serde_json::json!({ "source": source }).into(),
                                 );
                             }
                             Ok(Js::Undefined)
@@ -183,7 +183,7 @@ pub(crate) fn schedule(
                 }
                 Err(e) => runtime.report_exception(
                     &e.to_exchange_error(),
-                    &serde_json::json!({ "source": source }),
+                    &serde_json::json!({ "source": source }).into(),
                 ),
             }
             if !repeat {
@@ -300,7 +300,7 @@ impl body::Host for Frame {
     }
     fn call(&mut self, call: Prepared, args: Vec<Js>) -> Result<Task<Js, Thrown>, Thrown> {
         let result = callee(call).invoke(args)?;
-        Ok(Box::pin(await_js(result)))
+        Ok(Box::pin(await_js(&self.rt.exchange_runtime(), result)))
     }
     fn invoke(&mut self, call: Prepared, args: Vec<Js>) -> Result<Js, Thrown> {
         callee(call).invoke(args)
@@ -316,7 +316,7 @@ impl body::Host for Frame {
             args.push(Js::object(vec![("params", params)]));
         }
         let response = callee(call).invoke(args)?;
-        Ok(Box::pin(await_js(response)))
+        Ok(Box::pin(await_js(&self.rt.exchange_runtime(), response)))
     }
     fn root(&mut self, key: &str) -> Result<Js, Thrown> {
         match key {
@@ -360,7 +360,7 @@ impl body::Host for Frame {
         Ok(())
     }
     fn await_element(&mut self, v: Js) -> Task<Js, Thrown> {
-        Box::pin(await_js(v))
+        Box::pin(await_js(&self.rt.exchange_runtime(), v))
     }
     fn is_undefined(&self, v: &Js) -> bool {
         v.is_undefined()

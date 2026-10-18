@@ -993,7 +993,10 @@ impl GatewayHost for NativeGatewayHost {
             }
             timers.borrow_mut().remove(&id);
             if let Err(error) = callback() {
-                runtime.report_exception(&error, &serde_json::json!({"operation":"gateway timer"}));
+                runtime.report_exception(
+                    &error,
+                    &serde_json::json!({"operation":"gateway timer"}).into(),
+                );
             }
         }));
         self.timers.borrow_mut().insert(id, task);
@@ -1032,7 +1035,7 @@ fn fire(
         if let Err(error) = listener(event()) {
             runtime.report_exception(
                 &error,
-                &serde_json::json!({"operation":"gateway socket event"}),
+                &serde_json::json!({"operation":"gateway socket event"}).into(),
             );
         }
     }
@@ -1130,7 +1133,10 @@ struct GatewayData {
 }
 fn report(runtime: &Rc<dyn WsRuntime>, result: Result<(), ExchangeError>, operation: &str) {
     if let Err(error) = result {
-        runtime.report_exception(&error, &serde_json::json!({ "operation": operation }));
+        runtime.report_exception(
+            &error,
+            &serde_json::json!({ "operation": operation }).into(),
+        );
     }
 }
 impl ExternalPublicData for GatewayData {

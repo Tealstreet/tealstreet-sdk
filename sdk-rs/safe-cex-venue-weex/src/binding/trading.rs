@@ -69,7 +69,7 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 &method.to_ascii_lowercase(),
                 std::vec![Js::str(endpoint), data],
             )?;
-            Ok(Box::pin(await_js(pending)))
+            Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
         error_value: |e| e.value.clone(),
         error_sink: |h| v::method(h, &h.this(), "emitAndLogError"),

@@ -471,7 +471,7 @@ fn listen(
                     .exchange
                     .base()
                     .runtime
-                    .report_exception(&error, &json!({"method":method})),
+                    .report_exception(&error, &json!({"method":method}).into()),
             }
         }
     });

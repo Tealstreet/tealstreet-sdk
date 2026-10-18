@@ -55,6 +55,7 @@ fn spread(value: &Js) -> Result<Vec<Js>, Thrown> {
 
 pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
     let global = weak.clone();
+    let awaits = weak.clone();
     Rc::new(SocketOps {
         undefined: Rc::new(|| Js::Undefined),
         boolean: Rc::new(Js::Bool),
@@ -109,7 +110,10 @@ pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
             iterator_close(record)?;
             Ok((first, second))
         }),
-        await_value: Rc::new(|v| Box::pin(await_js(v))),
+        await_value: Rc::new(move |v| {
+            let awaits = awaits.clone();
+            Box::pin(async move { await_js(&scope(&awaits)?.exchange_runtime(), v).await })
+        }),
     })
 }
 
@@ -262,13 +266,13 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
         fn report_exception(
             &self,
             _: &safe_cex_exchange::runtime::ExchangeError,
-            _: &serde_json::Value,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
         ) {
         }
         fn report_raw_exception(
             &self,
             _: &safe_cex_exchange::js_runtime::value::Js,
-            _: &serde_json::Value,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
         ) {
         }
         fn execute_worker_request(

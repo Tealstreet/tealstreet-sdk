@@ -235,7 +235,7 @@ pub(crate) fn js_to_native(
     value: Js,
 ) -> NativePromise<AccountValue> {
     let (promise, resolver) = NativePromise::pending(microtasks);
-    let wait = safe_cex_exchange::js_runtime::promise::await_js(value);
+    let wait = safe_cex_exchange::js_runtime::promise::await_js(runtime, value);
     Promise::spawn(
         runtime,
         Box::pin(async move {

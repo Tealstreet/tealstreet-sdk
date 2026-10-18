@@ -88,7 +88,10 @@ impl AccountHost for Rt {
         Ok(())
     }
     fn resolve(&self, v: Js) -> Result<Rc<Operation>, Thrown> {
-        let promise = Promise::spawn(&self.exchange_runtime(), Box::pin(await_js(v)));
+        let promise = Promise::spawn(
+            &self.exchange_runtime(),
+            Box::pin(await_js(&self.exchange_runtime(), v)),
+        );
         Ok(Rc::new(Operation {
             waiter: std::cell::RefCell::new(promise.wait()),
             promise,
@@ -712,7 +715,12 @@ impl AuthHost for Rt {
         c.1.call(c.0, a)
     }
     fn capture_constructor(&self, n: &'static str) -> Result<Js, Thrown> {
-        self.global(n)
+        let mut parts = n.split('.');
+        let mut constructor = self.global(parts.next().unwrap_or_default())?;
+        for member in parts {
+            constructor = constructor.get(member)?;
+        }
+        Ok(constructor)
     }
     fn construct(&self, c: Js, a: Vec<Js>) -> Result<Js, Thrown> {
         c.construct(a, None)

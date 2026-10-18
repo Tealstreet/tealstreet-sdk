@@ -104,8 +104,15 @@ fn run(spec: &Value) {
     );
     let outcome = match invoked {
         Ok(pending) => {
-            let future: ExchangeFuture<'_, Js> =
-                Box::pin(async move { await_js(pending).await.map_err(|e| e.to_exchange_error()) });
+            let future: ExchangeFuture<'_, Js> = Box::pin({
+                let await_runtime: std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
+                    h.runtime.clone();
+                async move {
+                    await_js(&await_runtime, pending)
+                        .await
+                        .map_err(|e| e.to_exchange_error())
+                }
+            });
             h.drive(future)
         }
         Err(e) => Err(e.to_exchange_error()),

@@ -91,12 +91,16 @@ impl OrderlyExchange {
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt.this.clone();
-        Box::pin(async move { Ok(to_typed(&await_js(this.call_method(name, args)?).await?)?) })
+        Box::pin(async move {
+            Ok(to_typed(
+                &await_js(&self.rt.exchange_runtime(), this.call_method(name, args)?).await?,
+            )?)
+        })
     }
     fn unit(&self, name: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            await_js(this.call_method(name, args)?).await?;
+            await_js(&self.rt.exchange_runtime(), this.call_method(name, args)?).await?;
             Ok(())
         })
     }
@@ -105,10 +109,10 @@ impl Drop for OrderlyExchange {
     fn drop(&mut self) {
         if !self.rt.base().is_disposed() {
             if let Err(e) = self.dispose() {
-                self.rt
-                    .shared
-                    .runtime
-                    .report_exception(&e, &serde_json::json!({"source":"OrderlyExchange.drop"}));
+                self.rt.shared.runtime.report_exception(
+                    &e,
+                    &serde_json::json!({"source":"OrderlyExchange.drop"}).into(),
+                );
             }
         }
         for (_, task) in self.rt.shared.timers.borrow_mut().drain(..) {

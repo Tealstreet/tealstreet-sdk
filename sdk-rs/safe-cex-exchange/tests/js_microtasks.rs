@@ -71,11 +71,12 @@ setTimeout(()=>{trace.push('timer');console.log(JSON.stringify(trace))},0);
         trace.borrow_mut().push("after-then".into());
         let continuation = trace.clone();
         let runtime: Rc<dyn ExchangeRuntime> = native.clone();
+        let await_runtime = runtime.clone();
         let observer = Promise::spawn(
             &runtime,
             Box::pin(async move {
                 continuation.borrow_mut().push("async-start".into());
-                await_js(promise).await?;
+                await_js(&await_runtime, promise).await?;
                 continuation.borrow_mut().push("await".into());
                 Ok(Js::Undefined)
             }),
@@ -104,7 +105,7 @@ setTimeout(()=>{trace.push('timer');console.log(JSON.stringify(trace))},0);
             .await
             .unwrap();
         assert_eq!(*trace.borrow(), expected);
-        await_js(Js::Promise(observer)).await.unwrap();
+        await_js(&runtime, Js::Promise(observer)).await.unwrap();
     });
 }
 
@@ -240,10 +241,11 @@ const b=Promise.resolve().then(()=>trace.push('earlier'));resolve();await Promis
             let pending = trace.clone();
             let a = if asynchronous {
                 let promise = Js::Promise(promise.clone());
+                let await_runtime = runtime.clone();
                 Js::Promise(Promise::spawn(
                     &runtime,
                     Box::pin(async move {
-                        await_js(promise).await?;
+                        await_js(&await_runtime, promise).await?;
                         pending.borrow_mut().push("pending".into());
                         Ok(Js::Undefined)
                     }),
@@ -270,8 +272,8 @@ const b=Promise.resolve().then(()=>trace.push('earlier'));resolve();await Promis
                 )
                 .unwrap();
             promise.settle(Ok(Js::Undefined));
-            await_js(a).await.unwrap();
-            await_js(b).await.unwrap();
+            await_js(&runtime, a).await.unwrap();
+            await_js(&runtime, b).await.unwrap();
             rows.push(trace.borrow().clone());
         }
         let trace = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -303,8 +305,8 @@ const b=Promise.resolve().then(()=>trace.push('earlier'));resolve();await Promis
                 })],
             )
             .unwrap();
-        await_js(a).await.unwrap();
-        await_js(b).await.unwrap();
+        await_js(&runtime, a).await.unwrap();
+        await_js(&runtime, b).await.unwrap();
         rows.push(trace.borrow().clone());
         assert_eq!(rows, expected);
     });
@@ -444,8 +446,8 @@ const trace=[];const a=Promise[method](values).then(()=>trace.push('all'));const
                     )
                     .unwrap();
                 pending.settle(Ok(Js::Number(1.0)));
-                await_js(a).await.unwrap();
-                await_js(b).await.unwrap();
+                await_js(&runtime, a).await.unwrap();
+                await_js(&runtime, b).await.unwrap();
                 rows.push(trace.borrow().clone());
             }
         }
@@ -467,7 +469,11 @@ const trace=[];const a=Promise[method](values).then(()=>trace.push('all'));const
             Js::str("first"),
         )));
         rows.push(vec![
-            await_js(combined).await.unwrap_err().value.to_display(),
+            await_js(&runtime, combined)
+                .await
+                .unwrap_err()
+                .value
+                .to_display(),
         ]);
         assert_eq!(rows, expected);
     });
@@ -543,11 +549,12 @@ fn native_host_discard_releases_polled_and_unpolled_promise_jobs() {
             let pending = Promise::pending(&runtime);
             let probe = Rc::new(());
             let weak = Rc::downgrade(&probe);
+            let await_runtime = runtime.clone();
             drop(Promise::spawn(
                 &runtime,
                 Box::pin(async move {
                     let _keep = probe;
-                    await_js(Js::Promise(pending)).await
+                    await_js(&await_runtime, Js::Promise(pending)).await
                 }),
             ));
             if polled {
@@ -661,8 +668,8 @@ await Promise.all([a,b]);rows.push(trace);
                         )
                         .unwrap();
                 }
-                await_js(a).await.unwrap();
-                await_js(b).await.unwrap();
+                await_js(&runtime, a).await.unwrap();
+                await_js(&runtime, b).await.unwrap();
                 rows.push(trace.borrow().clone());
             }
         }

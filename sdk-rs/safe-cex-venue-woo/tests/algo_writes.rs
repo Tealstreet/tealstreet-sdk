@@ -1,3 +1,5 @@
+#[path = "support/retained_input_observations.rs"]
+mod retained_input_observations;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str};
 use safe_cex_types::object_map::JsObjectMap;
 use safe_cex_venue_woo::v3_private_orders::{
@@ -206,7 +208,16 @@ fn native_algo_declarations_before_source() {
         if value["family"] == "POSITIONAL_TP_SL" {
             assert!(js_from_str::<WooV3PositionalPlaceInput>(&raw).is_err());
         }
-        assert!(js_from_str::<JsObjectMap<JsNumberInput>>(&raw).is_err());
+        let retained: JsObjectMap<JsNumberInput> = js_from_str(&raw).unwrap();
+        let tag = retained["algoOrderTag"]
+            .clone()
+            .decode::<safe_cex_types::retained_json::RetainedJsonInput>()
+            .unwrap();
+        assert_eq!(
+            tag.as_text().unwrap(),
+            &[0xd800],
+            "WOO-ALGO-DECL native retained tag"
+        );
     }
     assert!(
         js_from_str::<WooV3PositionalTriggerInput>(
@@ -475,10 +486,15 @@ fn native_algo_guard_choices_before_source() {
     }
     assert!(js_from_str::<WooV3AlgoTriggerPriceType>(r#""UNKNOWN""#).is_err());
     for raw in [r#"{"kept":"\ud800"}"#, r#"["\ud800"]"#, r#""\ud800""#] {
-        assert!(
-            js_from_str::<JsNumberInput>(raw).is_err(),
-            "WOO-ALGO-GUARD native whole lone-value capture refusal"
-        );
+        use safe_cex_types::retained_json::RetainedJsonInput as Input;
+        let retained = retained_input_observations::capture(raw);
+        let units = match &retained {
+            Input::Text(units) => units.as_slice(),
+            Input::Array(values) => values[0].as_text().unwrap(),
+            Input::Object(_) => retained.get("kept").unwrap().as_text().unwrap(),
+            other => panic!("unexpected retained guard shape {other:?}"),
+        };
+        assert_eq!(units, &[0xd800], "WOO-ALGO-GUARD native captured units");
     }
     for expected in ["\u{10000}", r"\ud800"] {
         let value = safe_cex_num::numeric_ingress::js_from_str::<JsNumberInput>(
@@ -917,18 +933,23 @@ fn native_algo_request_choices_before_source() {
     );
     assert_eq!(symbol, "PERP_SOL_USDT");
     let tag_raw = stop().to_string().replace("audit-19", r"\ud800");
-    assert!(
-        js_from_str::<JsNumberInput>(&tag_raw).is_err(),
-        "WOO-ALGO-REQUEST native whole lone-tag refusal"
+    assert_eq!(
+        retained_input_observations::text_at(&tag_raw, &["algoOrderTag"]),
+        vec![0xd800],
+        "WOO-ALGO-REQUEST native retained tag units"
     );
     let comparison_raw = amend(order()).to_string().replace(
         r#""totalExecutedQuantity":"0""#,
         r#""totalExecutedQuantity":"\ud800""#,
     );
     assert!(comparison_raw.contains(r"\ud800"));
-    assert!(
-        js_from_str::<JsNumberInput>(&comparison_raw).is_err(),
-        "WOO-ALGO-REQUEST native whole stored-unit refusal"
+    assert_eq!(
+        retained_input_observations::text_at(
+            &comparison_raw,
+            &["currentOrder", "totalExecutedQuantity"]
+        ),
+        vec![0xd800],
+        "WOO-ALGO-REQUEST native retained stored units"
     );
     for (raw, expected) in [(r"\ud800\udc00", "\u{10000}"), (r"\\ud800", r"\ud800")] {
         let input: JsObjectMap<JsNumberInput> =

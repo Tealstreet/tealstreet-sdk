@@ -1,5 +1,11 @@
 //! binanceinverse.exchange.ts order formatting and write methods.
-use super::{Rt, ops::*};
+use super::{
+    Rt,
+    ops::{
+        contains, emit, enum_value, error_message, global, install_async, install_sync, optional,
+        or, request, store, text,
+    },
+};
 use safe_cex_exchange::js_runtime::{
     promise::{JsFuture, await_js},
     value::{Js, Thrown, arg},
@@ -412,7 +418,11 @@ fn split(rt: &Rt, a: &[Js]) -> Result<Js, Thrown> {
 fn place_order(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
     Box::pin(async move {
         let payloads = rt.call_path("formatCreateOrder", vec![arg(&a, 0)])?;
-        await_js(rt.call_path("placeOrderPayloads", vec![payloads])?).await
+        await_js(
+            &rt.exchange_runtime(),
+            rt.call_path("placeOrderPayloads", vec![payloads])?,
+        )
+        .await
     })
 }
 fn place_orders(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
@@ -424,7 +434,11 @@ fn place_orders(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
                     .iterable_values()?,
             );
         }
-        await_js(rt.call_path("placeOrderPayloads", vec![Js::array(payloads)])?).await
+        await_js(
+            &rt.exchange_runtime(),
+            rt.call_path("placeOrderPayloads", vec![Js::array(payloads)])?,
+        )
+        .await
     })
 }
 fn place_payloads(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
@@ -609,8 +623,16 @@ fn update_order(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
                 next.set(key, update.get(key)?)?;
             }
         }
-        await_js(rt.call_path("cancelOrders", vec![Js::array(vec![order])])?).await?;
-        await_js(rt.call_path("placeOrder", vec![next])?).await
+        await_js(
+            &rt.exchange_runtime(),
+            rt.call_path("cancelOrders", vec![Js::array(vec![order])])?,
+        )
+        .await?;
+        await_js(
+            &rt.exchange_runtime(),
+            rt.call_path("placeOrder", vec![next])?,
+        )
+        .await
     })
 }
 fn change_mode(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
