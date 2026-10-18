@@ -76605,7 +76605,7 @@
         }
       }
     ],
-    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations captured from maintained TypeScript before executing Rust. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
   },
   "safe_cex_venue_asterdex::account_helpers::mirror_cumulative_order_fill": {
     "category": "decoder",
@@ -76956,7 +76956,7 @@
         }
       }
     ],
-    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations captured from maintained TypeScript before executing Rust. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
   },
   "safe_cex_venue_asterdex::account_helpers::parse_asset_balance_updates": {
     "category": "decoder",
@@ -77288,7 +77288,7 @@
         "output": null
       }
     ],
-    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations captured from maintained TypeScript before executing Rust. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
   },
   "safe_cex_venue_asterdex::account_helpers::handle_account_update": {
     "category": "decoder",
@@ -77473,7 +77473,7 @@
         ]
       }
     ],
-    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations captured from maintained TypeScript before executing Rust. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
   },
   "safe_cex_venue_asterdex::account_helpers::get_account_update_upnl_deltas": {
     "category": "decoder",
@@ -77798,7 +77798,7 @@
         "output": []
       }
     ],
-    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations captured from maintained TypeScript before executing Rust. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
   },
   "safe_cex_venue_asterdex::api_helpers::generate_v1_signature": {
     "category": "decoder",
@@ -77906,7 +77906,7 @@
         }
       }
     ],
-    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations captured from maintained TypeScript before executing Rust. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
   },
   "safe_cex_venue_asterdex::api_helpers::generate_aster_dex_code_message_signature": {
     "category": "decoder",
@@ -78067,6 +78067,6 @@
         }
       }
     ],
-    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations captured from maintained TypeScript before executing Rust. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
   }
 }

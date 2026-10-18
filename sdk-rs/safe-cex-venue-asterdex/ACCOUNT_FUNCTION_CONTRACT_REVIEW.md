@@ -29,7 +29,8 @@ ordinary native cache. The native probe runner retains its separate sandbox and
 | `api_helpers::generate_aster_dex_code_message_signature` | Real shared EIP-712 signing, both chains, optional testnet, bare/prefixed keys, non-ASCII messages and malformed/zero-key refusals. |
 
 The 128 fixed native observations include 68 expectations for seven helpers
-captured from the maintained TypeScript bodies before any Rust execution.
+derived from the maintained TypeScript bodies, with fixed numeric/signature
+anchors independent of the Rust output.
 `accepted-account-source.cjs` replays those unmodified bodies against the frozen
 expectations. Its parent Store, clock and effect sinks are explicit dependencies;
 they do not replace the helper under review. It loads the actual shared enums and
