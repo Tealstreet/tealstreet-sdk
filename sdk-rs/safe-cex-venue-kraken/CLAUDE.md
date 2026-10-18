@@ -105,8 +105,9 @@ and nonzero balance-delta supplements prevent same-valued swaps and collapsed
 branches from satisfying these assertions. No local record-field Serde renames
 are involved: the input enum keeps keys and the output is constructed directly.
 This is not an interface-field AST census and makes no inherited-field claim.
-Paired source acceptance/Rust refusal witnesses cover lone surrogates and the
-shared depth budget. Host callback exceptions and resolver order are exercised.
+Paired source/native witnesses retain lone-surrogate units and observe their
+explicit final closed String projection; separate depth-budget refusals remain.
+Host callback exceptions and resolver order are exercised.
 
 Utility porting gate: `cargo test --manifest-path sdk-rs/Cargo.toml
 -p safe-cex-venue-kraken --test utilities --jobs 1` with the same explicit compiler
@@ -441,11 +442,16 @@ order controls fail before their respective cutovers. Symbol and ID Strings keep
 their explicit final shared output admission.
 
 The retained input admits lone UTF-16 surrogates. The read/utility boundary
-witnesses inspect those units before invoking the existing consumers: token and
-leverage wire conversion, fill/income model conversion, and scalar String
-admission still refuse their closed representations. Leverage reports that
-refusal once before any cache mutation. Depth and numeric-query refusals remain
-separate; all twelve utility source boundary cases are retained.
+witnesses inspect those units before invoking the existing consumers. Final
+closed String outputs use the shared U+FFFD projection: token output, leverage
+cache keys, fill IDs and income IDs are admitted, with every native numeric
+field and ordered effect still checked. `accepted_boundary_observers` reaches
+the constructed Scope, signed token/leverage/account-log clients and live fill
+host; original native response cells retain their unpaired units. Depth and
+numeric-query refusals remain separate; all twelve source cases are retained.
+Error response witnesses read signed zero through `retained_response_input`;
+`response_json_view` intentionally follows JSON.stringify and projects -0 to +0.
+See [RETAINED_BOUNDARY_REVIEW.md](RETAINED_BOUNDARY_REVIEW.md).
 
 ### REST read receiver coverage
 
@@ -566,8 +572,40 @@ alias probes; `accepted_loop_socket_aliases` drives the actual socket/Store and
 signed timer/HTTP paths. Three named compiled consumer faults and exact restored
 passes are required by `loop-socket-alias-controls.py`.
 
+
+Historical fill pages in the constructed ReadHost map directly over the canonical
+Js graph, using the shared map/filter and iterator operations. Only fields read
+by kraken.fills.ts are reached; never serialize or capture the whole row to
+produce a utility DTO first. Unrelated surrogates, nonfinite numbers and deep
+properties must not erase a page. Native IDs retain their exact units until the
+existing final Execution projection. tests/fill-ingress-source.cjs executes the
+maintained mapper for twelve wire cases; exchange_binding checks both surviving
+fills, every numeric bit and signed unwindowed/cursor requests. The constructed
+Scope test also checks exact native units and an unread throwing property.
+The standalone fills utility's separately documented profile is not broadened
+by this production binding fix.
+
 `TOPIC_ALIAS_REVIEW.md` records the UTF-16 collection decoder and physical public
 subscription boundary. Keep `Topic` units in canonical retained JSON until wire
 escaping; do not reintroduce a lossy String conversion. The `accepted_topic_alias`
 native witnesses, live-source script and compiled lossy-consumer control cover
 both Futures and Spot. `topic-alias-contracts.mjs` probes only this concrete alias.
+
+`STREAM_ADAPTER_RETIREMENT.md` records why the duplicate typed stream adapters and
+three callback aliases were removed. Their old class target strings are native
+dispatch identifiers, not Rust calls. Stream manifest rows map to the live member
+dispatcher. Preserve constructed book/candle tests and the actual Futures socket
+no-op witness; `scripts/stream-binding-controls.py` requires four compiled named
+failures and exact-source restored passes.
+
+All four production socket message hosts share `binding/sockets.rs::parse_frame`.
+It sends original UTF-16 units through the canonical RetainedJsonInput parser
+and constructs native Js directly; a serde Value intermediate would reject
+lone-surrogate escapes and drop the complete frame. Strict and tolerant parse
+error branches remain distinct. `constructed_private_ingress_keeps_surrogate_frames_neighbors_and_raw_info`
+delivers frames through both constructed private sockets and checks Store orders,
+good neighbors and exact raw info units; the public book fixture also receives
+a lone-unit unknown field through both real public sockets. The maintained
+onMessage oracle observes dispatch for all four source classes before JSON
+projection. These are socket ingress checks, not acceptance of every typed REST
+or utility projection in this crate.

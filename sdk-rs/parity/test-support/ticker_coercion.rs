@@ -169,7 +169,10 @@ pub fn assert_native(tickers: &[Ticker], case: &Value) {
             ("ask", ticker.ask),
             ("last", ticker.last),
             ("mark", ticker.mark),
-            ("index", ticker.index),
+            (
+                "index",
+                ticker.index.expect("numeric ticker source profile"),
+            ),
             ("percentage", ticker.percentage),
             ("volume", ticker.volume),
             ("quoteVolume", ticker.quote_volume),

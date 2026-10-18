@@ -29,7 +29,7 @@ pub fn get_bybit_trigger_direction_price(opts: &PlaceOrderOpts, ticker: &Ticker)
     match opts.r#type {
         OrderType::Conditional => match opts.trigger_type {
             Some(Trigger::MarkPrice) => ticker.mark,
-            Some(Trigger::IndexPrice) => ticker.index,
+            Some(Trigger::IndexPrice) => ticker.index.unwrap_or(0.0),
             _ => ticker.last,
         },
         OrderType::StopLoss => {

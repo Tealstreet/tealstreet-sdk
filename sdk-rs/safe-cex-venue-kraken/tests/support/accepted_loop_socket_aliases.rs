@@ -22,7 +22,7 @@ fn ticker() -> Ticker {
         ask: 2.0,
         last: 3.0,
         mark: 4.0,
-        index: 5.0,
+        index: Some(5.0),
         mid_price: None,
         percentage: 6.0,
         open_interest: 7.0,

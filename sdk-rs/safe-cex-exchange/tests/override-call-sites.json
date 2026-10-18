@@ -8776,42 +8776,6 @@
     ]
   },
   {
-    "file": "safe-cex-venue-kraken/src/stream_adapters.rs",
-    "function": "futures_listen_order_book",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "listen_order_book",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-kraken/src/stream_adapters.rs",
-    "function": "spot_listen_ohlcv",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "listen_ohlcv",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-kraken/src/stream_adapters.rs",
-    "function": "spot_listen_order_book",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "listen_order_book",
-        "count": 1
-      }
-    ]
-  },
-  {
     "file": "safe-cex-venue-kraken/src/trading.rs",
     "function": "futures_margin",
     "edges": [

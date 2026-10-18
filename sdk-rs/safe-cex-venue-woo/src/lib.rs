@@ -36,43 +36,18 @@ pub mod historical_fills;
 
 pub mod order_pages;
 
-pub mod v3_request;
 pub mod v3_ticker;
 pub mod v3_ws_quotes;
-
-pub mod v3_ws_topics;
-
-pub mod v3_ws_commands;
-
-pub mod v3_ws_session;
-
-pub mod v3_ws_public;
-
-pub mod v3_ws_state;
-
-pub mod v3_ws_private;
-
-pub mod v3_account_writes;
-
-pub mod v3_private;
-
-pub mod v3_private_orders;
-
-pub mod v3_regular_writes;
 
 pub mod legacy_metadata;
 
 pub mod legacy_socket_control;
-
-pub mod v3_algo_writes;
 
 pub mod legacy_market_reads;
 
 pub mod legacy_order_control;
 
 pub mod legacy_data_reads;
-
-pub mod v3_position_mode;
 
 pub mod legacy_fill_recovery;
 pub mod public_parity;

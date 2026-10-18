@@ -1,5 +1,12 @@
 # Exchange core contract
 
+The native Axios factory enhances rejections before venue interceptors, using
+the maintained helper's field order and live message getter. Its originalError
+Error snapshot excludes the self-reference under decision 2; existing owned
+metadata preserves diagnostics, extra/config data and nearest-response authority.
+Executable config capabilities retain the owned-data boundary. Constructed Aster
+and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
@@ -12,6 +19,9 @@ granular writes mutate existing rows, while full replacement and reset publish
 new generations. Retained values have no back-reference to the Store owner.
 Native mutations use the shared property/iterator algorithms and notify the live
 ordered listener registry. Typed subscribers project only at their reached slot.
+Notification transport retains the complete typed boundary in the existing opaque
+error origin before recovery, preserving nested subscriber IDs and the original
+cause without rebuilding the thrown value or replaying getters.
 Graph-backed typed reads return `StoreReadError` with property/projection phase
 and the opaque original cause; conversion recovers that cause before diagnostics.
 The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
@@ -109,6 +119,15 @@ Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
 See the [socket host contract](WS_CONTRACT.md) for host scheduling and relay options.
+Opt-in replay hosts register the canonical per-dial parser counters when a
+BaseWebSocket is constructed. The host retains only those counters, never the
+socket/parent owner. Diagnostic enumeration therefore includes nested sockets and
+disposed dial histories independently of exchange health/watchdog groups. Do not
+register nested business sockets as top-level slots to expose replay receipts.
+The recorded Binance addon regression checks both TLS/parser paths while keeping
+source-correct public grouping; the per-dial unit test checks counter identity
+and owner release with retained history. Ordinary hosts do not register histories.
+
 Synchronous venue `WsProtocol::connect_and_subscribe` implementations call
 `socket.start_websocket(url, protocols, options)`. The core owns the dial task,
 its cancellation and error diagnostics; the venue never retains its handle and
@@ -1943,6 +1962,11 @@ prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
 boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
+
+Store payload ticker baselines retain nullable index prices. The maintained worker
+advances its baseline for number-to-null transitions but omits non-number deltas;
+null-to-number emits the new number. Preserve this source behavior. The live
+store_payload oracle pins both transitions and unchanged-null packed arrays.
 
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.

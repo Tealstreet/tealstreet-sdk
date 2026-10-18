@@ -57,9 +57,11 @@ Sentry worker errors read only nonempty string message/name/stack properties;
 plain structured-clone objects work, primitive rejections use the supplied
 fallbacks, and whitespace strings remain valid. Missing stacks stay omitted.
 
-Sentry serialization currently accepts JSON properties only: inherited and
-non-enumerable browser Error/DOMException fields need host materialization.
-The live TypeScript witness pins this outstanding boundary, recorded as divergent.
+Sentry serialization accepts canonical Js values and reads inherited and hidden
+message/name/stack through Get in source order. Getter failures preserve their
+original thrown value and stop later reads; functions use fallbacks without Get.
+The existing String DTO replaces isolated UTF16 units with U+FFFD under the
+approved UTF-8 addendum; retained input units and valid pairs remain unchanged.
 Payload enums reject JSON object-form enum tags; worker ops are string literals.
 Private serde remote helpers expose the derived spelling inventory to unit tests,
 while public Deserialize requires strings. Fixture mode and version are closed
@@ -598,8 +600,8 @@ The numeric capture probe executes an independent 11-token inventory, checking
 source row/pair counts and native comparison count. Empty, partial and extra
 iterations must fail even when the source-total guard is bypassed.
 
-Snapshot parity fixes its execution at 72 × 17 preparation steps and 354 ticker
-actions across 70 traces. Source per-case counts, independent native bounds and
+Snapshot parity fixes its execution at 72 × 17 preparation steps and 358 ticker
+actions across 71 traces. Source per-case counts, independent native bounds and
 full-output collection comparisons prevent truncated traces from skipping work.
 
 Task identity fixes each record's case/leaf counts and executed comparisons. Its
@@ -694,3 +696,8 @@ Constructed AsterDEX private-frame/worker emitter witnesses live in
 `../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
 The venue retains private facade tests without importing the worker crate. Both paths preserve
 variadic event arguments; the real fill bridge retains Infinity and object identity.
+
+The ticker baseline corpus includes four nullable-index actions in addition to
+its original 354 comparisons. Actual maintained worker execution observes an
+updated null baseline without a packed null value; null-to-number emits the
+numeric index delta. This preserves the source typeof-number filter.

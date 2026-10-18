@@ -257,6 +257,8 @@ retain them. Other venue constructors explicitly leave these fields absent.
 The recorded public-market addon regression executes the actual Backpack and
 Crypto.com TS constructors and compiled native binding against identical HTTP bytes.
 
+Ticker.index is a required nullable number at runtime. WOO returns index_price:null for a real listed market; Option<f64> preserves that null in native and wire models while the generated index:number follows the maintained static declaration. Missing index, undefined and non-number/non-null values remain invalid. Null is not a zero price or a refused ticker.
+
 MarketRuntime.fees retains the undeclared Paradex market literal's maker/taker
 number object through the same flattened Market boundary. MarketFees requires an
 object with both numeric fields; absence remains absent for other venues. The

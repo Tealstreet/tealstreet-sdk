@@ -164,7 +164,7 @@ fn domain_native_field_identity_supplement() {
                 v.ask,
                 v.last,
                 v.mark,
-                v.index,
+                v.index.unwrap(),
                 v.percentage,
                 v.open_interest,
                 v.funding_rate,

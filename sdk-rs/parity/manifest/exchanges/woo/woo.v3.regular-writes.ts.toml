@@ -1,259 +1,259 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.regular-writes.ts"
-rust_files = [ "safe-cex-venue-woo/src/v3_regular_writes.rs" ]
+rust_files = []
 
 [[symbol]]
 ts = "WooV3RegularTimeInForce"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularTimeInForce"
-status = "ported"
-note = "Exact four GTC/IOC/FOK/POST_ONLY variants in v3_regular_writes.rs::WooV3RegularTimeInForce; native declaration assertions pin each spelling."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3RegularWriteTarget"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularWriteTarget"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3RegularWriteTarget is an owned exclusive ID enum; unlike the structural TypeScript union, declaration ingress rejects a record carrying both IDs. Numeric arms retain f64, including signed zero/non-finite declaration inputs; runtime validation remains separate."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3RegularPlaceInput"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularPlaceInput", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularPlaceKind" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3RegularPlaceInput captures a strict owned record with exact side/mode/type/TIF unions and present-null rejection; executable properties, readonly identity and lone UTF-16 surrogates are outside this native declaration boundary. Client ID remains unrestricted f64 until the builder. Supporting targets for this row: safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularPlaceInput, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularPlaceKind."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3RegularPlaceResult"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularPlaceResult", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularPlaceType" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3RegularPlaceResult owns all eight fields and a five-variant type; root numeric capture preserves declaration Infinity and negative zero instead of sharing a frozen JavaScript result object. Supporting targets for this row: safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularPlaceResult, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularPlaceType."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3RegularAmendInput"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularAmendInput", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularAmendUpdate" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3RegularAmendInput owns the complete current-order model, exclusive target and nested v3_regular_writes.rs::WooV3RegularAmendUpdate with independently optional price/totalQuantity; it cannot retain aliases to mutable caller records. Supporting targets for this row: safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularAmendInput, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularAmendUpdate."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3RegularAmendBuildResult"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularAmendBuildResult"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3RegularAmendBuildResult exposes native Ready/Blocked operation variants, not standalone arbitrary JS declaration ingress; each produced request/target, quantity-semantics literal and three blockers is asserted against source."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3RegularMutationResult"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularMutationResult", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularMutationStatus" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3RegularMutationResult uses a seven-status enum, exclusive owned target and f64 timestamp; declaration ingress checks the identityEvidence literal but public String construction is wider than the source literal type, while decoders always emit its exact value. Supporting targets for this row: safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularMutationResult, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularMutationStatus."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3RegularCancelPendingResult"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularCancelPendingResult", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularCancelScope", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularCancelStatus" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3RegularCancelPendingResult owns a two-status result and v3_regular_writes.rs::WooV3RegularCancelScope, preserving absent versus present symbol and timestamp bits; no frozen object/scope identity is retained. Supporting targets for this row: safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularCancelPendingResult, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularCancelScope, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularCancelStatus."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3WriteResponseError"
 kind = "class"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3WriteResponseError", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularWriteError" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3WriteResponseError retains concrete name/message/code/contractStatus and gateway fields in an owned captured tree; Rust has no JavaScript Error prototype/stack and nested gateway values are deep-owned rather than shallow aliased. Supporting targets for this row: safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3WriteResponseError, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularWriteError."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3WriteResponseError.constructor"
 kind = "constructor"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3WriteResponseError::new"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WooV3WriteResponseError::new clones the captured gateway tree and sets the concrete error name/status; direct construction asserts negative-zero code and snapshot independence, replacing Object.freeze of a shallow spread."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "WOO_V3_REGULAR_WRITE_PARITY"
 kind = "const"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::WOO_V3_REGULAR_WRITE_PARITY", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularWriteParity" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::WOO_V3_REGULAR_WRITE_PARITY uses a native constant whose public Copy fields yield owned mutable copies rather than JavaScript frozen object identity; it retains the exact seven source booleans/strings, individually asserted natively; it does not enable live routing or claim credentialed lifecycle evidence. Supporting targets for this row: safe-cex-venue-woo/src/v3_regular_writes.rs::WOO_V3_REGULAR_WRITE_PARITY, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularWriteParity."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "requireRecord"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::require_record"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::require_record returns an owned captured string-keyed record or Result message; object/array/null checks match retained JSON fixtures, while arbitrary prototypes/getters and source object aliasing are excluded."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "requireBoolean"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::require_boolean"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::require_boolean delegates the same boolean-only check and exact path error to the existing native validator; it returns Result<bool, String> instead of throwing an Error."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "requireInteger"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::require_integer"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::require_integer delegates finite safe-integer/minimum validation while preserving f64 signed zero; optional JS minimum becomes an explicit Rust argument and invalid inputs return the source message in Result."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "requireString"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::require_string"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::require_string preserves the nonempty string rule and exact path error in Result<String, String>; owned UTF-8 cannot represent lone UTF-16 surrogates."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "requireEnum"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::require_enum"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::require_enum checks captured strings against the supplied ordered spelling slice and returns an owned spelling or source error text; the generic TypeScript string-subtype identity is erased at this validation boundary."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "requireDecimal"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::require_decimal"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::require_decimal implements the ASCII decimal grammar and independent nonzero-digit rule without numeric conversion; allowZero is explicit and failures are native Result values, with lexical spelling preserved."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "decimalParts"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::decimal_parts"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::decimal_parts returns an owned Rust pair after first-two-dot-component splitting, leading whole-zero and trailing fractional-zero trimming; it models well-formed UTF-8 strings rather than arbitrary JS UTF-16 strings/readonly tuple identity."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "compareDecimals"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::compare_decimals"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::compare_decimals compares normalized whole UTF-16 widths/order and padded fractional UTF-16 order without f64 rounding; its -1/0/1 i32 result and well-formed Unicode inputs replace a JavaScript number/string boundary."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "requirePerpetualSymbol"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::require_perpetual_symbol"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::require_perpetual_symbol retains the PERP_BASE_QUOTE ASCII grammar and message through the existing validator; native &str intentionally excludes regex coercion of non-string JS values."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "validateTarget"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::validate_target"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::validate_target first checks exactly-one ID then minimum-one safe integer and returns the owned exclusive native target; absent captured keys represent undefined and errors use Result instead of throw."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "mapPlaceType"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::map_place_type"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::map_place_type reads a captured record, validates kind before TIF, distinguishes market-present-null from limit-nullish-default, and returns a five-variant native enum or source Result error. Batch audit: Retaining a captured input and a closed native place-type enum keeps the inert request API compatible with its typed descriptor consumers; executable getters and arbitrary returned JS referents would add a competing runtime-value interface. No additional dense-data algorithm defect found in this batch. Eight-row floor stops at decodeMutationResponse. See DIVERGENCE_AUDIT_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "buildWooV3RegularPlaceRequest"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::build_woo_v3_regular_place_request"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::build_woo_v3_regular_place_request preserves ordered symbol/side/decimal/type/price/mode/tag/ID/visibility/post-only checks and hedge close/open side selection in an owned descriptor; it explicitly refuses off-signature non-string tags/non-boolean reduceOnly/postOnlyAdjusted instead of JS truthiness/property behavior. Batch audit: Owned captured descriptors and explicit off-signature flag refusals are retained so transport-free builders cannot introduce executable values into the existing typed request boundary. Mirroring mutable getter/prototype behavior would require a separate request-value authority; this is a chosen API cost, not forced. No additional on-signature algorithm defect found. Eight-row floor stops at decodeMutationResponse. See DIVERGENCE_AUDIT_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "buildWooV3RegularAmendRequest"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::build_woo_v3_regular_amend_request"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::build_woo_v3_regular_amend_request preserves target mismatch before terminal before partial-fill blockers, zero-filled provenance, decimal no-op comparison and PUT total quantity. Captured typed-record checks replace off-signature property errors; old price/quantity retain empty strings but off-signature non-string values receive a native refusal when examined. Batch audit: Owned captured request/order/target values are retained for the existing typed descriptor boundary; mirroring source aliases and executable property reads would add another runtime-value authority. Native malformed-record refusals remain separate from the source throw behavior. No additional on-signature algorithm defect found. Eight-row floor stops at decodeMutationResponse. See DIVERGENCE_AUDIT_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "buildWooV3RegularCancelRequest"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::build_woo_v3_regular_cancel_request"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::build_woo_v3_regular_cancel_request validates target before symbol and returns DELETE order with symbol/one ID in query and no body; owned native descriptor replaces the frozen request/query objects. Batch audit: Owned mutable request/query values fit the existing typed transport descriptor boundary; exposing source frozen referents would require a parallel runtime-value interface for this inert API. The request operation remains inert. No additional on-signature algorithm defect found. Eight-row floor stops at decodeMutationResponse. See DIVERGENCE_AUDIT_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "buildWooV3RegularCancelPendingRequest"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::build_woo_v3_regular_cancel_pending_request"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::build_woo_v3_regular_cancel_pending_request maps Option<&str> to absent or symbol-only query on DELETE orders; explicit None replaces undefined and no algo/all-orders cancellation is introduced. Batch audit: The explicit Option string and owned descriptor boundary are retained for typed transport callers; importing executable/coercible symbol objects and frozen referents would duplicate the runtime-value interface. No additional on-signature algorithm defect found. Eight-row floor stops at decodeMutationResponse. See DIVERGENCE_AUDIT_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "decodeSuccessData"
 kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::decode_success_data", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularSuccessData" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::decode_success_data preserves success then failure-code-before-message and success-data-before-timestamp ordering, distinguishing native gateway class versus validation variants; captured gateway snapshots are owned and errors use Result. Supporting targets for this row: safe-cex-venue-woo/src/v3_regular_writes.rs::decode_success_data, safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3RegularSuccessData. Batch audit: Captured response/error snapshots preserve the typed error/transport interface instead of adding live executable getter and shallow-alias state to the inert decoder API. This is an API tradeoff; original JS exception/value identity outside this captured domain remains unrepresented. No additional dense-data algorithm defect found. Eight-row floor stops at decodeMutationResponse. See DIVERGENCE_AUDIT_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "decodeWooV3RegularPlaceResponse"
 kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/v3_regular_writes.rs::decode_woo_v3_regular_place_response", "safe-cex-venue-woo/src/v3_regular_writes.rs::decode_woo_v3_regular_place_response_with", "safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3PlaceResponseError" ]
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::decode_woo_v3_regular_place_response checks matching descriptor before response, known ID before type/quantity/client/price/amount/level and preserves lexical decimals. A borrowed f64 ID slice supplies Set membership on validated positive safe IDs; malformed expected quantities are explicitly refused rather than arbitrary JS split errors. Batch audit: Audit found an unpriced source-contract defect: valid ReadonlySet overrides of has can accept an otherwise known ID or throw an original value before later response fields. The new decode_woo_v3_regular_place_response_with body repairs that call seam with a fallible callback and generic Membership error retaining its original referent; the existing slice facade delegates with ordinary membership. Native decoded fields, ID/call counts, error Rc identity and earlier-refusal suppression precede five actual-source cases ending at wrong request. Remaining CHOSEN cost: captured request/response data and owned result/error values retain the existing typed transport/error interface; full executable object/prototype and frozen-result alias semantics would require another runtime-value authority. The callback caller performs the live Set method lookup and receiver call. Adapted split: safe-cex-venue-woo/src/v3_regular_writes.rs::decode_woo_v3_regular_place_response ; safe-cex-venue-woo/src/v3_regular_writes.rs::decode_woo_v3_regular_place_response_with ; safe-cex-venue-woo/src/v3_regular_writes.rs::WooV3PlaceResponseError. Eight-row floor stops at decodeMutationResponse. See DIVERGENCE_AUDIT_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "decodeMutationResponse"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::decode_mutation_response"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::decode_mutation_response decodes envelope before status before target, emits request-target-only evidence and f64 timestamp; statuses are the declared seven-status domain (arbitrary out-of-domain generic slices are excluded), and target is cloned into its native enum. Batch audit: The existing closed seven-status result and owned target/error interface are retained for typed consumers; accepting arbitrary JS generic result strings or live object aliases would introduce a competing result-value authority. A separate native public-API hazard was found for an out-of-domain BAD status list: mutation_status panicked. It now returns a visible validation error. BAD is outside the TypeScript status type and is not counted as a source-contract defect. No additional on-signature algorithm defect found. Eight-row floor stops at decodeMutationResponse. See DIVERGENCE_AUDIT_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "decodeWooV3RegularAmendResponse"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::decode_woo_v3_regular_amend_response"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::decode_woo_v3_regular_amend_response dispatches all seven source amend statuses and own route label through the ordered native mutation decoder, returning Result instead of thrown failures/frozen outputs."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "decodeWooV3RegularCancelResponse"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::decode_woo_v3_regular_cancel_response"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::decode_woo_v3_regular_cancel_response restricts cancel statuses to CANCELLED/REJECTED and preserves cancel-order error labels before validating the target; native operation results replace frozen response objects."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
 
 [[symbol]]
 ts = "decodeWooV3RegularCancelPendingResponse"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_regular_writes.rs::decode_woo_v3_regular_cancel_pending_response"
-status = "divergent"
-note = "CHOSEN: v3_regular_writes.rs::decode_woo_v3_regular_cancel_pending_response preserves envelope-before-status-before-scope-symbol sequencing and absent-scope-symbol semantics; its owned scope/result and Result errors replace separately frozen JS objects."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "No production TS caller or constructed WOO registration reaches this inactive V3 account/private-order/write island. The unused Rust caller closure, request DTO and exact facade/contract tail are retired. Native/source registration probes, live signed legacy account/order/socket tests and all-target compiler verify the removal. See ACCOUNT_WRITE_REVIEW.md."
