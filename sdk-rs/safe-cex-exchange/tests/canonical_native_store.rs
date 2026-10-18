@@ -48,40 +48,89 @@ fn facade_reuses_identity_descriptors_and_releases_its_graph() {
     let method = first.get("updateTicker").unwrap();
     let runtime = Js::object(vec![]);
     globals::install_builtins::<()>(&runtime, Weak::new());
-    runtime.get("Object").unwrap().call_method("defineProperty", vec![
-        first.clone(), Js::str("custom"), Js::object(vec![
-            ("value", Js::utf16(&[0xd800])),
-            ("writable", Js::Bool(false)),
-            ("enumerable", Js::Bool(false)),
-            ("configurable", Js::Bool(false)),
-        ])
-    ]).unwrap();
+    runtime
+        .get("Object")
+        .unwrap()
+        .call_method(
+            "defineProperty",
+            vec![
+                first.clone(),
+                Js::str("custom"),
+                Js::object(vec![
+                    ("value", Js::utf16(&[0xd800])),
+                    ("writable", Js::Bool(false)),
+                    ("enumerable", Js::Bool(false)),
+                    ("configurable", Js::Bool(false)),
+                ]),
+            ],
+        )
+        .unwrap();
+    let custom_key: Vec<u16> = "custom".encode_utf16().collect();
     for _ in 0..3 {
         let again = facade(store.clone()).unwrap();
-        assert!(first.same_reference(&again), "facade allocation must be reused");
+        assert!(
+            first.same_reference(&again),
+            "facade allocation must be reused"
+        );
         assert!(method.same_reference(&again.get("updateTicker").unwrap()));
-        assert!(again.get("custom").unwrap().strict_equals(&Js::utf16(&[0xd800])));
+        assert!(
+            again
+                .get("custom")
+                .unwrap()
+                .strict_equals(&Js::utf16(&[0xd800]))
+        );
         assert!(store.facade().unwrap().same_reference(&first));
-        assert!(!again.own_keys().iter().any(|key| key == &"custom".encode_utf16().collect::<Vec<_>>()));
+        assert!(
+            !again
+                .own_keys()
+                .iter()
+                .any(|key| key.as_ref() == custom_key.as_slice())
+        );
         assert!(again.set("custom", Js::Undefined).is_err());
     }
     let old_map = first.get("marketsById").unwrap();
     first.call_method("reset", vec![]).unwrap();
     assert!(first.same_reference(&facade(store.clone()).unwrap()));
     assert!(!old_map.same_reference(&first.get("marketsById").unwrap()));
-    assert!(first.get("custom").unwrap().strict_equals(&Js::utf16(&[0xd800])));
+    assert!(
+        first
+            .get("custom")
+            .unwrap()
+            .strict_equals(&Js::utf16(&[0xd800]))
+    );
     let owner = store.native_owner();
     let weak_owner = Rc::downgrade(&owner);
     drop(owner);
     drop(store);
-    assert!(weak_owner.upgrade().is_none(), "facade must not retain its cache owner");
-    first.call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)]).unwrap();
-    assert!(first.get("options").unwrap().get("isHedged").unwrap().truthy());
-    assert!(weak_graph.upgrade().is_some(), "retained facade must keep graph alive");
+    assert!(
+        weak_owner.upgrade().is_none(),
+        "facade must not retain its cache owner"
+    );
+    first
+        .call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)])
+        .unwrap();
+    assert!(
+        first
+            .get("options")
+            .unwrap()
+            .get("isHedged")
+            .unwrap()
+            .truthy()
+    );
+    assert!(
+        weak_graph.upgrade().is_some(),
+        "retained facade must keep graph alive"
+    );
     drop(first);
-    assert!(weak_graph.upgrade().is_some(), "retained method must keep graph alive");
+    assert!(
+        weak_graph.upgrade().is_some(),
+        "retained method must keep graph alive"
+    );
     drop(method);
-    assert!(weak_graph.upgrade().is_none(), "no graph/facade ownership cycle");
+    assert!(
+        weak_graph.upgrade().is_none(),
+        "no graph/facade ownership cycle"
+    );
 }
 
 fn fixture() -> (Rc<DefaultStore>, Js) {
