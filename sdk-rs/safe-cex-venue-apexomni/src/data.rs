@@ -29,35 +29,6 @@ pub(crate) fn property<'a>(value: &'a J, key: &str) -> Result<&'a J, ExchangeErr
     Ok(get(value, key))
 }
 
-pub(crate) fn v<'a>(
-    value: &'a J,
-    key: &str,
-) -> Result<&'a J, safe_cex_exchange::runtime::ExchangeError> {
-    if matches!(value, J::Undefined | J::Null) {
-        return Ok(get(value, key));
-    }
-    if matches!(value, J::Array(_)) {
-        return Ok(get(value, key));
-    }
-    if let J::Object(fields) = value {
-        for candidate in [
-            key.to_owned(),
-            safe_cex_num::get_key::s(key),
-            safe_cex_num::get_key::c(key),
-        ] {
-            if let Some((_, value)) = fields.iter().rev().find(|(name, _)| name == &candidate) {
-                return Ok(value);
-            }
-        }
-        return Ok(get(value, key));
-    }
-    let mut error = safe_cex_exchange::runtime::ExchangeError::new(format!(
-        "Cannot use 'in' operator to search for '{key}' in {}",
-        string(value).map_err(safe_cex_exchange::runtime::ExchangeError::new)?
-    ));
-    error.name = "TypeError".to_owned();
-    Err(error)
-}
 pub(crate) fn truthy(value: &J) -> bool {
     match value {
         J::Undefined | J::Null => false,

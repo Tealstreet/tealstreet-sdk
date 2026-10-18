@@ -90,9 +90,15 @@ pub(crate) fn nullish_zero(value: &Input) -> Input {
         value.clone()
     }
 }
-pub(crate) fn fields(value: &Input) -> Result<serde_json::Value, ExchangeError> {
-    value
-        .clone()
-        .into_value()
-        .map_err(|e| failure(e.to_string()))
+
+/// The warning is an explicit text boundary; preserve native kind/bits in Debug
+/// and render readable UTF-16 keys/text with the one canonical JSON writer.
+pub(crate) fn diagnostic(value: &Input) -> Result<String, ExchangeError> {
+    Ok(format!(
+        "{value:?}; JSON={}",
+        value
+            .json_stringify()
+            .map_err(ExchangeError::from)?
+            .unwrap_or_else(|| "undefined".into())
+    ))
 }

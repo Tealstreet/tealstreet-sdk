@@ -49,7 +49,7 @@ fn fixture_with_tick_interval(tick_interval: Option<f64>) -> Harness {
         http.ok("POST", "/v3/delete-open-orders", json!({}));
     });
     Store::update(h.store.as_ref(), serde_json::from_value(json!({"markets":[{"id":"BTC-USDC","symbol":"BTCUSDC","base":"BTC","quote":"USDC","active":true,"precision":{"amount":0.001,"price":0.01},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":50}},"info":contract()}]})).unwrap(), false).unwrap();
-    h.store.update_zk_link_config(Some(json!({"id":"16909060","l2Key":"fixture-l2","contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"},"contractConfig":{"perpetualContract":[contract()]}}))).unwrap();
+    h.store.update_zk_link_config(Some(json!({"id":"16909060","l2Key":"fixture-l2","contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"},"contractConfig":{"perpetualContract":[contract()]}}).into())).unwrap();
     h
 }
 fn placed() -> PlaceOrderOpts {
@@ -393,62 +393,4 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     done(&h);
 }
 
-#[test]
-fn rest_info_keeps_opaque_utf16_and_native_numbers() {
-    use safe_cex_exchange::js_runtime::value::{Js, from_json};
-    use safe_cex_types::retained_json::RetainedJsonInput as Input;
-    let h = fixture();
-    h.http
-        .routes
-        .borrow_mut()
-        .retain(|(_, path, _)| path != "/v3/open-orders");
-    let row = from_json(&raw_order());
-    row.define(
-        "opaque",
-        Js::object(vec![
-            ("text", Js::String(vec![0xd800].into())),
-            ("nan", Js::Number(f64::NAN)),
-            ("infinity", Js::Number(f64::INFINITY)),
-            ("negativeZero", Js::Number(-0.0)),
-            ("ownUndefined", Js::Undefined),
-        ]),
-    )
-    .unwrap();
-    h.http.route_native(
-        "GET",
-        "/v3/open-orders",
-        200.0,
-        Js::object(vec![
-            ("code", Js::Number(0.0)),
-            ("data", Js::array(vec![row, from_json(&raw_order())])),
-        ]),
-    );
-    let orders = h
-        .drive(h.venue().fetch_orders(None))
-        .expect("opaque info must not refuse the response");
-    assert_eq!(orders.len(), 2);
-    assert_eq!(orders[0].id, "order-1");
-    assert_eq!(orders[0].amount, 1.234);
-    let opaque = orders[0].info.value().unwrap().get("opaque").unwrap();
-    assert_eq!(
-        opaque.get("text").unwrap().as_text(),
-        Some([0xd800].as_slice())
-    );
-    assert!(opaque.get("nan").unwrap().as_f64().unwrap().is_nan());
-    assert_eq!(
-        opaque.get("infinity").unwrap().as_f64().unwrap(),
-        f64::INFINITY
-    );
-    assert_eq!(
-        opaque
-            .get("negativeZero")
-            .unwrap()
-            .as_f64()
-            .unwrap()
-            .to_bits(),
-        (-0.0f64).to_bits()
-    );
-    assert!(matches!(opaque.get("ownUndefined"), Some(Input::Undefined)));
-    assert!(orders[1].info.value().unwrap().get("opaque").is_none());
-    done(&h);
-}
+include!("support/retained_info.rs");

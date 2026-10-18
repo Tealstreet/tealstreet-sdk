@@ -1,6 +1,6 @@
 //! Venue method bodies over the shared exchange, Store and explicit host capabilities.
 use crate::{
-    data::{self, number, string, truthy},
+    data::{self, number, string},
     executions, protocol,
 };
 use safe_cex_exchange::{
@@ -78,15 +78,7 @@ pub(crate) fn numeric(value: &J) -> Result<f64, ExchangeError> {
         error
     })
 }
-pub(crate) fn field_string(value: &J) -> Result<String, ExchangeError> {
-    if let J::String(value) = value {
-        Ok(value.clone())
-    } else {
-        Err(failure(
-            "shared typed record refuses a non-string field".into(),
-        ))
-    }
-}
+
 pub(crate) fn text(value: &J) -> Result<String, ExchangeError> {
     string(value).map_err(|message| {
         let mut error = failure(message);
@@ -94,20 +86,7 @@ pub(crate) fn text(value: &J) -> Result<String, ExchangeError> {
         error
     })
 }
-fn or_zero(value: &J) -> J {
-    if truthy(value) {
-        value.clone()
-    } else {
-        J::Number(0.0)
-    }
-}
-fn nullish_zero(value: &J) -> J {
-    if matches!(value, J::Undefined | J::Null) {
-        J::Number(0.0)
-    } else {
-        value.clone()
-    }
-}
+
 pub(crate) fn retained_info(
     value: &J,
 ) -> Result<safe_cex_types::retained_json::RetainedJsonInput, ExchangeError> {
@@ -130,12 +109,6 @@ pub(crate) fn retained_info(
             ));
         }
     })
-}
-
-pub(crate) fn fields(value: &J) -> Result<serde_json::Value, ExchangeError> {
-    retained_info(value)?
-        .into_value()
-        .map_err(|error| failure(error.to_string()))
 }
 
 impl ApexOmniExchange {
@@ -202,19 +175,20 @@ impl ApexOmniExchange {
         })
     }
     // ts: ApexOmniExchange.getAccount
-    pub async fn get_account(&self) -> Result<J, ExchangeError> {
-        use crate::response::{field_string, property};
+    pub async fn get_account(&self) -> Result<R, ExchangeError> {
+        use crate::response::property;
         let response = self
             .request("get", "/v3/account", J::Undefined, J::Undefined, false)
             .await?;
-        Ok(crate::data::object([
+        Ok(R::Object(vec![
             (
-                "userId",
-                J::String(field_string(property(property(&response, "data")?, "id")?)?),
+                "userId".encode_utf16().collect(),
+                property(property(&response, "data")?, "id")?.clone(),
             ),
-            ("affiliateId", J::Null),
+            ("affiliateId".encode_utf16().collect(), R::Null),
         ]))
     }
+
     // ts: ApexOmniExchange.fetchRawBalance
     pub async fn fetch_raw_balance(&self) -> Result<Balance, ExchangeError> {
         use crate::response::{float, get, numeric, truthy};
@@ -712,7 +686,7 @@ impl ApexOmniExchange {
 impl ApexOmniExchange {
     // ts: ApexOmniExchange.fetchPositions
     pub async fn fetch_positions(&self) -> Result<Vec<Position>, ExchangeError> {
-        use crate::response::{self as data, fields, get, property};
+        use crate::response::{self as data, get, property};
         let response = self
             .request("get", "/v3/account", J::Undefined, J::Undefined, false)
             .await?;
@@ -739,9 +713,9 @@ impl ApexOmniExchange {
             .zk_link_config()
             .as_deref()
             .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        if !safe_cex_num::js_truthy(old.get("l2Key")) {
-            let mut config = old.as_object().cloned().unwrap_or_default();
+            .unwrap_or(R::Null);
+        if !get(&old, "l2Key").is_truthy() {
+            let mut config = old.as_object().map(Vec::from).unwrap_or_default();
             for (key, source) in [
                 ("l2Key", "l2key"),
                 ("ethereumAddress", "ethereumAddress"),
@@ -752,13 +726,16 @@ impl ApexOmniExchange {
                 ("contractWallets", "contractWallets"),
             ] {
                 let value = get(account, source);
-                if !matches!(value, R::Undefined) {
-                    config.insert(key.into(), fields(value)?);
+                let units = key.encode_utf16().collect::<Vec<_>>();
+                if let Some((_, old)) = config.iter_mut().find(|(name, _)| name == &units) {
+                    *old = value.clone();
                 } else {
-                    config.remove(key);
+                    config.push((units, value.clone()));
                 }
             }
-            self.base.store.update_zk_link_config(Some(config.into()))?;
+            self.base
+                .store
+                .update_zk_link_config(Some(R::Object(config)))?;
         }
         for market in self.base.store.markets().iter() {
             let margin = market
@@ -804,7 +781,7 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.fetchMarketsHelper
     pub async fn fetch_markets_helper(&self) -> Result<Vec<Market>, ExchangeError> {
-        use crate::response::{self as data, field_string, fields, float, get, property, truthy};
+        use crate::response::{self as data, field_string, float, get, property, truthy};
         let response = self
             .request("get", "/v3/symbols", J::Undefined, J::Undefined, false)
             .await?;
@@ -814,16 +791,20 @@ impl ApexOmniExchange {
             .store
             .zk_link_config()
             .as_deref()
-            .and_then(serde_json::Value::as_object)
-            .cloned()
+            .and_then(R::as_object)
+            .map(Vec::from)
             .unwrap_or_default();
-        if matches!(config, R::Undefined) {
-            // The owned Store snapshot omits this source undefined property.
-            old.remove("contractConfig");
+        if let Some((_, value)) = old
+            .iter_mut()
+            .find(|(key, _)| key.iter().copied().eq("contractConfig".encode_utf16()))
+        {
+            *value = config.clone();
         } else {
-            old.insert("contractConfig".into(), fields(config)?);
+            old.push(("contractConfig".encode_utf16().collect(), config.clone()));
         }
-        self.base.store.update_zk_link_config(Some(old.into()))?;
+        self.base
+            .store
+            .update_zk_link_config(Some(R::Object(old)))?;
         let contracts = property(config, "perpetualContract")?;
         property(contracts, "filter")?;
         let rows = data::array(contracts).map_err(|_| {
@@ -868,15 +849,16 @@ impl ApexOmniExchange {
             let projected: Result<Market, ExchangeError> = (|| {
                 let typed_string = |field, raw_field| {
                     let value = get(row, raw_field);
+                    let detail = crate::response::diagnostic(value)?;
                     field_string(value)
-                        .map_err(|cause| failure(format!("{field}={value:?}: {}", cause.message)))
+                        .map_err(|cause| failure(format!("{field}={detail}: {}", cause.message)))
                 };
                 let active = if let R::Bool(value) = get(row, "enableTrade") {
                     *value
                 } else {
                     return Err(failure(format!(
-                        "active={:?}: expected boolean",
-                        get(row, "enableTrade")
+                        "active={}: expected boolean",
+                        crate::response::diagnostic(get(row, "enableTrade"))?
                     )));
                 };
                 Ok(Market {
@@ -904,8 +886,8 @@ impl ApexOmniExchange {
                 Ok(market) => markets.push(market),
                 Err(cause) => self.base.log(
                     &format!(
-                        "Refused ApexOmni market row {index} id={:?}: {}",
-                        get(row, "symbol"),
+                        "Refused ApexOmni market row {index} id={}: {}",
+                        crate::response::diagnostic(get(row, "symbol"))?,
                         cause.message
                     ),
                     "warning",

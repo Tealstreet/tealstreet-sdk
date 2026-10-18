@@ -107,3 +107,22 @@ pub fn retained(value: &safe_cex_types::retained_json::RetainedJsonInput) -> J {
         ),
     }
 }
+
+/// Build the existing source fixtures at the native host boundary, without JSON.
+pub fn heap(value: &J) -> safe_cex_exchange::js_runtime::value::Js {
+    use safe_cex_exchange::js_runtime::value::Js;
+    match value {
+        J::Undefined => Js::Undefined,
+        J::Null => Js::Null,
+        J::Bool(v) => Js::Bool(*v),
+        J::Number(v) => Js::Number(*v),
+        J::String(v) => Js::str(v),
+        J::BigInt(v) => Js::BigInt(std::rc::Rc::new(v.clone())),
+        J::Array(v) => Js::array(v.iter().map(heap).collect()),
+        J::Object(v) => Js::object(v.iter().map(|(k, v)| (k.as_str(), heap(v))).collect()),
+    }
+}
+pub fn capture(value: &J) -> safe_cex_types::retained_json::RetainedJsonInput {
+    safe_cex_exchange::js_runtime::value::to_retained_input(&heap(value))
+        .expect("source fixture fits canonical retained response")
+}

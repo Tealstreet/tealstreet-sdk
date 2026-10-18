@@ -1,7 +1,7 @@
 //! Execution normalization and the venue's bounded websocket execution cache.
 use crate::response::{field_string, float, get, text as string, text, truthy};
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::{parse_float, parse_int};
+use safe_cex_num::parse_int;
 use safe_cex_types::retained_json::RetainedJsonInput as J;
 use safe_cex_types::{Execution, OrderSide};
 
@@ -67,10 +67,6 @@ pub(crate) fn execution_side(value: &J) -> Result<Option<OrderSide>, ExchangeErr
         "SELL" | "S" | "SHORT" => Some(OrderSide::Sell),
         _ => None,
     })
-}
-
-pub(crate) fn parse(value: &J) -> Result<f64, String> {
-    Ok(parse_float(&string(value).map_err(|e| e.message)?))
 }
 
 pub(crate) fn row_symbol(row: &J) -> &J {

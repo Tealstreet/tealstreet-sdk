@@ -813,7 +813,9 @@ fn canceled_prefix_effects_precede_later_order_faults() {
         store
             .add_or_update_orders_full(
                 parent
-                    .map_order(&J::from(corpus()["fixtures"]["order"].clone()))
+                    .map_order(&native::capture(&J::from(
+                        corpus()["fixtures"]["order"].clone(),
+                    )))
                     .unwrap(),
             )
             .unwrap();
