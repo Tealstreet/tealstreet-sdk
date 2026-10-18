@@ -1692,3 +1692,9 @@ Source `new` operations use `Js::construct`, including top-level native venue
 factories and host-selected collection constructors. Ordinary host calls remain
 separate. Lighter SDK's captured URLSearchParams uses `ClientHost::construct` for
 both transaction submission paths; JSON stringify remains an ordinary call.
+
+The shared JS Axios factory records each dispatched request in the existing
+HTTP_STATS singleton after proxy authorization, including rejected HTTP statuses.
+Its normal response interceptor preserves the source absence of recordError.
+The native runtime request-counter regression uses actual HTTP200/404 receipts;
+it fails with an unchanged total on the previous factory.

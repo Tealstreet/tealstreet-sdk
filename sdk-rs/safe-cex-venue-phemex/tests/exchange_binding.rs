@@ -585,7 +585,7 @@ fn disposal_during_start_ignores_late_market_reply() {
 }
 #[derive(Default)]
 struct Signer {
-    released: std::rc::Rc<std::cell::Cell<bool>>,
+    released: support::release::Release,
     fail: std::cell::Cell<bool>,
     requests: std::cell::RefCell<Vec<Value>>,
 }
@@ -598,17 +598,10 @@ impl safe_cex_transport::signing::RemoteSigner for Signer {
         self.requests
             .borrow_mut()
             .push(serde_json::to_value(request).unwrap());
-        let ready = self.released.clone();
+        let ready = self.released.wait();
         let fail = self.fail.get();
         Box::pin(async move {
-            std::future::poll_fn(move |_| {
-                if ready.get() {
-                    std::task::Poll::Ready(())
-                } else {
-                    std::task::Poll::Pending
-                }
-            })
-            .await;
+            ready.await;
             Ok(safe_cex_transport::signing::RemoteSignerResponse::WsAuth(
                 safe_cex_types::ws_auth::WsAuthResponse {
                     id: None,
@@ -670,6 +663,26 @@ fn private_socket_waits_for_remote_signature_then_auth_ack() {
         serde_json::from_str(sent.iter().find(|m| m.contains("user.auth")).unwrap()).unwrap();
     assert_eq!(auth["params"][2], "remote-signature");
     assert!(!sent.iter().any(|m| m.contains("aop_p.subscribe")));
+    drop(sent);
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(
+                json!({"id":999,"error":null,"result":{"status":"success"}}).to_string(),
+            ),
+        ));
+    h.runtime.pump();
+    assert_eq!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .filter(|m| m.contains("aop_p.subscribe"))
+            .count(),
+        1,
+        "source subscription starts only after successful auth acknowledgement"
+    );
 }
 #[test]
 fn remote_signing_failure_sends_no_auth_or_subscription_and_is_nonterminal() {

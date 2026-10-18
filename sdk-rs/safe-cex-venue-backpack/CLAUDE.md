@@ -372,3 +372,8 @@ The concrete leverage catch emits the helper-created native Error value rather
 than its message string. The constructed Exchange regression drives a successful
 account PATCH followed by a malformed position refresh, checks the committed
 leverage and single refresh, and inspects Error name/message before projection.
+
+Native HTTP executions belong to BaseExchange shared operations. A rejected
+ticker Promise.all drops its waiter while the already-started mark-price request
+continues through response interceptors. The native registry proxy test holds
+that response until after fetchTickers rejects, then observes both error events.

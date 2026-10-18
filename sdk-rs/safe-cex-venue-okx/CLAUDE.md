@@ -188,3 +188,8 @@ Independent null, string, NaN-producing, object, overflow, signed-zero and false
 inputs accompany distinct good rows, with finite Store resets before every case.
 The shared `ticker-native-controls.py` compiles live field-publication faults,
 requires named native failures, restores exact bytes and requires passing tests.
+
+The intrinsic/source fixture reuses the queued binding runtime and awaits each
+settled Promise through its real checkpoint, including handled rejections. The
+native registry HTTP witness separately checks order aggregation and the source
+catch returning stored orders with one error event.

@@ -1745,9 +1745,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "64772fd8567f69e68a60fb54dd75d977a5748773b23ad0a6800310fa554d37ba",
+      "producer_sha256": "ae10bee4abd66fa4f025815bb50a6b8a8280b87b10d922e6017d54537a612ae1",
       "classification": "no-owned-latch",
-      "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send. Reviewed response interceptor ownership: synchronous outcome/error handlers retain only Weak<BaseExchange>; existing request authorization and its asynchronous boundaries are unchanged."
+      "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send. Reviewed response interceptor ownership: synchronous outcome/error handlers retain only Weak<BaseExchange>; existing request authorization and its asynchronous boundaries are unchanged. Reviewed the synchronous HTTP_STATS request observation: its Mutex guard ends before returning the original config; no new async boundary or owned reservation is introduced."
     },
     {
       "owner": "src/js_runtime/globals.rs::resolve_promise",

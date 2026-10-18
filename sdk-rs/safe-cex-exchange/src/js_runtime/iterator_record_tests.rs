@@ -242,7 +242,10 @@ fn record_elisions_cached_next_and_normal_close_match_node() {
         let record = super::iterator::IteratorRecord::get(&iterable).unwrap();
         assert!(record.step().unwrap().is_some());
         let bound = record.step_value().unwrap().unwrap();
-        assert!(bound.same_reference(&token), "JS_ITERATOR_RECORD original bound value");
+        assert!(
+            bound.same_reference(&token),
+            "JS_ITERATOR_RECORD original bound value"
+        );
         let result = record.close();
         let succeeded = result.is_ok();
         let failure = match result {

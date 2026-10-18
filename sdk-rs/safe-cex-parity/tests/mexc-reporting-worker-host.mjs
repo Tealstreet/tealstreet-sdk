@@ -5,9 +5,9 @@ import vm from 'node:vm';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {isNativeError} from 'node:util/types';
-import {ts, root, load} from './source.mjs';
+import {ts, root, load} from '../../safe-cex-venue-mexc/tests/source.mjs';
 
-assert(process.argv[2], 'provide wasm-bindgen reporting_worker_host.js');
+assert(process.argv[2], 'provide wasm-bindgen mexc_reporting_worker_host.js');
 const require = createRequire(import.meta.url);
 const wasm = require(path.resolve(process.argv[2]));
 const dependency = createRequire(path.resolve(process.env.SAFE_CEX_TYPESCRIPT_PATH, '../mexc-worker-host.cjs'));
