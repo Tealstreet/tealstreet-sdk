@@ -30,6 +30,11 @@ pub const EXCHANGE_REGISTRY: &[ExchangeRegistration] = &[
         constructor: "BinanceExchange",
     },
     ExchangeRegistration {
+        name: ExchangeName::Binanceinverse,
+        module: "./binance/binanceinverse.exchange",
+        constructor: "BinanceInverseExchange",
+    },
+    ExchangeRegistration {
         name: ExchangeName::Binancepm,
         module: "./binance/binancepm.exchange",
         constructor: "BinancePMExchange",

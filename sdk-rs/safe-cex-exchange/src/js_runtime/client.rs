@@ -251,6 +251,16 @@ fn axios_headers() -> Result<Js, Thrown> {
     Ok(headers)
 }
 
+/// Source AxiosHeaders.from/new: preserve the shared header prototype and
+/// case-insensitive normalization rather than projecting through a JSON object.
+pub fn axios_headers_from(input: &Js) -> Result<Js, Thrown> {
+    let headers = axios_headers()?;
+    for (name, value) in input.spread_object()?.own_entries()? {
+        set_header(&headers, Js::utf16(&name), value, Js::Undefined)?;
+    }
+    Ok(headers)
+}
+
 fn normalized_header(name: &Js) -> Result<Vec<u16>, Thrown> {
     if !name.truthy() {
         return Ok(vec![]);

@@ -7460,3 +7460,11 @@ reason = "Native host ABI allocation: stores an already existing opaque Rc<dyn A
 [[exempt]]
 rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::resource"
 reason = "Native host ABI typed lookup: clones and downcasts only this ordinary object's immutable opaque Rc attachment, preserving the original native owner and returning None for wrong types or other receivers. This Rust type-erasure observation has no standalone TypeScript declaration; inherited properties and object spread do not transfer it."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::WriteObserver"
+reason = "Native host callback signature over an existing ordinary receiver, UTF-16 property key and unchanged assigned value. It publishes a successful write to native readers after the canonical property operation; TypeScript shares that object directly and declares no separate callback ABI. Actual compiler alias root/conversion probes and source-visible native identity, error and lifetime witnesses remain required."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::set_write_observer"
+reason = "Native host ABI for installing or clearing the single fallible write observer on an ordinary canonical object; refuses other receiver kinds. This is native synchronization of an already shared source options object, without a separate TypeScript method or wire decoder. The source constructor and immediate native account reader tests verify its observable role, plus callback release, reentry and original failure propagation."

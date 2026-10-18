@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/safeCexAxiosCreate.ts"
-rust_files = [ "safe-cex-store/src/request_stats.rs", "safe-cex-transport/src/signing.rs", "safe-cex-exchange/src/http.rs", "safe-cex-transport/src/provider.rs", "safe-cex-exchange/src/js_runtime/client/factory.rs", "safe-cex-transport/src/query.rs" ]
+rust_files = [ "safe-cex-store/src/request_stats.rs", "safe-cex-transport/src/signing.rs", "safe-cex-exchange/src/http.rs", "safe-cex-transport/src/provider.rs", "safe-cex-exchange/src/js_runtime/client/factory.rs", "safe-cex-transport/src/query.rs", "safe-cex-exchange/src/js_runtime/client.rs" ]
 
 [[symbol]]
 ts = "setInnerAdapterForRemoteSigning"
@@ -126,9 +126,9 @@ note = "CHOSEN Host supplies signing-capture boolean instead of config predicate
 ts = "safeCexAxiosCreateNoProxy"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/http.rs::safe_cex_axios_create_no_proxy"
+rs = [ "safe-cex-exchange/src/http.rs::safe_cex_axios_create_no_proxy", "safe-cex-exchange/src/js_runtime/client/factory.rs::create_no_proxy", "safe-cex-exchange/src/js_runtime/client.rs::axios_headers_from" ]
 status = "ported"
-note = ""
+note = "Split typed factory configuration and canonical native Js factory composition. The latter owns the source inverse public factory call (binanceinverse.api.ts:23), reuses the shared direct HTTP host and owning outcome interceptor with no provider routing. The imported AxiosHeaders.from operation is composed by safe-cex-exchange/src/js_runtime/client.rs::axios_headers_from using the existing canonical header class and setter, without JSON conversion. Existing venue factory call sites are unchanged. Rust mapping: safe-cex-exchange/src/http.rs::safe_cex_axios_create_no_proxy, safe-cex-exchange/src/js_runtime/client/factory.rs::create_no_proxy."
 
 [[symbol]]
 ts = "safeCexAxiosCreate"
