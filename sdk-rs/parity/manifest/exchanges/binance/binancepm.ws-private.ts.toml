@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/private_helpers.rs::detach_binance_private_socket"
 status = "ported"
-note = "Both native receivers already call safe-cex-venue-binance/src/private_helpers.rs::detach_binance_private_socket to capture the old socket once, remove message/close/open against current handlers, then preserve OPEN/CONNECTING short-circuit reads before closing it. The single live helper retains all32 maintained-source/native cases across both variants. The unused PM copy was removed; real native key/retry bindings continue through this shared path."
+note = "Both native receivers already call safe-cex-venue-binance/src/private_helpers.rs::detach_binance_private_socket to capture the old socket once, remove message/close/open against current handlers, then preserve OPEN/CONNECTING short-circuit reads before closing it. The single live helper retains all 32 maintained-source/native cases across both variants. The unused PM copy was removed; real native key/retry bindings continue through this shared path."
 
 [[symbol]]
 ts = "BinancePMPrivateWebsocket.onMessage"

@@ -70,8 +70,8 @@ Generated receipts and compiler snapshots remain under `target/`.
 Measured receipts on the reviewed source: thirteen authenticated native capability
 classifications pass, separately from seven native binding tests. All thirteen
 production faults compile and fail their named assertion, and every exact
-restoration passes. The32 live detach cases and all three connection groups pass;
+restoration passes. The 32 live detach cases and all three connection groups pass;
 strict native Clippy passes for the three touched integration targets. Required
 all-features cancellation passes six tests, with only its explicit discovery
-exporter ignored. Invention/status parity passes7563 rows/16696 public items.
+exporter ignored. Invention/status parity passes 7,563 rows and 16,696 public items.
 These figures describe this finite checkpoint, not global behavioral equivalence.
