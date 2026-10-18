@@ -23,7 +23,7 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 23 | ChaserOrderManager | OPEN | Constructed manager and receiver contracts. |
 | 24 | ChaserTerminate | OPEN | Live termination admission. |
 | 25 | ChaserCompleteEvent | OPEN | Native event payload. |
-| 26 | CallMethodHandler.handleCallMethod | OPEN | Actual method/Promise dispatch. |
+| 26 | CallMethodHandler.handleCallMethod | OPEN | Continuation timing repaired below; typed arguments/primitive rejection admission remains. |
 | 30 | readStringProperty | ACCEPT | Merged #1158: native Get, getter cause and approved typed String replacement. |
 | 71 | ExchangeWorker.start | OPEN | Real bootstrap construction and startup race. |
 | 72 | PerfFixtureFrame | OPEN | Recording/replay carrier reachability. |
@@ -32,7 +32,7 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 75 | ChaserOrderOptions | OPEN | Shared task model and live reads. |
 | 76 | TwapOptions | OPEN | Shared task model and live reads. |
 | 77 | TwapState | OPEN | Native state/serialization. |
-| 78 | CallMethodHandler.handle | OPEN | Dispatcher entry timing. |
+| 78 | CallMethodHandler.handle | OPEN | Entry timing repaired below; malformed/raw envelope admission remains. |
 | 79 | OHLCVSubscriptionsHandler.handle | OPEN | Actual listener/subscription timing. |
 
 ## Position refresh: rows 7 and 8
@@ -117,3 +117,30 @@ This closes the assigned continuation/timing findings. It does not classify
 arbitrary JS error/receiver admission or the separately open manager, options,
 state and event representations (rows 4, 21-25 and 75). The helper-specific Store
 snapshot and optional-method capability boundaries keep their own manifest rows.
+
+## CallMethod continuation repair within rows 26 and 78
+
+The actual maintained async arrow invokes the venue member before returning.
+Awaited cases post their reply after the source Promise checkpoint; synchronous
+cases (including unknown methods and recovery) post during entry. Caller
+abandonment leaves the operation running. The native boxed body previously
+started only when polled and its reply guard cancelled an abandoned caller.
+
+One canonical start_eager driver now owns dispatch and reply. Awaited typed
+leaves cross the canonical await checkpoint on fulfillment and rejection;
+removeOrders also yields after its synchronous mutator succeeds. The outer
+handler drops only the returned waiter, without spawning another body. Runtime
+teardown retains the existing guarded cancellation/report behavior.
+
+The handlers target compares twelve actual-source/native profiles across both
+entry points: ready/failed/held leverage, ready/throwing synchronous recovery and
+unknown methods. Four named regressions cover immediate entry, caller settlement
+and held-operation completion after dropping an unpolled waiter. DATA tests keep
+native binary64 fields and own undefined observations, and notification tests
+retain committed removal, original subscriber failure and stopped fanout.
+
+This is a bounded repair, not closure of the assigned representation findings.
+Rows 26/78 remain OPEN: typed Exchange arguments still reject values TS forwards,
+primitive throws are not ExchangeError, and raw dispatcher defaults still differ
+from source object spread. The retained carrier review must resolve those costs;
+this timing change supplies no authorization for accepting them.
