@@ -23,7 +23,7 @@ satisfy this corpus.
 | --- | --- | --- | --- |
 | ApexOmni | apexomni/apexomni.ws-public.ts | Truthy-gated parseFloat; missing mark falls back to index | Native proven: safe-cex-venue-apexomni/tests/binding.rs::production_ticker_coercion_matches_constructed_typescript; 64 three-row frames |
 | AsterDEX | asterdex/asterdex.ws-public.ts | Coercion except copied truthy fundingTime; decision-3 row refusal | Pending complete coercion corpus; row policy #807 |
-| Backpack | backpack/backpack.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
+| Backpack | backpack/backpack.ws-public.ts | NaN-guarded parseFloat, retaining infinity; percentage multiplied by 100 | Native proven: safe-cex-venue-backpack/tests/exchange_trait.rs::production_ticker_coercion_matches_constructed_typescript; 72 cases / 216 ticker, trade, bookTicker and depth frames; numeric mapping scope, not throttle timing |
 | Binance futures | binance/binance.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Binance PM | binance/binancepm.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Binance Spot | binance/binancespot.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
@@ -48,7 +48,7 @@ satisfy this corpus.
 | MEXC | mexc/mexc.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | OKX | okx/okx.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Orderly | orderly/orderly.ws-public.ts | Copied ticker/BBO/mark values stay strict; decision-3 row refusal; funding parsed | Pending complete coercion corpus; row policy #803 |
-| Paradex | paradex/paradex.ws-public.ts | parseFloat/Number finite handling | Pending complete coercion corpus |
+| Paradex | paradex/paradex.ws-public.ts | Truthy parseFloat aliases, positive/finite price guards; book prices retain NaN | Native proven: safe-cex-venue-paradex/tests/exchange_trait.rs::production_ticker_coercion_matches_constructed_typescript; 264 cases / 504 summary, BBO, book and trade frames, including numeric aliases and all book level forms; numeric mapping scope, not throttle timing |
 | Phemex | phemex/phemex.ws-public.ts | Packed parseFloat/arithmetic; truthy bid/ask guards | Native proven: safe-cex-venue-phemex/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 72 three-row packed frames |
 | Polymarket | polymarket/polymarket.ws-public.ts | Finite parseFloat bid/ask/last with token-to-symbol lookup; midpoint mark/index | Native proven: safe-cex-venue-polymarket/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 24 cases / 40 price-change and last-trade frames with production token mappings; numeric mapping scope, not throttle timing |
 | WEEX | weex/weex.ws-public.ts | toNumber finite fallback; bounded fractional percentage scaling | Native proven: safe-cex-venue-weex/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 96 cases / 288 frames, object and one-element array payloads |
