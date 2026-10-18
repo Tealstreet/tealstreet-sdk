@@ -31,6 +31,7 @@ struct Http {
     runtime: Rc<NativeRuntime>,
     gates: RefCell<BTreeMap<String, Rc<Gate>>>,
     requests: RefCell<Vec<String>>,
+    rejection: RefCell<Option<Js>>,
 }
 impl JsHttpHost for Http {
     fn runtime(&self) -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
@@ -39,6 +40,11 @@ impl JsHttpHost for Http {
     fn send(&self, config: Js) -> JsFuture<'static> {
         let url = config.get("url").unwrap().to_display();
         self.requests.borrow_mut().push(url.clone());
+        if let Some(value) = self.rejection.borrow().clone() {
+            return Box::pin(async move {
+                Err(safe_cex_exchange::js_runtime::value::Thrown::new(value))
+            });
+        }
         let gate = self
             .gates
             .borrow()
@@ -92,6 +98,7 @@ impl Fixture {
             runtime: runtime.clone(),
             gates: RefCell::default(),
             requests: RefCell::default(),
+            rejection: RefCell::default(),
         });
         let host = http.clone();
         let store = Rc::new(DefaultStore::new());
@@ -346,4 +353,79 @@ fn lifecycle_probes_execute_the_maintained_whole_typescript_classes() {
         value["signature"],
         json!({"name":"TypeError","sourceLeaksKey":true})
     );
+}
+
+#[test]
+fn factory_enhances_primitive_rejections_before_sync_position_mode_observes_them() {
+    run(async {
+        for original in [Js::str("bare rejection"), Js::Number(42.0), Js::Bool(false)] {
+            let f = Fixture::new();
+            *f.http.rejection.borrow_mut() = Some(original.clone());
+            let pending = f
+                .venue
+                .rt
+                .this
+                .call_method("syncPositionMode", vec![])
+                .unwrap();
+            let error = safe_cex_exchange::js_runtime::promise::await_js(
+                &f.venue.rt.exchange_runtime(),
+                pending,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(
+                error.value.get("message").unwrap().to_display(),
+                "[asterdex] Request setup error: undefined",
+                "ASTER-FACTORY-ENHANCER must run before the venue catch"
+            );
+            assert_eq!(error.value.get("name").unwrap().to_display(), "Error");
+            assert!(matches!(&error.value, Js::Object(object) if object.class == "Error"));
+            assert!(error.value.get("isAxiosError").unwrap().truthy());
+            assert!(
+                error
+                    .value
+                    .get("originalError")
+                    .unwrap()
+                    .strict_equals(&original)
+            );
+            assert!(
+                error
+                    .value
+                    .get("enhancedMessage")
+                    .unwrap()
+                    .strict_equals(&error.value.get("message").unwrap())
+            );
+            let timestamp = error
+                .value
+                .get("context")
+                .unwrap()
+                .get("timestamp")
+                .unwrap();
+            assert_eq!(timestamp.to_display(), "2027-01-15T08:00:00.000Z");
+        }
+    });
+}
+
+#[test]
+fn factory_enhancement_matches_the_two_actual_source_venues() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../safe-cex-exchange/tests/factory-error-source.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let result: serde_json::Value = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
+    assert_eq!(result, json!({"asterdex":3,"woo":3}));
 }
