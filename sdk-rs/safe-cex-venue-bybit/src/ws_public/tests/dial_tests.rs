@@ -229,39 +229,85 @@ fn dialing_matches_live_source_and_core_owns_cancellation() {
 #[test]
 fn disposing_before_dial_is_polled_releases_venue_socket() {
     for private in [false, true] {
-        let (_, parent, _) = fixture();
-        let runtime = Rc::new(Runtime::default());
-        let socket = BaseWebSocket::new(8, parent, runtime.clone(), Rc::new(Protocol));
-        if private {
-            crate::ws_private::connect_and_subscribe(
-                &socket,
-                runtime.as_ref(),
-                false,
-                None,
-                false,
-                true,
-            )
-            .unwrap();
-        } else {
-            connect_and_subscribe(&socket, runtime.as_ref(), "linear", false, None).unwrap();
+        for inline in [false, true] {
+            for pending in [true, false] {
+                let (_, parent, _) = fixture();
+                let runtime = Rc::new(Runtime::default());
+                runtime.inline.set(inline);
+                runtime.pending_dial.set(pending);
+                runtime.pending_timers.set(true);
+                let original_owners = Rc::strong_count(&runtime.dial_owner);
+                let socket = BaseWebSocket::new(8, parent, runtime.clone(), Rc::new(Protocol));
+                if private {
+                    crate::ws_private::connect_and_subscribe(
+                        &socket,
+                        runtime.as_ref(),
+                        false,
+                        None,
+                        false,
+                        true,
+                    )
+                    .unwrap();
+                } else {
+                    connect_and_subscribe(&socket, runtime.as_ref(), "linear", false, None)
+                        .unwrap();
+                }
+                let weak = Rc::downgrade(&socket);
+                // Both maintained connectAndSubscribe members call createWebsocket
+                // synchronously. No host task poll is needed to start the real dial.
+                let dials = runtime.dials.borrow().clone();
+                assert_eq!(
+                    dials.len(),
+                    1,
+                    "BYBIT-EAGER-DIAL before any host pump private={private} inline={inline} pending={pending}"
+                );
+                assert_eq!(
+                    dials[0]["url"],
+                    if private {
+                        "wss://stream.bybit.com/v5/private?requestId=fixture"
+                    } else {
+                        "wss://stream.bybit.com/v5/public/linear?requestId=fixture"
+                    }
+                );
+                assert_eq!(dials[0]["protocols"], json!([]));
+                assert_eq!(
+                    Rc::strong_count(&runtime.dial_owner),
+                    original_owners + usize::from(pending),
+                    "BYBIT-DIAL-OWNER actual pending I/O is retained"
+                );
+                socket.dispose();
+                assert_eq!(
+                    Rc::strong_count(&runtime.dial_owner),
+                    original_owners,
+                    "BYBIT-DIAL-CANCEL actual I/O drops before host pump"
+                );
+                assert!(
+                    !socket.has_websocket(),
+                    "disposed dial cannot leave a handle"
+                );
+                drop(socket);
+                assert!(
+                    weak.upgrade().is_none(),
+                    "cancelled dial must release venue socket before host pump"
+                );
+                // The canonical Promise driver can serve unrelated jobs. Disposal
+                // cancels the actual owned body now; the next pump reaps its driver.
+                poll_tasks(&runtime);
+                assert!(
+                    runtime
+                        .tasks
+                        .borrow()
+                        .iter()
+                        .all(|task| task.borrow().is_none()),
+                    "cancelled driver reaped after host pump"
+                );
+                poll_tasks(&runtime);
+                assert_eq!(
+                    *runtime.dials.borrow(),
+                    dials,
+                    "disposed dial must not run again later"
+                );
+            }
         }
-        let weak = Rc::downgrade(&socket);
-        assert!(runtime.dials.borrow().is_empty());
-        socket.dispose();
-        drop(socket);
-        assert!(weak.upgrade().is_none(), "unpolled dial must be core-owned");
-        assert!(
-            runtime
-                .tasks
-                .borrow()
-                .iter()
-                .all(|task| task.borrow().is_none()),
-            "unpolled tasks canceled"
-        );
-        poll_tasks(&runtime);
-        assert!(
-            runtime.dials.borrow().is_empty(),
-            "disposed dial must not run later"
-        );
     }
 }
