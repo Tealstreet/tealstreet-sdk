@@ -38,12 +38,10 @@ fn capture_error(env: &Env, value: Unknown<'_>) -> napi::Result<NativeValue> {
         }
         if object.has_named_property("stack")? {
             let stack: Unknown = object.get_named_property("stack")?;
-            if stack.get_type()? != ValueType::Undefined {
-                fields.push((
-                    "stack",
-                    unsafe { JsData::from_napi_value(env.raw(), stack.raw())? }.0,
-                ));
-            }
+            fields.push((
+                "stack",
+                unsafe { JsData::from_napi_value(env.raw(), stack.raw())? }.0,
+            ));
         }
         if object.has_named_property("code")? {
             let code: Unknown = object.get_named_property("code")?;

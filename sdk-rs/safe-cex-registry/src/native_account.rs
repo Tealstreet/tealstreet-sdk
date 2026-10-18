@@ -183,8 +183,8 @@ impl RemoteSigner for HostSigner {
 
 fn exchange_error(error: &ExchangeError) -> NativeValue {
     let projected = Thrown::from(error.clone()).value;
-    let mut fields = Vec::with_capacity(3);
-    for field in ["name", "message"] {
+    let mut fields = Vec::with_capacity(4);
+    for field in ["name", "message", "stack"] {
         let value = match projected.get(field) {
             Ok(value) => value,
             Err(cause) => {

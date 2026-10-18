@@ -298,3 +298,8 @@ Native account notifications use `native_account_event` for the outbound packet.
 The worker's `ws-reconnected` notification has no `data` property; other events
 retain their scalar/variadic NativeValue payload. The MEXC native-host socket
 witness exercises its source `onOpen` notification and packet construction.
+
+Native method error envelopes forward name, message, stack and optional code,
+matching CallMethodHandler. The canonical error materializer retains hosted
+callback stacks without JSON/coercion; explicit undefined remains an own field.
+The real signer-rejection Rust/Node targets inspect both envelope and Error.

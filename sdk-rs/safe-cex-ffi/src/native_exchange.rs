@@ -347,6 +347,9 @@ fn rejected(env: &Env, error: NativeValue) -> napi::Result<napi::Error> {
     })?;
     let mut object = unsafe { Object::from_napi_value(env.raw(), raw)? };
     object.set_named_property("name", field("name")?)?;
+    if let Some(stack) = error.get("stack") {
+        object.set_named_property("stack", JsData(stack.clone()))?;
+    }
     if let Some(code) = error.get("code") {
         object.set_named_property("code", JsData(code.clone()))?;
     }

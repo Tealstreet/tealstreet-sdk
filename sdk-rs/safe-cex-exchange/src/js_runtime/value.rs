@@ -140,6 +140,11 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
+        if let Some(stack) = &error.stack {
+            value
+                .set("stack", Js::str(stack))
+                .expect("fresh error stack property");
+        }
         if let Some(failure) = error.origin.as_ref().and_then(|origin| {
             origin
                 .error()
@@ -148,6 +153,11 @@ impl From<ExchangeError> for Thrown {
             failure.transport_error.as_deref()
             && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
         {
+            if let Some(stack) = cause.value().get("stack") {
+                value
+                    .set("stack", stack.to_js())
+                    .expect("fresh retained error stack property");
+            }
             for (field, projected) in [("name", &error.name), ("message", &error.message)] {
                 if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
                     && String::from_utf16(units).is_err()
