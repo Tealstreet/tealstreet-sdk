@@ -26,6 +26,10 @@ pub trait JsHttpHost {
     fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
         None
     }
+    /// Native implementation of the source options.payloadSigner callback.
+    fn payload_signer(&self) -> Option<Rc<dyn safe_cex_crypto::PayloadSigner>> {
+        None
+    }
 }
 
 type Host = Rc<dyn JsHttpHost>;
