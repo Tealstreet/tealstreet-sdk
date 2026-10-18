@@ -30,6 +30,7 @@ const ALL_EXCHANGES: ExchangeName[] = [
   'asterdex',
   'backpack',
   'binance',
+  'binanceinverse',
   'binancespot',
   'binancepm',
   'bingx',
