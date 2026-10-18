@@ -85,28 +85,60 @@ fn page_get<H: Host>(
     h.apply(selected, vec![endpoint, h.object(vec![("params", params)])])
 }
 
+/// Closed set of lexical callbacks created by this module and selected by the native host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Callback {
+    WalletHas,
+    WalletField,
+    WalletCoin,
+    PositionNumeric,
+    PositionRequired,
+    Nonfinite,
+    OrderNumber,
+    OrdersInvalid,
+    OrdersMap,
+    PositionsMap,
+}
+impl Callback {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "wallet-has" => Some(Self::WalletHas),
+            "wallet-field" => Some(Self::WalletField),
+            "wallet-coin" => Some(Self::WalletCoin),
+            "position-numeric" => Some(Self::PositionNumeric),
+            "position-required" => Some(Self::PositionRequired),
+            "nonfinite" => Some(Self::Nonfinite),
+            "order-number" => Some(Self::OrderNumber),
+            "orders-invalid" => Some(Self::OrdersInvalid),
+            "orders-map" => Some(Self::OrdersMap),
+            "positions-map" => Some(Self::PositionsMap),
+            _ => None,
+        }
+    }
+}
+
 pub fn dispatch<H: Host>(
     h: &H,
     owner: &H::Value,
-    code: &str,
+    code: Callback,
     captures: &[H::Value],
     args: Vec<H::Value>,
 ) -> Result<H::Value, H::Error> {
     let value = args.first().cloned().unwrap_or_else(|| h.undefined());
     let result = match code {
-        "wallet-has" => {
+        Callback::WalletHas => {
             !h.equal(&value, &h.undefined())
                 && !h.equal(&value, &h.intrinsic("null", vec![])?)
                 && !h.equal(&value, &h.literal(""))
                 && finite(h, h.intrinsic("Number", vec![value])?)?
         }
-        "wallet-field" => {
+        Callback::WalletField => {
             let row = captures[0].clone();
             h.equal(&get_field(h, row.clone(), value.clone())?, &h.undefined())
                 || h.equal(&get_field(h, row.clone(), value.clone())?, &h.literal(""))
                 || numeric_field(h, owner.clone(), row, value)?
         }
-        "wallet-coin" => {
+        Callback::WalletCoin => {
             !h.truthy(&value)
                 || !h.equal(
                     &h.intrinsic("typeof", vec![h.get(&value, "coin")?])?,
@@ -127,21 +159,21 @@ pub fn dispatch<H: Host>(
                     ],
                 )?
         }
-        "position-numeric" => {
+        Callback::PositionNumeric => {
             let row = captures[0].clone();
             !h.equal(&get_field(h, row.clone(), value.clone())?, &h.undefined())
                 && !h.equal(&get_field(h, row.clone(), value.clone())?, &h.literal(""))
                 && !numeric_field(h, owner.clone(), row, value)?
         }
-        "position-required" => {
+        Callback::PositionRequired => {
             let row = captures[0].clone();
             h.equal(&get_field(h, row.clone(), value.clone())?, &h.undefined())
                 || h.equal(&get_field(h, row.clone(), value.clone())?, &h.literal(""))
                 || !numeric_field(h, owner.clone(), row, value)?
         }
-        "nonfinite" => !finite(h, value)?,
-        "order-number" => !finite(h, value.clone())? || h.numeric(&value)? < 0.0,
-        "orders-invalid" => {
+        Callback::Nonfinite => !finite(h, value)?,
+        Callback::OrderNumber => !finite(h, value.clone())? || h.numeric(&value)? < 0.0,
+        Callback::OrdersInvalid => {
             !h.truthy(&h.get(&value, "status")?)
                 || !h.truthy(&h.get(&value, "type")?)
                 || !h.truthy(&h.get(&value, "side")?)
@@ -156,9 +188,8 @@ pub fn dispatch<H: Host>(
                     h.truthy(&call!(h, numbers, "some", vec![callback]))
                 }
         }
-        "orders-map" => return Ok(call!(h, owner.clone(), "mapOrder", vec![value])),
-        "positions-map" => return Ok(call!(h, owner.clone(), "mapPosition", vec![value])),
-        _ => return h.intrinsic("unknown callback", vec![h.literal(code)]),
+        Callback::OrdersMap => return Ok(call!(h, owner.clone(), "mapOrder", vec![value])),
+        Callback::PositionsMap => return Ok(call!(h, owner.clone(), "mapPosition", vec![value])),
     };
     Ok(h.boolean(result))
 }

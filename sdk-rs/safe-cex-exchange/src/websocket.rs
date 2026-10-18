@@ -4355,7 +4355,7 @@ mod tests {
             let (socket, parent, runtime, _) = fixture();
             let mut expected = ExchangeError::new("resync log listener failed");
             expected.name = "TypeError".into();
-            expected.code = Some(json!("E_LISTENER"));
+            expected.code = Some(crate::js_runtime::value::Js::str("E_LISTENER"));
             *parent.log_error.borrow_mut() = Some(expected.clone());
             parent.snapshot_failure.set(true);
             parent.snapshot_gate.set(false);

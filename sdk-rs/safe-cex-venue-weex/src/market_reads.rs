@@ -173,10 +173,15 @@ pub fn fetch_markets<'a, H, V: 'a, E: 'a>(
                     ))
                 }),
             )?;
-            (rt.map)(
+            let mapped = (rt.map)(
                 host,
                 &filtered,
                 Box::new(move |row, _, _| (rt.normalize_market)(host, row)),
+            )?;
+            (rt.filter)(
+                host,
+                &mapped,
+                Box::new(move |row, _, _| Ok(!(rt.is_undefined)(row))),
             )
         })
         .await;

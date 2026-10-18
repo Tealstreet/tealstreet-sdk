@@ -1325,6 +1325,19 @@ wait for its authentication or other asynchronous completion. The native TCP
 `js_socket_open_order` witness coalesces the upgrade and first frame and compares
 synchronous and asynchronous listener traces with Node.
 
+Emitter callbacks and `BaseExchange::emit`/`emit_args` carry shared `Js` directly.
+Scalar listeners read a missing first argument as Undefined; variadic listeners
+retain the original argument count. Producers use `from_typed` before any JSON
+serialization; already-JSON inputs opt into `from_json` explicitly. Listener
+errors stop dispatch, and once rows are removed before invoking their callback.
+
+`ExchangeError.code` is `Option<Js>`: absent differs from own Undefined, and
+thrown-error roundtrips retain native number bits and object references. Sentry
+formatter results are also `Js`, including own Undefined keys. The runtime's
+exception-report callbacks remain explicit JSON host boundaries. Worker event
+posts use the required native DATA capability; main-thread worker RPC arguments
+and successful results keep their separately scoped JSON ABI.
+
 Adapter config capture/restore reuses the canonical RetainedJsonInput and existing
 native typed codec through two thin value helpers. Shared HTTP adapters retain
 own undefined, raw NaN payloads, infinities and signed zero at the terminal and
@@ -1337,6 +1350,15 @@ Its native record codec preserves absent, own undefined and concrete intervals,
 including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
+
+The JS emitter facade follows the installed tiny-emitter removal algorithm:
+omitted or falsy callbacks clear the event, and callback removal filters every
+matching function or live `_` alias. Alias getters run without a listener borrow;
+a successful removal commits the original filtered snapshot, preserving source
+reentrant removal/addition behavior. Getter errors preserve their original value
+and side effects. Core host listeners share that snapshot, and an in-flight emit
+keeps its own snapshot. `tests/js_emitter_off.rs` compares 20 cases through the
+production native runtime and BaseExchange facade against installed tiny-emitter.
 
 Singular JS Store order/position/market mutators read the selector's `id` and
 compare it strictly with native string IDs. Non-string IDs and bare primitives
@@ -1494,6 +1516,13 @@ BigNumber.isFinite reads the private decimal/Infinity/NaN variant directly; it
 never converts through f64. The Node oracle includes finite values at +/-1e1000
 and +/-1e-1000, which overflow or underflow a Number conversion, as well as
 NaN, both infinities, signed zero, clones and arithmetic results.
+
+
+Raw error reporter inputs use `ExchangeErrorInput::Raw(Js)`. Pass the original
+shared-runtime value; already-JSON readers use explicit `from_json` at that boundary.
+The reporter retains lazy reads, native formatted messages and worker error identity.
+Optional message/extra-data and main-thread exception-host ABIs retain their stated
+UTF-8/JSON profiles; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
 
 Worker/native delivery services live in exchange-core so constructor hosts never
 depend upward on safe-cex-webworker. `delivery_timers` owns the existing timer

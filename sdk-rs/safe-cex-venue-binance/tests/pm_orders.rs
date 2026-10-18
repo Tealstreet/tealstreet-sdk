@@ -201,6 +201,10 @@ fn run_cases(precision_supplement: bool) {
         base.on_args(
             "error",
             Rc::new(move |_, message| {
+                let message: Vec<serde_json::Value> = message
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 capture.borrow_mut().push(serde_json::json!(message));
                 Ok(())
             }),

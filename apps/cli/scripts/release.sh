@@ -5,8 +5,22 @@ set -euo pipefail
 #
 # The GitHub Action publishes the public Tealstreet/cli release and updates
 # Tealstreet/homebrew-tap after this script pushes a cli-vX.Y.Z tag.
+#
+# BRAND=disrupt pushes disrupt-cli-vX.Y.Z instead, which the same workflow
+# builds with `scripts/build.sh disrupt` and publishes to DisruptTrade/cli
+# only (no npm, no Homebrew). Both brands share package.json's version.
 
 cd "$(dirname "$0")/.."
+
+BRAND="${BRAND:-tealstreet}"
+case "$BRAND" in
+  tealstreet) TAG_PREFIX="cli-v" ;;
+  disrupt) TAG_PREFIX="disrupt-cli-v" ;;
+  *)
+    echo "Unknown BRAND: $BRAND (expected tealstreet|disrupt)"
+    exit 1
+    ;;
+esac
 
 BUMP="${1:-}"
 case "$BUMP" in
@@ -22,7 +36,7 @@ if [ -n "$BUMP" ]; then
 fi
 
 VERSION=$(node -p "require('./package.json').version")
-TAG="cli-v${VERSION}"
+TAG="${TAG_PREFIX}${VERSION}"
 ROOT_DIR=$(git rev-parse --show-toplevel)
 
 cd "$ROOT_DIR"
@@ -53,6 +67,10 @@ git push origin HEAD
 git push origin "$TAG"
 
 echo "Release tag pushed: $TAG"
-echo "GitHub Actions will publish Tealstreet/cli v${VERSION} and update Homebrew."
-echo "  brew tap tealstreet/tap && brew install tealstreet"
+if [ "$BRAND" = disrupt ]; then
+  echo "GitHub Actions will publish DisruptTrade/cli v${VERSION} (binaries only)."
+else
+  echo "GitHub Actions will publish Tealstreet/cli v${VERSION} and update Homebrew."
+  echo "  brew tap tealstreet/tap && brew install tealstreet"
+fi
 echo ""

@@ -78,14 +78,34 @@ fn positions<H: AccountRefreshHost>(
     publish(h, owner, "positions", None)?;
     Ok(selected)
 }
+/// Closed set of lexical callbacks created by this module and selected by the native host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Callback {
+    AccountOrders,
+    InverseAccountPositions,
+    SpotAccountPositions,
+    AccountTickAgain,
+}
+impl Callback {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "account-orders" => Some(Self::AccountOrders),
+            "inverse-account-positions" => Some(Self::InverseAccountPositions),
+            "spot-account-positions" => Some(Self::SpotAccountPositions),
+            "account-tick-again" => Some(Self::AccountTickAgain),
+            _ => None,
+        }
+    }
+}
+
 pub fn dispatch<H: AccountRefreshHost>(
     h: &H,
     owner: &H::Value,
-    code: &str,
+    code: Callback,
     args: Vec<H::Value>,
 ) -> Result<H::Value, H::Error> {
     match code {
-        "account-orders" => {
+        Callback::AccountOrders => {
             if h.truthy(&h.get(owner, "isDisposed")?) {
                 return Ok(h.array(vec![]));
             }
@@ -93,7 +113,7 @@ pub fn dispatch<H: AccountRefreshHost>(
             publish(h, owner, "orders", Some(orders.clone()))?;
             Ok(orders)
         }
-        "inverse-account-positions" | "spot-account-positions" => {
+        Callback::InverseAccountPositions | Callback::SpotAccountPositions => {
             if h.truthy(&h.get(owner, "isDisposed")?) {
                 return Ok(h.array(vec![]));
             }
@@ -101,11 +121,10 @@ pub fn dispatch<H: AccountRefreshHost>(
                 h,
                 owner,
                 args[0].clone(),
-                code == "inverse-account-positions",
+                code == Callback::InverseAccountPositions,
             )
         }
-        "account-tick-again" => Ok(call!(h, owner.clone(), "tick", vec![])),
-        _ => h.intrinsic("unknown callback", vec![h.literal(code)]),
+        Callback::AccountTickAgain => Ok(call!(h, owner.clone(), "tick", vec![])),
     }
 }
 fn refresh<H: AccountRefreshHost>(

@@ -27,6 +27,29 @@ function fixture(tunnel=false){
  const ex=new c.Ex('breakoutprop',{key:'k',secret:'s',extra:{recvWindow:0},tealstreetTunnel:tunnel},store);ex.getAccountCode=async()=>{f.trace.push('account');return'A';};
  f.ex=ex;f.store=store;f.flush=async()=>{for(let i=0;i<32;i++)await Promise.resolve();};return f;
 }
+if(process.argv[2]==='amendmentCallerId'){
+ const base=ast('exchanges/base.ts'), klass=base.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='BaseExchange');
+ const methods=['resolveCallerClientOrderId','rejectPreflight'].map(name=>{
+  const method=klass.members.find(m=>m.name?.text===name);assert(method&&ts.isMethodDeclaration(method),'actual_base_guard:'+name);return method.getText(base);
+ });
+ const code=ts.transpileModule('return class ActualBaseGuard {'+methods.join('\n')+'}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+ const Guard=new Function(code)(),cases=[];
+ for(const label of ['absent','undefined','value','empty']){
+  const f=fixture();f.ex.sessionToken='cached';f.ex.sessionTokenExpiresAt=Date.now()+10000;f.ex._exchangeName='breakoutprop';
+  for(const name of ['resolveCallerClientOrderId','rejectPreflight'])f.ex[name]=Guard.prototype[name];
+  f.store.marketsBySymbol.BTC={symbol:'BTC',precision:{price:.1,amount:.01}};
+  const order={id:'old',symbol:'BTC',type:'limit',side:'buy',price:99.26,amount:1.234,reduceOnly:false};
+  if(label!=='absent')order.clientOrderId=label==='undefined'?undefined:label==='empty'?'':'caller-id';
+  let result;try{result={value:await f.ex.updateOrder({order,update:{amount:2.345,price:102.16}})}}catch(error){result={error:error.message}}
+  const methods=f.requests.map(r=>r.method),errors=f.trace.filter(t=>t.startsWith('error:'));
+  const refused=label==='value'||label==='empty';
+  assert.deepEqual(methods,refused?['DELETE']:['DELETE','POST'],'actual_source_ordering:'+label);
+  if(refused)assert.equal(result.error,'breakoutprop cannot honor a caller clientOrderId');
+  else assert.equal(result.value,'placed');
+  cases.push({label,result,methods,errors});
+ }
+ console.log(JSON.stringify({cases}));process.exit(0);
+}
 const api=fixture();assert.deepEqual(api.trace,['create','retry','create','retry']);await assert.rejects(api.ex.xhr.get('accounts/{accountCode}',{params:{accountCode:'A'}}),/No session token/);api.ex.sessionToken='old';api.ex.sessionTokenExpiresAt=Date.now()+10000;api.wire.push({status:401});await api.ex.xhr.get('accounts/{accountCode}',{params:{accountCode:'A',keep:'B'}});assert.equal(api.requests[0].url,'accounts/A');assert.equal(api.requests[0].params.keep,'B');assert.equal(Object.hasOwn(api.requests[0].params,'accountCode'),false);assert.equal(api.requests[0].headers.get('Coinbase-Authorization'),'DXAPI old');assert.equal(api.requests.at(-1).headers.get('Coinbase-Authorization'),'DXAPI renewed');assert.equal(api.requests[0].__dxSessionRetried,true);assert.deepEqual(api.requests.map(r=>r.url),['accounts/A','/login','accounts/A']);api.wire.push({status:401},null,{status:401});await assert.rejects(api.ex.xhr.get('/orders'),e=>e.code==='EXACT');assert.equal(api.requests.filter(r=>r.url==='/orders').length,2);
 for(const [url,status,noConfig]of[['/orders',403,false],['/orders',401,true],['/login',401,false]]){api.ex.sessionToken='cached';api.wire.push({status,noConfig});const before=api.requests.length;await assert.rejects(api.ex.xhr.get(url),e=>e.code==='EXACT');assert.equal(api.requests.length,before+1);assert.equal(api.ex.sessionToken,'cached');}
 const tunnel=fixture(true);await tunnel.ex.xhr.post('/login',{});assert.equal(tunnel.requests[0].headers.get('Authorization'),'DXAPI null');assert.equal(tunnel.requests[0].headers.has('Coinbase-Authorization'),false);

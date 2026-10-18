@@ -114,7 +114,9 @@ fn listen(h: &Harness, event: &str) -> Rc<RefCell<Vec<Value>>> {
     h.venue().base().on(
         event,
         Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.clone());
+            sink.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(data).expect("finite fixture event"),
+            );
             Ok(())
         }),
     );
@@ -1064,7 +1066,7 @@ fn private_balance_topics_preserve_the_rest_owned_store() {
     );
 }
 
-fn ticker_row_refusals(topic: &str, source: &str, target: &str) {
+fn ticker_row_refusals(topic: &str, source: &str, target: &str, surrogate: bool) {
     use safe_cex_store::{Store, StoreUpdate};
     let h = started(json!({"publicDataOnly":true}), public_routes);
     let template = h.store.tickers()[0].clone();
@@ -1091,14 +1093,20 @@ fn ticker_row_refusals(topic: &str, source: &str, target: &str) {
         row[source] = value;
         row
     };
-    push(
-        &h,
-        &public,
-        json!({"topic":topic,"data":[
-            frame_row("BTC",Value::Null),frame_row("ETH",json!(123)),
-            frame_row("SOL",json!("unparsed")),frame_row("LTC",json!(456))
-        ]}),
-    );
+    let frame = json!({"topic":topic,"data":[
+        frame_row("BTC",Value::Null),frame_row("ETH",json!(123)),
+        frame_row("SOL",json!("unparsed")),frame_row("LTC",json!(456))
+    ]});
+    if surrogate {
+        let text = frame.to_string().replace("\"unparsed\"", r#""\ud800""#);
+        public
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(text)));
+        h.runtime.pump();
+    } else {
+        push(&h, &public, frame);
+    }
     let rows = json_of(&*h.store.tickers());
     let field = |symbol: &str| {
         rows.as_array()
@@ -1114,7 +1122,10 @@ fn ticker_row_refusals(topic: &str, source: &str, target: &str) {
     assert_eq!(field("BTCUSDT"), original);
     assert_eq!(field("SOLUSDT"), original);
     let reports = h.runtime.reports.borrow().join("\n");
-    for (symbol, value) in [("BTCUSDT", "null"), ("SOLUSDT", "unparsed")] {
+    for (symbol, value) in [
+        ("BTCUSDT", "null"),
+        ("SOLUSDT", if surrogate { r"\ud800" } else { "unparsed" }),
+    ] {
         assert!(
             reports.contains(symbol),
             "missing refused row identity: {reports}"
@@ -1134,13 +1145,84 @@ fn ticker_row_refusals(topic: &str, source: &str, target: &str) {
 }
 #[test]
 fn ticker_row_refusals_keep_valid_ticker_siblings_and_report_each_value() {
-    ticker_row_refusals("tickers", "close", "last");
+    ticker_row_refusals("tickers", "close", "last", false);
 }
 #[test]
 fn ticker_row_refusals_keep_valid_bbo_siblings_and_report_each_value() {
-    ticker_row_refusals("bbos", "bid", "bid");
+    ticker_row_refusals("bbos", "bid", "bid", false);
 }
 #[test]
 fn ticker_row_refusals_keep_valid_mark_siblings_and_report_each_value() {
-    ticker_row_refusals("markprices", "price", "mark");
+    ticker_row_refusals("markprices", "price", "mark", false);
+}
+
+#[test]
+fn retained_ticker_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("tickers", "close", "last", true);
+}
+#[test]
+fn retained_bbo_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("bbos", "bid", "bid", true);
+}
+#[test]
+fn retained_mark_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("markprices", "price", "mark", true);
+}
+
+#[test]
+fn retained_ticker_frame_ignores_unread_surrogate_metadata() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":123,"amount":20,"volume":30,"ignored":"\ud800"}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, 123.);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn retained_ticker_frame_preserves_overflow_and_signed_zero_numbers() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":1e400,"amount":20,"volume":-0.0}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, f64::INFINITY);
+    assert_eq!(h.store.tickers()[0].volume.to_bits(), (-0.0f64).to_bits());
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn retained_ticker_frame_normalizes_before_identifier_admission() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT_\ud800","close":999,"amount":999,"volume":999},{"symbol":"PERP_\ud800_USDT","close":123,"amount":20,"volume":30}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, 999.);
+    assert_eq!(h.runtime.reports.borrow().len(), 1);
+    let reports = h.runtime.reports.borrow().join("\n");
+    assert!(
+        reports.contains(r"\ud800") && reports.contains("identifier boundary"),
+        "{reports}"
+    );
+    h.venue().dispose().unwrap();
 }

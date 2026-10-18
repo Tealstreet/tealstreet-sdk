@@ -1085,14 +1085,83 @@ renders the tab permanently empty.
 - `isDemo = true` -- triggers demo URL selection for REST and the private WebSocket; public data intentionally uses mainnet
 - `get supportedCategories()` returns `['linear']`
 
-`HyrotraderExchange` is a first-party Bybit-compatible simulator variant. It keeps
-the Bybit parsers/order lifecycle, but uses explicit URL override hooks instead
-of pretending its exchange name is `bybitdemo`:
+`HyrotraderExchange` is a first-party Bybit-compatible simulator/prod variant. It
+keeps the Bybit parsers/order lifecycle, but uses explicit URL override hooks
+instead of pretending its exchange name is `bybitdemo`:
 
-- REST origin comes from `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`
-- public/private WS URLs come from `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL`
-  and `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL`, or are derived from the
-  REST origin as `/v5/public/linear` and `/v5/private`
+- Production/user-pasted challenge accounts use
+  `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL`,
+  `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL`, and
+  `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL`. The WebSocket URLs are optional
+  and derive from the REST origin as `/v5/public/linear` and `/v5/private`.
+  While Hyro's production HTTPS/WSS origin is not live, these accounts fall back
+  to the configured `NEXT_PUBLIC_HYROTRADER_SIMULATOR_*` origins but still stay
+  `hyrotraderMode: 'production'` / `isDemo = false` for grading, journaling and
+  hosted-server nudges. Do not use `bybitdemo` for Hyro simulator keys; it talks
+  to Bybit's demo host, not Hyro.
+- Metadata keeps HyroTrader **dev-only** (`enabled: false`, `enabledInDev: true`,
+  `enableInPreview: false`) until private REST/WS can run from preview/prod via
+  Hyro HTTPS/WSS origins or a Tealstreet relay. Public market-data HTTPS/WSS is
+  not enough to validate/link a private account.
+- The shared `/hyrotrader-demo` account is explicitly marked with
+  `ExchangeAccountConfig.hyrotraderDemo: true`, which maps to
+  `options.extra.hyrotraderMode: 'demo'`, sets `isDemo = true`, and uses the
+  simulator-only `NEXT_PUBLIC_HYROTRADER_SIMULATOR_*` env family, including the
+  bundled shared API key/secret. Production accounts default to
+  `hyrotraderMode: 'production'` and may borrow simulator ORIGINS during v1, but
+  must never read simulator API keys/secrets as a credential fallback.
+- Hyro's simulator origin may be plain HTTP on port `8012`; WS uses the same
+  host/port with `ws://.../v5/public/linear` and `ws://.../v5/private`. Do not
+  force HTTPS/WSS in probes or config normalization, and keep exact simulator
+  IPs out of committed docs/config. Plain `http://` + `ws://` is unreachable
+  from any HTTPS origin (mixed-content block is non-overridable in production
+  browsers), so direct-browser against the simulator only works from local
+  HTTP dev. Any production path from a Tealstreet HTTPS origin needs either
+  TLS fronting by Hyro or a Tealstreet-origin proxy. Hyro confirmed on
+  2026-10-15 that HTTPS/WSS should already be available on the main deployment;
+  the separate test server was not configured yet and was awaiting their DevOps
+  team, so do not add a relay scaffold unless the TLS route remains unavailable.
+- Public market data should use Hyro's own public REST/WS endpoints directly as
+  the baseline. Do not proxy public market-data traffic unnecessarily, and do not
+  assume direct Bybit L2 is identical to the simulator's served book.
+- **A HyroTrader `retCode: 10003 "API key is invalid"` is not a reliable
+  signal that credentials are wrong.** Hyro deactivates the account on
+  their end when the user's challenge expires or is disabled (observed
+  2026-10-15: Hatef reactivated the test challenge and the same
+  key/secret pair started returning `retCode: 0` again, no credential
+  change on our side). The generic auth-invalid pattern in
+  `health/errorPatterns.ts` catches it as a critical credential error
+  and raises the auth badge, which is user-safe but misleading: it
+  reads as "rotate your key" when the user cannot fix it from their
+  side at all. The Bybit live/demo mismatch probe in `bybit.api.ts` is
+  correctly gated on `exchange.name === 'bybit' || 'bybitdemo'` and
+  does not run for `hyrotrader`, so there is no automatic
+  disambiguation here either.
+  Per Hatef (2026-10-15), the current and near-term production flow is
+  user-paste-key: a trader copies their challenge's API key and secret
+  from HyroTrader and enters them into Tealstreet like any other
+  exchange. OAuth is a future convenience that automates the paste
+  step; it does not change the underlying signing scheme or create
+  partner service keys. So the UX branches for `retCode 10003` are:
+  - **Paste-key accounts (today's prod, CLI, and any user who manually
+    added hyrotrader)**: route to contact-Hyro + check-challenge-status
+    guidance. Do not auto-trigger a re-paste flow for a key that has
+    not actually changed. The user cannot fix it from their side.
+  - **Shared `/hyrotrader-demo` bundled-key account**: surface as
+    "demo temporarily unavailable" and raise an internal alert — no
+    user action possible because rotating the bundled key does nothing
+    when Hyro has deactivated it.
+  - **OAuth-linked accounts (v2, not yet shipped)**: route to a
+    Reconnect Hyro flow, driven by Hyro's authenticated status
+    endpoint which they'll poll every 30 s and surface revocation
+    within 30 s. Preferable to inferring state from `retCode 10003`
+    once that lifecycle signal exists.
+  Deferred OAuth/server-held credential design lives in
+  `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
+  OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
+  private trading should run through `services/exchange-server` because every
+  private request may need Tealstreet-held signing material. OAuth has no known
+  end-user launch timeline yet.
 - reconciliation is USDT-only (`linear`, `settleCoin=USDT`) because the simulator
   contract does not support Bybit's USDC linear branch
 - order placement sends a generated `orderLinkId` because the simulator requires
@@ -1149,19 +1218,31 @@ Creates are refused while an established private session is recovering.
 Public streams carry periodic snapshots. Hyro candles use authoritative kline volume
 and never accumulate publicTrade snapshots; seconds candles are unavailable. Bybit's
 trade-derived candle path is unchanged. Orderbook snapshot/delta and ticker parsing
-remain shared.
+remain shared, but Hyro public endpoints are the venue source of truth for this
+adapter; do not swap in direct Bybit L2 as an assumed-equivalent fallback.
 
 Configure the web build before enabling the connector:
 
 | Setting                                                                                    | Purpose                                                                                               |
 | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`                                                | Required simulator REST origin; no fallback to Bybit                                                  |
-| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL`                                           | Optional exact public socket URL; defaults to REST-derived `/v5/public/linear`                        |
-| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL`                                          | Optional exact private socket URL; defaults to REST-derived `/v5/private`                             |
+| `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL`                                                     | Required production/challenge REST origin for ordinary `hyrotrader` accounts; no fallback to Bybit    |
+| `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL`                                                | Optional production public socket URL; defaults to REST-derived `/v5/public/linear`                   |
+| `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL`                                               | Optional production private socket URL; defaults to REST-derived `/v5/private`                        |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`                                                | Shared demo/probe simulator REST origin, including plain `http://<host>:8012`; no fallback to Bybit   |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PUBLIC_WS_URL`                                           | Optional simulator public socket URL; defaults to REST-derived `/v5/public/linear`                    |
+| `NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL`                                          | Optional simulator private socket URL; defaults to REST-derived `/v5/private`                         |
 | `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_KEY` / `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_SECRET` | Existing branded-demo defaults, bundled publicly; only a disposable shared demo account belongs here  |
 | `HYROTRADER_ENABLED`                                                                       | App feature flag controlling connector/demo access; runtime overrides may differ from source defaults |
 
-Normal connected accounts supply their own credentials through exchange options.
+Until Hyro's production origin is live, ordinary `hyrotrader` accounts use the
+simulator origin when `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL` is unset. This is
+still not a Bybit fallback, and only the `/hyrotrader-demo` account reads the
+simulator API key/secret envs.
+
+Normal connected accounts supply their own credentials through exchange options,
+not environment variables. During v1 they may use the simulator origin with
+user-pasted challenge keys, but only the shared `/hyrotrader-demo` account should
+read the simulator API key/secret envs.
 All `NEXT_PUBLIC_*` settings are fixed at build time. Changing deployment settings
 requires a new web build. Keep account credentials out of committed files and logs.
 

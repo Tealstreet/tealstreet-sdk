@@ -38,7 +38,8 @@ fn watch(venue: &AsterDEXExchange, event: &str) -> Rc<RefCell<Vec<Value>>> {
     venue.base().on(
         event,
         Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut()
+                .push(safe_cex_exchange::js_runtime::value::to_json(value)?);
             Ok(())
         }),
     );
@@ -65,7 +66,7 @@ fn native_facade_preserves_zero_single_array_and_multiple_arguments() {
             venue.base().on_args(
                 event,
                 Rc::new(move |_, args| {
-                    sink.borrow_mut().push(Value::Array(args.to_vec()));
+                    sink.borrow_mut().push(to_json(&Js::array(args.to_vec()))?);
                     Ok(())
                 }),
             );
@@ -107,7 +108,10 @@ fn native_facade_preserves_zero_single_array_and_multiple_arguments() {
                 ],
             )
             .unwrap();
-        venue.base().emit("positions", json!(["a", "b"])).unwrap();
+        venue
+            .base()
+            .emit("positions", from_json(&json!(["a", "b"])))
+            .unwrap();
         assert_eq!(*calls.borrow(), vec![json!([["a", "b"]])]);
     });
 }

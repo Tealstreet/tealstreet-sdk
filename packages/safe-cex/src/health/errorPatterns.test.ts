@@ -299,3 +299,20 @@ describe('bybit auth rejections the venue actually sends', () => {
     expect(match('invalid request, please check your server timestamp or recv_window param')).toBe('time_sync');
   });
 });
+
+describe('hyrotrader auth rejections the simulator sends', () => {
+  const match = (message: string) => {
+    const patterns = mergePatterns(DEFAULT_ERROR_PATTERNS, EXCHANGE_SPECIFIC_PATTERNS.hyrotrader);
+    for (const pattern of patterns) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  it('classifies HyroTrader 10003 as an auth error for user-facing challenge guidance', () => {
+    expect(match('retCode:10003 retMsg:API key is invalid.')).toBe('auth_invalid');
+  });
+});
