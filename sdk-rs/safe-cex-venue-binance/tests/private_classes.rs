@@ -4073,6 +4073,7 @@ fn projection_host() -> (
     Rc<Runtime>,
     Rc<dyn ExchangeImports>,
     std::sync::Arc<ProjectionWire>,
+    Rc<ExchangeOwner>,
 ) {
     let runtime = Rc::new(Runtime::default());
     let wire = std::sync::Arc::new(ProjectionWire::default());
@@ -4083,7 +4084,16 @@ fn projection_host() -> (
         None,
         Default::default(),
     );
-    (runtime, deps.imports, wire)
+    let imports = deps.imports.clone();
+    let owner = ExchangeOwner::new(
+        Venue::Futures,
+        safe_cex_types::ExchangeName::Binance,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+        deps,
+    )
+    .unwrap();
+    (runtime, imports, wire, owner)
 }
 #[cfg(feature = "native")]
 fn projection_client(imports: &dyn ExchangeImports, kind: Factory) -> EventValue {
@@ -4097,7 +4107,7 @@ fn projection_client(imports: &dyn ExchangeImports, kind: Factory) -> EventValue
 #[cfg(feature = "native")]
 fn native_projection_query_bigint_is_rendered_instead_of_dropping_every_parameter() {
     for method in [HttpMethod::Get, HttpMethod::Delete] {
-        let (runtime, imports, wire) = projection_host();
+        let (runtime, imports, wire, _owner) = projection_host();
         let client = projection_client(imports.as_ref(), Factory::PublicAPI);
         let params = record([
             ("symbol", string("BTCUSDT")),
@@ -4126,7 +4136,7 @@ fn native_projection_query_bigint_is_rendered_instead_of_dropping_every_paramete
 #[cfg(feature = "native")]
 fn native_projection_body_bigint_rejects_before_any_transport_call() {
     for method in [HttpMethod::Post, HttpMethod::Put] {
-        let (runtime, imports, wire) = projection_host();
+        let (runtime, imports, wire, _owner) = projection_host();
         let client = projection_client(imports.as_ref(), Factory::PublicAPI);
         let data = record([(
             "quantity",
@@ -4155,7 +4165,7 @@ fn native_projection_signing_observes_bigint_query_and_body_before_serialization
     let mut vectors = vec![];
     let mut queries = vec![];
     for method in [HttpMethod::Get, HttpMethod::Post] {
-        let (runtime, imports, wire) = projection_host();
+        let (runtime, imports, wire, _owner) = projection_host();
         let client = projection_client(imports.as_ref(), Factory::API);
         let payload = record([
             ("symbol", string("BTCUSDT")),
@@ -4235,7 +4245,7 @@ fn native_projection_signing_observes_bigint_query_and_body_before_serialization
 #[test]
 #[cfg(feature = "native")]
 fn native_projection_unsigned_private_body_keeps_json_bigint_refusal() {
-    let (runtime, imports, wire) = projection_host();
+    let (runtime, imports, wire, _owner) = projection_host();
     let options = EventValue::from_json(json!({"key":"","secret":""}));
     let owner = record([("name", string("binance")), ("options", options.clone())]);
     let client = imports
