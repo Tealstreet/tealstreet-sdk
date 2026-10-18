@@ -219,6 +219,9 @@ async function bootstrap(s) {
 async function saveRun(s, results) {
   await s.close();
   sessions.splice(sessions.indexOf(s), 1);
+  const requestBytes = serialize(s.records.map(({ response, ...record }) => record));
+  const requestFixture = join(fixtures, `${hash(requestBytes)}.${s.label}.rest-requests.v8`);
+  writeFileSync(requestFixture, requestBytes, { mode: 0o600 });
   const bytes = serialize(results),
     fixture = join(fixtures, `${hash(bytes)}.${s.label}.rest-results.v8`);
   writeFileSync(fixture, bytes, { mode: 0o600 });
@@ -226,6 +229,8 @@ async function saveRun(s, results) {
     label: s.label,
     implementation: s.implementation,
     fixture,
+    requestFixture,
+    requestHash: hash(requestBytes),
     hash: hash(bytes),
     requests: cleanRecords(s.records),
     diagnostics: s.diagnostics,
@@ -366,7 +371,7 @@ try {
             ['TIMEOUT', 'BLOCKED', 'INPUT_DIFF', 'NONDETERMINISTIC', 'CLOCK_DIFF', 'NOT_RUN'].includes(c.status),
           )
         ? 'INCOMPLETE'
-        : report.checks.some((c) => c.status === 'PASS')
+        : report.checks.some((c) => c.status === 'PASS' && c.label !== 'bootstrap-markets')
           ? 'PASS_WITH_COVERAGE_LIMITS'
           : 'NO_PUBLIC_COVERAGE';
     if (realtimeClock || bundle.kind === 'PUBLIC_REST_V1') report.status = 'DIAGNOSTIC_ONLY';
