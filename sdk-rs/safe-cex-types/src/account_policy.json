@@ -60,7 +60,7 @@
     "requiresOmniKeySeed": false,
     "supportsVault": false,
     "supportsTestnet": false,
-    "enabled": true,
+    "enabled": false,
     "requiresCors": false,
     "defaultProxyRegion": "SG"
   },
@@ -100,6 +100,19 @@
     "supportsVault": false,
     "supportsTestnet": true,
     "enabled": true,
+    "requiresCors": false,
+    "defaultProxyRegion": "SG"
+  },
+  "binanceinverse": {
+    "prettyName": "Binance Inverse",
+    "requiresNoSecret": false,
+    "requiresPassphrase": false,
+    "requiresApplicationId": false,
+    "requiresApiKeyIndex": false,
+    "requiresOmniKeySeed": false,
+    "supportsVault": false,
+    "supportsTestnet": false,
+    "enabled": false,
     "requiresCors": false,
     "defaultProxyRegion": "SG"
   },

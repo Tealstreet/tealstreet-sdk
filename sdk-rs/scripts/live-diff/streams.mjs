@@ -19,6 +19,9 @@ const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name
 const exchange = option('--venue', 'binance'),
   adapter = publicStreams[exchange];
 if (!adapter) throw new Error('Add an explicit public stream host adapter for this venue');
+const startupOnly = args.includes('--startup-only');
+if (adapter.startupOnly && !startupOnly) throw new Error('This venue is limited to --startup-only recorded replays');
+if (startupOnly && !args.includes('--replay')) throw new Error('--startup-only requires a recorded replay bundle');
 const captureMs = Number(option('--capture-ms', '60000')),
   timeout = Number(option('--timeout-ms', '60000'));
 if (!Number.isSafeInteger(captureMs) || captureMs < 1000 || captureMs > 60000)
@@ -38,6 +41,7 @@ const report = {
   node: process.version,
   rustRevision: option('--rust-revision'),
   captureMs,
+  startupOnly,
   nativeDrainVerified: false,
   comparisonsProvisional: true,
   limitations: [
@@ -167,7 +171,9 @@ async function session(implementation, mode, tape, label) {
   };
   sessions.push(result);
   await call('open', [], { exchange, options, ...(mode === 'replay' ? { replayEpoch: candleTo } : {}) });
+  const startedAt = performance.now();
   await call('start');
+  result.startMs = performance.now() - startedAt;
   console.log(`${exchange}: ${label} started`);
   return result;
 }
@@ -237,7 +243,7 @@ try {
   const replaySessions = startups.map((s) => s.value);
   const warmups = await Promise.allSettled(
     replaySessions.map(async (s) => {
-      await s.call('subscribe', [symbol, '1m', candleTo]);
+      if (!startupOnly) await s.call('subscribe', [symbol, '1m', candleTo]);
       if (!(await s.relay.ready())) throw new Error(`${s.label}: captured sockets did not open`);
       // Flush startup Store deliveries before observing parser-facing replay.
       await s.call('barrier');
@@ -290,6 +296,7 @@ try {
       label: s.label,
       implementation: s.implementation,
       receipt: receipts[i],
+      startMs: s.startMs,
       fixture,
       outputHash: hash(bytes),
       outputCount: values[i].outputs.length,
@@ -303,6 +310,18 @@ try {
     rust: compareSequences(values[2].outputs, values[3].outputs),
   };
   report.parity = compareSequences(values[0].outputs, values[2].outputs);
+  if (startupOnly) {
+    report.startup = values.map((value, i) => ({
+      label: replaySessions[i].label,
+      markets: value.state.markets?.length ?? 0,
+      tickers: value.state.tickers?.length ?? 0,
+      liveTickers: value.state.tickers?.filter((t) => t.last > 0 || t.bid > 0 || t.ask > 0).length ?? 0,
+      startMs: replaySessions[i].startMs,
+    }));
+    report.limitations.push(
+      'Recorded startup proof only: final Store state and per-dial drain are retained; no book/candle or 60-second live-window coverage claim.',
+    );
+  }
   report.coverage = Object.fromEntries(
     ['store:tickers', 'orderbook', 'candles'].map((channel) => [
       channel,

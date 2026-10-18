@@ -94,6 +94,11 @@ function audit(source, scripts = packageScripts) {
     assert.deepEqual(actual, commands, `${label} must retain fail-fast commands`);
   };
   const parity = job('types');
+  const accountPolicy = step(parity, 'Check generated account policy', /^        run: node sdk-rs\/safe-cex-types\/scripts\/account-policy\.cjs --check$/m);
+  assert.match(accountPolicy, /^        working-directory: \.$/m);
+  assert.doesNotMatch(accountPolicy, /^        env:/m, 'account policy must use the configured live-source oracle');
+  assert.ok(parity.indexOf('- name: Install isolated oracle dependencies from the repo lockfile') < parity.indexOf('- name: Check generated account policy'), 'account policy must follow isolated TypeScript setup');
+  assert.ok(parity.indexOf('- name: Check generated account policy') < parity.indexOf('- name: Cache cargo'), 'account policy must fail before Cargo and venue gates');
   // Coinbase tables/types must stay a mandatory live-source oracle after isolated TS setup.
   auditCryptocom(source);
   const coinbase = step(parity, 'Check Coinbase live TypeScript oracle', /^        run: corepack yarn venue-oracle:coinbase$/m);
@@ -186,6 +191,15 @@ test('GRVT script retains all venue test targets', () => {
   assert.equal(scripts['venue-oracle:grvt'], 'cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-grvt --all-targets --jobs 2 -- --include-ignored && cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-grvt --doc --jobs 2');
 });
 test('Rust workflow enforces parity and live routing gates', () => audit(workflow));
+test('account policy check cannot be removed, bypassed, or changed to regeneration', () => {
+  const header = '      - name: Check generated account policy\n';
+  for (const changed of [
+    workflow.replace(/      - name: Check generated account policy\n[\s\S]*?(?=      - name:)/, ''),
+    workflow.replace(header, header + '        if: false\n'),
+    workflow.replace(header, header + '        continue-on-error: true\n'),
+    workflow.replace('run: node sdk-rs/safe-cex-types/scripts/account-policy.cjs --check', 'run: node sdk-rs/safe-cex-types/scripts/account-policy.cjs'),
+  ]) assert.throws(() => audit(changed), /Check generated account policy/);
+});
 test('omitting the OKX live oracle is rejected', () => assert.throws(() => audit(workflow.replace(/      - name: Run OKX venue TypeScript equivalence gate\n[\s\S]*?(?=      # Local)/, '')), /missing Run OKX venue TypeScript equivalence gate/));
 test('masking the OKX oracle is rejected', () => assert.throws(() => audit(workflow.replace('corepack yarn venue-oracle:okx', 'corepack yarn venue-oracle:okx || true')), /Run OKX venue TypeScript equivalence gate command/));
 test('OKX root script retains the live Cargo oracle', () => {
