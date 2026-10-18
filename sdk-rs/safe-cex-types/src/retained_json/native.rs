@@ -102,8 +102,7 @@ impl<'de> Deserializer<'de> for NativeInput {
         visitor: V,
     ) -> Result<V::Value, Error> {
         if name == crate::retained_json::RETAINED_NATIVE {
-            return NativeInput(self.0.into_native_payload(), NativeMode::Preserve)
-                .deserialize_seq(visitor);
+            return self.0.into_native_payload().deserialize_seq(visitor);
         }
         if name == crate::model_field::MODEL_FIELD && matches!(self.0, Input::Undefined) {
             return visitor.visit_unit();
