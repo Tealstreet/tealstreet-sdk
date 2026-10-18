@@ -48,3 +48,7 @@ maintained safeCexAxiosCreate, real Axios adapter rejection, maintained signing 
 history/report bodies. The enhanced fallback equals native output; all original
 26 message profiles, UTF16 units, emitted count and signed-call assertions remain.
 No shared error producer change is made for that observer correction.
+
+The follow-up HISTORY_OUTPUT_REVIEW.md resolves those output/options obligations
+with three compiled native baseline failures and selected-row admission. It also
+records the successful class/cache reconciliation; the assigned ledger is closed.

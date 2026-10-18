@@ -210,3 +210,158 @@ fn history_ignores_unread_utf16_and_preserves_selected_number_coercion() {
         );
     }
 }
+
+#[test]
+fn history_options_match_source_coercion() {
+    assert_history_boundary("options");
+}
+
+#[test]
+fn history_selected_asset_refuses_only_its_row() {
+    assert_history_boundary("asset");
+}
+
+#[test]
+fn history_typed_strings_do_not_discard_siblings() {
+    assert_history_boundary("text");
+}
+
+fn assert_history_boundary(group: &str) {
+    use safe_cex_exchange::js_runtime::value::from_retained_input;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    fn unpack(value: &Value) -> Js {
+        if let Some(units) = value.get("$units").and_then(Value::as_array) {
+            return Js::utf16(
+                &units
+                    .iter()
+                    .map(|v| v.as_u64().unwrap() as u16)
+                    .collect::<Vec<_>>(),
+            );
+        }
+        if value.get("$undefined") == Some(&Value::Bool(true)) {
+            return Js::Undefined;
+        }
+        if let Some(bits) = value.get("$bits").and_then(Value::as_str) {
+            return Js::Number(f64::from_bits(u64::from_str_radix(bits, 16).unwrap()));
+        }
+        match value {
+            Value::Array(items) => Js::array(items.iter().map(unpack).collect()),
+            Value::Object(items) => {
+                Js::object(items.iter().map(|(k, v)| (k.as_str(), unpack(v))).collect())
+            }
+            _ => safe_cex_exchange::js_runtime::value::from_json(value),
+        }
+    }
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/history-row-source.cjs"
+        ))
+        .arg("--boundary")
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 28);
+    for case in cases {
+        let profile = case["profile"].as_str().unwrap();
+        let selected = match profile {
+            "bad-asset" => "asset",
+            "utf16-text" | "unknown-side" | "unknown-position" => "text",
+            _ => "options",
+        };
+        if selected != group {
+            continue;
+        }
+        let raw = case["raw"].as_str().unwrap();
+        let data = Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap();
+        let path = "/v3/trade/transactionHistory";
+        let h = harness(ExchangeName::Woo, options(), |http| {
+            http.route_native("GET", path, 200.0, from_retained_input(data));
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let sink = errors.clone();
+        h.venue().base().on(
+            "error",
+            Rc::new(move |_, value| {
+                sink.borrow_mut().push(value.to_display());
+                Ok(())
+            }),
+        );
+        let value = h
+            .exchange
+            .rt
+            .this
+            .call_method(
+                case["method"].as_str().unwrap(),
+                vec![unpack(&case["opts"])],
+            )
+            .unwrap();
+        let runtime = h.exchange.rt.exchange_runtime();
+        let actual = h.drive(Box::pin(async move {
+            await_js(&runtime, value)
+                .await
+                .map_err(|e| e.to_exchange_error())
+        }));
+        let actual = actual.unwrap_or_else(|error| {
+            panic!(
+                "history boundary {} {}: {error:?}",
+                case["method"], case["profile"]
+            )
+        });
+        fn typed_text(value: Value) -> Value {
+            if let Some(units) = value.get("$units").and_then(Value::as_array) {
+                return Value::String(String::from_utf16_lossy(
+                    &units
+                        .iter()
+                        .map(|v| v.as_u64().unwrap() as u16)
+                        .collect::<Vec<_>>(),
+                ));
+            }
+            match value {
+                Value::Array(items) => Value::Array(items.into_iter().map(typed_text).collect()),
+                Value::Object(items) => {
+                    Value::Object(items.into_iter().map(|(k, v)| (k, typed_text(v))).collect())
+                }
+                other => other,
+            }
+        }
+        let mut expected = typed_text(case["rows"].clone());
+        if case["profile"] == "bad-asset" {
+            expected
+                .as_array_mut()
+                .unwrap()
+                .retain(|row| row["id"] != "middle");
+            assert_eq!(errors.borrow().len(), 1, "exactly one row refusal");
+            let message = &errors.borrow()[0];
+            assert!(
+                message.contains("commissionAsset")
+                    && message.contains("middle")
+                    && message.contains("invalid"),
+                "{message}"
+            );
+        } else {
+            assert!(errors.borrow().is_empty(), "{:?}", errors.borrow());
+        }
+        assert_eq!(
+            observe(&actual),
+            expected,
+            "history output {} {}",
+            case["method"],
+            case["profile"]
+        );
+        let calls = h.http.calls(path);
+        assert_eq!(calls.len(), 1, "one signed history read");
+        assert!(
+            !calls[0].headers["x-api-signature"]
+                .as_str()
+                .unwrap()
+                .is_empty()
+        );
+        h.venue().dispose().unwrap();
+    }
+}

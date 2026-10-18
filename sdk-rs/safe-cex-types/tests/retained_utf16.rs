@@ -116,9 +116,18 @@ fn native_payload_stream_preserves_all_units_and_rejects_malformed_units() {
     let units: Vec<u16> = (0..=u16::MAX).collect();
     let decoded =
         deserialize_native_payload(Input::Text(units.clone()).into_native_payload()).unwrap();
-    assert_eq!(decoded, Input::Text(units));
+    assert_eq!(decoded, Input::Text(units.clone()));
+    let keyed = Input::Object(vec![(units.clone(), Input::Text(units))]);
+    let decoded = deserialize_native_payload(keyed.clone().into_native_payload()).unwrap();
+    assert_eq!(
+        decoded, keyed,
+        "all UTF-16 keys and values survive packed native capture"
+    );
     for (raw, expected) in [
         (r#"["Text",[0,65535,3.0,-0.0]]"#, Some(vec![0, 65535, 3, 0])),
+        (r#"[{"Text":null},[0]]"#, None),
+        (r#"[3,[0]]"#, None),
+        (r#"[false,[0]]"#, None),
         (r#"["Text",[-1]]"#, None),
         (r#"["Text",[65536]]"#, None),
         (r#"["Text",[1.5]]"#, None),
