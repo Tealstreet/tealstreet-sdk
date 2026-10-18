@@ -83,3 +83,7 @@ impl ZkLinkHost for NativeSigner {
             .map_err(ExchangeError::new)
     }
 }
+
+#[cfg(test)]
+#[path = "signer_handle_tests.rs"]
+mod handle_tests;
