@@ -1,3 +1,9 @@
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use super::*;
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask};
 use safe_cex_venue_bybit::private_snapshot_refresh::{
@@ -26,6 +32,7 @@ impl Drop for SleepDrop {
 }
 #[derive(Default)]
 struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     mono: Rc<Cell<f64>>,
     wall: Cell<f64>,
     tasks: RefCell<Vec<Slot>>,
@@ -34,7 +41,10 @@ struct Runtime {
 }
 impl Runtime {
     fn pump(&self) {
+        self.sleep_wakers.wake_due(self.mono.get());
         for _ in 0..100 {
+            let signal = std::sync::Arc::new(virtual_time::WakeSignal::default());
+            let waker = signal.waker();
             let tasks = self.tasks.borrow().clone();
             let before = tasks.len();
             let mut completed = 0;
@@ -43,7 +53,7 @@ impl Runtime {
                 if let Some(mut work) = work {
                     if work
                         .as_mut()
-                        .poll(&mut Context::from_waker(Waker::noop()))
+                        .poll(&mut Context::from_waker(&waker))
                         .is_pending()
                     {
                         *slot.borrow_mut() = Some(work);
@@ -52,7 +62,7 @@ impl Runtime {
                     }
                 }
             }
-            if completed == 0 && self.tasks.borrow().len() == before {
+            if completed == 0 && self.tasks.borrow().len() == before && !signal.take() {
                 return;
             }
         }
@@ -81,11 +91,13 @@ impl ExchangeRuntime for Runtime {
         self.sleeps.borrow_mut().push(sleep.clone());
         let guard = SleepDrop(sleep.clone());
         let mono = self.mono.clone();
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleeper = self.sleep_wakers.register(sleep.due);
+        Box::pin(std::future::poll_fn(move |cx| {
             let _retained = &guard;
             if mono.get() >= sleep.due {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -833,4 +845,53 @@ impl Fixture {
         );
         json!({key:kind,"trace":self.host.hooks.trace.borrow().clone(),"timers":self.host.runtime.timer_count(),"observations":self.host.hooks.observations.borrow().clone()})
     }
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Runtime::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.mono.set(runtime.mono.get() + 9.0);
+    runtime.pump();
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.mono.set(runtime.mono.get() + 1.0);
+    runtime.pump();
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.mono.set(runtime.mono.get() + 10.0);
+    runtime.pump();
+    assert!(!latest.take(), "dropped sleep must not wake");
 }

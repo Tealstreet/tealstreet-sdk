@@ -474,7 +474,10 @@ impl crate::variant_account_refresh::AccountRefreshHost for Rt {
         promise.call_method("then", vec![fulfilled])
     }
     fn all(&self, promises: Vec<Js>) -> Result<Js, Thrown> {
-        Ok(self.spawn(Box::pin(super::promise::all(promises))))
+        Ok(Js::Promise(super::promise::all(
+            &self.exchange_runtime(),
+            promises,
+        )))
     }
 }
 
