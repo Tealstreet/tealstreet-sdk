@@ -514,7 +514,7 @@ fn change_position_mode_e2e() {
     let calls = h.http.calls(endpoint("SET_MARGIN_TYPE"));
     assert_eq!(calls.len(), 1);
     assert_eq!(body(&calls[0])["separatedType"], "SEPARATED");
-    assert!(h.store.options().is_hedged);
+    assert!(h.store.options().unwrap().is_hedged);
 }
 #[test]
 fn rejected_order_leg_keeps_successful_orders_without_error_event() {
@@ -599,7 +599,7 @@ fn accepted_post_only_placement_updates_the_real_store() {
         assert_eq!(body(&calls[0])["timeInForce"], "POST_ONLY");
         let ids = outcome.expect("accepted PostOnly placement must resolve after Store update");
         assert_eq!(ids, ["1008"]);
-        let stored = h.store.orders();
+        let stored = h.store.orders().unwrap();
         assert_eq!(stored.len(), usize::from(has_stored_order));
         if has_stored_order {
             assert_eq!(
@@ -656,7 +656,7 @@ fn accepted_post_only_batch_updates_only_the_matching_store_row() {
         outcome.expect("accepted PostOnly batch must resolve after Store update"),
         ["1008", "1009"]
     );
-    let stored = h.store.orders();
+    let stored = h.store.orders().unwrap();
     assert_eq!(stored.len(), 2);
     assert_eq!(
         stored
@@ -703,7 +703,7 @@ fn accepted_tpsl_amendment_updates_the_real_store_price() {
             outcome.expect("accepted TP/SL amendment must resolve after Store update"),
             ["native-9"]
         );
-        let stored = h.store.orders();
+        let stored = h.store.orders().unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].price, ModelField::Value(103.5));
         assert_eq!(stored[0].amount, 2.0);
@@ -725,7 +725,7 @@ fn cancel_orders_e2e() {
     let calls = h.http.calls(endpoint("BATCH_ORDERS"));
     assert_eq!(calls.len(), 1);
     assert_eq!(body(&calls[0])["orderIdList"], json!(["native-9"]));
-    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(h.store.orders().unwrap()[0].status, OrderStatus::Canceled);
 }
 #[test]
 fn update_order_e2e() {
@@ -765,10 +765,10 @@ fn schedule_cancel_e2e() {
 fn start_e2e() {
     let h = setup();
     expect_ok(h.drive(h.venue().start()));
-    assert!(h.store.loaded().markets);
-    assert!(h.store.loaded().tickers);
-    assert!(h.store.loaded().orders);
-    assert!(h.store.loaded().balance);
+    assert!(h.store.loaded().unwrap().markets);
+    assert!(h.store.loaded().unwrap().tickers);
+    assert!(h.store.loaded().unwrap().orders);
+    assert!(h.store.loaded().unwrap().balance);
     assert!(!h.runtime.dials.borrow().is_empty());
     h.venue().dispose().unwrap();
 }
@@ -829,7 +829,7 @@ fn incapable_private_transport_never_dials_and_rest_start_stays_available() {
             .iter()
             .all(|(_, options)| !options.headers_required)
     );
-    assert!(h.store.loaded().balance);
+    assert!(h.store.loaded().unwrap().balance);
     h.venue().dispose().unwrap();
 }
 #[test]
@@ -1017,7 +1017,7 @@ fn trait_fetch_leverage_uses_cross_config_instead_of_market_maximum() {
         "user leverage comes from the symbol config"
     );
     assert_eq!(actual.sell_leverage, 20.0);
-    assert_eq!(h.store.fetched_leverage()["BTCUSDT"], actual);
+    assert_eq!(h.store.fetched_leverage().unwrap()["BTCUSDT"], actual);
     assert_eq!(h.http.calls(endpoint("SYMBOL_CONFIG")).len(), 1);
     assert!(h.http.calls(endpoint("EXCHANGE_INFO")).is_empty());
 }
@@ -1039,7 +1039,7 @@ fn trait_fetch_leverage_retains_distinct_isolated_sides() {
         .unwrap();
     assert_eq!(actual.buy_leverage, 11.0);
     assert_eq!(actual.sell_leverage, 13.0);
-    assert_eq!(h.store.fetched_leverage()["BTCUSDT"], actual);
+    assert_eq!(h.store.fetched_leverage().unwrap()["BTCUSDT"], actual);
     assert!(h.http.calls(endpoint("EXCHANGE_INFO")).is_empty());
 }
 
@@ -1089,7 +1089,11 @@ fn generated_minted_order_id_strips_nanoid_separators() {
     let h = setup();
     *h.runtime.id.borrow_mut() = Some("A_b-cD_e-fG_h-iJ_k-lM".into());
     assert_eq!(
-        h.venue().base().mint_client_order_id(place()).as_deref(),
+        h.venue()
+            .base()
+            .mint_client_order_id(place())
+            .unwrap()
+            .as_deref(),
         Some("tsAbcDefGhiJklM")
     );
 }
@@ -1107,7 +1111,7 @@ fn private_order_frame_commits_the_normalized_order() {
             json!({"e":"orders","d":[row]}).to_string(),
         ))
         .unwrap();
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let order = orders.iter().find(|o| o.id == "native-9").unwrap();
     assert_eq!(order.price, 107.5);
     assert_eq!(order.filled, 0.75);
@@ -1120,7 +1124,7 @@ fn private_position_frame_commits_the_normalized_position() {
     h.runtime.pump();
     h.venue().base().get_private_sockets()[0]
         .on_message(&safe_cex_transport::socket::SocketFrame::Text(json!({"e":"positions","d":[{"symbol":"BTCUSDT","positionSide":"LONG","size":"7","openValue":"714","leverage":"14","marginType":"CROSS","updatedTime":1700000000000.0}]}).to_string())).unwrap();
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     let position = positions
         .iter()
         .find(|p| p.symbol == "BTCUSDT" && p.side == PositionSide::Long)
@@ -1150,9 +1154,9 @@ fn private_account_frame_refreshes_balance_from_rest() {
     h.runtime.advance(250.0);
     h.runtime.pump();
     assert_eq!(h.http.calls(endpoint("BALANCE")).len(), before + 1);
-    assert_eq!(h.store.balance().total, 150.0);
-    assert_eq!(h.store.balance().free, 120.0);
-    assert_eq!(h.store.balance().upnl, 3.0);
+    assert_eq!(h.store.balance().unwrap().total, 150.0);
+    assert_eq!(h.store.balance().unwrap().free, 120.0);
+    assert_eq!(h.store.balance().unwrap().upnl, 3.0);
 }
 
 #[test]
@@ -1165,7 +1169,7 @@ fn trait_nuke_positions_closes_unseen_positions_and_replaces_snapshot() {
     seed(&h);
     // Consume the initial position page, leaving an empty close-confirmation page.
     h.drive(h.venue().fetch_positions(None)).unwrap();
-    assert!(h.store.positions().is_empty());
+    assert!(h.store.positions().unwrap().is_empty());
     expect_ok(h.drive(h.venue().nuke_positions(0)));
     let calls = h.http.calls(endpoint("CLOSE_POSITIONS"));
     assert_eq!(
@@ -1175,8 +1179,14 @@ fn trait_nuke_positions_closes_unseen_positions_and_replaces_snapshot() {
     );
     assert_eq!(body(&calls[0]), json!({}));
     assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 2);
-    assert!(!h.store.positions().is_empty());
-    assert!(h.store.positions().iter().all(|p| p.contracts == 0.0));
+    assert!(!h.store.positions().unwrap().is_empty());
+    assert!(
+        h.store
+            .positions()
+            .unwrap()
+            .iter()
+            .all(|p| p.contracts == 0.0)
+    );
     assert!(h.http.calls(endpoint("ORDER")).is_empty());
 }
 
@@ -1231,7 +1241,7 @@ fn private_orders_frame_updates_the_real_store() {
             json!({"e":"orders","d":[row]}).to_string(),
         ))
         .unwrap();
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let actual = orders.iter().find(|o| o.id == "socket-order-42").unwrap();
     assert_eq!(actual.price, 123.5);
     assert_eq!(actual.amount, 2.0);
@@ -1249,7 +1259,7 @@ fn private_positions_frame_updates_the_real_store() {
     socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(
         json!({"e":"positions","d":[{"symbol":"BTCUSDT","positionSide":"LONG","size":"3","openValue":"330","leverage":"20","marginType":"CROSS","updatedTime":1700000000001.0}]}).to_string(),
     )).unwrap();
-    let positions = h.store.positions();
+    let positions = h.store.positions().unwrap();
     let actual = positions.iter().find(|p| p.contracts == 3.0).unwrap();
     assert_eq!(actual.symbol, "BTCUSDT");
     assert_eq!(actual.entry_price, 110.0);
@@ -1262,7 +1272,7 @@ fn private_account_frame_refreshes_balance_in_the_real_store() {
     let h = setup();
     expect_ok(h.drive(h.venue().start()));
     h.runtime.pump();
-    assert_eq!(h.store.balance().total, 150.0);
+    assert_eq!(h.store.balance().unwrap().total, 150.0);
     h.http.replace(
         "GET",
         endpoint("BALANCE"),
@@ -1276,9 +1286,9 @@ fn private_account_frame_refreshes_balance_in_the_real_store() {
         .unwrap();
     h.runtime.pump();
     h.runtime.advance(251.0);
-    assert_eq!(h.store.balance().total, 285.0);
-    assert_eq!(h.store.balance().free, 240.0);
-    assert_eq!(h.store.balance().upnl, 5.0);
+    assert_eq!(h.store.balance().unwrap().total, 285.0);
+    assert_eq!(h.store.balance().unwrap().free, 240.0);
+    assert_eq!(h.store.balance().unwrap().upnl, 5.0);
     h.venue().dispose().unwrap();
 }
 
@@ -1303,7 +1313,7 @@ fn private_balance_refresh_rejection_is_silent() {
     let before = h.http.calls(endpoint("BALANCE")).len();
     assert_eq!(before, 2);
     assert!(h.runtime.reports.borrow().is_empty());
-    assert_eq!(h.store.balance().total, 150.0);
+    assert_eq!(h.store.balance().unwrap().total, 150.0);
     h.venue().base().get_private_sockets()[0]
         .on_message(&safe_cex_transport::socket::SocketFrame::Text(
             json!({"e":"account","d":[{"equity":"999"}]}).to_string(),
@@ -1314,7 +1324,7 @@ fn private_balance_refresh_rejection_is_silent() {
     h.runtime.pump();
     assert_eq!(h.http.calls(endpoint("BALANCE")).len(), before + 1);
     assert_eq!(
-        h.store.balance().total,
+        h.store.balance().unwrap().total,
         150.0,
         "rejected refresh retains balance"
     );
@@ -1401,7 +1411,7 @@ fn private_fill_frame_emits_and_reconciles_the_real_order_store() {
     let h = setup();
     expect_ok(h.drive(h.venue().start()));
     h.runtime.pump();
-    let before = h.store.orders().to_vec();
+    let before = h.store.orders().unwrap().to_vec();
     assert_eq!(
         before
             .iter()
@@ -1453,7 +1463,7 @@ fn private_fill_frame_emits_and_reconciles_the_real_order_store() {
         "queued frame must reach the production fill emitter"
     );
     assert_eq!(
-        h.store.orders().to_vec(),
+        h.store.orders().unwrap().to_vec(),
         before,
         "source waits for REST order reconciliation"
     );
@@ -1461,7 +1471,7 @@ fn private_fill_frame_emits_and_reconciles_the_real_order_store() {
     assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), reads);
     h.runtime.advance(1.0);
     assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), reads + 1);
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let actual = orders.iter().find(|order| order.id == "native-9").unwrap();
     assert_eq!(actual.filled, 0.75);
     assert_eq!(actual.remaining, 1.25);
@@ -1579,7 +1589,7 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
             assert_eq!(result.unwrap(), expected, "accepted source ID {id:?}");
             assert!(errors.borrow().is_empty());
             assert_eq!(
-                h.store.orders()[0].time_in_force,
+                h.store.orders().unwrap()[0].time_in_force,
                 ModelField::Value(OrderTimeInForce::PostOnly)
             );
         } else {
@@ -1600,7 +1610,7 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
                 "native emitter preserves the exact source refusal string"
             );
             assert_eq!(
-                h.store.orders()[0].time_in_force,
+                h.store.orders().unwrap()[0].time_in_force,
                 ModelField::Value(OrderTimeInForce::GoodTillCancel),
                 "no PostOnly patch before full source validation"
             );
@@ -1662,7 +1672,7 @@ fn market_closed_rows_keep_good_markets_and_report_field_values() {
                 "bad {field}={bad:?} must not discard good markets or return the cached BTC snapshot"
             );
             assert_eq!(
-                h.store.markets()[0].symbol,
+                h.store.markets().unwrap()[0].symbol,
                 "BTCUSDT",
                 "fetch returns the snapshot; caller commits it"
             );
@@ -1804,7 +1814,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 )));
             h.runtime.pump();
         }
-        ticker_coercion::assert_native(&h.store.tickers(), case);
+        ticker_coercion::assert_native(&h.store.tickers().unwrap(), case);
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),

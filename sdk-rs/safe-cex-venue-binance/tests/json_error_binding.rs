@@ -3,8 +3,9 @@
 mod capture;
 #[path = "support/inverse_rest_runtime.rs"]
 mod host;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js};
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };
@@ -103,7 +104,7 @@ fn observe(pm: bool, profile: &str) -> Value {
             }),
         );
         drive(runtime, subject.set_leverage("BTCUSDT".into(), 20.0, None)).unwrap();
-        let positions = subject.base().store.positions();
+        let positions = subject.base().store.positions().unwrap();
         assert_eq!(positions.len(), 1);
         let leverage = positions[0].leverage;
         assert_eq!(

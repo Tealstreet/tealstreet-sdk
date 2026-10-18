@@ -299,7 +299,7 @@ impl BingxPrivateEvents {
                 .store
                 .add_or_update_positions_full(positions)
                 .map_err(ExchangeError::from)?;
-            let mut loaded = self.parent.base.store.loaded().clone();
+            let mut loaded = self.parent.base.store.loaded()?.clone();
             loaded.positions = true;
             self.parent
                 .base
@@ -416,7 +416,7 @@ impl BingxPrivateEvents {
             }
             let order = map_order(
                 data,
-                &self.parent.base.store.orders(),
+                &self.parent.base.store.orders()?,
                 safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )?;
             if let Some(order) = order
@@ -505,7 +505,7 @@ impl BingxPrivateEvents {
                 } else {
                     None
                 };
-                let positions = self.parent.base.store.positions();
+                let positions = self.parent.base.store.positions()?;
                 let for_symbol = positions
                     .iter()
                     .filter(|p| p.symbol == symbol)

@@ -32,7 +32,7 @@ fn real_cancel_all_classic_calls_venue_without_store_orders() {
         (ExchangeName::Bitgetusdc, "usdc-futures", "USDC"),
     ] {
         let h = harness(name, options(), classic);
-        assert!(h.store.orders().is_empty());
+        assert!(h.store.orders().unwrap().is_empty());
         h.drive(h.venue().cancel_all_orders()).unwrap();
         let calls = h.http.calls(CANCEL_ALL);
         assert_eq!(
@@ -68,7 +68,7 @@ fn real_cancel_all_uta_fetches_unmapped_normal_and_plan_orders() {
             http.ok("POST", CANCEL_NORMAL, json!({}));
             http.ok("POST", CANCEL_STRATEGY, json!({}));
         });
-        assert!(h.store.orders().is_empty());
+        assert!(h.store.orders().unwrap().is_empty());
         h.drive(h.venue().cancel_all_orders()).unwrap();
         let normal = h.http.calls(NORMAL);
         let strategy = h.http.calls(STRATEGY);
@@ -100,7 +100,7 @@ fn real_cancel_all_uta_fetches_unmapped_normal_and_plan_orders() {
             json!({"orderId":"unseen-plan","clientOid":"client-unseen-plan"})
         );
         assert!(
-            h.store.orders().is_empty(),
+            h.store.orders().unwrap().is_empty(),
             "source pure venue sweep does not publish fetched orders"
         );
         assert!(
@@ -136,7 +136,7 @@ fn real_inverse_cancel_all_uses_each_unique_market_margin_coin() {
         false,
     )
     .unwrap();
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
     h.drive(h.venue().cancel_all_orders()).unwrap();
     let payloads: Vec<_> = h
         .http

@@ -173,3 +173,9 @@ impl std::error::Error for OrderBookUpdateError {
         })
     }
 }
+
+impl From<safe_cex_types::StoreReadError> for OrderBookUpdateError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error.into())
+    }
+}

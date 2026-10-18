@@ -449,7 +449,7 @@ pub async fn venue_harness(
     let constructor = rust_constructor(&name, host.clone())
         .expect("a Rust-constructed venue in the registry table");
     let options = serde_json::from_value(options).unwrap();
-    let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let exchange = constructor
         .construct(name, options, store.clone())
         .unwrap_or_else(|e| {

@@ -54,24 +54,27 @@ impl Host {
             })
         })
     }
-    pub(super) fn read_markets(&self) -> ReadMarkets {
-        Rc::new(RefCell::new(
+    pub(super) fn read_markets(&self) -> Result<ReadMarkets, PortfolioFailure> {
+        Ok(Rc::new(RefCell::new(
             self.shared
                 .store
                 .markets()
+                .map_err(|error| super::error::failure(error.into()))?
                 .iter()
                 .cloned()
                 .map(|market| Rc::new(RefCell::new(market)))
                 .collect(),
-        ))
+        )))
     }
-    pub(super) fn read_market(&self, id: &str) -> Option<ReadMarket> {
-        self.shared
+    pub(super) fn read_market(&self, id: &str) -> Result<Option<ReadMarket>, PortfolioFailure> {
+        Ok(self
+            .shared
             .store
             .markets_by_id()
+            .map_err(|error| super::error::failure(error.into()))?
             .get(id)
             .cloned()
-            .map(|market| Rc::new(RefCell::new(market)))
+            .map(|market| Rc::new(RefCell::new(market))))
     }
     pub(super) fn public_read_receiver(&self) -> Rc<PublicMarketReadReceiver<Self>> {
         Rc::new(PublicMarketReadReceiver {
@@ -90,8 +93,14 @@ impl Host {
             .map_err(from_thrown)?;
         Ok(())
     }
-    pub(super) fn cached_balance(&self) -> Balance {
-        cached_portfolio_balance(&self.shared.store.balance())
+    pub(super) fn cached_balance(&self) -> Result<Balance, PortfolioFailure> {
+        Ok(cached_portfolio_balance(
+            &self
+                .shared
+                .store
+                .balance()
+                .map_err(|error| super::error::failure(error.into()))?,
+        ))
     }
 
     pub(super) fn dayjs(&self, value: Option<Value>) -> Result<Js, PortfolioFailure> {
@@ -150,16 +159,18 @@ impl PortfolioHost for Host {
     fn emit_and_log_error(&self, args: &[Option<Value>]) -> Result<(), PortfolioFailure> {
         self.emit_args(args)
     }
-    fn cached_balance(&self) -> Balance {
+    fn cached_balance(&self) -> Result<Balance, PortfolioFailure> {
         self.cached_balance()
     }
-    fn position_upnls(&self) -> Vec<f64> {
-        self.shared
+    fn position_upnls(&self) -> Result<Vec<f64>, PortfolioFailure> {
+        Ok(self
+            .shared
             .store
             .positions()
+            .map_err(|error| super::error::failure(error.into()))?
             .iter()
             .map(|position| position.unrealized_pnl)
-            .collect()
+            .collect())
     }
 }
 impl MarketPositionHost for Host {
@@ -188,17 +199,18 @@ impl MarketPositionHost for Host {
         let result = self.class().map(|class| class.supported_types());
         self.promise(async move { Ok(result?.await?.borrow().clone()) })
     }
-    fn markets(&self) -> ReadMarkets {
+    fn markets(&self) -> Result<ReadMarkets, PortfolioFailure> {
         self.read_markets()
     }
-    fn market_by_id(&self, id: &str) -> Option<ReadMarket> {
+    fn market_by_id(&self, id: &str) -> Result<Option<ReadMarket>, PortfolioFailure> {
         self.read_market(id)
     }
-    fn cached_tickers(&self) -> ReadTickers {
-        Rc::new(RefCell::new(
+    fn cached_tickers(&self) -> Result<ReadTickers, PortfolioFailure> {
+        Ok(Rc::new(RefCell::new(
             self.shared
                 .store
                 .tickers()
+                .map_err(|error| super::error::failure(error.into()))?
                 .iter()
                 .cloned()
                 .map(|mut fields| {
@@ -206,13 +218,14 @@ impl MarketPositionHost for Host {
                     Rc::new(ReadTicker { fields, info })
                 })
                 .collect(),
-        ))
+        )))
     }
-    fn cached_positions(&self) -> ReadPositions {
-        Rc::new(RefCell::new(
+    fn cached_positions(&self) -> Result<ReadPositions, PortfolioFailure> {
+        Ok(Rc::new(RefCell::new(
             self.shared
                 .store
                 .positions()
+                .map_err(|error| super::error::failure(error.into()))?
                 .iter()
                 .cloned()
                 .map(|mut fields| {
@@ -220,7 +233,7 @@ impl MarketPositionHost for Host {
                     Rc::new(ReadPosition { fields, info })
                 })
                 .collect(),
-        ))
+        )))
     }
     fn emit_and_log_error(&self, args: &[Option<Value>]) -> Result<(), PortfolioFailure> {
         self.emit_args(args)
@@ -250,11 +263,12 @@ impl PublicMarketReadHost for Host {
     fn error_response_items(&self, err: &PortfolioFailure) -> Option<ReadItems> {
         MarketPositionHost::error_response_items(self, err)
     }
-    fn cached_markets(&self) -> CatalogMarkets {
-        Rc::new(RefCell::new(
+    fn cached_markets(&self) -> Result<CatalogMarkets, PortfolioFailure> {
+        Ok(Rc::new(RefCell::new(
             self.shared
                 .store
                 .markets()
+                .map_err(|error| super::error::failure(error.into()))?
                 .iter()
                 .cloned()
                 .map(|mut fields| {
@@ -262,7 +276,7 @@ impl PublicMarketReadHost for Host {
                     Rc::new(RefCell::new(CatalogMarket { fields, info }))
                 })
                 .collect(),
-        ))
+        )))
     }
     fn emit_and_log_error(&self, message: Option<Value>) -> Result<(), PortfolioFailure> {
         self.emit(message)

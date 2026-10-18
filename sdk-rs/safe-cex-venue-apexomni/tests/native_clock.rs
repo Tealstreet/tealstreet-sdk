@@ -176,7 +176,7 @@ fn native_synced_clock_reaches_http_sockets_models_and_expiration() {
             ),
         ));
     h.runtime.pump();
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let order = orders.iter().find(|o| o.id == "order-1").unwrap();
     assert_eq!(order.status.value(), Some(&OrderStatus::Closed));
     assert_eq!(order.filled, 1.234);

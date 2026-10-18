@@ -4,6 +4,7 @@ mod runtime;
 mod ws_runtime;
 use runtime::Runtime;
 use safe_cex_exchange::message_stats::*;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
@@ -11,7 +12,7 @@ use safe_cex_exchange::{
     websocket::{BaseWebSocket, MessageHandlerStat, WsProtocol},
     ws_parent::WsExchangeParent,
 };
-use safe_cex_store::store::{DEFAULT_STORE, DefaultStore};
+use safe_cex_store::store::DEFAULT_STORE;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::rc::Rc;

@@ -255,7 +255,16 @@ impl RestAdapter for ReqwestAdapter {
 
 /// A client WebSocket. Events are queued from connection, so none are lost
 /// before the consumer's first `receive`.
+#[derive(Default, Clone, serde::Serialize)]
+pub struct NativeFrameCounts {
+    pub message: u64,
+    pub ping: u64,
+    pub pong: u64,
+    pub close: u64,
+}
 pub struct NativeSocket {
+    /// Physical frames consumed by tungstenite, before application dispatch.
+    pub frame_counts: Rc<std::cell::RefCell<NativeFrameCounts>>,
     state: Rc<Cell<u16>>,
     outgoing: mpsc::UnboundedSender<Message>,
     incoming: Rc<Mutex<mpsc::UnboundedReceiver<SocketFrame>>>,
@@ -311,6 +320,8 @@ pub async fn connect_websocket(
         }
         writer_state.set(3);
     });
+    let frame_counts = Rc::new(std::cell::RefCell::new(NativeFrameCounts::default()));
+    let reader_counts = frame_counts.clone();
     let reader_state = state.clone();
     let reader = tokio::task::spawn_local(async move {
         let mut close = SocketFrame::Close {
@@ -320,9 +331,24 @@ pub async fn connect_websocket(
         };
         while let Some(message) = source.next().await {
             let frame = match message {
-                Ok(Message::Text(text)) => SocketFrame::Text(text.to_string()),
-                Ok(Message::Binary(bytes)) => SocketFrame::Binary(bytes.to_vec()),
+                Ok(Message::Text(text)) => {
+                    reader_counts.borrow_mut().message += 1;
+                    SocketFrame::Text(text.to_string())
+                }
+                Ok(Message::Binary(bytes)) => {
+                    reader_counts.borrow_mut().message += 1;
+                    SocketFrame::Binary(bytes.to_vec())
+                }
+                Ok(Message::Ping(_)) => {
+                    reader_counts.borrow_mut().ping += 1;
+                    continue;
+                }
+                Ok(Message::Pong(_)) => {
+                    reader_counts.borrow_mut().pong += 1;
+                    continue;
+                }
                 Ok(Message::Close(frame)) => {
+                    reader_counts.borrow_mut().close += 1;
                     close = frame.map_or(
                         SocketFrame::Close {
                             code: 1005,
@@ -349,6 +375,7 @@ pub async fn connect_websocket(
     })
     .abort_handle();
     Ok(NativeSocket {
+        frame_counts,
         state,
         outgoing,
         incoming: Rc::new(Mutex::new(incoming)),
@@ -552,5 +579,55 @@ mod query_tests {
             failures.is_empty(),
             "native Axios default query mismatch: {failures:#?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use super::*;
+    #[test]
+    fn native_frame_receipts_include_control_frames_before_application_dispatch() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("ws://{}", listener.local_addr().unwrap());
+            let server = tokio::task::spawn_local(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut peer = tokio_tungstenite::accept_async(stream).await.unwrap();
+                for message in [
+                    Message::text("one"),
+                    Message::binary(vec![0, 255]),
+                    Message::Ping(vec![1].into()),
+                    Message::Pong(vec![2].into()),
+                    Message::Close(None),
+                ] {
+                    peer.send(message).await.unwrap();
+                }
+            });
+            let socket = connect_websocket(&url, &[], &BTreeMap::new())
+                .await
+                .unwrap();
+            assert!(matches!(
+                socket.receive().await.unwrap(),
+                SocketFrame::Text(_)
+            ));
+            assert!(matches!(
+                socket.receive().await.unwrap(),
+                SocketFrame::Binary(_)
+            ));
+            assert!(matches!(
+                socket.receive().await.unwrap(),
+                SocketFrame::Close { .. }
+            ));
+            server.await.unwrap();
+            let counts = socket.frame_counts.borrow();
+            assert_eq!(
+                (counts.message, counts.ping, counts.pong, counts.close),
+                (2, 1, 1, 1)
+            );
+        });
     }
 }

@@ -258,7 +258,7 @@ fn private_parent_hook_errors_abort_at_the_original_call_and_preserve_committed_
             expected_writes,
             "private native parent-hook Store write cutoff"
         );
-        let orders = store.orders();
+        let orders = store.orders().unwrap();
         assert_eq!(
             orders.len(),
             if kind == "order" { 2 } else { 0 },
