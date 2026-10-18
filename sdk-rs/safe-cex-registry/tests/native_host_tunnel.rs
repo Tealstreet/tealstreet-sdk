@@ -567,3 +567,85 @@ fn okx_family_signed_rest_uses_the_authenticated_bigint_tunnel() {
         }
     });
 }
+#[test]
+fn fulfilled_tunnel_failure_reaches_the_native_venue_error_report() {
+    const CHILD: &str = "SAFE_CEX_HTTP_CORRELATION_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        run_local(async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = format!("ws://{}", listener.local_addr().unwrap());
+            let tunnel = Rc::new(Tunnel::default());
+            tokio::task::spawn_local(serve_tunnel(listener, Rc::new(|_| None), tunnel.clone()));
+            let runtime = native_tealstreet_runtime_with(
+                Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+                Rc::new(LocalTunnel {
+                    inner: NativeTunnelHost,
+                    origin,
+                }),
+            );
+            let h = venue_harness(
+                safe_cex_types::ExchangeName::Woo,
+                Rc::new(|_| None),
+                json!({"key":"native-key","secret":SECRET,"tealstreetTunnel":true}),
+                None,
+                runtime,
+            )
+            .await;
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let captured = errors.clone();
+            h.exchange.base().on_args(
+                "error",
+                Rc::new(move |_, args| {
+                    captured.borrow_mut().push(args[0].to_display());
+                    Ok(())
+                }),
+            );
+            let markets = h.exchange.fetch_markets().await.unwrap();
+            assert!(
+                markets.is_empty(),
+                "source catch returns the current empty Store markets"
+            );
+            assert_eq!(tunnel.seen.borrow().len(), 1, "one real HOW request");
+            assert!(tunnel.seen.borrow()[0].path.ends_with("/v1/public/info"));
+            assert!(h.seen.borrow().is_empty(), "no direct-origin HTTP request");
+            assert_eq!(
+                errors.borrow().len(),
+                1,
+                "the actual venue catch reports the failure"
+            );
+            assert!(
+                errors.borrow()[0].contains("filter"),
+                "{:?}",
+                errors.borrow()
+            );
+            h.exchange.dispose().unwrap();
+        });
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "fulfilled_tunnel_failure_reaches_the_native_venue_error_report",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        output.status.success(),
+        "native host child failed: {stderr}"
+    );
+    assert!(
+        stderr.contains("\"recentHttpStatus\":404"),
+        "fulfilled HTTP failure lost its native report context: {stderr}"
+    );
+    assert!(
+        stderr.contains("\"recentHttpUrl\":"),
+        "missing source request URL: {stderr}"
+    );
+    assert!(
+        stderr.contains("\"recentHttpAgeMs\":"),
+        "missing correlation age: {stderr}"
+    );
+}
