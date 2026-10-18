@@ -48,7 +48,7 @@ pub fn array(values: Vec<EventValue>) -> EventValue {
 }
 fn snapshot(v: &EventValue, expression: &str, method: &str) -> Result<Vec<EventValue>, Failure> {
     if let EventValue::Array(a) = v {
-        return Ok(array_values(&a)?);
+        return array_values(&a);
     }
     if v.nullish() {
         return Err(type_error(format!(

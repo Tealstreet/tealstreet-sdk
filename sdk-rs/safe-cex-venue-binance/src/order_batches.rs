@@ -40,7 +40,7 @@ pub trait BatchBindings {
 }
 fn dense(v: &EventValue, expr: &str, method: &str) -> Result<Vec<EventValue>, Failure> {
     if let EventValue::Array(a) = v {
-        return Ok(array_values(&a)?);
+        return array_values(&a);
     }
     if v.nullish() {
         return Err(type_error(format!(

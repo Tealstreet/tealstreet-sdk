@@ -271,7 +271,7 @@ impl Js {
                         .map(|i| (i, k.clone()))
                 })
                 .collect();
-            keys.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            keys.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
             for (index, key) in keys {
                 if !self.reflect_delete(&key)? {
                     array.length.set(index as u32 + 1);

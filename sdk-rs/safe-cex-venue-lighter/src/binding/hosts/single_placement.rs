@@ -107,11 +107,7 @@ impl SinglePlacementHost for Bound {
     ) -> SigningResult<()> {
         let target = to_js(object);
         let key = utf16(key);
-        let storable = match &target {
-            Js::Object(_) | Js::Function(_) => true,
-            Js::Array(_) => true,
-            _ => false,
-        };
+        let storable = matches!(&target, Js::Object(_) | Js::Function(_) | Js::Array(_));
         if !storable {
             return Err(to_signing(unsupported_store(&target, &key)));
         }
