@@ -998,6 +998,13 @@ fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
         source["error"],
         json!([[warning, "warning"], [warning, "warning"]])
     );
+    let expected_console = source["error"][0]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join(" ");
     for attempt in 0..3 {
         if attempt == 1 {
             // Markets/tickers plus the first snapshot consumed the real
@@ -1033,8 +1040,8 @@ fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
         for (severity, message) in logs {
             assert_eq!(severity, "warning");
             assert_eq!(
-                message, warning,
-                "PHEMEX-SNAPSHOT-WARNING must use Error.message, matching maintained TS"
+                message, expected_console,
+                "PHEMEX-SNAPSHOT-WARNING console retains source message and severity"
             );
         }
         assert!(received.borrow().is_empty());

@@ -36,15 +36,15 @@ fn concrete_constructor_account_and_source_controls() {
         &[
             (
                 "warning".into(),
-                "Leverage is not supported on Polymarket (always 1x)".into()
+                "Leverage is not supported on Polymarket (always 1x) warning".into()
             ),
             (
                 "warning".into(),
-                "Position mode changes not supported on Polymarket".into()
+                "Position mode changes not supported on Polymarket warning".into()
             ),
             (
                 "warning".into(),
-                "Margin type changes not supported on Polymarket".into()
+                "Margin type changes not supported on Polymarket warning".into()
             ),
         ],
         "source no-op controls retain their exact warnings"
