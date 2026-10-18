@@ -49,3 +49,12 @@ checks the receipt API and the same 12-frame/6-HTTP prefix. Both native repeats
 drain strictly and produce identical ten outputs; complete TS/native outputs
 and all four Store health records match, including own undefined values and key
 order. This short prefix is a smoke check, not a 60-second coverage claim.
+
+The subsequent `health-strict570-green.json` and
+`health-strict570-assertions.log` confirm the complete original 570-frame replay
+on the same candidate. Both strict native drains finish with the same physical
+and parser counts as RED and no pending jobs or blocking raw work. Both TS and
+native repeats agree exactly; the complete 624-output cross-language sequence
+also agrees, including all 238 health records and their property order. All three
+previously missing properties remain own undefined. Request stats, handler stats,
+tickers, books, candles and the other Store fields also match without normalization.
