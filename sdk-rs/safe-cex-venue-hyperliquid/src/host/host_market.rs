@@ -64,7 +64,9 @@ impl MarketScalarHost for Host {
         Ok(units(&String::from_utf16_lossy(text).to_lowercase()))
     }
     fn number_to_string(&mut self, number: f64) -> Result<Option<JsString>, Thrown> {
-        Ok(Some(units(&safe_cex_num::js_number_string(number))))
+        let function = self.import("numberToString")?;
+        let value = self.call(&function, &Js::Undefined, &[Js::Number(number)])?;
+        Ok(Some(JsString(value.to_js_string()?.to_vec())))
     }
     fn precise_compare(
         &mut self,
@@ -83,7 +85,9 @@ impl MarketScalarHost for Host {
     }
     /// ccxt parseToInt: parseInt(parseFloat(numberToString(n))).
     fn parse_to_int(&mut self, number: f64) -> Result<f64, Thrown> {
-        let float = safe_cex_num::parse_float(&safe_cex_num::js_number_string(number));
+        let string = MarketScalarHost::number_to_string(self, number)?
+            .expect("numberToString returns a string for numeric input");
+        let float = safe_cex_num::parse_float(&String::from_utf16_lossy(&string.0));
         Ok(safe_cex_num::parse_int(
             &safe_cex_num::js_number_string(float),
             None,

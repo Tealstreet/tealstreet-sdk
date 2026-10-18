@@ -312,7 +312,21 @@ pub(super) fn race_iterable(runtime: &Rc<dyn ExchangeRuntime>, value: &Js) -> Pr
         Promise::spawn(
             runtime,
             Box::pin(async move {
-                output.settle(input.wait().await);
+                let mut input = Box::pin(input.wait());
+                let mut finished = Box::pin(output.reaction());
+                let settlement = std::future::poll_fn(|cx| {
+                    if let Poll::Ready(value) = input.as_mut().poll(cx) {
+                        return Poll::Ready(Some(value));
+                    }
+                    if finished.as_mut().poll(cx).is_ready() {
+                        return Poll::Ready(None);
+                    }
+                    Poll::Pending
+                })
+                .await;
+                if let Some(value) = settlement {
+                    output.settle(value);
+                }
                 Ok(Js::Undefined)
             }),
         );

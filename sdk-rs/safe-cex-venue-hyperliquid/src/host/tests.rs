@@ -1408,3 +1408,30 @@ fn source_json(host: &mut Host, value: &Js) -> serde_json::Value {
     );
     result
 }
+
+#[test]
+fn shared_spread_rechecks_descriptors_and_keeps_iterator_symbol_aliases() {
+    let output = std::process::Command::new("node").args(["-e", r#"
+const assert=require('node:assert/strict'), token={}, source={};
+Object.defineProperty(source,'first',{enumerable:true,get(){assert.equal(this,source);Object.defineProperty(source,'second',{enumerable:false});return -0;}});
+source.second=2;source[Symbol.iterator]=token;const result={...source};assert.equal(result[Symbol.iterator],token);assert(Object.is(result.first,-0));console.log(JSON.stringify(Object.keys(result)));
+"#]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
+    let (mut context, _) = production_realm();
+    let source = context.new_object();
+    let receiver = source.clone();
+    source.define_accessor("first", Some(Rc::new(move |this| {
+        assert!(this.same_reference(&receiver));
+        this.define_property(&"second".encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("enumerable", Js::Bool(false))]))?;
+        Ok(Js::Number(-0.0))
+    })), None).unwrap();
+    source.define("second", Js::Number(2.0)).unwrap();
+    let token = context.new_object();
+    source.define_property_for(&Js::SymbolIterator, &Js::object(vec![("value",token.clone()),("enumerable",Js::Bool(true))])).unwrap();
+    let result = context.new_object();
+    context.copy_data_properties(&result, &source).unwrap();
+    assert_eq!(result.own_keys().iter().map(|key|String::from_utf16(key).unwrap()).collect::<Vec<_>>(), expected, "HL_SHARED_SPREAD live descriptor check");
+    assert_eq!(result.get("first").unwrap().as_f64().unwrap().to_bits(), (-0.0f64).to_bits());
+    assert!(result.get_property(&Js::SymbolIterator).unwrap().same_reference(&token), "HL_SHARED_SPREAD original iterator-symbol value");
+}

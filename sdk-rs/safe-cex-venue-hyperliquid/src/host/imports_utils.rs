@@ -94,11 +94,12 @@ pub(crate) fn bind(realm: &Host) {
     // @tealstreet/json-parse jsonParse: JSON.parse or null.
     realm.bind_import(
         "jsonParse",
-        realm
-            .shared
-            .globals
-            .get("jsonParse")
-            .expect("installed shared utility"),
+        realm.native("jsonParse", 1, |host, _, args| {
+            Ok((|| {
+                let json = host.global_binding("JSON")?;
+                host.call_method(&json, "parse", &[arg(args, 0)])
+            })().unwrap_or(Js::Null))
+        }),
     );
 
     // utils/orderbook calcOrderBookTotal: cumulative totals written in place.

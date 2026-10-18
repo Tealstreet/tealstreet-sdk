@@ -62,21 +62,7 @@ impl Host {
     }
     /// Object spread / CopyDataProperties: own enumerable string then symbol keys.
     pub(crate) fn copy_data_properties(&mut self, target: &Js, source: &Js) -> Result<(), Thrown> {
-        if source.is_nullish() {
-            return Ok(());
-        }
-        if let Js::String(u) = source {
-            for (i, unit) in u.iter().enumerate() {
-                self.define(target, Js::str(&i.to_string()), Js::utf16(&[*unit]))?;
-            }
-            return Ok(());
-        }
-        let keys = self.own_keys(source, true)?;
-        for key in keys {
-            let v = self.get(source, &key)?;
-            self.define(target, key, v)?;
-        }
-        Ok(())
+        source.copy_data_properties_to(target)
     }
     pub(crate) fn spread_object(&mut self, source: &Js) -> Result<Js, Thrown> {
         let out = self.new_object();

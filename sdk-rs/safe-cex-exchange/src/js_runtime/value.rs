@@ -2109,12 +2109,34 @@ impl Js {
     /// `{ ...value }`: nullish spreads nothing, strings spread indexed characters.
     pub fn spread_object(&self) -> Result<Js, Thrown> {
         let out = Js::object(vec![]);
-        if !self.is_nullish() {
-            for (k, v) in self.own_entries()? {
-                out.define_key(&k, v)?;
+        self.copy_data_properties_to(&out)?;
+        Ok(out)
+    }
+    /// CopyDataProperties snapshots keys, then rechecks each live descriptor before Get.
+    pub fn copy_data_properties_to(&self, target: &Js) -> Result<(), Thrown> {
+        if self.is_nullish() {
+            return Ok(());
+        }
+        let mut keys: Vec<Js> = self.for_in_own_names()?.into_iter().map(Js::String).collect();
+        if self.symbol_iterator_slot().is_some_and(|slot| slot.borrow().is_some()) {
+            keys.push(Js::SymbolIterator);
+        }
+        for key in keys {
+            let enumerable = if let Js::String(units) = &key {
+                self.own_enumerability(units)?.unwrap_or(false)
+            } else {
+                let descriptor = self.own_property_descriptor_for(&key)?;
+                !descriptor.is_undefined() && descriptor.get("enumerable")?.truthy()
+            };
+            if enumerable {
+                let value = self.get_property(&key)?;
+                target.define_property_for(&key, &Js::object(vec![
+                    ("value", value), ("writable", Js::Bool(true)),
+                    ("enumerable", Js::Bool(true)), ("configurable", Js::Bool(true)),
+                ]))?;
             }
         }
-        Ok(out)
+        Ok(())
     }
     /// Typed snapshot: capture length once, then HasProperty/Get each live slot.
     pub fn array_items(&self) -> Result<Option<Vec<Option<Js>>>, Thrown> {

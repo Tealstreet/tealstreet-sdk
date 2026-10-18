@@ -146,3 +146,29 @@ console.log(JSON.stringify(values.map(value=>{try{return isNaN(value)}catch(e){r
         assert_eq!(calls.get(), 1);
     });
 }
+
+#[test]
+fn installed_numeric_global_constants_match_node_values_and_descriptors() {
+    let output = std::process::Command::new("node").args(["-e", r#"
+console.log(JSON.stringify(['Infinity','NaN','undefined'].map(name=>{
+ const value=globalThis[name], {value:ignored,...descriptor}=Object.getOwnPropertyDescriptor(globalThis,name);
+ const bytes=Buffer.alloc(8);if(typeof value==='number')bytes.writeDoubleBE(value);
+ return {name,type:typeof value,bits:typeof value==='number'?bytes.toString('hex'):null,descriptor};
+})));
+"#]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let cases: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    run(|scope| async move {
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let value = scope.global(name).unwrap();
+            assert_eq!(value.type_of(), case["type"].as_str().unwrap());
+            if let Some(bits) = case["bits"].as_str() {
+                assert_eq!(format!("{:016x}", value.as_f64().unwrap().to_bits()), bits);
+            } else { assert!(value.is_undefined()); }
+            let descriptor = scope.global("Object").unwrap().call_method("getOwnPropertyDescriptor", vec![scope.shared.globals.clone(), Js::str(name)]).unwrap();
+            descriptor.delete(&"value".encode_utf16().collect::<Vec<_>>()).unwrap();
+            assert_eq!(safe_cex_exchange::js_runtime::value::to_json(&descriptor).unwrap(), case["descriptor"]);
+        }
+    });
+}

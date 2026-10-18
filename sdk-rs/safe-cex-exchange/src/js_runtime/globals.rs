@@ -367,6 +367,14 @@ fn construct_promise(
 /// The JS builtins venue bodies resolve by name. `rt` is weak: the globals
 /// object lives inside the shared scope state.
 pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
+    for (name, value) in [
+        ("Infinity", Js::Number(f64::INFINITY)),
+        ("NaN", Js::Number(f64::NAN)),
+        ("undefined", Js::Undefined),
+    ] {
+        g.define_property(&name.encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value", value)]))
+            .expect("stock global constant descriptor");
+    }
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };

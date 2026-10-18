@@ -218,7 +218,7 @@ impl Host {
         value::from_typed(value)
     }
     pub(crate) fn to_typed<T: serde::de::DeserializeOwned>(&self, value: &Js) -> Result<T, Thrown> {
-        value::to_typed_preserving_undefined(value)
+        value::to_typed(value)
     }
     pub(crate) fn to_serde(&self, value: &Js) -> Result<serde_json::Value, Thrown> {
         value::to_json(value)

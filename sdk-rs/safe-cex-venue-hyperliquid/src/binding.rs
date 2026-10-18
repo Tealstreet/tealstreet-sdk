@@ -288,7 +288,7 @@ impl Binding {
         name: &str,
         args: impl FnOnce(&mut Host) -> Result<Vec<Js>, Thrown>,
     ) -> Result<T, ExchangeError> {
-        let (mut realm, value) = self.invoke(name, args).await?;
+        let (realm, value) = self.invoke(name, args).await?;
         realm.to_typed(&value).map_err(|e| realm.exchange_error(&e))
     }
     pub(crate) async fn unit(

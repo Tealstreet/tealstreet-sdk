@@ -22,6 +22,10 @@ if(process.argv[2]==='effects'){
  const strictMode=api.decimalToPrecision('1.235',{valueOf(){throw Error('mode must not coerce')}},2,2,5);
  console.log(JSON.stringify({log,units:Array.from({length:result.length},(_,i)=>result.charCodeAt(i)),thrown,returned,defaults,functionDefault,precision,decimal,strictMode}));process.exit(0);
 }
+if(process.argv[2]==='precision'){
+ const cases=['','1','0.0100','1.2500','1e-8','1E+5','-2.300e-7','abc','abc1e-2','1e','0.00000001','123.456789'];
+ console.log(JSON.stringify(cases.map(input=>{const value=api.precisionFromString(input);const bytes=Buffer.alloc(8);bytes.writeDoubleBE(value);return {input,nan:Number.isNaN(value),bits:bytes.toString('hex'),json:JSON.stringify(value)};})));process.exit(0);
+}
 const cases=[];
 for(const x of [0,-0,1e-8,-1e-8,1.234e23,NaN,Infinity,-Infinity,undefined,null,true,123n,'1e-8','\ud800'])cases.push(['numberToString',[x]]);
 for(const x of [undefined,null,true,0,1,3,-2,'2.9','0x10','garbage','\ud800'])cases.push(['parsePrecision',[x]]);

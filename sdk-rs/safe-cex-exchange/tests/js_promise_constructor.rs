@@ -344,6 +344,10 @@ fn dropping_the_constructor_observer_does_not_cancel_its_thenable_job() {
 
 #[test]
 fn race_uses_live_iterator_resolution_and_keeps_losing_operations_alive() {
+    let source = std::process::Command::new("node").args(["-e", r#"
+(async()=>{const assert=require('node:assert/strict');let resolve;const loser=new Promise(r=>resolve=r), winner={identity:-0};assert.equal(await Promise.race([loser,winner]),winner);const late={};resolve(late);assert.equal(await loser,late);const cause={};assert.equal(await Promise.race([Promise.reject(cause)]).catch(e=>e),cause);let settled=false;Promise.race([]).then(()=>settled=true);await Promise.resolve();assert.equal(settled,false);const calls=[];const thenable={then(resolve){calls.push('then');resolve(3)}};assert.equal(await Promise.race([thenable,7]),7);assert.deepEqual(calls,['then']);console.log('race profiles pass')})().catch(e=>{console.error(e);process.exitCode=1})
+"#]).output().unwrap();
+    assert!(source.status.success(), "{}", String::from_utf8_lossy(&source.stderr));
     run(|scope| async move {
         let runtime = scope.exchange_runtime();
         let constructor = scope.global("Promise").unwrap();

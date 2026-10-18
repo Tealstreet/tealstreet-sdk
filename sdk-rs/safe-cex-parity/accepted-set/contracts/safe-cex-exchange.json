@@ -147,7 +147,7 @@
         }
       },
       {
-        "input": " ﻿ ",
+        "input": " \ufeff ",
         "output": {
           "kind": "finite",
           "bits": "0000000000000000"
@@ -4109,7 +4109,7 @@
     "call": "serde_json::json!($type($value.as_str().expect(\"frame\")))",
     "cases": [
       {
-        "input": " PING ",
+        "input": " PING\u00a0",
         "output": true
       },
       {
@@ -23369,7 +23369,7 @@
         }
       },
       {
-        "input": "﻿2 ",
+        "input": "\ufeff2\u00a0",
         "output": {
           "bits": "4000000000000000",
           "nan": false
@@ -23623,7 +23623,7 @@
         }
       },
       {
-        "input": "🚀",
+        "input": "\ud83d\ude80",
         "output": {
           "tag": "string",
           "units": [
@@ -24365,7 +24365,7 @@
           {
             "input": {
               "kind": "string",
-              "text": "雪😀"
+              "text": "\u96ea\ud83d\ude00"
             },
             "output": {
               "tag": "string",
@@ -24447,7 +24447,7 @@
             }
           },
           {
-            "input": "🚀",
+            "input": "\ud83d\ude80",
             "output": {
               "units": [
                 55357,
@@ -25558,7 +25558,7 @@
         },
         "input": "observed",
         "reason": "GetIterator calls the actual retained protocol method and verifies its native object result. Array and astral-string fixtures step that returned iterator and observe iterable-self identity, values and exhaustion.",
-        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A😀\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
+        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A\ud83d\ude00\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
         "cases": [
           {
             "input": "array",
@@ -25577,7 +25577,7 @@
               "self": true,
               "values": [
                 "A",
-                "😀"
+                "\ud83d\ude00"
               ],
               "done": true
             }
@@ -31763,7 +31763,7 @@
           {
             "input": [
               7,
-              "😀",
+              "\ud83d\ude00",
               null
             ],
             "output": {
@@ -31786,7 +31786,7 @@
             }
           },
           {
-            "input": "A😀",
+            "input": "A\ud83d\ude00",
             "output": {
               "values": [
                 {
@@ -31878,7 +31878,7 @@
           {
             "input": [
               7,
-              "😀",
+              "\ud83d\ude00",
               null
             ],
             "output": {
@@ -31901,7 +31901,7 @@
             }
           },
           {
-            "input": "A😀",
+            "input": "A\ud83d\ude00",
             "output": {
               "values": [
                 {
