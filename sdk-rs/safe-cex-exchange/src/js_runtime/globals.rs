@@ -619,6 +619,36 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "Object",
         Js::object(vec![
             (
+                "freeze",
+                Js::function("freeze", |_, args| arg(&args, 0).freeze()),
+            ),
+            (
+                "preventExtensions",
+                Js::function("preventExtensions", |_, args| {
+                    arg(&args, 0).prevent_extensions()
+                }),
+            ),
+            (
+                "isExtensible",
+                Js::function("isExtensible", |_, args| {
+                    Ok(Js::Bool(arg(&args, 0).is_extensible()?))
+                }),
+            ),
+            (
+                "isFrozen",
+                Js::function("isFrozen", |_, args| {
+                    Ok(Js::Bool(arg(&args, 0).is_frozen()?))
+                }),
+            ),
+            (
+                "getOwnPropertyDescriptor",
+                Js::function("getOwnPropertyDescriptor", |_, args| {
+                    let target = arg(&args, 0);
+                    let key = arg(&args, 1).to_js_string()?;
+                    target.own_property_descriptor(&key)
+                }),
+            ),
+            (
                 "defineProperty",
                 Js::function("defineProperty", |_, a| {
                     let target = arg(&a, 0);

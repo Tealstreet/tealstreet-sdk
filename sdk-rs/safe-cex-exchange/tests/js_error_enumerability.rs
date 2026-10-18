@@ -56,7 +56,7 @@ fn descriptor(error: &Js, key: &str) -> Value {
             enumerable,
             configurable,
         }) => (value, writable, enumerable, configurable),
-        Some(Prop::Accessor(..)) => panic!("Error instance descriptor must be data"),
+        Some(Prop::Accessor { .. }) => panic!("Error instance descriptor must be data"),
     };
     json!({"value":units(value),"writable":writable,"enumerable":enumerable,"configurable":configurable})
 }

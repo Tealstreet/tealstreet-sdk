@@ -1656,3 +1656,20 @@ listener arguments, including Unicode, NUL, empty strings and formatting tokens.
 `scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
 missing classifications or changed default bodies; the receiver classification
 applies only to this typed forwarding method.
+
+Ordinary object/function descriptor operations retain accessor functions as native
+Js referents, including enumeration/configuration flags and inherited receivers.
+Object.defineProperty validates getter callability before reading the setter and
+keeps original thrown values. Object.freeze preserves accessor setters while
+locking configuration and data writes; preventExtensions blocks new own fields.
+Descriptor reflection reads stored functions without invoking them. Integrity
+operations on array/collection storage await the separate storage cutover.
+The native define_accessor helper remains a host bootstrap installer with its
+existing ABI; it bypasses source descriptor validation and must not implement
+user descriptor operations. Its fallible callsite migration is separately held
+until the approved model-info cutover. Source definitions use define_property.
+tests/js_property_descriptors.rs executes both maintained Hyperliquid frozen
+configuration initializers and compares accessors with Node, including getter
+identity, strict writes, setter receivers, validation order and JS stringify.
+scripts/js-property-descriptor-controls.py compiles an accessor-configurability
+fault, requires the named failure, restores exact bytes and reruns the witnesses.
