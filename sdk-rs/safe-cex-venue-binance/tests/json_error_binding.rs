@@ -1,4 +1,6 @@
 #![cfg(feature = "native")]
+#[path = "support/json_error_runtime.rs"]
+mod capture;
 #[path = "support/inverse_rest_runtime.rs"]
 mod host;
 use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js};
@@ -43,7 +45,7 @@ impl RestAdapter for RejectedHttp {
         })
     }
 }
-fn drive<T>(runtime: &host::Runtime, future: impl Future<Output = T>) -> T {
+fn drive<T>(runtime: &capture::Runtime, future: impl Future<Output = T>) -> T {
     let mut future = std::pin::pin!(future);
     for _ in 0..64 {
         if let Poll::Ready(value) = future
@@ -57,7 +59,7 @@ fn drive<T>(runtime: &host::Runtime, future: impl Future<Output = T>) -> T {
     panic!("bounded terminal HTTP witness did not settle");
 }
 fn observe(pm: bool, profile: &str) -> Value {
-    let runtime = Rc::new(host::Runtime::default());
+    let runtime = Rc::new(capture::Runtime::default());
     let msg = match profile {
         "object" => json!({"name":"VenueError","message":"raw venue reason","detail":17}),
         "number" => json!(7),
@@ -89,7 +91,7 @@ fn observe(pm: bool, profile: &str) -> Value {
     let options: ExchangeOptions = serde_json::from_value(json!({"key":"synthetic-key","secret":"synthetic-secret","tuning":{"consoleLogging":false}})).unwrap();
     fn invoke<E: Exchange>(
         subject: &E,
-        runtime: &host::Runtime,
+        runtime: &capture::Runtime,
         events: &Rc<RefCell<Vec<Js>>>,
     ) -> f64 {
         let seen = events.clone();
@@ -143,6 +145,29 @@ fn observe(pm: bool, profile: &str) -> Value {
         .to_js_string()
         .unwrap()
         .to_vec();
+    if profile == "object" {
+        let reports = runtime.raw_reports.borrow();
+        let raw = reports.last().expect("actual raw reporter callback");
+        assert!(
+            raw.get("name")
+                .unwrap()
+                .strict_equals(&Js::str("VenueError"))
+        );
+        assert!(
+            raw.get("message")
+                .unwrap()
+                .strict_equals(&Js::str("raw venue reason"))
+        );
+        let Js::Number(detail) = raw.get("detail").unwrap() else {
+            panic!("native numeric detail");
+        };
+        assert_eq!(detail.to_bits(), 17.0_f64.to_bits());
+        let console = runtime.error_console.borrow();
+        assert!(
+            raw.strict_equals(&console.last().unwrap()[1]),
+            "console and reporter retain the same native message object"
+        );
+    }
     json!({"stem":if pm {"binancepm"} else {"binance"},"profile":profile,"messageUnits":units,"requests":requests.len(),"leverageBits":format!("{:016x}",leverage.to_bits())})
 }
 fn assert_messages(pm: bool) {

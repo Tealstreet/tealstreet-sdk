@@ -828,3 +828,16 @@ Their classification receipts do not execute signing or establish arbitrary-JS
 parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
+
+The exchange assembly's legacy JSON error port forwards the selected raw value
+to BaseExchange. Do not String-coerce it first: Base distinguishes strings,
+falsy values, objects and primitives when formatting and reporting an error.
+`json_error_binding --features native` constructs the actual Futures/PM venues,
+configured signers/clients and Store, rejecting only terminal HTTP. The object
+profile checks native reporter name/message/detail bits and console/reporter
+identity before diagnostic projection. Its ignored source test constructs the
+whole maintained classes and real Axios/Store for six profiles. Run
+`scripts/json-error-controls.py` to compile the old String conversion, require
+both named native failures, then restore exact bytes and require all three
+tests to pass. This preserves the existing JSON input boundary; it does not
+claim arbitrary input graph identity across that boundary.
