@@ -787,3 +787,12 @@ Use `private_classes --features native` for actual native private frame/Store,
 public ticker generations, candle delegation/cleanup and depth recovery proofs.
 Registry/N-API construction reaches those concrete classes. The current wasm FFI
 exports only `parity_probe`/`version`, with no legacy message entry.
+
+The request-weight `Failure` and `HeaderGetter` aliases retain native error and
+bound header-reader capabilities. Their compiler receipts classify the actual
+alias traits; they do not execute a decoder or the callback. The existing native
+`production_native_request_weight_callbacks_observe_success_and_rejection` test
+constructs the real parent and compares five signed HTTP outcomes to TS/Axios.
+`scripts/header-alias-controls.py` independently corrupts the production header
+argument and rejection-response forwarding, requires compiled named failures,
+and restores exact source bytes before requiring a pass.
