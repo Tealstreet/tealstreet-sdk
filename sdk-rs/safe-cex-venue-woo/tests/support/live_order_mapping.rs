@@ -547,6 +547,7 @@ fn constructed_order_tables_keep_source_own_entries_and_inherited_referents() {
         let row = map(&h, "mapAlgoOrder", algo)
             .unwrap()
             .array_values()
+            .expect("fixture array property reads")
             .unwrap()
             .remove(0);
         for field in ["type", "side", "tpTriggerType"] {
