@@ -1,5 +1,14 @@
 # Binance family port
 
+The public REST receipt group executes ten private production decoders directly,
+observing borrowed row identity, native numeric bits and mapper fields before
+reporting. Its finite stock JSON/UTF8 cases use the maintained TS REST oracle and
+Node coercion/property outcomes. Endpoint lookup, inclusion predicate and strict
+equality have separate non-decoder roles; those receipts do not execute behavior.
+Canonical `--measure --module=public_rest` retains full compiler discovery and
+existing alias/helper obligations. It does not claim arbitrary JS graphs or the
+native feature matrix; public socket owners have a separate receipt group.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/binance/CLAUDE.md).
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
