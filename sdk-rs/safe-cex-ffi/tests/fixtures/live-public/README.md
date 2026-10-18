@@ -28,9 +28,14 @@ Its `sourceBundleSha256` pins the complete 570-frame capture:
 The JSON envelope stores HTTP response bytes in base64; frame payloads and
 timestamps are unchanged. `native-account-delivery-order.test.mjs` reconstructs
 the replay bundle and drives the real TS worker and production addon four times,
-with two fresh accounts per side each time. It requires processed-frame drain
-receipts, exact ticker/book/candle values, and identical combined native output
-across all eight accounts, including every Store field. Existing cross-language
-metadata differences remain separate; the test does not claim full Store parity
-or a new 60-second capture. Run with `LIVE_DIFF_ADDON=/absolute/addon.node` to
-check an immutable compiled artifact.
+with two fresh accounts per side each time. It requires parsed/transport frame
+receipts, zero canonical Promise jobs, exact ticker/book/candle values, and
+identical combined native output across all eight accounts, including every
+Store field. Binance's snapshot listener must start through `start_eager` so its
+HTTP continuation belongs to that job system before the next clock advance.
+`binance-snapshot-ordering-evidence.json` records the compiled RED/GREEN and
+source enqueue/clock observations. General classification of raw runtime tasks
+remains follow-up work; these receipts do not certify all raw tasks. Existing
+cross-language metadata differences remain separate. The test claims neither
+full Store parity nor a new 60-second capture. Run with
+`LIVE_DIFF_ADDON=/absolute/addon.node` to check an immutable compiled artifact.

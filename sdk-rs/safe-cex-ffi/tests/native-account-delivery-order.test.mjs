@@ -36,7 +36,8 @@ test('recorded Binance frames preserve combined Store/event order across eight f
       child.once('close', resolve);
     });
     // Existing qualified metadata differences can make streams.mjs exit 1.
-    // They do not excuse incomplete drain or within-native order differences.
+    // They do not excuse incomplete parser/Jobs receipts or native order diffs.
+    // General raw-runtime-task classification is outside these legacy receipts.
     assert.ok(code === 0 || code === 1, log);
     const report = JSON.parse(readFileSync(output));
     assert.equal(report.nativeDrainVerified, true, log);

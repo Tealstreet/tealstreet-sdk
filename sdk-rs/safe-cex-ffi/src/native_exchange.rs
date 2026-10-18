@@ -7,14 +7,13 @@
 use crate::{
     native_callback::{Callback, Request},
     native_lifecycle::NativeStartup,
-    native_notify::{self, Listener},
     native_value::{JsData, check_status},
 };
 use napi::{
-    Env,
-    bindgen_prelude::{FromNapiValue, JsObjectValue, Object, PromiseRaw, ToNapiValue},
+    Env, Status,
+    bindgen_prelude::{FromNapiValue, JsObjectValue, Object, PromiseRaw, ToNapiValue, Unknown},
     sys,
-    threadsafe_function::ThreadsafeFunctionCallMode,
+    threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use safe_cex_registry::native_account::{
     NativeAccount, NativeAccountFuture, NativeAccountSpec, native_account_call,
@@ -32,7 +31,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
-pub(crate) use crate::native_notify::Notify;
+pub(crate) type Notify = ThreadsafeFunction<JsData, Unknown<'static>, JsData, Status, false>;
 type Reply<T> = oneshot::Sender<Result<T, NativeValue>>;
 
 /// A structured options object plus the account's name for remote signing.
@@ -420,12 +419,11 @@ fn settle<'env, T: Send + ToNapiValue + 'static>(
 pub fn native_account_open<'env>(
     env: &'env Env,
     init: NativeAccountInit,
-    on_event: Listener<'env>,
-    on_store: Listener<'env>,
+    on_event: Notify,
+    on_store: Notify,
     sign: Option<Callback<'env>>,
     proxy_token: Option<Callback<'env>>,
 ) -> napi::Result<PromiseRaw<'env, u32>> {
-    let (on_event, on_store) = native_notify::ordered(env, on_event, on_store)?;
     let sign = sign
         .map(|callback| crate::native_callback::wrap(env, callback))
         .transpose()?;
