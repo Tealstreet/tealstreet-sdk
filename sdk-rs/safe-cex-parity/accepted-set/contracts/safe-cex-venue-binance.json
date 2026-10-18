@@ -50732,5 +50732,617 @@
     },
     "reason": "Typed Spot entrypoint selecting Venue::Spot and forwarding the host, symbol and native callback to the depth lifecycle. It does not expose an alternate raw decoder.",
     "evidence": "Actual production API in src/public_listeners.rs. tests/private_classes.rs::public_listener_aliases::production_native_public_listener_functions_preserve_two_subscriptions constructs real native_dependencies/ExchangeOwner/PublicSocket for Futures, PM and Spot. It reads Parser/Book Rc identities, callback order, native topic/book bits and sibling-safe cleanup state before projection; outbound payload fields/ID values are checked at the actual socket wire, with terminal HTTP held while frames buffer. The existing production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe additionally checks each actual endpoint/flat query, native book fields and delayed connection. scripts/public-listener-function-controls.py independently faults this exact owner, requires a compiled named real-native assertion failure, restores exact source bytes and requires GREEN. The maintained public-listeners.mjs source oracle independently retains 18 depth scenarios per family. This classification receipt does not execute the capability or claim arbitrary getters/prototypes, arbitrary counters, full cancellation, other owners or wasm parity; see PUBLIC_LISTENER_FUNCTION_REVIEW.md."
+  },
+  "safe_cex_venue_binance::class_decode::decode": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "decode",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_core::de::value::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type::<(f64,bool,String)>(safe_cex_exchange::js_runtime::value::from_json($value)) { Ok((number,flag,text))=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits()),\"flag\":flag,\"text\":text}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": [
+          1.25,
+          true,
+          "first"
+        ],
+        "output": {
+          "ok": true,
+          "bits": "3ff4000000000000",
+          "flag": true,
+          "text": "first"
+        }
+      },
+      {
+        "input": [
+          -0.0,
+          false,
+          "second"
+        ],
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000",
+          "flag": false,
+          "text": "second"
+        }
+      },
+      {
+        "input": [
+          -12.5,
+          true,
+          "λ"
+        ],
+        "output": {
+          "ok": true,
+          "bits": "c029000000000000",
+          "flag": true,
+          "text": "λ"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": true,
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "text",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          1.25,
+          true
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          1.25,
+          "true",
+          "text"
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          "1",
+          true,
+          "text"
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          1.25,
+          true,
+          12
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          1.25,
+          true,
+          "text",
+          "extra"
+        ],
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "nativeFields": [
+        "bits",
+        "flag",
+        "text"
+      ],
+      "call": "{ match $type::<(f64,bool,String)>(safe_cex_exchange::js_runtime::value::from_json($value)) { Ok((number,flag,text))=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits()),\"flag\":flag,\"text\":text}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": [
+            1.25,
+            true,
+            "first"
+          ],
+          "output": {
+            "ok": true,
+            "bits": "3ff4000000000000",
+            "flag": true,
+            "text": "first"
+          }
+        },
+        {
+          "input": [
+            -0.0,
+            false,
+            "second"
+          ],
+          "output": {
+            "ok": true,
+            "bits": "8000000000000000",
+            "flag": false,
+            "text": "second"
+          }
+        },
+        {
+          "input": [
+            -12.5,
+            true,
+            "λ"
+          ],
+          "output": {
+            "ok": true,
+            "bits": "c029000000000000",
+            "flag": true,
+            "text": "λ"
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": true,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "text",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            1.25,
+            true
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            1.25,
+            "true",
+            "text"
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "1",
+            true,
+            "text"
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            1.25,
+            true,
+            12
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            1.25,
+            true,
+            "text",
+            "extra"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "evidence": "UNVALIDATED fixed generic profile: T=(f64,bool,String), native Js values constructed through production from_json. Calls the actual function from its compiler-selected source scope, without a new export or substitute helper. This profile does not claim all generic instantiations. Canonical/native controls pending.",
+    "instantiation": "decode",
+    "monomorphization": "The actual generic function is selected without a new wrapper; its direct call fixes T=(f64,bool,String). Other generic instantiations are not claimed."
+  },
+  "safe_cex_venue_binance::deserialize_present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_present",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "D"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "serde_core::de::Deserializer",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "lifetime": "'de"
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          },
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "T"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "serde_core::de::Deserialize",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "lifetime": "'de"
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{ match $type::<_,Option<f64>>($value.clone()) { Ok(value)=> { let present=value.is_some(); let number=value.flatten(); serde_json::json!({\"ok\":true,\"present\":present,\"null\":present && number.is_none(),\"bits\":number.map(|number|format!(\"{:016x}\",number.to_bits()))}) }, Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "ok": true,
+          "present": true,
+          "null": true,
+          "bits": null
+        }
+      },
+      {
+        "input": 1.25,
+        "output": {
+          "ok": true,
+          "present": true,
+          "null": false,
+          "bits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": -0.0,
+        "output": {
+          "ok": true,
+          "present": true,
+          "null": false,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": true,
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "text",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "nativeFields": [
+        "present",
+        "null",
+        "bits"
+      ],
+      "call": "{ match $type::<_,Option<f64>>($value.clone()) { Ok(value)=> { let present=value.is_some(); let number=value.flatten(); serde_json::json!({\"ok\":true,\"present\":present,\"null\":present && number.is_none(),\"bits\":number.map(|number|format!(\"{:016x}\",number.to_bits()))}) }, Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": null,
+          "output": {
+            "ok": true,
+            "present": true,
+            "null": true,
+            "bits": null
+          }
+        },
+        {
+          "input": 1.25,
+          "output": {
+            "ok": true,
+            "present": true,
+            "null": false,
+            "bits": "3ff4000000000000"
+          }
+        },
+        {
+          "input": -0.0,
+          "output": {
+            "ok": true,
+            "present": true,
+            "null": false,
+            "bits": "8000000000000000"
+          }
+        },
+        {
+          "input": true,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "text",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "evidence": "UNVALIDATED fixed generic profile: D=owned serde_json::Value, T=Option<f64>; returned outer Some, explicit null and native number bits. Calls the actual function from its compiler-selected source scope, without a new export or substitute helper. This profile does not claim all generic instantiations. Canonical/native controls pending.",
+    "instantiation": "deserialize_present",
+    "monomorphization": "The actual generic function is selected without a new wrapper; its direct call fixes D=owned serde_json::Value and T=Option<f64>. Other generic instantiations are not claimed."
   }
 }
