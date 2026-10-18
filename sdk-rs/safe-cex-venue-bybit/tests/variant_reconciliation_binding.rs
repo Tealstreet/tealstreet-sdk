@@ -49,7 +49,7 @@ fn reconciliation(name: ExchangeName, expect_probes: bool) {
         ["reduce-limit"]
     );
     assert_eq!(
-        h.store.orders().len(),
+        h.store.orders().unwrap().len(),
         1,
         "Brazil fallback publishes the placed order"
     );
@@ -66,7 +66,7 @@ fn reconciliation(name: ExchangeName, expect_probes: bool) {
             probes.is_empty(),
             "variant source never schedules primary reconciliation: {probes:?}"
         );
-        assert_eq!(h.store.orders().len(), 1);
+        assert_eq!(h.store.orders().unwrap().len(), 1);
     }
     h.venue().dispose().unwrap();
 }

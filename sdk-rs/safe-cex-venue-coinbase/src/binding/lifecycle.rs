@@ -41,7 +41,13 @@ impl Host {
         )
     }
     pub(super) fn loaded(&self) -> Result<Frame, PortfolioFailure> {
-        frame(&*self.shared.store.loaded())
+        frame(
+            &self
+                .shared
+                .store
+                .loaded()
+                .map_err(|error| failure(error.into()))?,
+        )
     }
     pub(super) fn publish(&self, fields: LifecycleUpdate) -> Result<(), PortfolioFailure> {
         let fields = Js::object(

@@ -2,12 +2,12 @@
 mod runtime;
 use indexmap::IndexMap;
 use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::*,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, OrderSide, OrderType, PlaceOrderOpts};
 use safe_cex_webworker::chaser::ChaserOrderInstance;
 use safe_cex_webworker::task_types::*;

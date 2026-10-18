@@ -353,7 +353,7 @@ fn mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding() {
                     .call_method("update", vec![Js::object(vec![("orders", rows.clone())])])
                     .expect("configured fetchOrders must not poison the Store snapshot");
                 assert_eq!(
-                    h.store.orders().len(),
+                    h.store.orders().unwrap().len(),
                     4,
                     "good rows reach the actual DefaultStore"
                 );

@@ -85,7 +85,7 @@ impl PolymarketExchange {
             &class,
             from_typed(&name).map_err(err)?,
             from_typed(&options).map_err(err)?,
-            store::facade(store),
+            store::facade(store)?,
         )
         .map_err(err)?
         .receiver();

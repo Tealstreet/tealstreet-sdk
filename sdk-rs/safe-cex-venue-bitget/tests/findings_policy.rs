@@ -57,7 +57,7 @@ fn inherited_order_fields_and_native_info_input_have_separate_prices() {
                 map_inverse_order(
                     Some(&input.clone().into()),
                     "coin-futures",
-                    |_| None,
+                    |_| Ok(None),
                     || 1.0,
                 )
             } else {
@@ -89,7 +89,7 @@ fn inherited_order_fields_and_native_info_input_have_separate_prices() {
             map_inverse_order(
                 Some(&input.clone().into()),
                 "coin-futures",
-                |_| None,
+                |_| Ok(None),
                 || 1.0,
             )
         } else {

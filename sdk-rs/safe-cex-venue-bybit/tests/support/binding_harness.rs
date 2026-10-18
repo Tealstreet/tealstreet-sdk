@@ -52,6 +52,7 @@ pub struct Runtime {
     pub reports: RefCell<Vec<String>>,
     pub report_contexts: RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>,
     pub logs: RefCell<Vec<String>>,
+    pub console_calls: RefCell<Vec<(String, Vec<safe_cex_exchange::js_runtime::value::Js>)>>,
     /// Optional deterministic entropy stream for session/identity race witnesses.
     pub random_sequence: Cell<Option<u64>>,
 }
@@ -118,6 +119,9 @@ impl ExchangeRuntime for Runtime {
         Box::new(Task(flag))
     }
     fn console_values(&self, level: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.console_calls
+            .borrow_mut()
+            .push((level.into(), message.to_vec()));
         let rendered = safe_cex_exchange::runtime::console_text(message);
         let message = rendered.as_str();
         self.logs.borrow_mut().push(format!("{level}: {message}"));
@@ -464,7 +468,7 @@ impl RateLimitClock for Clock {
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub wire: Arc<Wire>,
-    pub store: Rc<safe_cex_store::store::DefaultStore>,
+    pub store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub exchange: Rc<BybitExchange>,
 }
 
@@ -537,7 +541,7 @@ fn configured_harness(
     runtime.now.set(START_MS);
     let wire = Arc::new(Wire::default());
     script(&wire);
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let epoch = Arc::new(AtomicU64::new(START_MS as u64));
     let mut clock = VirtualClock::default();
     clock.now = Arc::new(move || epoch.load(Ordering::SeqCst) as f64);

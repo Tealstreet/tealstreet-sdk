@@ -178,7 +178,7 @@ fn native_synced_clock_reaches_rest_and_private_auth() {
     );
     h.runtime.pump();
     let after = VIRTUAL_CLOCK.get_current_time_ms();
-    let orders = h.store.orders();
+    let orders = h.store.orders().unwrap();
     let order = orders.iter().find(|o| o.id == "synced-order").unwrap();
     assert_eq!(order.filled, 1.5);
     assert!(

@@ -47,11 +47,11 @@ fn cache_notification_precedes_fresh_position_lookup() {
     );
     fixture::ready(future).expect("configured setter succeeds");
 
-    let positions = Store::positions(store.as_ref());
+    let positions = Store::positions(store.as_ref()).unwrap();
     assert_eq!(positions.len(), 1, "subscriber replaced the original array");
     assert_eq!(positions[0].id, "live", "fresh native position identity");
     assert_eq!(positions[0].leverage.to_bits(), 12.5f64.to_bits());
-    let cache = Store::fetched_leverage(store.as_ref());
+    let cache = Store::fetched_leverage(store.as_ref()).unwrap();
     let cached = &cache["BTC_USDT_PERP"];
     assert_eq!(cached.buy_leverage.to_bits(), 12.5f64.to_bits());
     assert_eq!(cached.sell_leverage.to_bits(), 12.5f64.to_bits());

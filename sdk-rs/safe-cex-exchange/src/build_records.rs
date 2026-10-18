@@ -15,7 +15,7 @@ pub struct BuildRecordsOptions<'a> {
     pub from: f64,
     pub to: f64,
     pub symbol_scoped: bool,
-    pub resolve_settle_currency: &'a mut dyn FnMut(&str) -> String,
+    pub resolve_settle_currency: &'a mut dyn FnMut(&str) -> Result<String, ExchangeError>,
 }
 #[derive(Debug)]
 pub struct BuildRecordsResult {
@@ -134,7 +134,7 @@ pub async fn build_folded_position_records(
                 Some(&mut resolve_funding)
             },
         };
-        if let Some(record) = map_folded_interval(interval, &mut deps) {
+        if let Some(record) = map_folded_interval(interval, &mut deps).map_err(direct)? {
             records.push(record);
         }
     }

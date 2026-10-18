@@ -95,7 +95,7 @@ fn native_promise_iterator_diagnostics_match_node() {
         let shared = Rc::new(ScopeShared::new(
             native,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));

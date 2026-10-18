@@ -251,11 +251,14 @@ pub struct Request {
 #[derive(Default)]
 pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
-    pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
+    pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Js)>)>>,
     pub requests: RefCell<Vec<Request>>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
+        self.route_native(method, path, status, from_json(&body));
+    }
+    pub fn route_native(&self, method: &str, path: &str, status: f64, body: Js) {
         let mut routes = self.routes.borrow_mut();
         match routes.iter_mut().find(|(m, p, _)| m == method && p == path) {
             Some((_, _, queue)) => queue.push_back((status, body)),
@@ -336,7 +339,7 @@ impl JsHttpHost for Http {
         let result = match response {
             Some((status, body)) => Ok(Js::object(vec![
                 ("status", Js::Number(status)),
-                ("data", from_json(&body)),
+                ("data", body),
                 ("headers", Js::object(vec![])),
             ])),
             None => Err(Thrown::error(
@@ -351,7 +354,7 @@ impl JsHttpHost for Http {
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub http: Rc<Http>,
-    pub store: Rc<safe_cex_store::store::DefaultStore>,
+    pub store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub exchange: Rc<WooExchange>,
 }
 
@@ -372,7 +375,7 @@ pub fn harness(
     let http = Rc::new(Http::default());
     *http.runtime.borrow_mut() = Some(runtime.clone());
     script(&http);
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let exchange = WooExchange::new(
         name,
         options,

@@ -97,6 +97,9 @@ its internal payload never appears in serialized JSON. The single retained JSON
 writer lives here below Num and applies JSON.stringify projection only on output.
 `safe-cex-exchange/tests/js_runtime.rs` runs the maintained TS model/Store corpus
 against actual typed bridges and the production Store facade before wire checks.
+StoreData and StoreUpdate use the same native Store record profile: undefined
+optional JSON-view properties are omitted rather than turned into null, while
+retained zk config and nested model/info presence keep their native markers.
 
 Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
 float directly. Capture accepts that event using the same Float path as the
@@ -250,3 +253,9 @@ The static TS declaration projection omits them; native output and numeric ingre
 retain them. Other venue constructors explicitly leave these fields absent.
 The recorded public-market addon regression executes the actual Backpack and
 Crypto.com TS constructors and compiled native binding against identical HTTP bytes.
+
+MarketRuntime.fees retains the undeclared Paradex market literal's maker/taker
+number object through the same flattened Market boundary. MarketFees requires an
+object with both numeric fields; absence remains absent for other venues. The
+static generated TS Market declaration is unchanged. The recorded public-market
+addon regression compares all 66 Paradex markets against actual maintained TS.

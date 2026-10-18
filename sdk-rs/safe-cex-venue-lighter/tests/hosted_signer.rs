@@ -80,7 +80,7 @@ fn hosted_http_signer_does_not_replace_lighter_sdk_secret() {
         runtime.now.set(START);
         let http = Rc::new(Http::default());
         *http.runtime.borrow_mut() = Some(runtime.clone());
-        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let mut opts = options();
         opts.key = "hosted-key".into();
         opts.secret.clear();

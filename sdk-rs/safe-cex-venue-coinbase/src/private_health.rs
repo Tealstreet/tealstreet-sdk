@@ -58,7 +58,7 @@ impl CoinbasePrivateUserStreamHealth {
         // the serialized field. JSON Value has no undefined, so compose the same
         // update with the shared Store read and replacement operations.
         let mut socket_health = store
-            .socket_health()
+            .socket_health()?
             .and_then(|current| current.as_object().cloned())
             .unwrap_or_default();
         socket_health.shift_remove("privateDegradedReason");

@@ -1,4 +1,5 @@
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Balance, object_map::JsObjectMap};
 use serde_json::Value;
 
@@ -26,7 +27,7 @@ fn production_balance_enumerates_recursive_keys_like_live_javascript() {
             false,
         )
         .expect("fixture Store mutation must succeed");
-        let balance = host.balance();
+        let balance = host.balance().unwrap();
         let currencies = balance.currencies.as_ref().unwrap();
         assert_eq!(
             serde_json::to_value(currencies.keys().collect::<Vec<_>>()).unwrap(),
@@ -51,7 +52,7 @@ fn production_balance_enumerates_recursive_keys_like_live_javascript() {
             "live coin key order"
         );
         let encoded: Value =
-            serde_json::from_str(&serde_json::to_string(&*balance).unwrap()).unwrap();
+            serde_json::from_str(&serde_json::to_string(&balance).unwrap()).unwrap();
         assert_eq!(
             encoded["currencies"]
                 .as_object()

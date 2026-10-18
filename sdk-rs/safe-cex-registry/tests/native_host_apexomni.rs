@@ -53,7 +53,7 @@ fn apexomni_native_registry_bootstraps_signs_places_and_cancels() {
     run_local(async {
         let h=venue_harness(ExchangeName::Apexomni,Rc::new(routes),json!({"key":"native-key","secret":SECRET,"passphrase":"native-passphrase","omniKeySeed":format!("0x{}1b","01".repeat(64)),"tealstreetTunnel":false}),None,safe_cex_exchange::native::native_runtime()).await;
         h.exchange.start().await.expect("Apex native start");
-        let loaded = h.store.loaded().clone();
+        let loaded = h.store.loaded().unwrap().clone();
         assert!(
             loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions
         );
