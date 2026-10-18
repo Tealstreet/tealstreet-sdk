@@ -9,6 +9,9 @@ mod virtual_time {
     ));
 }
 // Scripted native HTTP and WS host; no venue operation is mocked.
+// Accepted-set instrumentation includes this same host inside the library.
+#[cfg(not(test))]
+use crate as safe_cex_venue_binance;
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},

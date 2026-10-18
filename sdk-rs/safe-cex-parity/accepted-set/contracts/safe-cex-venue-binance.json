@@ -5258,5 +5258,3796 @@
         }
       }
     }
+  },
+  "safe_cex_venue_binance::inverse::ops::enum_value": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "enum_value",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "family",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Concrete installed source enum members are read without coercing or inventing missing values. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);witness::observe($type(&witness::rt(&h),$value[\"family\"].as_str().unwrap(),$value[\"key\"].as_str().unwrap())) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "family": "OrderSide",
+          "key": "Buy"
+        },
+        "output": {
+          "units": [
+            98,
+            117,
+            121
+          ]
+        }
+      },
+      {
+        "input": {
+          "family": "OrderSide",
+          "key": "Sell"
+        },
+        "output": {
+          "units": [
+            115,
+            101,
+            108,
+            108
+          ]
+        }
+      },
+      {
+        "input": {
+          "family": "OrderSide",
+          "key": "missing"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::BinanceInverseExchange": {
+    "category": "decoder",
+    "shape": "observed",
+    "evidence": "The actual BinanceInverseExchange constructor and all ten compiler-selected native/default entrypoints execute. The canonical primitive HTTP/WS test host scripts external IO only; the production receiver methods, signing, Store, generic invoke<T>, listen<T>, Promise scheduling and cleanup run unchanged. The two source environment profiles and native DTO field/bit witnesses are finite evidence, not blanket venue or feature-matrix equivalence. Raw String/JSON arguments are observed rather than labelled typed. Existing inverse REST/order/socket actual-source oracles retain their own coverage.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "name",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeName",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "store",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_store::contract::Store",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "deps",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::inverse::BinanceInverseDependencies",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "Self"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let (runtime,http,store,options)=witness::new_parts($value);let client=safe_cex_exchange::js_runtime::client::rest_http_host(runtime.clone(),http.clone());let venue=$type::new(safe_cex_types::ExchangeName::Binanceinverse,options,store,crate::inverse::BinanceInverseDependencies{runtime,http:client,external_public_data:None}).unwrap();let receiver=venue.receiver();serde_json::json!({\"publicBase\":receiver.get(\"publicXhr\").unwrap().get(\"defaults\").unwrap().get(\"baseURL\").unwrap().to_display(),\"class\":venue.class_name(),\"publicSocket\":venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).is_some(),\"privateSocket\":venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private).is_some(),\"requests\":http.sent.lock().unwrap().len()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "testnet": false
+            },
+            "output": {
+              "publicBase": "https://dapi.binance.com",
+              "class": "BinanceInverseExchange",
+              "publicSocket": true,
+              "privateSocket": true,
+              "requests": 0
+            }
+          },
+          {
+            "input": {
+              "testnet": true
+            },
+            "output": {
+              "publicBase": "https://demo-dapi.binance.com",
+              "class": "BinanceInverseExchange",
+              "publicSocket": true,
+              "privateSocket": true,
+              "requests": 0
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_positions",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Position",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.store.set_setting(\"isHedged\",$value[\"hedged\"].as_bool().unwrap()).unwrap();let rows=h.drive($type::fetch_positions(h.exchange.as_ref(),Some(vec![\"unused-source-selector\".into()]))).unwrap();let values=rows.iter().map(|p|serde_json::json!({\"symbol\":p.symbol,\"side\":match p.side.value().unwrap(){safe_cex_types::PositionSide::Long=>\"long\",safe_cex_types::PositionSide::Short=>\"short\"},\"mode\":match p.position_mode.value().unwrap(){safe_cex_types::PositionMode::Hedged=>\"hedged\",safe_cex_types::PositionMode::OneWay=>\"oneway\"},\"contracts\":witness::number(p.contracts),\"entry\":witness::number(p.entry_price)})).collect::<Vec<_>>();serde_json::json!({\"rows\":values,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "hedged": false
+            },
+            "output": {
+              "rows": [
+                {
+                  "symbol": "BTCUSD_PERP",
+                  "side": "long",
+                  "mode": "oneway",
+                  "contracts": "0000000000000000",
+                  "entry": "0000000000000000"
+                }
+              ],
+              "wire": [
+                {
+                  "method": "get",
+                  "path": "/dapi/v1/positionRisk",
+                  "base": "https://dapi.binance.com",
+                  "query": []
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "hedged": true
+            },
+            "output": {
+              "rows": [
+                {
+                  "symbol": "BTCUSD_PERP",
+                  "side": "long",
+                  "mode": "hedged",
+                  "contracts": "0000000000000000",
+                  "entry": "0000000000000000"
+                },
+                {
+                  "symbol": "BTCUSD_PERP",
+                  "side": "short",
+                  "mode": "hedged",
+                  "contracts": "0000000000000000",
+                  "entry": "0000000000000000"
+                }
+              ],
+              "wire": [
+                {
+                  "method": "get",
+                  "path": "/dapi/v1/positionRisk",
+                  "base": "https://dapi.binance.com",
+                  "query": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Order",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.http.replace(\"GET\",\"/dapi/v1/openOrders\",serde_json::json!([{\"orderId\":$value[\"id\"],\"symbol\":\"BTCUSD_PERP\",\"type\":\"LIMIT\",\"side\":\"BUY\",\"price\":$value[\"price\"],\"origQty\":$value[\"amount\"],\"executedQty\":\"0.5\",\"reduceOnly\":false}]));let rows=h.drive($type::fetch_orders(h.exchange.as_ref(),None)).unwrap();serde_json::json!({\"rows\":rows.iter().map(|o|serde_json::json!({\"id\":o.id,\"symbol\":o.symbol,\"price\":witness::number(*o.price.value().unwrap()),\"amount\":witness::number(o.amount),\"filled\":witness::number(o.filled),\"remaining\":witness::number(o.remaining),\"buy\":matches!(o.side.value(),Some(safe_cex_types::OrderSide::Buy))})).collect::<Vec<_>>(),\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "id": 17,
+              "price": "123.5",
+              "amount": "2.5"
+            },
+            "output": {
+              "rows": [
+                {
+                  "id": "17",
+                  "symbol": "BTCUSD_PERP",
+                  "price": "405ee00000000000",
+                  "amount": "4004000000000000",
+                  "filled": "3fe0000000000000",
+                  "remaining": "4000000000000000",
+                  "buy": true
+                }
+              ],
+              "wire": [
+                {
+                  "method": "get",
+                  "path": "/dapi/v1/openOrders",
+                  "base": "https://dapi.binance.com",
+                  "query": []
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "id": 29,
+              "price": "9.25",
+              "amount": "7"
+            },
+            "output": {
+              "rows": [
+                {
+                  "id": "29",
+                  "symbol": "BTCUSD_PERP",
+                  "price": "4022800000000000",
+                  "amount": "401c000000000000",
+                  "filled": "3fe0000000000000",
+                  "remaining": "401a000000000000",
+                  "buy": true
+                }
+              ],
+              "wire": [
+                {
+                  "method": "get",
+                  "path": "/dapi/v1/openOrders",
+                  "base": "https://dapi.binance.com",
+                  "query": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_public_trades",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "limit",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::PublicTrade",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);let rows=h.drive($type::fetch_public_trades(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),Some($value[\"limit\"].as_f64().unwrap()))).unwrap();serde_json::json!({\"rows\":rows.iter().map(|p|serde_json::json!({\"id\":p.id,\"symbol\":p.symbol,\"price\":witness::number(p.price),\"qty\":witness::number(p.qty),\"quote\":witness::number(p.quote_qty.unwrap()),\"timestamp\":witness::number(p.timestamp),\"buy\":matches!(p.side,safe_cex_types::OrderSide::Buy)})).collect::<Vec<_>>(),\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "limit": 7
+            },
+            "output": {
+              "rows": [
+                {
+                  "id": "7",
+                  "symbol": "BTCUSD_PERP",
+                  "price": "4059c00000000000",
+                  "qty": "4000000000000000",
+                  "quote": "3fa47ae147ae147b",
+                  "timestamp": "40af400000000000",
+                  "buy": true
+                }
+              ],
+              "wire": [
+                {
+                  "method": "get",
+                  "path": "/dapi/v1/trades",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "symbol=BTCUSD_PERP",
+                    "limit=7"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "limit": 2000
+            },
+            "output": {
+              "rows": [
+                {
+                  "id": "7",
+                  "symbol": "BTCUSD_PERP",
+                  "price": "4059c00000000000",
+                  "qty": "4000000000000000",
+                  "quote": "3fa47ae147ae147b",
+                  "timestamp": "40af400000000000",
+                  "buy": true
+                }
+              ],
+              "wire": [
+                {
+                  "method": "get",
+                  "path": "/dapi/v1/trades",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "symbol=BTCUSD_PERP",
+                    "limit=1000"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "listen_order_book",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [
+                                            {
+                                              "resolved_path": {
+                                                "path": "safe_cex_types::OrderBook",
+                                                "args": null
+                                              }
+                                            }
+                                          ],
+                                          "output": null
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ListenerCleanup",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);let socket=h.exchange.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).unwrap();socket.connect_and_subscribe(false).unwrap();h.runtime.pump();let rows=std::rc::Rc::new(std::cell::RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));let sink=rows.clone();let cleanup=$type::listen_order_book(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),std::rc::Rc::new(move |b|sink.borrow_mut().push(b))).unwrap();let event=serde_json::json!({\"e\":\"depthUpdate\",\"s\":\"BTCUSD_PERP\",\"U\":11,\"u\":11,\"pu\":10,\"b\":[[\"101\",$value[\"amount\"]]],\"a\":[]});socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(event.to_string())).unwrap();h.runtime.pump();let (count,price,amount)={let values=rows.borrow();let b=&values[0];(values.len(),witness::number(b.bids[0].price),witness::number(b.bids[0].amount))};cleanup().unwrap();socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"e\":\"depthUpdate\",\"s\":\"BTCUSD_PERP\",\"U\":12,\"u\":12,\"pu\":11,\"b\":[[\"101\",\"99\"]],\"a\":[]}).to_string())).unwrap();h.runtime.pump();serde_json::json!({\"count\":count,\"price\":price,\"amount\":amount,\"afterCleanup\":rows.borrow().len()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "amount": "4"
+            },
+            "output": {
+              "count": 1,
+              "price": "4059400000000000",
+              "amount": "4010000000000000",
+              "afterCleanup": 1
+            }
+          },
+          {
+            "input": {
+              "amount": "6"
+            },
+            "output": {
+              "count": 1,
+              "price": "4059400000000000",
+              "amount": "4018000000000000",
+              "afterCleanup": 1
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "cancel_symbol_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::cancel_symbol_orders(h.exchange.as_ref(),$value[\"symbol\"].as_str().unwrap().into())).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSD_PERP"
+            },
+            "output": {
+              "ok": true,
+              "wire": [
+                {
+                  "method": "delete",
+                  "path": "/dapi/v1/allOpenOrders",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "symbol=BTCUSD_PERP"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSD_PERP"
+            },
+            "output": {
+              "ok": true,
+              "wire": [
+                {
+                  "method": "delete",
+                  "path": "/dapi/v1/allOpenOrders",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "symbol=ETHUSD_PERP"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "set_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "leverage",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "_",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::PositionSide",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::set_leverage(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),$value[\"leverage\"].as_f64().unwrap(),None)).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "leverage": 17
+            },
+            "output": {
+              "ok": true,
+              "wire": [
+                {
+                  "method": "post",
+                  "path": "/dapi/v1/leverage",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "symbol=BTCUSD_PERP",
+                    "leverage=17"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "leverage": 200
+            },
+            "output": {
+              "ok": true,
+              "wire": [
+                {
+                  "method": "post",
+                  "path": "/dapi/v1/leverage",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "symbol=BTCUSD_PERP",
+                    "leverage=50"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_position_mode",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "hedged",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);safe_cex_store::Store::update(h.store.as_ref(),serde_json::from_value(serde_json::json!({\"positions\":[]})).unwrap(),false).unwrap();h.drive($type::change_position_mode(h.exchange.as_ref(),$value[\"hedged\"].as_bool().unwrap(),Some(\"BTCUSD_PERP\".into()))).unwrap();serde_json::json!({\"hedged\":h.store.options().is_hedged,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "hedged": false
+            },
+            "output": {
+              "hedged": false,
+              "wire": [
+                {
+                  "method": "post",
+                  "path": "/dapi/v1/positionSide/dual",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "dualSidePosition=false"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "hedged": true
+            },
+            "output": {
+              "hedged": true,
+              "wire": [
+                {
+                  "method": "post",
+                  "path": "/dapi/v1/positionSide/dual",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "dualSidePosition=true"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_margin_type",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "isolated",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::change_margin_type(h.exchange.as_ref(),$value[\"isolated\"].as_bool().unwrap(),Some(\"BTCUSD_PERP\".into()))).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "isolated": false
+            },
+            "output": {
+              "ok": true,
+              "wire": [
+                {
+                  "method": "post",
+                  "path": "/dapi/v1/marginType",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "symbol=BTCUSD_PERP",
+                    "marginType=CROSSED"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "isolated": true
+            },
+            "output": {
+              "ok": true,
+              "wire": [
+                {
+                  "method": "post",
+                  "path": "/dapi/v1/marginType",
+                  "base": "https://dapi.binance.com",
+                  "query": [
+                    "symbol=BTCUSD_PERP",
+                    "marginType=ISOLATED"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "after_method_called_in_worker",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "result",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "method",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::worker::CallableMethodsInWorker",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "args",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "resolved_path": {
+                          "path": "serde_json::value::Value",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);$type::after_method_called_in_worker(h.exchange.as_ref(),&serde_json::Value::Null,safe_cex_exchange::worker::CallableMethodsInWorker::ChangePositionMode,&[serde_json::Value::Bool($value[\"hedged\"].as_bool().unwrap()),serde_json::Value::String(\"BTCUSD_PERP\".into())]).unwrap();serde_json::json!({\"hedged\":h.store.options().is_hedged,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+        "cases": [
+          {
+            "input": {
+              "hedged": false
+            },
+            "output": {
+              "hedged": false,
+              "wire": []
+            }
+          },
+          {
+            "input": {
+              "hedged": true
+            },
+            "output": {
+              "hedged": true,
+              "wire": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::orders::equal": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "equal",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "opts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "family",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Source strict equality compares the raw property to the installed enum referent without Number/String coercion. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let opts=safe_cex_exchange::js_runtime::value::from_json(&$value[\"options\"]);let same=$type(&witness::rt(&h),&opts,\"side\",\"OrderSide\",\"Buy\").unwrap();serde_json::json!({\"same\":same}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "options": {
+            "side": "buy"
+          }
+        },
+        "output": {
+          "same": true
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "side": "sell"
+          }
+        },
+        "output": {
+          "same": false
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "side": 1
+          }
+        },
+        "output": {
+          "same": false
+        }
+      },
+      {
+        "input": {
+          "options": {}
+        },
+        "output": {
+          "same": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ops::store": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "store",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production constructor and DefaultStore seed independent market/position rows; inspect actual facade rows, not a replacement Store mock. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let v=$type(&witness::rt(&h),$value[\"key\"].as_str().unwrap()).unwrap();serde_json::json!({\"len\":v.array_values().unwrap().len(),\"id\":v.get(\"0\").unwrap().get(\"id\").unwrap().to_display()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "key": "markets"
+        },
+        "output": {
+          "len": 1,
+          "id": "BTC/USD:BTC"
+        }
+      },
+      {
+        "input": {
+          "key": "positions"
+        },
+        "output": {
+          "len": 1,
+          "id": "BTCUSD_PERP:long"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ops::install_sync": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "install_sync",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "body",
+            {
+              "function_pointer": {
+                "sig": {
+                  "inputs": [
+                    [
+                      "_",
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "resolved_path": {
+                              "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    [
+                      "_",
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "slice": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "core::result::Result",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  },
+                  "is_c_variadic": false
+                },
+                "generic_params": [],
+                "header": {
+                  "is_const": false,
+                  "is_unsafe": false,
+                  "is_async": false,
+                  "abi": "Rust"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Registers a new test-only callback on the real assembled receiver. Calling with wrong this must retain lexical scope, argument count, opaque identity and actual eager Promise scheduling; no venue method is replaced. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.exchange.receiver().define(\"acceptedLabel\",safe_cex_exchange::js_runtime::value::from_json(&$value[\"label\"])).unwrap();$type(&witness::rt(&h),\"acceptedProbe\",witness::sync_body).unwrap();witness::installed(&h,\"acceptedProbe\",$value) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "label": "first",
+          "value": {
+            "opaque": 1
+          }
+        },
+        "output": {
+          "label": "first",
+          "arityBits": "4000000000000000",
+          "same": true
+        }
+      },
+      {
+        "input": {
+          "label": "second",
+          "profile": "undefined"
+        },
+        "output": {
+          "label": "second",
+          "arityBits": "4000000000000000",
+          "same": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::globals::table": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "table",
+      "signature": {
+        "inputs": [
+          [
+            "rows",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "generic": "T"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::ser::Serialize",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Fixed serde_json::Value monomorphization exercises source table materialization with integer-key enumeration, duplicate last-write precedence and independent Boolean/null payloads; no all-Serialize-implementations claim. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let rows=$value[\"rows\"].as_array().unwrap().iter().map(|r|(r[0].as_str().unwrap(),r[1].clone())).collect::<Vec<_>>();let v=$type(&rows).unwrap();serde_json::json!({\"keys\":v.own_keys(),\"first\":witness::observe(v.get($value[\"key\"].as_str().unwrap()))}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "rows": [
+            [
+              "2",
+              "two"
+            ],
+            [
+              "1",
+              "one"
+            ],
+            [
+              "x",
+              "last"
+            ],
+            [
+              "2",
+              "replaced"
+            ]
+          ],
+          "key": "2"
+        },
+        "output": {
+          "keys": [
+            [
+              49
+            ],
+            [
+              50
+            ],
+            [
+              120
+            ]
+          ],
+          "first": {
+            "units": [
+              114,
+              101,
+              112,
+              108,
+              97,
+              99,
+              101,
+              100
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "rows": [
+            [
+              "flag",
+              true
+            ],
+            [
+              "empty",
+              null
+            ]
+          ],
+          "key": "flag"
+        },
+        "output": {
+          "keys": [
+            [
+              102,
+              108,
+              97,
+              103
+            ],
+            [
+              101,
+              109,
+              112,
+              116,
+              121
+            ]
+          ],
+          "first": {
+            "bool": true
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::orders::inverse": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "inverse",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "family",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "The actual inverseObj global and native property-key read implement inverse table selection; missing entries stay undefined. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);witness::observe($type(&witness::rt(&h),$value[\"family\"].as_str().unwrap(),safe_cex_exchange::js_runtime::value::from_json(&$value[\"value\"]))) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "family": "ORDER_SIDE",
+          "value": "buy"
+        },
+        "output": {
+          "units": [
+            66,
+            85,
+            89
+          ]
+        }
+      },
+      {
+        "input": {
+          "family": "ORDER_SIDE",
+          "value": "sell"
+        },
+        "output": {
+          "units": [
+            83,
+            69,
+            76,
+            76
+          ]
+        }
+      },
+      {
+        "input": {
+          "family": "ORDER_TYPE",
+          "value": "not-an-order"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::binanceinverse_types::BinanceIncomeRecord": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "symbol": "BTCUSD_PERP",
+      "incomeType": "FUNDING_FEE",
+      "income": "-1.25",
+      "asset": "BTC",
+      "info": "fee-note",
+      "time": 0,
+      "tranId": "9007199254740993",
+      "tradeId": "t-7"
+    },
+    "entrypoints": [],
+    "evidence": "The generated declaration follows binanceinverse.types.ts and its private map-only numeric-ingress schema. Direct production Deserialize observations read every native field and f64 bits before projection. Independently authored valid positional arrays, missing/wrong fields and present-null optional values are refused; optional absence remains separate. This is the declared typed Rust wire boundary, not a TypeScript runtime validator; MANIFEST-SPEC.md numeric-ingress and closed-typed-output boundaries apply. incomeType remains the source open String, including unknown tags.",
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "incomeType",
+        "income",
+        "asset",
+        "info",
+        "timeBits",
+        "tranId",
+        "tradeId"
+      ],
+      "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw input\")) { Ok(d)=>serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"incomeType\":d.income_type,\"income\":d.income,\"asset\":d.asset,\"info\":d.info,\"timeBits\":format!(\"{:016x}\",d.time.to_bits()),\"tranId\":d.tran_id,\"tradeId\":d.trade_id}), Err(_)=>serde_json::json!({\"ok\":false}) } })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"BTCUSD_PERP\",\"incomeType\":\"FUNDING_FEE\",\"income\":\"-1.25\",\"asset\":\"BTC\",\"info\":\"fee-note\",\"time\":-0,\"tranId\":\"9007199254740993\",\"tradeId\":\"t-7\"}",
+          "output": {
+            "ok": true,
+            "symbol": "BTCUSD_PERP",
+            "incomeType": "FUNDING_FEE",
+            "income": "-1.25",
+            "asset": "BTC",
+            "info": "fee-note",
+            "tranId": "9007199254740993",
+            "tradeId": "t-7",
+            "timeBits": "8000000000000000"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ETHUSD_PERP\",\"incomeType\":\"ARBITRARY_SOURCE_TAG\",\"income\":\"2.75\",\"asset\":\"ETH\",\"time\":31,\"tranId\":\"another-tx\"}",
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD_PERP",
+            "incomeType": "ARBITRARY_SOURCE_TAG",
+            "income": "2.75",
+            "asset": "ETH",
+            "info": null,
+            "tranId": "another-tx",
+            "tradeId": null,
+            "timeBits": "403f000000000000"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ETHUSD_PERP\",\"incomeType\":\"ARBITRARY_SOURCE_TAG\",\"income\":\"2.75\",\"asset\":\"ETH\",\"time\":1e400,\"tranId\":\"another-tx\"}",
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD_PERP",
+            "incomeType": "ARBITRARY_SOURCE_TAG",
+            "income": "2.75",
+            "asset": "ETH",
+            "info": null,
+            "tranId": "another-tx",
+            "tradeId": null,
+            "timeBits": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "[\"BTCUSD_PERP\",\"FUNDING_FEE\",\"-1.25\",\"BTC\",\"fee-note\",-0,\"9007199254740993\",\"t-7\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"row\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"symbol\":\"BTCUSD_PERP\",\"incomeType\":\"FUNDING_FEE\",\"income\":\"-1.25\",\"asset\":\"BTC\",\"info\":null,\"time\":0,\"tranId\":\"9007199254740993\",\"tradeId\":\"t-7\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"symbol\":\"BTCUSD_PERP\",\"incomeType\":\"FUNDING_FEE\",\"income\":\"-1.25\",\"asset\":\"BTC\",\"info\":\"fee-note\",\"time\":0,\"tranId\":\"9007199254740993\",\"tradeId\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"symbol\":\"BTCUSD_PERP\",\"incomeType\":\"FUNDING_FEE\",\"income\":\"-1.25\",\"asset\":\"BTC\",\"info\":\"fee-note\",\"time\":\"31\",\"tranId\":\"9007199254740993\",\"tradeId\":\"t-7\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::inverse::api::optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Source optional chaining guards nullish receiver only; present null and primitive/string reads remain native. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); witness::observe($type(&source,$value[\"key\"].as_str().unwrap())) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "value": null,
+          "key": "x"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "profile": "undefined",
+          "key": "x"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "x": 9
+          },
+          "key": "x"
+        },
+        "output": {
+          "bits": "4022000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "x": null
+          },
+          "key": "x"
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "x": "raw"
+          },
+          "key": "x"
+        },
+        "output": {
+          "units": [
+            114,
+            97,
+            119
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "key": "x"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ops::global": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "global",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "The real installed global is resolved and invoked with exact arguments, including lookup failure. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value); let rt=witness::rt(&h); let args=$value[\"args\"].as_array().unwrap().iter().map(safe_cex_exchange::js_runtime::value::from_json).collect(); witness::observe($type(&rt,$value[\"name\"].as_str().unwrap(),args)) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "name": "Math.max",
+          "args": [
+            1,
+            9
+          ]
+        },
+        "output": {
+          "bits": "4022000000000000"
+        }
+      },
+      {
+        "input": {
+          "name": "Math.min",
+          "args": [
+            1,
+            9
+          ]
+        },
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "name": "missingAcceptedGlobal",
+          "args": []
+        },
+        "output": {
+          "error": "ReferenceError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::binanceinverse_types::GetPositionRiskResponse": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::binanceinverse_types::BinanceInversePositionRisk",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "positive": [
+      [],
+      [
+        {
+          "symbol": "BTCUSD_PERP",
+          "positionAmt": "2.5",
+          "entryPrice": "40123.25",
+          "markPrice": "40234.5",
+          "unRealizedProfit": "7.75",
+          "liquidationPrice": "20000.5",
+          "leverage": "9",
+          "maxQty": "100",
+          "marginType": "isolated",
+          "isolatedMargin": "11.25",
+          "positionSide": "LONG",
+          "updateTime": 0
+        },
+        {
+          "symbol": "ETHUSD_PERP",
+          "positionAmt": "-3",
+          "entryPrice": "2011",
+          "markPrice": "1999",
+          "unRealizedProfit": "-12",
+          "liquidationPrice": "3000",
+          "isolatedMargin": "4",
+          "positionSide": "SHORT",
+          "updateTime": 23
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      17,
+      "array",
+      [
+        null
+      ],
+      [
+        {}
+      ],
+      [
+        [
+          "BTCUSD_PERP",
+          "2.5",
+          "40123.25",
+          "40234.5",
+          "7.75",
+          "20000.5",
+          "9",
+          "100",
+          "isolated",
+          "11.25",
+          "LONG",
+          0
+        ]
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "The actual public Vec<BinanceInversePositionRisk> alias retains ordered rows and executes each native field/bit observation directly. It has its own array admission and invalid-member refusals; this neither redirects the alias nor substitutes an expected compiler type. The generated declaration follows binanceinverse.types.ts and its private map-only numeric-ingress schema. Direct production Deserialize observations read every native field and f64 bits before projection. Independently authored valid positional arrays, missing/wrong fields and present-null optional values are refused; optional absence remains separate. This is the declared typed Rust wire boundary, not a TypeScript runtime validator; MANIFEST-SPEC.md numeric-ingress and closed-typed-output boundaries apply.",
+    "observation": {
+      "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw vector\")) { Ok(rows)=>serde_json::json!({\"ok\":true,\"len\":rows.len(),\"rows\":rows.iter().map(|d|serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"positionAmt\":d.position_amt,\"entryPrice\":d.entry_price,\"markPrice\":d.mark_price,\"unRealizedProfit\":d.un_realized_profit,\"liquidationPrice\":d.liquidation_price,\"leverage\":d.leverage,\"maxQty\":d.max_qty,\"marginType\":d.margin_type,\"isolatedMargin\":d.isolated_margin,\"positionSide\":d.position_side,\"updateTimeBits\":format!(\"{:016x}\",d.update_time.to_bits())})).collect::<Vec<_>>()}), Err(_)=>serde_json::json!({\"ok\":false}) } })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+      "cases": [
+        {
+          "input": "[{\"symbol\":\"BTCUSD_PERP\",\"positionAmt\":\"2.5\",\"entryPrice\":\"40123.25\",\"markPrice\":\"40234.5\",\"unRealizedProfit\":\"7.75\",\"liquidationPrice\":\"20000.5\",\"leverage\":\"9\",\"maxQty\":\"100\",\"marginType\":\"isolated\",\"isolatedMargin\":\"11.25\",\"positionSide\":\"LONG\",\"updateTime\":-0},{\"symbol\":\"ETHUSD_PERP\",\"positionAmt\":\"-3\",\"entryPrice\":\"2011\",\"markPrice\":\"1999\",\"unRealizedProfit\":\"-12\",\"liquidationPrice\":\"3000\",\"isolatedMargin\":\"4\",\"positionSide\":\"SHORT\",\"updateTime\":23}]",
+          "output": {
+            "ok": true,
+            "len": 2,
+            "rows": [
+              {
+                "ok": true,
+                "symbol": "BTCUSD_PERP",
+                "positionAmt": "2.5",
+                "entryPrice": "40123.25",
+                "markPrice": "40234.5",
+                "unRealizedProfit": "7.75",
+                "liquidationPrice": "20000.5",
+                "leverage": "9",
+                "maxQty": "100",
+                "marginType": "isolated",
+                "isolatedMargin": "11.25",
+                "positionSide": "LONG",
+                "updateTimeBits": "8000000000000000"
+              },
+              {
+                "ok": true,
+                "symbol": "ETHUSD_PERP",
+                "positionAmt": "-3",
+                "entryPrice": "2011",
+                "markPrice": "1999",
+                "unRealizedProfit": "-12",
+                "liquidationPrice": "3000",
+                "leverage": null,
+                "maxQty": null,
+                "marginType": null,
+                "isolatedMargin": "4",
+                "positionSide": "SHORT",
+                "updateTimeBits": "4037000000000000"
+              }
+            ]
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": true,
+            "len": 0,
+            "rows": []
+          }
+        },
+        {
+          "input": "[{\"symbol\":\"ETHUSD_PERP\",\"positionAmt\":\"-3\",\"entryPrice\":\"2011\",\"markPrice\":\"1999\",\"unRealizedProfit\":\"-12\",\"liquidationPrice\":\"3000\",\"isolatedMargin\":\"4\",\"positionSide\":\"SHORT\",\"updateTime\":23}]",
+          "output": {
+            "ok": true,
+            "len": 1,
+            "rows": [
+              {
+                "ok": true,
+                "symbol": "ETHUSD_PERP",
+                "positionAmt": "-3",
+                "entryPrice": "2011",
+                "markPrice": "1999",
+                "unRealizedProfit": "-12",
+                "liquidationPrice": "3000",
+                "leverage": null,
+                "maxQty": null,
+                "marginType": null,
+                "isolatedMargin": "4",
+                "positionSide": "SHORT",
+                "updateTimeBits": "4037000000000000"
+              }
+            ]
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"array\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[null]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[{}]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[[\"BTCUSD_PERP\",\"2.5\",\"40123.25\",\"40234.5\",\"7.75\",\"20000.5\",\"9\",\"100\",\"isolated\",\"11.25\",\"LONG\",0]]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::inverse::ops::optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Source optional chaining guards nullish receiver only; present null and primitive/string reads remain native. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); witness::observe($type(&source,$value[\"key\"].as_str().unwrap())) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "value": null,
+          "key": "x"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "profile": "undefined",
+          "key": "x"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "x": 9
+          },
+          "key": "x"
+        },
+        "output": {
+          "bits": "4022000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "x": null
+          },
+          "key": "x"
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "x": "raw"
+          },
+          "key": "x"
+        },
+        "output": {
+          "units": [
+            114,
+            97,
+            119
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "key": "x"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ops::install_async": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "install_async",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "body",
+            {
+              "function_pointer": {
+                "sig": {
+                  "inputs": [
+                    [
+                      "_",
+                      {
+                        "resolved_path": {
+                          "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    [
+                      "_",
+                      {
+                        "resolved_path": {
+                          "path": "alloc::vec::Vec",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "safe_cex_exchange::js_runtime::value::Js",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "safe_cex_exchange::js_runtime::promise::JsFuture",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "lifetime": "'static"
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  },
+                  "is_c_variadic": false
+                },
+                "generic_params": [],
+                "header": {
+                  "is_const": false,
+                  "is_unsafe": false,
+                  "is_async": false,
+                  "abi": "Rust"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Registers a new test-only callback on the real assembled receiver. Calling with wrong this must retain lexical scope, argument count, opaque identity and actual eager Promise scheduling; no venue method is replaced. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.exchange.receiver().define(\"acceptedLabel\",safe_cex_exchange::js_runtime::value::from_json(&$value[\"label\"])).unwrap();$type(&witness::rt(&h),\"acceptedProbe\",witness::async_body).unwrap();witness::installed(&h,\"acceptedProbe\",$value) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "label": "first",
+          "value": {
+            "opaque": 1
+          }
+        },
+        "output": {
+          "label": "first",
+          "arityBits": "4000000000000000",
+          "same": true
+        }
+      },
+      {
+        "input": {
+          "label": "second",
+          "profile": "undefined"
+        },
+        "output": {
+          "label": "second",
+          "arityBits": "4000000000000000",
+          "same": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::binanceinverse_types::BinanceInversePositionRisk": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "symbol": "BTCUSD_PERP",
+      "positionAmt": "2.5",
+      "entryPrice": "40123.25",
+      "markPrice": "40234.5",
+      "unRealizedProfit": "7.75",
+      "liquidationPrice": "20000.5",
+      "leverage": "9",
+      "maxQty": "100",
+      "marginType": "isolated",
+      "isolatedMargin": "11.25",
+      "positionSide": "LONG",
+      "updateTime": 0
+    },
+    "entrypoints": [],
+    "evidence": "The generated declaration follows binanceinverse.types.ts and its private map-only numeric-ingress schema. Direct production Deserialize observations read every native field and f64 bits before projection. Independently authored valid positional arrays, missing/wrong fields and present-null optional values are refused; optional absence remains separate. This is the declared typed Rust wire boundary, not a TypeScript runtime validator; MANIFEST-SPEC.md numeric-ingress and closed-typed-output boundaries apply.",
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "positionAmt",
+        "entryPrice",
+        "markPrice",
+        "unRealizedProfit",
+        "liquidationPrice",
+        "leverage",
+        "maxQty",
+        "marginType",
+        "isolatedMargin",
+        "positionSide",
+        "updateTimeBits"
+      ],
+      "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw input\")) { Ok(d)=>serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"positionAmt\":d.position_amt,\"entryPrice\":d.entry_price,\"markPrice\":d.mark_price,\"unRealizedProfit\":d.un_realized_profit,\"liquidationPrice\":d.liquidation_price,\"leverage\":d.leverage,\"maxQty\":d.max_qty,\"marginType\":d.margin_type,\"isolatedMargin\":d.isolated_margin,\"positionSide\":d.position_side,\"updateTimeBits\":format!(\"{:016x}\",d.update_time.to_bits())}), Err(_)=>serde_json::json!({\"ok\":false}) } })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"BTCUSD_PERP\",\"positionAmt\":\"2.5\",\"entryPrice\":\"40123.25\",\"markPrice\":\"40234.5\",\"unRealizedProfit\":\"7.75\",\"liquidationPrice\":\"20000.5\",\"leverage\":\"9\",\"maxQty\":\"100\",\"marginType\":\"isolated\",\"isolatedMargin\":\"11.25\",\"positionSide\":\"LONG\",\"updateTime\":-0}",
+          "output": {
+            "ok": true,
+            "symbol": "BTCUSD_PERP",
+            "positionAmt": "2.5",
+            "entryPrice": "40123.25",
+            "markPrice": "40234.5",
+            "unRealizedProfit": "7.75",
+            "liquidationPrice": "20000.5",
+            "leverage": "9",
+            "maxQty": "100",
+            "marginType": "isolated",
+            "isolatedMargin": "11.25",
+            "positionSide": "LONG",
+            "updateTimeBits": "8000000000000000"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ETHUSD_PERP\",\"positionAmt\":\"-3\",\"entryPrice\":\"2011\",\"markPrice\":\"1999\",\"unRealizedProfit\":\"-12\",\"liquidationPrice\":\"3000\",\"isolatedMargin\":\"4\",\"positionSide\":\"SHORT\",\"updateTime\":23}",
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD_PERP",
+            "positionAmt": "-3",
+            "entryPrice": "2011",
+            "markPrice": "1999",
+            "unRealizedProfit": "-12",
+            "liquidationPrice": "3000",
+            "leverage": null,
+            "maxQty": null,
+            "marginType": null,
+            "isolatedMargin": "4",
+            "positionSide": "SHORT",
+            "updateTimeBits": "4037000000000000"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ETHUSD_PERP\",\"positionAmt\":\"-3\",\"entryPrice\":\"2011\",\"markPrice\":\"1999\",\"unRealizedProfit\":\"-12\",\"liquidationPrice\":\"3000\",\"isolatedMargin\":\"4\",\"positionSide\":\"SHORT\",\"updateTime\":1e400}",
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD_PERP",
+            "positionAmt": "-3",
+            "entryPrice": "2011",
+            "markPrice": "1999",
+            "unRealizedProfit": "-12",
+            "liquidationPrice": "3000",
+            "leverage": null,
+            "maxQty": null,
+            "marginType": null,
+            "isolatedMargin": "4",
+            "positionSide": "SHORT",
+            "updateTimeBits": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "[\"BTCUSD_PERP\",\"2.5\",\"40123.25\",\"40234.5\",\"7.75\",\"20000.5\",\"9\",\"100\",\"isolated\",\"11.25\",\"LONG\",-0]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"row\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"symbol\":\"BTCUSD_PERP\",\"positionAmt\":\"2.5\",\"entryPrice\":\"40123.25\",\"markPrice\":\"40234.5\",\"unRealizedProfit\":\"7.75\",\"liquidationPrice\":\"20000.5\",\"leverage\":null,\"maxQty\":\"100\",\"marginType\":\"isolated\",\"isolatedMargin\":\"11.25\",\"positionSide\":\"LONG\",\"updateTime\":0}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"symbol\":\"BTCUSD_PERP\",\"positionAmt\":\"2.5\",\"entryPrice\":\"40123.25\",\"markPrice\":\"40234.5\",\"unRealizedProfit\":\"7.75\",\"liquidationPrice\":\"20000.5\",\"leverage\":\"9\",\"maxQty\":\"100\",\"marginType\":\"isolated\",\"isolatedMargin\":\"11.25\",\"positionSide\":\"LONG\",\"updateTime\":\"23\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::inverse::ops::request": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "request",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "client",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "extra",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual signed client, HTTP transform, shared Promise and response-data selection execute before observing native decoded numbers; no Value-first projection. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.http.encoded(\"GET\",\"/dapi/v1/openOrders\",$value[\"raw\"].as_str().unwrap().as_bytes());let rt=witness::rt(&h);let result=h.drive(Box::pin(async move {Ok($type(&rt,\"xhr\",\"get\",\"OPEN_ORDERS\",vec![]).await)})).unwrap().unwrap();serde_json::json!({\"len\":result.array_values().unwrap().len(),\"first\":witness::number(result.get(\"0\").unwrap().as_f64().unwrap()),\"second\":witness::number(result.get(\"1\").unwrap().as_f64().unwrap()),\"requests\":h.http.calls(\"/dapi/v1/openOrders\").len()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "raw": "[-0,1e400]"
+        },
+        "output": {
+          "len": 2,
+          "first": "8000000000000000",
+          "second": "7ff0000000000000",
+          "requests": 1
+        }
+      },
+      {
+        "input": {
+          "raw": "[3.5,-2.25]"
+        },
+        "output": {
+          "len": 2,
+          "first": "400c000000000000",
+          "second": "c002000000000000",
+          "requests": 1
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ops::contains": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "contains",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual in-operator delegation preserves own/inherited presence and primitive TypeError; no own-only substitute. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); match $type(&source,$value[\"key\"].as_str().unwrap()) { Ok(p)=>serde_json::json!({\"present\":p}),Err(e)=>witness::observe(Err(e)) } })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "value": {
+            "x": null
+          },
+          "key": "x"
+        },
+        "output": {
+          "present": true
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "key": "x"
+        },
+        "output": {
+          "present": false
+        }
+      },
+      {
+        "input": {
+          "profile": "inherited",
+          "value": {},
+          "key": "toString"
+        },
+        "output": {
+          "present": true
+        }
+      },
+      {
+        "input": {
+          "value": "x",
+          "key": "x"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "key": "x"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ops::v": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "v",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "object",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual installed get-key collaborator receives the original graph and field; signed-zero and missing remain distinct. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let source=witness::raw($value);witness::observe($type(&witness::rt(&h),&source,$value[\"key\"].as_str().unwrap())) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "cases": [
+      {
+        "input": {
+          "value": {
+            "x": -0.0
+          },
+          "key": "x"
+        },
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "x": "retained"
+          },
+          "key": "x"
+        },
+        "output": {
+          "units": [
+            114,
+            101,
+            116,
+            97,
+            105,
+            110,
+            101,
+            100
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "key": "missing"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ]
   }
 }
