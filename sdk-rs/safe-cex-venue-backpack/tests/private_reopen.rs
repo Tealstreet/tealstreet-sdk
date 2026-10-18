@@ -118,6 +118,7 @@ fn private_fill_frame_emits_fill_and_updates_order() {
     f.owner.base.on(
         "fill",
         Rc::new(move |_, fill| {
+            let fill = safe_cex_exchange::js_runtime::value::to_json(fill).unwrap();
             capture.borrow_mut().push(fill.clone());
             Ok(())
         }),

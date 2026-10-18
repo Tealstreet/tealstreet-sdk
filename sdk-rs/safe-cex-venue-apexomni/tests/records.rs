@@ -1397,6 +1397,61 @@ fn order_decoded_fields_match_typescript() {
 }
 
 #[test]
+fn iso8601_accepted_contract_observes_the_real_timestamp_decoder() {
+    let reference = oracle();
+    let mut observed = Vec::new();
+    for raw in [
+        "\"2026-10-18T12:34:56.789Z\"",
+        "\"not-a-date\"",
+        "\"\"",
+        "\"é-😀\"",
+        "1700000000000",
+        "-0",
+        "1.25",
+        "null",
+        "true",
+        "[]",
+        "{}",
+        "{\"String\":\"time\"}",
+        "not-json",
+    ] {
+        let actual = match serde_json::from_str::<Iso8601>(raw) {
+            Ok(Iso8601::String(value)) => {
+                json!({"ok":true,"variant":"String","value":value})
+            }
+            Ok(Iso8601::Number(value)) => {
+                json!({"ok":true,"variant":"Number","value":format!("{:016x}",value.to_bits())})
+            }
+            Err(_) => json!({"ok":false}),
+        };
+        let source_accepts = serde_json::from_str::<Value>(raw)
+            .is_ok_and(|value| schema_accepts(&reference["ISO8601"], &value));
+        assert_eq!(actual["ok"], source_accepts, "TS timestamp domain {raw}");
+        observed.push((raw, actual));
+    }
+    let contracts: Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-parity/accepted-set/contracts/safe-cex-venue-apexomni.json"
+    )))
+    .unwrap();
+    let contract = &contracts["safe_cex_venue_apexomni::order_records::Iso8601"];
+    assert_eq!(
+        contract["nativeObservation"]["nativeFields"],
+        json!(["variant", "value"]),
+        "TimestampVisitor needs direct native timestamp observations"
+    );
+    let cases = contract["nativeObservation"]["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), observed.len());
+    for (raw, actual) in observed {
+        let expected = cases.iter().find(|case| case["input"] == raw).unwrap();
+        assert_eq!(
+            actual, expected["output"],
+            "native timestamp contract {raw}"
+        );
+    }
+}
+
+#[test]
 fn iso8601_preserves_live_typescript_union_and_numeric_bits() {
     let reference = oracle();
     assert_eq!(

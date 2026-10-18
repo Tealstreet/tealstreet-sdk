@@ -152,3 +152,5 @@ export {
   type AliasSyncResponse,
   type AliasSyncState,
 } from './aliasSync/aliasSync';
+export { getCliBrand, setCliBrand, TEALSTREET_CLI_BRAND } from './brand';
+export type { CliBrand } from './brand';
