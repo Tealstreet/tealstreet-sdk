@@ -176,9 +176,7 @@ impl safe_cex_store::Store for ReadTrace {
     fn stark_config(&self) -> Option<Ref<'_, Value>> {
         safe_cex_store::Store::stark_config(self.inner.as_ref())
     }
-    fn zk_link_config(
-        &self,
-    ) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
+    fn zk_link_config(&self) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
         safe_cex_store::Store::zk_link_config(self.inner.as_ref())
     }
     fn user_data(&self) -> Option<Ref<'_, Value>> {

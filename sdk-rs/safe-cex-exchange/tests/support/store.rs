@@ -256,9 +256,7 @@ impl Store for TestStore {
     fn stark_config(&self) -> Option<Ref<'_, Value>> {
         Ref::filter_map(self.data.borrow(), |data| data.stark_config.as_ref()).ok()
     }
-    fn zk_link_config(
-        &self,
-    ) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
+    fn zk_link_config(&self) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
         Ref::filter_map(self.data.borrow(), |data| data.zk_link_config.as_ref()).ok()
     }
     fn user_data(&self) -> Option<Ref<'_, Value>> {

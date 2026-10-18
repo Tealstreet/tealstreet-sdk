@@ -258,7 +258,7 @@ pub struct MarketLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, TS)]
-#[ts(optional_fields)]
+#[ts(optional_fields, rename_all = "camelCase")]
 pub struct Market {
     pub id: String,
     pub symbol: String,
@@ -501,7 +501,7 @@ impl From<Balance> for CurrencyBalance {
     }
 }
 #[derive(Debug, Clone, PartialEq, TS)]
-#[ts(optional_fields)]
+#[ts(optional_fields, rename_all = "camelCase")]
 pub struct Balance {
     pub used: f64,
     pub free: f64,
@@ -519,7 +519,7 @@ pub struct Balance {
 }
 
 #[derive(Debug, Clone, PartialEq, TS)]
-#[ts(optional_fields)]
+#[ts(optional_fields, rename_all = "camelCase")]
 pub struct Ticker {
     pub id: String,
     pub symbol: String,
