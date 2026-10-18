@@ -26,6 +26,9 @@ diagnostic arguments before the terminal sink, preserving prethrow writes and
 skipping later revision/notification statements on failure.
 `Object.seal` and `Object.freeze` share the canonical descriptor integrity
 operation; sealing preserves existing writable bits and both retain accessors.
+Strict writes to string primitives distinguish existing read-only length/index
+slots from missing properties. The actual Bitget dictionary facade witness pins
+both errors against the maintained Store and preserves the typed projection refusal.
 
 ## Abstract venue hooks
 

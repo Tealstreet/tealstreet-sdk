@@ -646,7 +646,7 @@ fn native_case(input: Input) -> Value {
             "native report retains original opaque cause pointer"
         );
     }
-    json!({"trace":*h.parent.trace.borrow(),"closeDelta":h.socket.diagnostics().on_close_count,"health":Store::socket_health(h.store.as_ref()).unwrap().map(|v|v.clone()),"book":{"updates":book.updates,"isSnapshotLoaded":book.is_snapshot_loaded},"hasOpened":opened.get(),"resyncOrdersOnOpen":resync.get(),"failure":errors.first().map(|e|json!({"name":e.name,"message":e.message,"code":observed_error_code(&e.code)})),"settlement":if !sends {None} else if errors.is_empty() {Some("resolved")} else {Some("rejected")}})
+    json!({"trace":*h.parent.trace.borrow(),"closeDelta":h.socket.diagnostics().on_close_count,"health":Store::socket_health(h.store.as_ref()).unwrap(),"book":{"updates":book.updates,"isSnapshotLoaded":book.is_snapshot_loaded},"hasOpened":opened.get(),"resyncOrdersOnOpen":resync.get(),"failure":errors.first().map(|e|json!({"name":e.name,"message":e.message,"code":observed_error_code(&e.code)})),"settlement":if !sends {None} else if errors.is_empty() {Some("resolved")} else {Some("rejected")}})
 }
 #[test]
 #[ignore = "mandatory live source oracle: yarn venue-oracle:binance"]

@@ -560,18 +560,6 @@
     ]
   },
   {
-    "file": "safe-cex-exchange/src/js_runtime/store.rs",
-    "function": "facade",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "update_order",
-        "count": 1
-      }
-    ]
-  },
-  {
     "file": "safe-cex-exchange/src/owned_tasks.rs",
     "function": "start_detached",
     "edges": [
@@ -1138,18 +1126,6 @@
         "kind": "call",
         "hook": "name",
         "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-store/src/store.rs",
-    "function": "update_order",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "update_order",
-        "count": 2
       }
     ]
   },
@@ -7390,13 +7366,6 @@
         "kind": "reference",
         "hook": "start",
         "callee": "account_runtime :: start",
-        "count": 1
-      },
-      {
-        "receiver": "path",
-        "kind": "reference",
-        "hook": "update_order",
-        "callee": "crate :: order_controls :: update_order",
         "count": 1
       },
       {

@@ -1720,5 +1720,58 @@
         }
       ]
     }
+  },
+  "safe_cex_store::balance_handle::BalanceHandle": {
+    "shape": "typed",
+    "evidence": "Retains the supplied typed native BalanceReference capability; no balance is read, serialized or cached by this constructor. Actual canonical Store and Bitrue binding witnesses cover captured aliases, generations, getter errors and owner drop.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "reference",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_store::balance_handle::BalanceReference",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Retains the supplied typed native BalanceReference capability; no balance is read, serialized or cached by this constructor. Actual canonical Store and Bitrue binding witnesses cover captured aliases, generations, getter errors and owner drop."
+      }
+    ]
   }
 }

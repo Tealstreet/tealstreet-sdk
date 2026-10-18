@@ -22,7 +22,7 @@ use safe_cex_exchange::{
     },
     native::native_runtime,
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_types::{
     AnyTimeframe, ExchangeName, OHLCVOptions, Timeframe, retained_json::RetainedJsonInput as Input,
 };

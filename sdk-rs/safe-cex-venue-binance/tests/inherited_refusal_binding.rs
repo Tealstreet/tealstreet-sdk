@@ -3,7 +3,7 @@
 #[path = "support/inverse_rest_runtime.rs"]
 mod host;
 use safe_cex_exchange::{exchange::Exchange, runtime::ExchangeError};
-use safe_cex_store::store::DefaultStore;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_binance::exchange_classes::{
     BinanceExchange, BinancePMExchange, BinanceSpotExchange,
