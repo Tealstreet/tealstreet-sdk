@@ -41005,5 +41005,759 @@
         }
       }
     ]
+  },
+"safe_cex_venue_binance::exchange_classes::failure": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "failure",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_binance::request_weight::Failure",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the production failure bridge with explicit native output observations. This bounded Rust assembly bridge profile preserves its existing String/JSON/typed DTO boundary; it is not a claim of unrestricted JS graph or all generic instantiations.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/exchange-bridge-observers.rs\")); } witness::diagnostic($value, |message| $type(message)) }",
+    "cases": [
+      {
+        "input": "",
+        "output": {
+          "name": "Error",
+          "units": []
+        }
+      },
+      {
+        "input": "venue refusal",
+        "output": {
+          "name": "Error",
+          "units": [
+            118,
+            101,
+            110,
+            117,
+            101,
+            32,
+            114,
+            101,
+            102,
+            117,
+            115,
+            97,
+            108
+          ]
+        }
+      },
+      {
+        "input": "é漢😀",
+        "output": {
+          "name": "Error",
+          "units": [
+            233,
+            28450,
+            55357,
+            56832
+          ]
+        }
+      },
+      {
+        "input": "line\nmessage",
+        "output": {
+          "name": "Error",
+          "units": [
+            108,
+            105,
+            110,
+            101,
+            10,
+            109,
+            101,
+            115,
+            115,
+            97,
+            103,
+            101
+          ]
+        }
+      },
+      {
+        "input": "0",
+        "output": {
+          "name": "Error",
+          "units": [
+            48
+          ]
+        }
+      },
+      {
+        "input": "[object Object]",
+        "output": {
+          "name": "Error",
+          "units": [
+            91,
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            32,
+            79,
+            98,
+            106,
+            101,
+            99,
+            116,
+            93
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::exchange_classes::json_value": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "json_value",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the production json_value bridge with explicit native output observations. This bounded Rust assembly bridge profile preserves its existing String/JSON/typed DTO boundary; it is not a claim of unrestricted JS graph or all generic instantiations.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/exchange-bridge-observers.rs\")); } witness::json_bridge($value, |value| $type(value)) }",
+    "cases": [
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": {
+            "kind": "null"
+          }
+        }
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": {
+          "ok": {
+            "bool": true
+          }
+        }
+      },
+      {
+        "input": {
+          "value": 17
+        },
+        "output": {
+          "ok": {
+            "bits": "4031000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "value": "native text"
+        },
+        "output": {
+          "ok": {
+            "units": [
+              110,
+              97,
+              116,
+              105,
+              118,
+              101,
+              32,
+              116,
+              101,
+              120,
+              116
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "value": [
+            1,
+            null,
+            false
+          ]
+        },
+        "output": {
+          "ok": {
+            "array": [
+              {
+                "bits": "3ff0000000000000"
+              },
+              {
+                "kind": "null"
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "z": 1,
+            "a": [
+              2,
+              3
+            ]
+          }
+        },
+        "output": {
+          "ok": {
+            "object": [
+              [
+                "z",
+                {
+                  "bits": "3ff0000000000000"
+                }
+              ],
+              [
+                "a",
+                {
+                  "array": [
+                    {
+                      "bits": "4000000000000000"
+                    },
+                    {
+                      "bits": "4008000000000000"
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "ok": {
+            "object": []
+          }
+        }
+      },
+      {
+        "input": {
+          "profile": "undefined"
+        },
+        "output": {
+          "name": "Error",
+          "message": "undefined has no JSON carrier"
+        }
+      },
+      {
+        "input": {
+          "profile": "nonfinite"
+        },
+        "output": {
+          "ok": {
+            "object": [
+              [
+                "negativeZero",
+                {
+                  "bits": "0000000000000000"
+                }
+              ],
+              [
+                "nan",
+                {
+                  "kind": "null"
+                }
+              ],
+              [
+                "positiveInfinity",
+                {
+                  "kind": "null"
+                }
+              ],
+              [
+                "array",
+                {
+                  "array": [
+                    {
+                      "kind": "null"
+                    },
+                    {
+                      "kind": "null"
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::exchange_classes::typed": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "typed",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Executes the production typed bridge with explicit native output observations. This bounded Rust assembly bridge profile preserves its existing String/JSON/typed DTO boundary; it is not a claim of unrestricted JS graph or all generic instantiations. Generic T is fixed only to Vec<Market>; every declared field, optional absence, row order and binary64 field is read directly from the result before serialization.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/exchange-bridge-observers.rs\")); } witness::markets($value, |value| $type::<Vec<safe_cex_types::Market>>(value)) }",
+    "cases": [
+      {
+        "input": {
+          "value": []
+        },
+        "output": {
+          "rows": []
+        }
+      },
+      {
+        "input": {
+          "value": [
+            {
+              "id": "BTC/USDT:USDT",
+              "symbol": "BTCUSDT",
+              "prettySymbol": "BTC / USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": {
+                "amount": 0.001,
+                "price": 0.1
+              },
+              "limits": {
+                "amount": {
+                  "min": 0.001,
+                  "max": 500
+                },
+                "leverage": {
+                  "min": 1,
+                  "max": 50
+                }
+              },
+              "contractSize": 1,
+              "isPerpetual": true
+            },
+            {
+              "id": "ETH/USDT",
+              "symbol": "ETHUSDT",
+              "base": "ETH",
+              "quote": "USDT",
+              "active": false,
+              "precision": {
+                "amount": 1,
+                "price": 2
+              },
+              "limits": {
+                "amount": {
+                  "min": 3,
+                  "max": 4
+                },
+                "leverage": {
+                  "min": 5,
+                  "max": 6
+                }
+              },
+              "takerFee": 0.002,
+              "makerFee": 0.001,
+              "isSpot": true
+            }
+          ]
+        },
+        "output": {
+          "rows": [
+            {
+              "id": "BTC/USDT:USDT",
+              "symbol": "BTCUSDT",
+              "prettySymbol": "BTC / USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": [
+                "3f50624dd2f1a9fc",
+                "3fb999999999999a"
+              ],
+              "amount": [
+                "3f50624dd2f1a9fc",
+                "407f400000000000"
+              ],
+              "leverage": [
+                "3ff0000000000000",
+                "4049000000000000"
+              ],
+              "minimumPrice": null,
+              "contractSize": "3ff0000000000000",
+              "flags": [
+                null,
+                null,
+                null,
+                true,
+                null
+              ],
+              "fees": [
+                null,
+                null
+              ]
+            },
+            {
+              "id": "ETH/USDT",
+              "symbol": "ETHUSDT",
+              "prettySymbol": null,
+              "base": "ETH",
+              "quote": "USDT",
+              "active": false,
+              "precision": [
+                "3ff0000000000000",
+                "4000000000000000"
+              ],
+              "amount": [
+                "4008000000000000",
+                "4010000000000000"
+              ],
+              "leverage": [
+                "4014000000000000",
+                "4018000000000000"
+              ],
+              "minimumPrice": null,
+              "contractSize": null,
+              "flags": [
+                null,
+                null,
+                true,
+                null,
+                null
+              ],
+              "fees": [
+                "3f60624dd2f1a9fc",
+                "3f50624dd2f1a9fc"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "profile": "native-numbers",
+          "value": [
+            {
+              "id": "BTC/USDT:USDT",
+              "symbol": "BTCUSDT",
+              "prettySymbol": "BTC / USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": {
+                "amount": 0.001,
+                "price": 0.1
+              },
+              "limits": {
+                "amount": {
+                  "min": 0.001,
+                  "max": 500
+                },
+                "leverage": {
+                  "min": 1,
+                  "max": 50
+                }
+              },
+              "contractSize": 1,
+              "isPerpetual": true
+            }
+          ]
+        },
+        "output": {
+          "rows": [
+            {
+              "id": "BTC/USDT:USDT",
+              "symbol": "BTCUSDT",
+              "prettySymbol": "BTC / USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": [
+                "7ff8000000000000",
+                "8000000000000000"
+              ],
+              "amount": [
+                "3f50624dd2f1a9fc",
+                "407f400000000000"
+              ],
+              "leverage": [
+                "3ff0000000000000",
+                "7ff0000000000000"
+              ],
+              "minimumPrice": null,
+              "contractSize": "3ff0000000000000",
+              "flags": [
+                null,
+                null,
+                null,
+                true,
+                null
+              ],
+              "fees": [
+                null,
+                null
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "error": "Error",
+          "messagePresent": true
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "error": "Error",
+          "messagePresent": true
+        }
+      },
+      {
+        "input": {
+          "value": [
+            {}
+          ]
+        },
+        "output": {
+          "error": "Error",
+          "messagePresent": true
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null
+          ]
+        },
+        "output": {
+          "error": "Error",
+          "messagePresent": true
+        }
+      },
+      {
+        "input": {
+          "value": [
+            17
+          ]
+        },
+        "output": {
+          "error": "Error",
+          "messagePresent": true
+        }
+      }
+    ]
   }
 }

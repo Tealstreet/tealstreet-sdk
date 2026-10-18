@@ -905,3 +905,11 @@ observations are compared with the maintained TS constructors. The ordinary
 private_classes source-case guard keeps all 164 cases live in CI. Preserve the
 208 constructed native Store cases and seven independent compiled body controls
 when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
+
+The exchange assembly bridge cohort measures exactly `failure`, `json_value` and
+`typed<Vec<Market>>` through the maintained canonical accepted-set driver. Read
+`EXCHANGE_BRIDGE_REVIEW.md` for its finite String/JSON/typed boundaries. Native
+output fields and number bits are observed before serialization; do not broaden
+this to arbitrary JS graphs or generic T. The companion
+`scripts/exchange-bridge-controls.py` requires independent compiled named failures
+and exact byte restoration for all three bridges.
