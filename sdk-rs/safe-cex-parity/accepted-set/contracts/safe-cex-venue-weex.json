@@ -5290,7 +5290,7 @@
         "where_predicates": []
       }
     },
-    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value.clone()); match $type(retained.get(\"present\").and_then(|present|if present.as_bool()==Some(true){Some(&$value[\"value\"])}else{None}),\"reduceOnly\"){Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})} }",
+    "call": "{let retained=safe_cex_types::retained_json::RetainedJsonInput::from($value.clone()); match $type(retained.get(\"present\").and_then(|present|if present.as_bool()==Some(true){Some(retained.get(\"value\").expect(\"authored present field\"))}else{None}),\"reduceOnly\"){Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})} }",
     "cases": [
       {
         "input": {

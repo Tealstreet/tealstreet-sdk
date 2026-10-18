@@ -327,7 +327,7 @@
         "where_predicates": []
       }
     },
-    "call": "{use safe_cex_types::retained_json::RetainedJsonInput as I;let input=I::from($value.clone());let out=$type(&input,&[\"a\",\"b\"]);serde_json::json!({\"a\":out.is_some_and(|v|std::ptr::eq(v,input.get(\"a\").unwrap())),\"number\":out.and_then(I::as_f64)})}",
+    "call": "{use safe_cex_types::retained_json::RetainedJsonInput as I;let input=I::from($value.clone());let out=$type(&input,&[\"a\",\"b\"]);serde_json::json!({\"a\":out.is_some_and(|v|std::ptr::eq(v,input.get(\"a\").unwrap())),\"numberBits\":out.and_then(I::as_f64).map(|number|format!(\"{:016x}\",number.to_bits()))})}",
     "cases": [
       {
         "input": {
@@ -336,7 +336,7 @@
         },
         "output": {
           "a": true,
-          "number": 0
+          "numberBits": "0000000000000000"
         }
       },
       {
@@ -346,7 +346,7 @@
         },
         "output": {
           "a": false,
-          "number": 17
+          "numberBits": "4031000000000000"
         }
       }
     ],
