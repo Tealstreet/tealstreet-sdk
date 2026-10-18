@@ -698,6 +698,9 @@ pub struct FrameDrainReceipt {
     pub close_processed: u64,
 }
 
+type HandlerStatsReader =
+    dyn Fn(&str, usize) -> Result<(bool, safe_cex_num::PrototypeScalar), ExchangeError>;
+
 pub struct BaseWebSocket {
     pub id: u64,
     frame_receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>,
@@ -710,6 +713,9 @@ pub struct BaseWebSocket {
     pub order_book_inner_state: RefCell<HashMap<String, OrderBookInnerState>>,
     pub message_handlers: RefCell<indexmap::IndexMap<String, HandlerList>>,
     pub message_handlers_stats: RefCell<MessageHandlersStats>,
+    // JS-backed protocols read their original registry in place. Typed protocols
+    // own message_handlers directly; this capability carries no callback copy.
+    handler_stats_reader: RefCell<Option<Rc<HandlerStatsReader>>>,
     pub prototype_realm: Rc<safe_cex_num::PrototypeRealm>,
     pub last_log: RefCell<VecDeque<String>>,
     pub treat_any_message_as_pong: Cell<bool>,
@@ -741,6 +747,7 @@ impl BaseWebSocket {
             order_book_inner_state: RefCell::new(HashMap::new()),
             message_handlers: RefCell::new(indexmap::IndexMap::new()),
             message_handlers_stats: RefCell::new(indexmap::IndexMap::new()),
+            handler_stats_reader: RefCell::new(None),
             prototype_realm: safe_cex_num::PrototypeRealm::current(),
             last_log: RefCell::new(VecDeque::with_capacity(20)),
             treat_any_message_as_pong: Cell::new(false),
@@ -857,9 +864,14 @@ impl BaseWebSocket {
             return Ok(());
         }
         let now = self.now();
-        let count = self.handler_stats_count(topic, 1)?;
-        let has = self.handler_stats_present(topic)
-            && safe_cex_num::PrototypeValue::from(count.clone()).truthy();
+        let (has, count) = if let Some(reader) = self.handler_stats_reader.borrow().clone() {
+            reader(topic, 1)?
+        } else {
+            let count = self.handler_stats_count(topic, 1)?;
+            let has = self.handler_stats_present(topic)
+                && safe_cex_num::PrototypeValue::from(count.clone()).truthy();
+            (has, count)
+        };
         let own = self.message_handlers_stats.borrow().contains_key(topic);
         if own {
             let mut stats = self.message_handlers_stats.borrow_mut();
@@ -964,6 +976,9 @@ impl BaseWebSocket {
         }
         Ok(())
     }
+    pub(crate) fn set_handler_stats_reader(&self, reader: Rc<HandlerStatsReader>) {
+        *self.handler_stats_reader.borrow_mut() = Some(reader);
+    }
     fn handler_stats_present(&self, topic: &str) -> bool {
         self.message_handlers.borrow().contains_key(topic)
             || self.prototype_realm.inherited(topic).truthy()
@@ -975,6 +990,9 @@ impl BaseWebSocket {
     ) -> Result<safe_cex_num::PrototypeScalar, ExchangeError> {
         use safe_cex_num::PrototypeScalar as Scalar;
         use safe_cex_num::PrototypeValue as Native;
+        if let Some(reader) = self.handler_stats_reader.borrow().clone() {
+            return reader(topic, missing).map(|(_, count)| count);
+        }
         if let Some(handlers) = self.message_handlers.borrow().get(topic) {
             return Ok(Scalar::Number(handlers.borrow().len() as f64));
         }

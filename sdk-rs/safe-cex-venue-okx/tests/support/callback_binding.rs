@@ -260,3 +260,184 @@ fn actual_socket_dispatch_reads_only_the_live_selected_handler() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn actual_js_socket_statistics_share_live_counts_with_pong_and_teardown() {
+    use safe_cex_num::PrototypeScalar as Scalar;
+    let h = fixture();
+    let socket = h.exchange.scope.this.get("businessWebsocket").unwrap();
+    let parser = Js::function("parser", |_, _| Ok(Js::Undefined));
+    let handlers = Js::object(vec![
+        ("book", Js::array(vec![parser.clone(), parser.clone()])),
+        ("pong", Js::array(vec![parser.clone()])),
+    ]);
+    socket.set("messageHandlers", handlers.clone()).unwrap();
+    let core = h
+        .venue()
+        .base()
+        .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Business)
+        .unwrap();
+    let record = |key| {
+        socket
+            .call_method("recordMessageHandlerStats", vec![Js::str(key)])
+            .unwrap()
+    };
+    record("book");
+    socket.call_method("handlePongEvent", vec![]).unwrap();
+    assert_eq!(
+        core.message_handlers_stats.borrow()["book"].last_callbacks_count,
+        Scalar::Number(2.0)
+    );
+    assert_eq!(
+        core.message_handlers_stats.borrow()["pong"].had_handlers,
+        Some(true),
+        "JS-backed pong uses the same source registry as dispatch"
+    );
+    handlers.set("book", Js::array(vec![])).unwrap();
+    h.runtime.advance(6000.0);
+    record("pong");
+    assert_eq!(
+        core.message_handlers_stats.borrow()["book"].last_callbacks_count,
+        Scalar::Number(0.0),
+        "periodic reconciliation reads the changed source table"
+    );
+    handlers.set("book", Js::array(vec![parser])).unwrap();
+    record("book");
+    handlers
+        .delete(&"pong".encode_utf16().collect::<Vec<_>>())
+        .unwrap();
+    h.runtime.advance(300.0);
+    socket
+        .call_method("cleanupMessageHandlerStats", vec![Js::str("book")])
+        .unwrap();
+    assert!(!core.message_handlers_stats.borrow().contains_key("book"));
+    assert_eq!(
+        core.message_handlers_stats.borrow()["pong"].last_callbacks_count,
+        Scalar::Number(0.0),
+        "forced teardown reconciliation sees deletion through an alias"
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn actual_js_socket_statistics_preserve_length_reads_and_original_throws() {
+    use safe_cex_num::PrototypeScalar as Scalar;
+    let h = fixture();
+    let socket = h.exchange.scope.this.get("businessWebsocket").unwrap();
+    // Establish the same initial reconciliation window as the maintained source.
+    socket
+        .call_method("recordMessageHandlerStats", vec![Js::str("bare")])
+        .unwrap();
+    let reads = Rc::new(Cell::new(0));
+    let counter = reads.clone();
+    let list = Js::object(vec![]);
+    list.define_accessor(
+        "length",
+        Some(Rc::new(move |_| {
+            counter.set(counter.get() + 1);
+            Ok(Js::Number(counter.get() as f64))
+        })),
+        None,
+    )
+    .unwrap();
+    let lookups = Rc::new(Cell::new(0));
+    let lookup_count = lookups.clone();
+    let table = Js::object(vec![]);
+    table
+        .define_accessor(
+            "selected",
+            Some(Rc::new(move |_| {
+                lookup_count.set(lookup_count.get() + 1);
+                Ok(list.clone())
+            })),
+            None,
+        )
+        .unwrap();
+    socket.set("messageHandlers", table.clone()).unwrap();
+    socket
+        .call_method("recordMessageHandlerStats", vec![Js::str("selected")])
+        .unwrap();
+    let core = h
+        .venue()
+        .base()
+        .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Business)
+        .unwrap();
+    assert_eq!(
+        reads.get(),
+        2,
+        "source reads length for hasHandlers, then callbacksCount"
+    );
+    assert_eq!(
+        lookups.get(),
+        1,
+        "source captures the selected registry entry once"
+    );
+    assert_eq!(
+        core.message_handlers_stats.borrow()["selected"].had_handlers,
+        Some(true)
+    );
+    assert_eq!(
+        core.message_handlers_stats.borrow()["selected"].last_callbacks_count,
+        Scalar::Number(2.0)
+    );
+    let original = Js::object(vec![("marker", Js::str("original length getter error"))]);
+    let thrown = original.clone();
+    let list = Js::object(vec![]);
+    list.define_accessor(
+        "length",
+        Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+        None,
+    )
+    .unwrap();
+    table.define("selected", list).unwrap();
+    let error = socket
+        .call_method("recordMessageHandlerStats", vec![Js::str("selected")])
+        .unwrap_err();
+    assert!(
+        error.value.same_reference(&original),
+        "record keeps original thrown value"
+    );
+    assert_eq!(
+        core.message_handlers_stats.borrow()["selected"].last_callbacks_count,
+        Scalar::Number(2.0),
+        "a throwing read precedes statistics mutation"
+    );
+    h.runtime.advance(300.0);
+    let error = socket
+        .call_method("cleanupMessageHandlerStats", vec![Js::str("other")])
+        .unwrap_err();
+    assert!(
+        error.value.same_reference(&original),
+        "forced reconciliation keeps original thrown value"
+    );
+    h.runtime.advance(6000.0);
+    let error = socket
+        .call_method("recordMessageHandlerStats", vec![Js::str("bare")])
+        .unwrap_err();
+    assert!(
+        error.value.same_reference(&original),
+        "periodic reconciliation keeps original thrown value"
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn maintained_handler_registry_source_preserves_live_reads_and_throws() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/callback-source.mjs"
+        ))
+        .arg("--handler-registry")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "handler-registry"
+    );
+}
