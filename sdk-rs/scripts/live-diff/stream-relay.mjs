@@ -313,7 +313,8 @@ export async function streamRelay({
 // Fail closed: compare exact counts per physical URL occurrence, rejecting extra
 // messages/sockets as well as missing or unfinished handlers.
 export function verifyDrain(tape, expected, receipt, expectedCloses = closeCounts(tape)) {
-  if (!receipt?.sockets || (receipt.pendingJobs ?? 0) !== 0) return false;
+  if (!receipt?.sockets || !Number.isSafeInteger(receipt.pendingJobs) || receipt.pendingJobs !== 0) return false;
+  if (receipt.transport && !verifyRawTaskDrain(receipt.rawTasks)) return false;
   const occurrences = new Map(),
     actual = new Map();
   for (const socket of receipt.sockets) {
@@ -330,6 +331,15 @@ export function verifyDrain(tape, expected, receipt, expectedCloses = closeCount
   for (const [key, count] of expected) if (actual.get(key) !== count) return false;
   for (const [key, count] of actual) if (count !== (expected.get(key) ?? 0)) return false;
   return true;
+}
+
+// Old addons and malformed/inconsistent counters cannot certify raw task drain.
+export function verifyRawTaskDrain(tasks) {
+  if (tasks?.version !== 1 || tasks.scope !== 'exchange-runtime') return false;
+  for (const key of ['unknown', 'finite', 'ready', 'waitingTimers', 'waitingSockets', 'promiseDrivers', 'blocking']) {
+    if (!Number.isSafeInteger(tasks[key]) || tasks[key] < 0) return false;
+  }
+  return tasks.blocking === tasks.unknown + tasks.finite + tasks.ready && tasks.blocking === 0;
 }
 
 export function verifyTransportDrain(tape, receipt, counts = transportCounts(tape)) {
