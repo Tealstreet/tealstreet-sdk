@@ -1,7 +1,7 @@
 //! The actual Scope stored by a constructed KrakenExchange, with terminal HTTP only.
 #[allow(dead_code)]
 #[path = "binding_harness.rs"]
-mod terminal;
+pub(super) mod terminal;
 
 use crate::rest_account::ReadHost;
 use safe_cex_exchange::exchange::Exchange;
