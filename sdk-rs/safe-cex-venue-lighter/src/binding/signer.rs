@@ -94,7 +94,7 @@ impl Host {
         map: impl FnOnce(Js) -> Result<T, Thrown> + 'static,
     ) -> NativePromise<T> {
         let (promise, resolver) = NativePromise::pending(self.microtasks.clone());
-        let wait = await_js(value);
+        let wait = await_js(&self.runtime, value);
         Promise::spawn(
             &self.runtime,
             Box::pin(async move {

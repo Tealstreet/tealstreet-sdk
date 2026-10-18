@@ -4,6 +4,20 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
 
+`scripts/public-dispatch-contracts.mjs` uses the maintained compiler driver with
+four exact owner filters for `public_dispatch::{Handlers,dispatch_binance_message}`
+and `ticker_capture::{Capture,lookup}`. The three raw-key/frame operations have
+direct native observations; `Capture::new` is a typed Store capability factory.
+Its classification does not claim decoder execution. Keep retained metadata,
+callback identity/order and inherited lookup observations before JSON projection.
+
+The constructed NativeImports socket witness compares twelve prototype/capture
+cases against the maintained TypeScript exchange classes. Capture assertions
+must inspect retained cells before rereading the dictionary, so a lazy refresh
+cannot conceal a broken Store subscription. `scripts/public-dispatch-controls.py`
+requires four independently compiled production faults to fail their named
+constructed socket tests, then restores each source file byte for byte.
+
 ## Source-owned tables
 
 `scripts/types.mjs` evaluates all three live TypeScript type modules, resolving
@@ -135,6 +149,12 @@ Public websocket subscription helpers snapshot shared JS own-key order and read
 each count immediately before sending. Native-count callbacks preserve NaN and
 infinities; nonnumeric counts are None. Bind the fallible send callback to the
 core socket when composing classes. Send errors abort the remaining keys.
+All five concrete PublicState kinds use subscribe_binance_public and its private
+encoder. Keep the live-source cases on that actual shared route; do not recreate
+unused family-named forwarding wrappers. The native subscription receipt test
+opens every kind with native_dependencies and checks outgoing bytes, reentry and
+send failure. See PUBLIC_SUBSCRIPTION_REVIEW.md for individual classifications
+and compiled body controls.
 
 Public onOpen bodies use BaseWebSocket send/reset rather than local socket or
 orderbook replicas. Market variants keep their books; public/Spot variants reset
@@ -185,6 +205,14 @@ PM margin-mode rejection is an extracted async operation with a fallible error
 emitter. It emits exactly once, then returns the unsupported-margin Error; an
 emitter failure takes precedence and retains its metadata. Unused isolated and
 symbol inputs are omitted; concrete class/emitter composition remains pending.
+
+The three `leverage` function contracts pin typed command APIs, including the
+shared setter reached by both live exchange classes. Their classification receipts
+do not execute the commands or admit raw records. The separate `leverage` test
+target compares 138 maintained source cases and four inherited-market guards,
+observes native finite/signed-zero bits and nonfinite classes before projection,
+and checks both families cannot write Store state while POST remains pending.
+Use canonical accepted-set `--measure --module=leverage` for the scoped receipts.
 
 Generated wire records capture shared JsNumberInput at their public Deserialize
 entry, then call the private remote companion through strict_decode::object. Keep
@@ -594,6 +622,13 @@ Futures/PM overlay witness checks signed bracket requests, Store publication and
 unchanged market fields. `scripts/account-leverage-alias-contracts.mjs` measures
 their actual native traits with the maintained authenticated compiler context.
 
+The two `margin_mode` free functions are typed asynchronous commands, with exact
+compiler API classifications rather than decoder-admission claims. Their separate
+production-function witnesses in `margin_mode` and `margin_dispose` compare 64
+maintained source cases and poll both futures margin modes across a pending POST.
+Run the canonical accepted-set `--measure --module=margin_mode` for classification
+receipts; those receipts do not execute the commands or cover arbitrary JS inputs.
+
 ### Position snapshot callback alias receipts
 
 `position_snapshots::{Emit,Log}` are executable capabilities captured from the
@@ -664,6 +699,26 @@ receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
 
+The private/order alias review covers thirteen live capabilities with individual
+compiler contracts and actual native binding/fault witnesses. See
+`PRIVATE_ORDER_ALIAS_REVIEW.md` and `scripts/private-order-alias-contracts.mjs`.
+`RefreshCallback` and `KeyFuture` were retired with test-only scheduling and key
+wrappers. Keep the live receiver's native key future, retry/refresh methods and
+single shared detach helper; do not restore parallel helpers for the census.
+
+
+The private REST `SnapshotCall` capture preserves each source console argument
+as a native value and forwards the explicit log severity. Caught errors use the
+canonical `Thrown` materialization, so their name/message reach the console sink
+as an Error rather than a message string. `snapshot_call_binding` in the native
+`private_classes` target executes actual signed order requests and observes the
+captured severity, original data bits/presence and caught Error before projection.
+`scripts/snapshot-call-controls.py` independently corrupts those three production
+forwarding paths, requires compiled named assertion failures and exact-restoration
+passes. `scripts/snapshot-call-alias-contracts.mjs` authenticates fresh compiler
+metadata and checks only the selected alias classification; it does not replace
+the native callback execution witnesses or classify the continuation aliases.
+
 The public ticker handlers consume canonical native EventArray values from the
 constructed public classes. The old PublicEvent/PublicEvents JSON adapter and its
 oracle-only test/control tail are removed; they had no production caller.
@@ -703,6 +758,25 @@ holds a listen-key request, drops the original settlement and observes both
 clones before invoking a cloned reconnect arrow. These reviews do not classify
 raw-input decoders or widen accepted representations.
 
+LiveFlag constructor receipts classify typed callback/Cell state. Native retry
+proofs live in tests/support/live_flag_binding.rs; live-flag-controls.py requires
+independent compiled reader/conversion failures and exact source restorations.
+
+
+The private REST continuation aliases have finite native evidence in
+`tests/support/snapshot_future_binding.rs`. The actual PM exchange starts the
+regular signed request, awaits its member result before invoking the conditional
+member, and keeps the aggregate pending until that second HTTP response settles.
+The witness reads ordered native fields, signed-zero/NaN bits and own-undefined
+from both results, and separately checks rejected conditional settlement against
+the source Store fallback and Base error emitter. Only terminal HTTP is held.
+`scripts/snapshot-future-controls.py` independently corrupts member order and
+request-result forwarding, requires successful compilation plus the named native
+failure, restores exact production bytes and requires GREEN after each fault.
+`scripts/snapshot-future-alias-contracts.mjs` authenticates compiler artifacts and
+classifies only `SnapshotFuture`/`SnapshotRequestFuture`; those classification
+receipts are distinct from executing the real continuations and do not classify
+the response payloads or unrelated aliases.
 The seven `public_listeners` aliases have a finite compiler-authenticated review
 in `scripts/public-listener-alias-contracts.mjs`. `Book` is an actual map decoder,
 with native per-level binary64 observations and Rc identity; the six callable,
@@ -715,3 +789,42 @@ flat query, then checks one retained book through live updates and cleanup.
 the latter installs GET args into config.params, so callers must not wrap again.
 Separate compiled semantic controls require named native failures and exact
 source restoration for every reviewed alias.
+
+Private REST shape checks, field aliases and diagnostics consume the canonical
+native graph directly. Never restore the recursive `json_data` projection.
+Existing borrowed-JSON array validators delegate to the same native guard.
+The executed function contracts and constructed native HTTP witnesses are
+reviewed in `PRIVATE_REST_CONTRACT_REVIEW.md`; snapshot callable aliases remain
+a separate cohort. Refresh the two reviewed nested-helper source pins after
+reviewing any change to `private_rest.rs`.
+
+The snapshot rejection fixture settles rejected HTTP through `RestFailure`, not
+a fulfilled response with status 400. Its exact Base-formatted emitter assertion
+distinguishes transport rejection from malformed fulfilled-body validation.
+`scripts/snapshot-rejection-fixture-control.py` compiles the old fulfilled fixture,
+requires that assertion to fail and restores the genuine rejection path. This is
+a fixture-semantics check, separate from the two production continuation controls.
+
+
+The legacy `public_message`, `private_message`, `spot_public_message` and
+`public_candle_delegate` callback extractions have no production callers and were
+removed with `message_entry` and its standalone oracle/control receipts. All
+nine mapped source members retain their existing concrete native class bodies.
+Use `private_classes --features native` for actual native private frame/Store,
+public ticker generations, candle delegation/cleanup and depth recovery proofs.
+Registry/N-API construction reaches those concrete classes. The current wasm FFI
+exports only `parity_probe`/`version`, with no legacy message entry.
+
+The standalone `delegated_methods` extraction layer has no production caller and
+is retired with its options alias and mock-only oracle. Keep the six TypeScript
+rows on the live ExchangeState listener/dispatch members. The native candle,
+depth and historical-position witnesses and compiled live history flag control
+are documented in DELEGATED_ROUTE_REVIEW.md; do not recreate forwarding helpers
+to satisfy accepted-owner discovery.
+
+The ten `signing` accepted-set owners are outbound codecs and request-signing
+transformations, with individual non-decoder role records and exact compiler APIs.
+Their classification receipts do not execute signing or establish arbitrary-JS
+parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
+signer against the actual TS signer with installed Axios, qs and create-hmac.
+Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.

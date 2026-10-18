@@ -1,22 +1,22 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/binance/binancepm.ws-private.ts"
-rust_files = [ "safe-cex-venue-binance/src/private_classes.rs", "safe-cex-venue-binance/src/private_helpers.rs", "safe-cex-venue-binance/src/private_session.rs", "safe-cex-venue-binance/src/private_open.rs", "safe-cex-venue-binance/src/private_message.rs", "safe-cex-venue-binance/src/private_ping.rs", "safe-cex-venue-binance/src/private_events.rs", "safe-cex-venue-binance/src/position_refresh.rs", "safe-cex-venue-binance/src/listen_key.rs" ]
+rust_files = [ "safe-cex-venue-binance/src/private_classes.rs", "safe-cex-venue-binance/src/private_helpers.rs", "safe-cex-venue-binance/src/private_session.rs", "safe-cex-venue-binance/src/private_open.rs", "safe-cex-venue-binance/src/private_ping.rs", "safe-cex-venue-binance/src/private_events.rs", "safe-cex-venue-binance/src/position_refresh.rs", "safe-cex-venue-binance/src/listen_key.rs" ]
 
 [[symbol]]
 ts = "BinancePMPrivateWebsocket"
 kind = "class"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/private_classes.rs::BinancePMPrivateWebsocket", "safe-cex-venue-binance/src/private_classes.rs::BinancePMPrivateWebsocket::new", "safe-cex-venue-binance/src/private_classes.rs::PrivateSocket::new", "safe-cex-venue-binance/src/private_message.rs::PrivateMessageMethods::conditional_order" ]
+rs = [ "safe-cex-venue-binance/src/private_classes.rs::BinancePMPrivateWebsocket", "safe-cex-venue-binance/src/private_classes.rs::BinancePMPrivateWebsocket::new", "safe-cex-venue-binance/src/private_classes.rs::PrivateSocket::new" ]
 status = "divergent"
-note = "FORCED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Valid JSON containing an escaped lone surrogate reaches the source callback once with code unit 55296; native parsing drops the frame and invokes no callback. scripts/class-boundary-findings.mjs and the named public/private escaped-surrogate tests inventory this observable difference. Concrete private class binds connection, open/auth, events, refresh, keepalive, timers and disposal. Three actual source classes through case2; synchronous open failures, saved callbacks and detached rejections have named native regressions. Split member `safe-cex-venue-binance/src/private_classes.rs::BinancePMPrivateWebsocket::new`. Concrete class composition: public constructor binding for this venue private websocket class over the shared PrivateSocket construction. Split member `safe-cex-venue-binance/src/private_classes.rs::PrivateSocket::new`. Concrete class composition: shared private websocket construction: base socket, default closures and live parent bindings behind each concrete class. Split member `safe-cex-venue-binance/src/private_message.rs::PrivateMessageMethods::conditional_order`. Required member of the PrivateMessageMethods host capability (imported call, realm read/write, timer, emit or store access) used by binancepm.ws-private BinancePMPrivateWebsocket.onMessage. No independent venue algorithm."
+note = "FORCED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Valid JSON containing an escaped lone surrogate reaches the source callback once with code unit 55296; native parsing drops the frame and invokes no callback. scripts/class-boundary-findings.mjs and the named public/private escaped-surrogate tests inventory this observable difference. Concrete private class binds connection, open/auth, events, refresh, keepalive, timers and disposal. Three actual source classes through case2; synchronous open failures, saved callbacks and detached rejections have named native regressions. Split member `safe-cex-venue-binance/src/private_classes.rs::BinancePMPrivateWebsocket::new`. Concrete class composition: public constructor binding for this venue private websocket class over the shared PrivateSocket construction. Split member `safe-cex-venue-binance/src/private_classes.rs::PrivateSocket::new`. Concrete class composition: shared private websocket construction: base socket, default closures and live parent bindings behind each concrete class."
 
 [[symbol]]
 ts = "BinancePMPrivateWebsocket.dispose"
 kind = "method"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/private_helpers.rs::dispose_binance_pm_private", "safe-cex-venue-binance/src/private_classes.rs::PrivateState::dispose" ]
+rs = [ "safe-cex-venue-binance/src/private_classes.rs::PrivateState::dispose" ]
 status = "ported"
-note = "Cancels retry then reads/cancels the live refresh timer before configured base disposal; keeps field values and original failure/partial effects. Native values/errors/counts precede independently counted source effects; one compiling control per new row. Typed timer-registry handles, data cells, numeric ready-state and configured fallible operations are body boundaries; concrete class/registry/socket/handler/arrow wiring and full async keepalive composition remain pending. Rename target: `safe-cex-venue-binance/src/private_helpers.rs::dispose_binance_pm_private`. Split member `safe-cex-venue-binance/src/private_classes.rs::PrivateState::dispose`. Concrete class composition: shared Futures/PM/Spot private-socket member bound for this TypeScript member, selecting the venue body named by this row under the prototype realm."
+note = "The production target safe-cex-venue-binance/src/private_classes.rs::PrivateState::dispose clears retry then current refresh before disposing its core socket. The separate typed timer replica had no production caller and was removed with its fake-only oracle cases; native key/retry/refresh tests exercise the surviving path."
 
 [[symbol]]
 ts = "BinancePMPrivateWebsocket.connectAndSubscribe"
@@ -38,17 +38,17 @@ note = "Mapped to safe-cex-venue-binance/src/private_open.rs::open_binance_pm_pr
 ts = "BinancePMPrivateWebsocket#detachSocket"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-binance/src/private_helpers.rs::detach_binance_pm_private_socket"
+rs = "safe-cex-venue-binance/src/private_helpers.rs::detach_binance_private_socket"
 status = "ported"
-note = "Captures previous socket once; removes message/close/open listeners through per-call optional binding, then preserves OPEN/CONNECTING short-circuit reads and closes the captured socket. Native values/errors/counts precede independently counted source effects; one compiling control per new row. Typed timer-registry handles, data cells, numeric ready-state and configured fallible operations are body boundaries; concrete class/registry/socket/handler/arrow wiring and full async keepalive composition remain pending. Rename target: `safe-cex-venue-binance/src/private_helpers.rs::detach_binance_pm_private_socket`."
+note = "Both native receivers already call safe-cex-venue-binance/src/private_helpers.rs::detach_binance_private_socket to capture the old socket once, remove message/close/open against current handlers, then preserve OPEN/CONNECTING short-circuit reads before closing it. The single live helper retains all 32 maintained-source/native cases across both variants. The unused PM copy was removed; real native key/retry bindings continue through this shared path."
 
 [[symbol]]
 ts = "BinancePMPrivateWebsocket.onMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/private_message.rs::on_pm_private_message", "safe-cex-venue-binance/src/private_classes.rs::PrivateState::on_message" ]
+rs = "safe-cex-venue-binance/src/private_classes.rs::PrivateState::on_message"
 status = "ported"
-note = "Extracted private onMessage body with MessageEvent.data read before disposal guard, actual BaseWebSocket track_last_received and ordinary-topic handler statistics, configured diagnostic/handler/pong methods, and shared production JSON parser. Futures bigint parser returns non-string input unchanged and retains protected IDs; PM JSON.parse coerces decoded data and rounds numeric IDs. Separate ordered if statements reread live event/id after callbacks, preserve original decoded payload handle in fresh singleton arguments, synchronous errors and partial effects. Configured data accessor and bound diagnostic/account/order/algo/conditional/pong methods remain boundaries; concrete class composition, executable property hooks/non-JSON values and arbitrary undefined-valued payload fields remain pending. Native decoded values/counts/identity precede actual-source comparisons. Shared core health/statistics errors cross the by-value ExchangeError API; name/message/metadata are retained, with no original error-object identity claim at that boundary. Configured data/dispatch/diagnostic/handler errors retain their Rc identity. Captured MessageData cells are stable: primitive cells immutable; object/array cells retain their value/kind and identity. Callbacks may mutate object properties/array elements; replacing a captured cell value/kind is outside the configured boundary. Rename target: `safe-cex-venue-binance/src/private_message.rs::on_pm_private_message`. Split member `safe-cex-venue-binance/src/private_classes.rs::PrivateState::on_message`. Concrete class composition: shared Futures/PM/Spot private-socket member bound for this TypeScript member, selecting the venue body named by this row under the prototype realm."
+note = "Concrete native class composition: `safe-cex-venue-binance/src/private_classes.rs::PrivateState::on_message` selects the venue/kind body for this TypeScript member. The unused callback-only extraction and its test-only host path were removed after the production caller audit; this row retains the existing live class method. The shared typed-output, UTF-8 string and core error boundaries remain documented in the crate guidance and parity specification. Rename target: `safe-cex-venue-binance/src/private_classes.rs::PrivateState::on_message`."
 
 [[symbol]]
 ts = "BinancePMPrivateWebsocket.ping"
@@ -110,9 +110,9 @@ note = "Configured POST invocation and await, decoded response data destructurin
 ts = "BinancePMPrivateWebsocket#scheduleListenKeyRefresh"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/private_helpers.rs::schedule_binance_pm_listen_key_refresh", "safe-cex-venue-binance/src/private_classes.rs::PrivateState::schedule_refresh" ]
+rs = [ "safe-cex-venue-binance/src/private_classes.rs::PrivateState::schedule_refresh" ]
 status = "ported"
-note = "Cancels current refresh timer, forwards raw f64 delay, registers a fresh deferred void callback, and assigns only a successfully created handle. Starter resolves current owner method and starts its async job on fire. Native values/errors/counts precede independently counted source effects; one compiling control per new row. Typed timer-registry handles, data cells, numeric ready-state and configured fallible operations are body boundaries; concrete class/registry/socket/handler/arrow wiring and full async keepalive composition remain pending. Rename target: `safe-cex-venue-binance/src/private_helpers.rs::schedule_binance_pm_listen_key_refresh`. Split member `safe-cex-venue-binance/src/private_classes.rs::PrivateState::schedule_refresh`. Concrete class composition: shared Futures/PM/Spot private-socket member bound for this TypeScript member, selecting the venue body named by this row under the prototype realm."
+note = "The production target safe-cex-venue-binance/src/private_classes.rs::PrivateState::schedule_refresh is shared by both constructors for current-method resolution, refresh cancellation and deferred registration. The oracle-only timer replica and its callback alias were retired; real native key/retry/refresh proofs remain in tests/private_classes.rs::private_order_aliases."
 
 [[symbol]]
 ts = "BinancePMPrivateWebsocket#updateListenKey"

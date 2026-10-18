@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/binance/binancepm.ws-public.ts"
-rust_files = [ "safe-cex-venue-binance/src/public_classes.rs", "safe-cex-venue-binance/src/public_connect.rs", "safe-cex-venue-binance/src/public_open.rs", "safe-cex-venue-binance/src/public_subscriptions.rs", "safe-cex-venue-binance/src/public_message.rs", "safe-cex-venue-binance/src/public_stats.rs", "safe-cex-venue-binance/src/public_ticker_events.rs", "safe-cex-venue-binance/src/public_listeners.rs", "safe-cex-venue-binance/src/public_candle_delegate.rs", "safe-cex-venue-binance/src/public_dispose.rs" ]
+rust_files = [ "safe-cex-venue-binance/src/public_classes.rs", "safe-cex-venue-binance/src/public_connect.rs", "safe-cex-venue-binance/src/public_open.rs", "safe-cex-venue-binance/src/public_subscriptions.rs", "safe-cex-venue-binance/src/public_stats.rs", "safe-cex-venue-binance/src/public_ticker_events.rs", "safe-cex-venue-binance/src/public_listeners.rs", "safe-cex-venue-binance/src/public_dispose.rs" ]
 
 [[symbol]]
 ts = "BinancePMMarketWebsocket"
@@ -30,17 +30,17 @@ note = "Mapped to safe-cex-venue-binance/src/public_open.rs::open_binance_pm_mar
 ts = "BinancePMMarketWebsocket.subscribe"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_pm_market", "safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe" ]
+rs = [ "safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public", "safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe" ]
 status = "ported"
-note = "Renamed BinancePMMarketWebsocket.subscribe to safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_pm_market. Extracted body accepts native count-read and fallible core-send callbacks pending class integration. Shared own-key ordering snapshots keys, fresh topic counts including NaN/infinities after each send, strict finite-positive guard, sequential IDs and send error propagation preserved. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe`. Concrete class composition: shared market/public websocket member bound for this TypeScript member, selecting the venue/kind body named by this row."
+note = "Renamed BinancePMMarketWebsocket.subscribe to safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public. PublicState::subscribe uses this exact common production wrapper for every public/market socket kind; four unused forwarding wrappers were retired after the SDK/registry/FFI/wasm caller census. The shared body snapshots JS own-key order, reads current native counts lazily, requires finite positive counts, sends exact SUBSCRIBE frames with IDs starting at 10, and propagates send errors. All 5,505 live TS cases remain; tests/support/public_subscription_receipts.rs executes all five actual native socket kinds and scripts/public-subscription-controls.py corrupts/restores both surviving production bodies. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe`."
 
 [[symbol]]
 ts = "BinancePMMarketWebsocket.onMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/public_message.rs::on_pm_market_message", "safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message" ]
+rs = "safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message"
 status = "ported"
-note = "Extracted public onMessage wrapper: configured MessageEvent.data accessor runs before the disposal guard; actual BaseWebSocket.track_last_received runs before configured dispatch binding, preserving received data identity/undefined, health notification failures and continuation after reentrant disposal. Dispatch binding supplies current messageHandlers/recordHandlerStats and their receiver; shared dispatchBinanceMessage and concrete class composition remain pending. No full dispatcher/prototype-write parity claim. Native core state/decoded data/counts/identity precede actual-source comparisons. Shared core health/statistics errors cross the by-value ExchangeError API; name/message/metadata are retained, with no original error-object identity claim at that boundary. Configured data/dispatch/diagnostic/handler errors retain their Rc identity. Captured MessageData cells are stable: primitive cells immutable; object/array cells retain their value/kind and identity. Callbacks may mutate object properties/array elements; replacing a captured cell value/kind is outside the configured boundary. Rename target: `safe-cex-venue-binance/src/public_message.rs::on_pm_market_message`. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message`. Concrete class composition: shared market/public websocket member bound for this TypeScript member, selecting the venue/kind body named by this row."
+note = "Concrete native class composition: `safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message` selects the venue/kind body for this TypeScript member. The unused callback-only extraction and its test-only host path were removed after the production caller audit; this row retains the existing live class method. The shared typed-output, UTF-8 string and core error boundaries remain documented in the crate guidance and parity specification. Rename target: `safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message`."
 
 [[symbol]]
 ts = "BinancePMMarketWebsocket#recordHandlerStats"
@@ -110,17 +110,17 @@ note = "Mapped to safe-cex-venue-binance/src/public_open.rs::open_binance_pm_pub
 ts = "BinancePMPublicWebsocket.subscribe"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_pm_public", "safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe" ]
+rs = [ "safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public", "safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe" ]
 status = "ported"
-note = "Renamed BinancePMPublicWebsocket.subscribe to safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_pm_public. Extracted body accepts native count-read and fallible core-send callbacks pending class integration. Shared own-key ordering snapshots keys, fresh topic counts including NaN/infinities after each send, strict finite-positive guard, sequential IDs and send error propagation preserved. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe`. Concrete class composition: shared market/public websocket member bound for this TypeScript member, selecting the venue/kind body named by this row."
+note = "Renamed BinancePMPublicWebsocket.subscribe to safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public. PublicState::subscribe uses this exact common production wrapper for every public/market socket kind; four unused forwarding wrappers were retired after the SDK/registry/FFI/wasm caller census. The shared body snapshots JS own-key order, reads current native counts lazily, requires finite positive counts, sends exact SUBSCRIBE frames with IDs starting at 10, and propagates send errors. All 5,505 live TS cases remain; tests/support/public_subscription_receipts.rs executes all five actual native socket kinds and scripts/public-subscription-controls.py corrupts/restores both surviving production bodies. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe`."
 
 [[symbol]]
 ts = "BinancePMPublicWebsocket.onMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/public_message.rs::on_pm_public_message", "safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message" ]
+rs = "safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message"
 status = "ported"
-note = "Extracted public onMessage wrapper: configured MessageEvent.data accessor runs before the disposal guard; actual BaseWebSocket.track_last_received runs before configured dispatch binding, preserving received data identity/undefined, health notification failures and continuation after reentrant disposal. Dispatch binding supplies current messageHandlers/recordHandlerStats and their receiver; shared dispatchBinanceMessage and concrete class composition remain pending. No full dispatcher/prototype-write parity claim. Native core state/decoded data/counts/identity precede actual-source comparisons. Shared core health/statistics errors cross the by-value ExchangeError API; name/message/metadata are retained, with no original error-object identity claim at that boundary. Configured data/dispatch/diagnostic/handler errors retain their Rc identity. Captured MessageData cells are stable: primitive cells immutable; object/array cells retain their value/kind and identity. Callbacks may mutate object properties/array elements; replacing a captured cell value/kind is outside the configured boundary. Rename target: `safe-cex-venue-binance/src/public_message.rs::on_pm_public_message`. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message`. Concrete class composition: shared market/public websocket member bound for this TypeScript member, selecting the venue/kind body named by this row."
+note = "Concrete native class composition: `safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message` selects the venue/kind body for this TypeScript member. The unused callback-only extraction and its test-only host path were removed after the production caller audit; this row retains the existing live class method. The shared typed-output, UTF-8 string and core error boundaries remain documented in the crate guidance and parity specification. Rename target: `safe-cex-venue-binance/src/public_classes.rs::PublicState::on_message`."
 
 [[symbol]]
 ts = "BinancePMPublicWebsocket#recordHandlerStats"
@@ -142,9 +142,9 @@ note = "Captures the live dictionary handle once, rereads live event length/entr
 ts = "BinancePMPublicWebsocket.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/public_candle_delegate.rs::listen_pm_public_ohlcv", "safe-cex-venue-binance/src/public_classes.rs::PublicState::listen_ohlcv" ]
+rs = "safe-cex-venue-binance/src/public_classes.rs::PublicState::listen_ohlcv"
 status = "ported"
-note = "Extracted companion-market listenOHLCV forwarding body; stable decoded OHLCVOptions handle, original callback, original cleanup and original synchronous errors are forwarded unchanged. Configured marketWebsocket method/receiver is caller-bound; concrete sibling class wiring remains pending. Native decoded options/candle values and handle identities precede live actual-source comparisons. Rename target: `safe-cex-venue-binance/src/public_candle_delegate.rs::listen_pm_public_ohlcv`. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::listen_ohlcv`. Concrete class composition: shared market/public websocket member bound for this TypeScript member, selecting the venue/kind body named by this row."
+note = "Concrete native class composition: `safe-cex-venue-binance/src/public_classes.rs::PublicState::listen_ohlcv` selects the venue/kind body for this TypeScript member. The unused callback-only extraction and its test-only host path were removed after the production caller audit; this row retains the existing live class method. The shared typed-output, UTF-8 string and core error boundaries remain documented in the crate guidance and parity specification. Rename target: `safe-cex-venue-binance/src/public_classes.rs::PublicState::listen_ohlcv`."
 
 [[symbol]]
 ts = "BinancePMPublicWebsocket.listenOrderBook"

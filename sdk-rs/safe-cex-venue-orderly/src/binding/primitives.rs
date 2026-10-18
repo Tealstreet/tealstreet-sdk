@@ -334,9 +334,11 @@ impl crate::runtime_actions::RuntimeHost for Host {
     ) -> R<()> {
         let rt = self.rt()?;
         let runtime = rt.shared.runtime.clone();
+        let await_runtime = rt.exchange_runtime();
         rt.spawn(Box::pin(async move {
             if let Err(error) =
-                safe_cex_exchange::js_runtime::promise::await_js((*promise).clone()).await
+                safe_cex_exchange::js_runtime::promise::await_js(&await_runtime, (*promise).clone())
+                    .await
             {
                 if let Err(error) = callback.invoke(error) {
                     runtime.report_exception(

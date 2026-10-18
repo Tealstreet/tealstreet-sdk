@@ -320,15 +320,17 @@ fn secondary_socket(rt: &Rt, index: f64) -> Js {
             }),
         );
     }
-    socket.define_accessor(
-        "isConnected",
-        Some(Rc::new(move |_| {
-            Ok(Js::Bool(
-                cell.get().is_some_and(|s| s.base().is_connected()),
-            ))
-        })),
-        None,
-    );
+    socket
+        .define_accessor(
+            "isConnected",
+            Some(Rc::new(move |_| {
+                Ok(Js::Bool(
+                    cell.get().is_some_and(|s| s.base().is_connected()),
+                ))
+            })),
+            None,
+        )
+        .expect("fresh extensible accessor target");
     socket
 }
 
@@ -752,11 +754,13 @@ mod signature_tests {
             } else {
                 vec![]
             });
-            value.define_accessor(
-                field,
-                Some(Rc::new(move |_| Err(Thrown::error("RangeError", message)))),
-                None,
-            );
+            value
+                .define_accessor(
+                    field,
+                    Some(Rc::new(move |_| Err(Thrown::error("RangeError", message)))),
+                    None,
+                )
+                .expect("fresh extensible accessor target");
             cases.push((label, value));
         }
         assert_eq!(cases.len(), 22);

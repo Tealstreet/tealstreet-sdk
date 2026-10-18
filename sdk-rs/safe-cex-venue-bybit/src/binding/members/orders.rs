@@ -57,7 +57,11 @@ fn kind_text(kind: OrderType) -> String {
 
 async fn post(rt: &Rt, endpoint: &str, payload: Js) -> Result<Js, Thrown> {
     let xhr = rt.this.get("xhr")?;
-    await_js(xhr.call_method("post", vec![Js::str(endpoint), payload])?).await
+    await_js(
+        &rt.exchange_runtime(),
+        xhr.call_method("post", vec![Js::str(endpoint), payload])?,
+    )
+    .await
 }
 
 fn format_venue_error(rt: &Rt, data: &Js, fallback: &Js) -> Result<String, Thrown> {
@@ -294,10 +298,13 @@ async fn place_option_order(
         ("reduceOnly", Js::Bool(base.reduce_only.unwrap_or(false))),
         ("orderLinkId", link_id),
     ]);
-    let responses = await_js(rt.this.call_method(
-        "submitCreateOrders",
-        vec![Js::array(vec![payload]), opts.clone()],
-    )?)
+    let responses = await_js(
+        &rt.exchange_runtime(),
+        rt.this.call_method(
+            "submitCreateOrders",
+            vec![Js::array(vec![payload]), opts.clone()],
+        )?,
+    )
     .await?;
     let responses = responses
         .array_values()
@@ -432,19 +439,26 @@ fn fetch_position_mode_body(rt: &Rt, symbol: Js, primary: bool) -> Result<Js, Th
             return Ok(mode);
         }
         let endpoint = crate::types::ENDPOINTS["POSITIONS"].as_str().unwrap();
-        let data = await_js(rt.this.get("xhr")?.call_method(
-            "get",
-            vec![
-                Js::str(endpoint),
-                Js::object(vec![(
-                    "params",
-                    Js::object(vec![
-                ("category", rt.this.call_method("getCategoryForSymbol", vec![symbol.clone()])?),
-                ("symbol", symbol.clone()),
-            ]),
-                )]),
-            ],
-        )?)
+        let data = await_js(
+            &rt.exchange_runtime(),
+            rt.this.get("xhr")?.call_method(
+                "get",
+                vec![
+                    Js::str(endpoint),
+                    Js::object(vec![(
+                        "params",
+                        Js::object(vec![
+                            (
+                                "category",
+                                rt.this
+                                    .call_method("getCategoryForSymbol", vec![symbol.clone()])?,
+                            ),
+                            ("symbol", symbol.clone()),
+                        ]),
+                    )]),
+                ],
+            )?,
+        )
         .await?
         .get("data")?;
         let meta = if primary {
@@ -535,7 +549,7 @@ pub(crate) async fn get_order_position_idx(
             vec![symbol.as_ref().map_or(Js::Undefined, from_json)],
         );
         async move {
-            let mode = await_js(pending?).await?;
+            let mode = await_js(&rt.exchange_runtime(), pending?).await?;
             Ok::<_, Thrown>(Some(to_json(&mode)?).filter(|v| !v.is_null()))
         }
     })
@@ -914,10 +928,13 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             "assertSingleNativeClientOrderId",
             vec![client_order_id.clone(), Js::Number(payloads.len() as f64)],
         )?;
-        let responses = await_js(rt.this.call_method(
-            "submitCreateOrders",
-            vec![Js::array(payloads), opts.clone()],
-        )?)
+        let responses = await_js(
+            &rt.exchange_runtime(),
+            rt.this.call_method(
+                "submitCreateOrders",
+                vec![Js::array(payloads), opts.clone()],
+            )?,
+        )
         .await?;
         let responses = responses
             .array_values()

@@ -119,7 +119,7 @@ impl SessionHost for Rt {
         selected.call(Js::Undefined, args)
     }
     fn wait(&self, value: Js) -> SessionFuture<'_, Js, Thrown> {
-        Box::pin(await_js(value))
+        Box::pin(await_js(&self.exchange_runtime(), value))
     }
     fn intrinsic(&self, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {
         match name {
@@ -454,7 +454,7 @@ impl SpotOrderHost for Rt {
             })?;
             let mut out = Vec::with_capacity(items.len());
             for (i, item) in items.into_iter().enumerate() {
-                let item = await_js(item).await?;
+                let item = await_js(&self.exchange_runtime(), item).await?;
                 out.push(body(item, i).await?);
             }
             Ok(Js::array(out))

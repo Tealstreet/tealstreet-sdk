@@ -11,7 +11,7 @@ output = Path('/tmp/js-series-controls')
 output.mkdir(exist_ok=True)
 saved = source.read_bytes()
 cases = [
-    ('input-await', b'await_js(Js::Promise(Promise::resolve(&runtime, array.get(&key)?)))', b'std::future::ready(Ok::<_, Thrown>(array.get(&key)?))',
+    ('input-await', b'await_js(&runtime, array.get(&key)?)', b'std::future::ready(Ok::<_, Thrown>(array.get(&key)?))',
      'installed_series_helpers_match_package_live_slots_awaits_and_receivers', 'SERIES_SOURCE'),
     ('module-root', b'NATIVE_MODULE_ROOTS: [&str; 1] = ["p-iteration"]',
      b'NATIVE_MODULE_ROOTS: [&str; 1] = ["not-loaded"]',

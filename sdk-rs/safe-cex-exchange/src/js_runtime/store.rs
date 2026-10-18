@@ -115,7 +115,8 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     let getter = |name: &str, read: Rc<dyn Fn(&dyn Store) -> Result<Js, Thrown>>| {
         let store = store.clone();
         let g: Getter = Rc::new(move |_| read(store.as_ref()));
-        s.define_accessor(name, Some(g), None);
+        s.define_accessor(name, Some(g), None)
+            .expect("accessor target is a fresh extensible host object");
     };
     getter("markets", Rc::new(|st| from_typed(&*st.markets())));
     getter("tickers", Rc::new(|st| from_typed(&*st.tickers())));

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/binance/binancespot.exchange.ts"
-rust_files = [ "safe-cex-venue-binance/src/exchange_classes.rs", "safe-cex-venue-binance/src/private_session.rs", "safe-cex-venue-binance/src/exchange_dispose.rs", "safe-cex-venue-binance/src/account_validation.rs", "safe-cex-venue-binance/src/lifecycle.rs", "safe-cex-venue-binance/src/public_start.rs", "safe-cex-venue-binance/src/public_rest.rs", "safe-cex-venue-binance/src/account_fetch.rs", "safe-cex-venue-binance/src/private_rest.rs", "safe-cex-venue-binance/src/spot_valuation.rs", "safe-cex-venue-binance/src/delegated_methods.rs", "safe-cex-venue-binance/src/order_operations.rs", "safe-cex-venue-binance/src/cancel_symbol_orders.rs", "safe-cex-venue-binance/src/order_batches.rs", "safe-cex-venue-binance/src/spot_orders.rs" ]
+rust_files = [ "safe-cex-venue-binance/src/exchange_classes.rs", "safe-cex-venue-binance/src/private_session.rs", "safe-cex-venue-binance/src/exchange_dispose.rs", "safe-cex-venue-binance/src/account_validation.rs", "safe-cex-venue-binance/src/lifecycle.rs", "safe-cex-venue-binance/src/public_start.rs", "safe-cex-venue-binance/src/public_rest.rs", "safe-cex-venue-binance/src/account_fetch.rs", "safe-cex-venue-binance/src/private_rest.rs", "safe-cex-venue-binance/src/spot_valuation.rs", "safe-cex-venue-binance/src/order_operations.rs", "safe-cex-venue-binance/src/cancel_symbol_orders.rs", "safe-cex-venue-binance/src/order_batches.rs", "safe-cex-venue-binance/src/spot_orders.rs" ]
 
 [[symbol]]
 ts = "BinanceSpotExchange"
@@ -126,17 +126,17 @@ note = "Spot calls data.map and propagates malformed payload failures; typed OHL
 ts = "BinanceSpotExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/delegated_methods.rs::listen_binance_spot_ohlcv", "safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::listen_ohlcv" ]
+rs = "safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::listen_ohlcv"
 status = "ported"
-note = "Forwards original decoded OHLCVOptions handle and callback to configured public websocket. Preserves returned cleanup/result and original error identity without catches or retries. Native values/identity/counts asserted before source comparisons; one compiling control per row. Typed decoded options and configured method/provider-presence boundaries; concrete class/provider/websocket/journal composition, property getters and arrow receiver binding remain pending. Rename target: `safe-cex-venue-binance/src/delegated_methods.rs::listen_binance_spot_ohlcv`. Split member `safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::listen_ohlcv`. Concrete class composition: shared Futures/PM/Spot ExchangeState member that the class field binds for this TypeScript member, selecting the venue body named by this row; it is the bound callable, not a second algorithm."
+note = "Rename target: `safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::listen_ohlcv`. The shared class member selects the PM/Spot public-socket candle delegation for this TypeScript field; Futures uses its separately mapped history-seeding route. The constructed native three-family candle witness checks actual market socket delivery, callback fields and cleanup. The uncalled generic forwarding extraction and CandleOptionsHandle are retired; existing typed Candle output boundaries remain unchanged."
 
 [[symbol]]
 ts = "BinanceSpotExchange.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/delegated_methods.rs::listen_binance_spot_order_book", "safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::listen_order_book" ]
+rs = "safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::listen_order_book"
 status = "ported"
-note = "Forwards symbol and original callback to configured public websocket. Preserves returned cleanup/result and original error identity without catches or retries. Native values/identity/counts asserted before source comparisons; one compiling control per row. Typed decoded options and configured method/provider-presence boundaries; concrete class/provider/websocket/journal composition, property getters and arrow receiver binding remain pending. Rename target: `safe-cex-venue-binance/src/delegated_methods.rs::listen_binance_spot_order_book`. Split member `safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::listen_order_book`. Concrete class composition: shared Futures/PM/Spot ExchangeState member that the class field binds for this TypeScript member, selecting the venue body named by this row; it is the bound callable, not a second algorithm."
+note = "Rename target: `safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::listen_order_book`. Shared Futures/PM/Spot production class member bound to this TypeScript field. Futures selects an available external provider without fallback on failure; PM/Spot and the default Futures route use the actual public socket. The constructed native three-family listener witness checks snapshot HTTP, buffering, callback reference reuse and unsubscribe. The uncalled generic forwarding extraction is retired; existing external-provider and typed-output boundaries remain unchanged."
 
 [[symbol]]
 ts = "BinanceSpotExchange.cancelOrders"

@@ -1,4 +1,4 @@
-use safe_cex_venue_binance::public_subscriptions::*;
+use safe_cex_venue_binance::public_subscriptions::subscribe_binance_public;
 use serde_json::{Map, Value, json};
 use std::cell::RefCell;
 
@@ -66,14 +66,13 @@ fn subscriptions_match_live_source() {
             }
             Ok(())
         };
+        // Every concrete PublicState uses the same production subscription body.
         let result = match c["variant"].as_str().unwrap() {
-            "binance:BinanceMarketWebsocket" => subscribe_binance_market(keys, count, send),
-            "binance:BinancePublicWebsocket" => subscribe_binance_public(keys, count, send),
-            "binancepm:BinancePMMarketWebsocket" => subscribe_binance_pm_market(keys, count, send),
-            "binancepm:BinancePMPublicWebsocket" => subscribe_binance_pm_public(keys, count, send),
-            "binancespot:BinancePublicWebsocket" => {
-                subscribe_binance_spot_public(keys, count, send)
-            }
+            "binance:BinanceMarketWebsocket"
+            | "binance:BinancePublicWebsocket"
+            | "binancepm:BinancePMMarketWebsocket"
+            | "binancepm:BinancePMPublicWebsocket"
+            | "binancespot:BinancePublicWebsocket" => subscribe_binance_public(keys, count, send),
             _ => unreachable!(),
         };
         assert_eq!(

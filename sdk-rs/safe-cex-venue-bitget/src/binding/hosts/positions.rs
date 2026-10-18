@@ -57,7 +57,13 @@ fn endpoint(name: &str) -> Result<&'static str, Thrown> {
 }
 
 /// `client.get(url[, { params }])` started now; the future yields `response.data`.
-fn get_data(client: &Js, url: &str, params: Option<Js>) -> Result<JsFuture<'static>, Thrown> {
+fn get_data(
+    rt: &Rt,
+    client: &Js,
+    url: &str,
+    params: Option<Js>,
+) -> Result<JsFuture<'static>, Thrown> {
+    let runtime = rt.exchange_runtime();
     let get = client.get("get")?;
     if !get.is_callable() {
         return Err(Thrown::type_error("client.get is not a function"));
@@ -67,9 +73,9 @@ fn get_data(client: &Js, url: &str, params: Option<Js>) -> Result<JsFuture<'stat
         args.push(Js::object(vec![("params", params)]));
     }
     let response = get.call(client.clone(), args)?;
-    Ok(Box::pin(
-        async move { await_js(response).await?.get("data") },
-    ))
+    Ok(Box::pin(async move {
+        await_js(&runtime, response).await?.get("data")
+    }))
 }
 
 /// `this.toFiniteNumber(value, fallback)` over the observed typeof branches.
@@ -260,11 +266,11 @@ impl AccountPositionsHost for Rt {
         object.set_key(&key.to_js_string()?, value)
     }
     fn await_value(&self, value: Js) -> AccountFuture<'_, Js, Thrown> {
-        Box::pin(await_js(value))
+        Box::pin(await_js(&self.exchange_runtime(), value))
     }
     fn call(&self, name: &str, args: Vec<Js>) -> Result<AccountFuture<'_, Js, Thrown>, Thrown> {
         let value = self.call_path(name, args)?;
-        Ok(Box::pin(await_js(value)))
+        Ok(Box::pin(await_js(&self.exchange_runtime(), value)))
     }
     fn read(
         &self,
@@ -275,7 +281,7 @@ impl AccountPositionsHost for Rt {
         let url = self::endpoint(endpoint)?;
         // The source omits the request config entirely where it passes no params.
         let params = (!params.is_empty()).then(|| Js::object(params));
-        get_data(&client, url, params)
+        get_data(self, &client, url, params)
     }
     fn finite(&self, value: &Js, fallback: f64) -> Result<f64, Thrown> {
         Ok(finite(value, fallback))
@@ -390,6 +396,7 @@ impl InversePositionsHost for Rt {
 
 /// The imported journal fold, reading fills and income through the JS receiver.
 struct ReceiverFolder {
+    runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
     this: Js,
 }
 
@@ -411,7 +418,9 @@ impl JournalFolder for ReceiverFolder {
                 Box::pin(async move {
                     let call =
                         this.call_method("fetchHistoricalFills", vec![from_typed(&opts)?])?;
-                    Ok(to_typed::<Vec<Execution>>(&await_js(call).await?)?)
+                    Ok(to_typed::<Vec<Execution>>(
+                        &await_js(&self.runtime, call).await?,
+                    )?)
                 })
             };
             let income_this = this.clone();
@@ -422,7 +431,9 @@ impl JournalFolder for ReceiverFolder {
                         "fetchIncomeHistoryRange",
                         vec![Js::Number(from), Js::Number(to)],
                     )?;
-                    Ok(to_typed::<Vec<IncomeRecord>>(&await_js(call).await?)?)
+                    Ok(to_typed::<Vec<IncomeRecord>>(
+                        &await_js(&self.runtime, call).await?,
+                    )?)
                 })
             };
             let has_income = this.get("fetchIncomeHistoryRange")?.truthy();
@@ -488,7 +499,11 @@ async fn page_rows(
     cursor: &str,
     params: safe_cex_num::JsJsonValue,
 ) -> Result<(Vec<Value>, Option<String>), Thrown> {
-    let page = await_js(rt.call_path(member, vec![js_json(params)])?).await?;
+    let page = await_js(
+        &rt.exchange_runtime(),
+        rt.call_path(member, vec![js_json(params)])?,
+    )
+    .await?;
     let rows = page.get("rows")?;
     let rows = rows
         .array_values()
@@ -749,6 +764,7 @@ pub(crate) fn bind(
                 };
                 let venue = venue(&rt)?;
                 let folder = ReceiverFolder {
+                    runtime: rt.exchange_runtime(),
                     this: rt.this.clone(),
                 };
                 let records = crate::history_reads::fetch_historical_positions(
@@ -765,7 +781,7 @@ pub(crate) fn bind(
                 let account = crate::account_read::get_account(|url| {
                     let rt = rt.clone();
                     async move {
-                        let data = get_data(&rt.this.get("xhr")?, url, None)?.await?;
+                        let data = get_data(&rt, &rt.this.get("xhr")?, url, None)?.await?;
                         optional_json(&data)
                     }
                 })
@@ -837,7 +853,8 @@ pub(crate) fn bind(
                         let rt = rt.clone();
                         async move {
                             let data =
-                                get_data(&rt.this.get("xhr")?, url, Some(js_json(params)))?.await?;
+                                get_data(&rt, &rt.this.get("xhr")?, url, Some(js_json(params)))?
+                                    .await?;
                             optional_json(&data)
                         }
                     },
@@ -853,8 +870,11 @@ pub(crate) fn bind(
                     |opts| {
                         let rt = rt.clone();
                         async move {
-                            let page =
-                                await_js(rt.call_path("_fetchBillPage", vec![opts])?).await?;
+                            let page = await_js(
+                                &rt.exchange_runtime(),
+                                rt.call_path("_fetchBillPage", vec![opts])?,
+                            )
+                            .await?;
                             to_typed::<Vec<IncomeRecord>>(&page)
                         }
                     },
@@ -884,7 +904,7 @@ pub(crate) fn bind(
                         let rt = rt.clone();
                         async move {
                             let data =
-                                get_data(&rt.this.get("xhr")?, url, Some(from_json(&params)))?
+                                get_data(&rt, &rt.this.get("xhr")?, url, Some(from_json(&params)))?
                                     .await?;
                             optional_json(&data)
                         }
@@ -909,16 +929,22 @@ pub(crate) fn bind(
                     || {
                         let rt = rt.clone();
                         async move {
-                            await_js(rt.call_path("ensureAccountTypeDetected", vec![])?).await?;
+                            await_js(
+                                &rt.exchange_runtime(),
+                                rt.call_path("ensureAccountTypeDetected", vec![])?,
+                            )
+                            .await?;
                             Ok(rt.this.get("usesUtaRouting")?.truthy())
                         }
                     },
                     |_| {
                         let rt = rt.clone();
                         async move {
-                            let rows =
-                                await_js(rt.call_path("_fetchHistoricalUtaFills", vec![original])?)
-                                    .await?;
+                            let rows = await_js(
+                                &rt.exchange_runtime(),
+                                rt.call_path("_fetchHistoricalUtaFills", vec![original])?,
+                            )
+                            .await?;
                             to_typed::<Vec<safe_cex_types::Execution>>(&rows)
                                 .map_err(ExchangeError::from)
                         }
@@ -966,7 +992,8 @@ pub(crate) fn bind(
                         let rt = rt.clone();
                         async move {
                             let data =
-                                get_data(&rt.this.get("xhr")?, url, Some(js_json(params)))?.await?;
+                                get_data(&rt, &rt.this.get("xhr")?, url, Some(js_json(params)))?
+                                    .await?;
                             optional_json(&data)
                         }
                     },

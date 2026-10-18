@@ -176,10 +176,11 @@ impl ExchangeAccountAccessHost for Bound {
             Err(e) => resolver.settle(Err(to_signing(e))),
             Ok(true) => {
                 let runtime = self.realm.exchange_runtime();
+                let await_runtime = runtime.clone();
                 Promise::spawn(
                     &runtime,
                     Box::pin(async move {
-                        resolver.settle(match await_js(js).await {
+                        resolver.settle(match await_js(&await_runtime, js).await {
                             Ok(v) => Ok(to_account(&v)),
                             Err(e) => Err(to_signing(e)),
                         });

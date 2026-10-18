@@ -55,6 +55,7 @@ fn spread(value: &Js) -> Result<Vec<Js>, Thrown> {
 
 pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
     let global = weak.clone();
+    let awaits = weak.clone();
     Rc::new(SocketOps {
         undefined: Rc::new(|| Js::Undefined),
         boolean: Rc::new(Js::Bool),
@@ -109,7 +110,10 @@ pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
             iterator_close(record)?;
             Ok((first, second))
         }),
-        await_value: Rc::new(|v| Box::pin(await_js(v))),
+        await_value: Rc::new(move |v| {
+            let awaits = awaits.clone();
+            Box::pin(async move { await_js(&scope(&awaits)?.exchange_runtime(), v).await })
+        }),
     })
 }
 
@@ -351,7 +355,11 @@ fn super_construct(weak: &Weak<Shared>, base: Js, target: Js, args: Vec<Js>) -> 
     for class in classes.iter().rev() {
         for (name, getter) in class.getters.borrow().iter() {
             let getter = getter.clone();
-            instance.define_accessor(name, Some(Rc::new(move |this| getter(this.clone()))), None);
+            instance.define_accessor(
+                name,
+                Some(Rc::new(move |this| getter(this.clone()))),
+                None,
+            )?;
         }
     }
     Ok(instance)

@@ -162,7 +162,7 @@ pub fn create(
                 setter.set_disposed_flag(value.truthy());
                 Ok(())
             })),
-        );
+        )?;
     }
     {
         // Dispatches through the venue's privacy hook, as the source getter does.
@@ -174,7 +174,7 @@ pub fn create(
                 .ok_or_else(|| Thrown::error("Error", "exchange is not assembled"))?;
             Ok(Js::Bool(venue.is_public_data_only()))
         });
-        this.define_accessor("isPublicDataOnly", Some(getter), None);
+        this.define_accessor("isPublicDataOnly", Some(getter), None)?;
     }
     {
         let base = base.clone();
@@ -307,11 +307,16 @@ pub fn create(
     {
         let receiver = this.clone();
         let ws_runtime = context.runtime.clone();
+        let runtime = runtime.clone();
         def(
             "createXhrWithSecondaryKey",
             Js::function("createXhrWithSecondaryKey", move |_, a| {
-                let (xhr, primary, secondary) =
-                    create_xhr_with_secondary_key(ws_runtime.transport().as_ref(), &receiver, &a)?;
+                let (xhr, primary, secondary) = create_xhr_with_secondary_key(
+                    &runtime,
+                    ws_runtime.transport().as_ref(),
+                    &receiver,
+                    &a,
+                )?;
                 receiver.set("_primaryXhr", primary)?;
                 receiver.set("_secondaryXhr", secondary)?;
                 Ok(xhr)
@@ -396,7 +401,7 @@ pub fn create(
                 Ok(object)
             })),
             None,
-        );
+        )?;
     }
     {
         let base = base.clone();
@@ -469,7 +474,7 @@ pub fn create(
                 Ok(Js::Bool(base.needs_account_market_overlay(&*venue)))
             })),
             None,
-        );
+        )?;
     }
     {
         let base = base.clone();
@@ -484,8 +489,11 @@ pub fn create(
                     &runtime,
                     Box::pin(async move {
                         let overlay = Box::pin(async move {
-                            let value =
-                                super::promise::await_js(load.call(Js::Undefined, vec![])?).await?;
+                            let value = super::promise::await_js(
+                                &reporter,
+                                load.call(Js::Undefined, vec![])?,
+                            )
+                            .await?;
                             Ok(market_overlay(value, reporter))
                         });
                         base.load_account_market_overlay(overlay).await?;
@@ -661,6 +669,7 @@ type ClientRows = RefCell<Vec<(Arc<dyn RestAdapter>, Js)>>;
 /// decides the split, the secondary_* overrides and the secondary proxy precedence.
 /// Returns `[xhr, primaryXhr, secondaryXhr]`; without a secondary key all three are one client.
 fn create_xhr_with_secondary_key(
+    runtime: &Rc<dyn ExchangeRuntime>,
     transport: &dyn TransportProvider,
     receiver: &Js,
     a: &[Js],
@@ -688,7 +697,8 @@ fn create_xhr_with_secondary_key(
     let record = |xhr: Js| -> Arc<dyn RestAdapter> {
         // The typed helper takes `Arc` adapters; a JS client stays on its own thread.
         #[expect(clippy::arc_with_non_send_sync)]
-        let adapter: Arc<dyn RestAdapter> = Arc::new(JsRestAdapter::new(xhr.clone()));
+        let adapter: Arc<dyn RestAdapter> =
+            Arc::new(JsRestAdapter::new(runtime.clone(), xhr.clone()));
         rows.borrow_mut().push((adapter.clone(), xhr));
         adapter
     };
