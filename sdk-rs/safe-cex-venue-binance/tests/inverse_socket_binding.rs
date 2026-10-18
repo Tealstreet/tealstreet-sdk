@@ -361,3 +361,113 @@ fn account_frame_converts_inverse_contracts_and_preserves_existing_fields() {
         "paused background repair does not send positionRisk"
     );
 }
+
+fn private_member(h: &support::Harness, method: &str) {
+    let socket = h.exchange.receiver().get("privateWebsocket").unwrap();
+    socket.get(method).unwrap().call(socket, vec![]).unwrap();
+    h.runtime.pump();
+}
+fn advance(h: &support::Harness, milliseconds: f64) {
+    h.runtime.now.set(h.runtime.now.get() + milliseconds);
+    h.runtime.pump();
+}
+fn fail_http(h: &support::Harness, message: &str) {
+    h.http.replies.borrow_mut().push_back(Err(
+        safe_cex_exchange::js_runtime::value::Thrown::error("Error", message),
+    ));
+}
+#[test]
+fn listen_key_retry_backoff_caps_and_real_force_close_blocks_retry() {
+    let h = support::fixture(false, false);
+    fail_http(&h, "listen key unavailable");
+    private_member(&h, "connectAndSubscribe");
+    assert_eq!(h.http.requests.borrow().len(), 1);
+    assert!(h.runtime.sockets.borrow().is_empty());
+    for (index, delay) in [5000., 10000., 20000., 40000., 60000., 60000.]
+        .into_iter()
+        .enumerate()
+    {
+        fail_http(&h, "still unavailable");
+        advance(&h, delay - 1.);
+        assert_eq!(
+            h.http.requests.borrow().len(),
+            index + 1,
+            "retry must wait full source delay"
+        );
+        advance(&h, 1.);
+        assert_eq!(
+            h.http.requests.borrow().len(),
+            index + 2,
+            "retry at source deadline"
+        );
+    }
+    h.exchange
+        .base()
+        .get_socket(SocketSlot::Private)
+        .unwrap()
+        .force_close();
+    advance(&h, 60000.);
+    assert_eq!(
+        h.http.requests.borrow().len(),
+        7,
+        "force-closed real core blocks scheduled retry"
+    );
+}
+#[test]
+fn listen_key_refresh_failure_retries_then_resets_and_dispose_cancels_timer() {
+    let h = support::fixture(false, false);
+    key(&h, "key");
+    private_member(&h, "fetchListenKey");
+    assert_eq!(h.http.requests.borrow().len(), 1);
+    fail_http(&h, "keepalive unavailable");
+    advance(&h, 1_800_000. - 1.);
+    assert_eq!(h.http.requests.borrow().len(), 1);
+    advance(&h, 1.);
+    assert_eq!(h.http.requests.borrow().len(), 2);
+    assert_eq!(
+        h.http.requests.borrow()[1]
+            .get("method")
+            .unwrap()
+            .to_display(),
+        "put"
+    );
+    assert_eq!(
+        h.http.requests.borrow()[1].get("url").unwrap().to_display(),
+        "/dapi/v1/listenKey"
+    );
+    key(&h, "unused successful keepalive body");
+    advance(&h, 59999.);
+    assert_eq!(h.http.requests.borrow().len(), 2);
+    advance(&h, 1.);
+    assert_eq!(h.http.requests.borrow().len(), 3);
+    advance(&h, 60000.);
+    assert_eq!(
+        h.http.requests.borrow().len(),
+        3,
+        "success restores thirty-minute interval"
+    );
+    private_member(&h, "dispose");
+    advance(&h, 1_800_000.);
+    assert_eq!(
+        h.http.requests.borrow().len(),
+        3,
+        "dispose clears actual refresh timer"
+    );
+}
+#[test]
+#[ignore = "mandatory maintained TS classes: venue-oracle:binance includes ignored tests"]
+fn maintained_inverse_socket_classes_match_native_case_expectations() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/inverse-socket-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
