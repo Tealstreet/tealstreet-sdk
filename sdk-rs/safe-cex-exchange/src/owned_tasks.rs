@@ -213,7 +213,7 @@ impl OwnedTasks {
                             if let Err(error) = callback_result {
                                 task_runtime.report_exception(
                                     &error,
-                                    &serde_json::json!({"operation":"owned timer callback"}),
+                                    &serde_json::json!({"operation":"owned timer callback"}).into(),
                                 );
                             }
                             if !operation.is_active() {
@@ -243,7 +243,7 @@ impl OwnedTasks {
                     if let Err(error) = result {
                         task_runtime.report_exception(
                             &error,
-                            &serde_json::json!({"operation":"owned timer"}),
+                            &serde_json::json!({"operation":"owned timer"}).into(),
                         );
                     }
                 })

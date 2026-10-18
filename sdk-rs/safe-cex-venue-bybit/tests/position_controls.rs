@@ -342,7 +342,9 @@ fn position_controls_match_maintained_bodies() {
             .map(|()| None),
             "fetch" => {
                 let emit =
-                    |m: Option<Value>, context: Option<&str>, extra: Option<Map<String, Value>>| {
+                    |m: Option<safe_cex_types::retained_json::RetainedJsonInput>, context: Option<&str>, extra: Option<safe_cex_types::retained_json::RetainedJsonInput>| {
+                        let m = m.map(|value| value.into_value().expect("finite source fixture message"));
+                        let extra = extra.map(|value| value.into_value().expect("finite source fixture diagnostic"));
                         if let Some(context) = context {
                             h.event("emit", json!(["emit", optional(m), context, extra]))
                         } else {

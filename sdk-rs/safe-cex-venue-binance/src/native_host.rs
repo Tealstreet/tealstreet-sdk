@@ -10,12 +10,17 @@ use crate::{
     class_jobs::NativeFuture,
     exchange_classes::{ExchangeDependencies, ExchangeImports, ExchangeState, HttpMethod, Method},
     lifecycle::TickTimer,
-    orderbook::*,
+    orderbook::{
+        apply_binance_depth_update, load_binance_order_book_snapshot,
+        reset_binance_order_book_sync_state,
+    },
     private_classes::{
         Action, CapturedAction, NativePrivateSocket, PrivateBase, PrivateCallback, PrivateParent,
         PrivateTimers,
     },
-    private_event_value::*,
+    private_event_value::{
+        EventOps, EventValue, array_values, native_json, number, record, string,
+    },
     private_rest::{SnapshotCompletion, SnapshotRequestFuture},
     private_session::{Factory, RateHook, Venue},
     protocol_types::BinanceOrderBookApplyResult,
@@ -478,6 +483,8 @@ fn response_value(
     for (name, value) in &response.headers {
         headers.write(name, string(value));
     }
+    let headers = safe_cex_exchange::js_runtime::client::axios_headers_from(&headers)
+        .map_err(|error| exchange_failure(error.into()))?;
     Ok(record([
         (
             "data",
@@ -494,7 +501,26 @@ fn response_value(
         ("config", config_value(config)?),
     ]))
 }
-fn error_value(error: &Failure) -> EventValue {
+fn response_from_error(error: &Failure) -> Result<Option<EventValue>, Failure> {
+    error
+        .response
+        .clone()
+        .map(|response| {
+            let response = EventValue::from_json(response);
+            if !response.nullish() {
+                let headers = response.read("headers")?;
+                if !headers.nullish() {
+                    let headers =
+                        safe_cex_exchange::js_runtime::client::axios_headers_from(&headers)
+                            .map_err(|error| exchange_failure(error.into()))?;
+                    response.write("headers", headers);
+                }
+            }
+            Ok(response)
+        })
+        .transpose()
+}
+fn error_value(error: &Failure) -> Result<EventValue, Failure> {
     let value = record([
         ("message", string(&error.message)),
         ("name", string(&error.name)),
@@ -502,12 +528,9 @@ fn error_value(error: &Failure) -> EventValue {
     value.write("code", error.code.clone().unwrap_or(EventValue::Undefined));
     value.write(
         "response",
-        error
-            .response
-            .clone()
-            .map_or(EventValue::Undefined, EventValue::from_json),
+        response_from_error(error)?.unwrap_or(EventValue::Undefined),
     );
-    value
+    Ok(value)
 }
 /// None asks the caller to resend once: a response interceptor saw a signature rejection.
 async fn respond(
@@ -554,7 +577,7 @@ async fn respond(
                 api_outcome(outcome, None)
             }
             (ResponseStage::Api(_, Some(failed)), Err(error)) => {
-                api_outcome(failed(error_value(&error), &mut bindings)?, Some(error))
+                api_outcome(failed(error_value(&error)?, &mut bindings)?, Some(error))
             }
             (ResponseStage::Api(_, None), Err(error)) => Err(error),
             (ResponseStage::Guard(success, _), Ok(response)) => success(response),
@@ -851,6 +874,30 @@ impl FactoryBindings for Factorizer<'_> {
 }
 
 impl ExchangeImports for NativeImports {
+    fn weight_error_response(&self, error: &Failure) -> Result<Option<EventValue>, Failure> {
+        response_from_error(error)
+    }
+    fn weight_header_get_member(
+        &self,
+        headers: &EventValue,
+    ) -> Result<crate::request_weight::HeaderGetMember, Failure> {
+        use crate::request_weight::HeaderGetMember;
+        let get = headers.read("get")?;
+        if !get.is_callable() {
+            return Ok(HeaderGetMember::NotCallable);
+        }
+        let receiver = headers.clone();
+        Ok(HeaderGetMember::Callable(Rc::new(move |name| {
+            let value = get
+                .call(receiver.clone(), vec![string(name)])
+                .map_err(|error| exchange_failure(error.into()))?;
+            if value.nullish() {
+                Ok(None)
+            } else {
+                to_json(&value).map(Some)
+            }
+        })))
+    }
     fn factory(
         &self,
         venue: Venue,
@@ -1212,7 +1259,7 @@ impl ExchangeImports for NativeImports {
             if let Err(error) = result {
                 reporter.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"binance tick loop"}),
+                    &serde_json::json!({"operation":"binance tick loop"}).into(),
                 );
             }
         }));
@@ -1256,7 +1303,10 @@ fn schedule_timer(
             timers.live.borrow_mut().remove(&(id as u64));
         }
         if let Err(error) = action() {
-            runtime.report_exception(&error, &serde_json::json!({"operation":"binance timer"}));
+            runtime.report_exception(
+                &error,
+                &serde_json::json!({"operation":"binance timer"}).into(),
+            );
         }
     }));
     this.live.borrow_mut().insert(id as u64, task);
@@ -1357,7 +1407,7 @@ impl ListenerHost for NativeListenerOperations {
             if let Err(error) = job.await {
                 runtime.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"binance listener job"}),
+                    &serde_json::json!({"operation":"binance listener job"}).into(),
                 );
             }
         }));
@@ -1667,7 +1717,7 @@ impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData
     fn connect(&self) {
         self.0.report_exception(
             &ExchangeError::new(NO_EXTERNAL),
-            &serde_json::json!({"operation":"external public data"}),
+            &serde_json::json!({"operation":"external public data"}).into(),
         );
     }
     fn dispose(&self) {}

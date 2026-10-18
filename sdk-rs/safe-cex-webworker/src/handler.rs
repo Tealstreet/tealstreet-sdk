@@ -163,7 +163,7 @@ impl BaseHandler {
                         if let Err(error) = handler.pending_timed_out() {
                             handler.exchange.base().runtime.report_exception(
                                 &error,
-                                &json!({"method":"bufferUntilMarketsLoaded"}),
+                                &json!({"method":"bufferUntilMarketsLoaded"}).into(),
                             );
                         }
                     }

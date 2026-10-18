@@ -13,7 +13,7 @@ const specs = [
 const input = s => s.kind==='number'?Number(s.value):s.value;
 const number = n => Object.is(n,-0)?'-0':String(n);
 const view = n => ({str:n.toString(),value:n.valueOf(),fixed:[n.toFixed(),n.toFixed(0),n.toFixed(2),n.toFixed(6)],json:JSON.stringify({sz:n}),nan:n.isNaN(),finite:n.isFinite(),number:number(n.toNumber())});
-const scalars=specs.map(spec=>{const n=new B(input(spec));return {spec,result:view(n),clone:view(new B(n))}});
+const scalars=specs.map(spec=>{const n=new B(input(spec));return {spec,result:view(n),call:view(B(input(spec))),clone:view(new B(n))}});
 const operations=['plus','minus','times','multipliedBy','idiv','dividedToIntegerBy'];
 const comparisons=['lt','lte','gt','gte','eq','isEqualTo'];
 const selected=['negative_infinity','negative','negative_zero','zero','positive','infinity','nan'].map(tag=>specs.find(s=>s.tag===tag));

@@ -92,11 +92,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reported.borrow_mut().push(error.name.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -3054,6 +3058,33 @@ const SIXTEEN_METHOD_OUTCOMES: &[(&str, &str, &str, &[&str])] = &[
     ("Spot", "fetch_public_trades", r#"err:Not implemented"#, &[]),
 ];
 
+fn assert_method_outcome_json(actual: &Value, expected: &Value, path: &str) {
+    match (actual, expected) {
+        (Value::Number(actual), Value::Number(expected)) => assert_eq!(
+            actual.as_f64().unwrap().to_bits(),
+            expected.as_f64().unwrap().to_bits(),
+            "{path} numeric bits"
+        ),
+        (Value::Array(actual), Value::Array(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{path} array length");
+            for (index, expected) in expected.iter().enumerate() {
+                assert_method_outcome_json(&actual[index], expected, &format!("{path}[{index}]"));
+            }
+        }
+        (Value::Object(actual), Value::Object(expected)) => {
+            assert_eq!(
+                actual.keys().collect::<Vec<_>>(),
+                expected.keys().collect::<Vec<_>>(),
+                "{path} object keys"
+            );
+            for (key, expected) in expected {
+                assert_method_outcome_json(&actual[key], expected, &format!("{path}.{key}"));
+            }
+        }
+        _ => assert_eq!(actual, expected, "{path}"),
+    }
+}
+
 #[test]
 fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() {
     use safe_cex_exchange::exchange::Exchange;
@@ -3157,7 +3188,17 @@ fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() 
             observed.iter().zip(expected)
         {
             assert_eq!(label, want_label, "method order: {venue:?}");
-            assert_eq!(outcome, want_outcome, "{venue:?} {label} outcome");
+            match (
+                outcome.strip_prefix("ok:"),
+                want_outcome.strip_prefix("ok:"),
+            ) {
+                (Some(actual), Some(expected)) => assert_method_outcome_json(
+                    &serde_json::from_str(actual).unwrap(),
+                    &serde_json::from_str(expected).unwrap(),
+                    &format!("{venue:?} {label} outcome"),
+                ),
+                _ => assert_eq!(outcome, *want_outcome, "{venue:?} {label} outcome"),
+            }
             assert_eq!(
                 requests, want_requests,
                 "{venue:?} {label} transport requests"
@@ -4732,7 +4773,10 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
     use safe_cex_transport::{
         RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
     };
-    use std::sync::{Arc, Mutex};
+    use std::{
+        io::Write,
+        sync::{Arc, Mutex},
+    };
     struct Response {
         status: u16,
         header: &'static str,
@@ -4757,8 +4801,12 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             Box::pin(async move { Ok(response) })
         }
     }
+    let mut source_input = vec![];
+    let mut native_pauses = vec![];
     for (status, header, value, duration) in [
         (200, "x-mbx-used-weight-1m", "1920", 60_000.0),
+        (200, "X-MbX-UsEd-WeIgHt-1m", "1920", 60_000.0),
+        (429, "ReTrY-AfTeR", "2.5", 2_500.0),
         (429, "retry-after", "2.5", 2_500.0),
         (429, "retry-after", "invalid", 60_000.0),
     ] {
@@ -4811,7 +4859,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         assert_eq!(
             owner.paused_until.get(),
             1_000.0 + duration,
-            "native request-weight observer must run on HTTP status {status}"
+            "native request-weight observer must run on HTTP status {status} header {header}"
         );
         assert!(owner.paused());
         let requests = requests.lock().unwrap();
@@ -4823,8 +4871,38 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         assert_eq!(path, "/fapi/v1/openOrders");
         assert!(query.contains("timestamp="));
         assert!(query.contains("signature="));
+        source_input
+            .push(json!({"status":status,"header":header,"value":value,"now":runtime.now.get()}));
+        native_pauses.push(owner.paused_until.get());
         owner.dispose().unwrap();
     }
+    let mut source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/native-weight-headers-source.cjs"
+        ))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    source
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&source_input).unwrap())
+        .unwrap();
+    let source = source.wait_with_output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source_pauses: Vec<f64> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        native_pauses, source_pauses,
+        "all five native request outcomes match actual TS/Axios guards"
+    );
 }
 
 #[test]

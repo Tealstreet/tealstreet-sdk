@@ -160,7 +160,7 @@ impl Realm {
     pub(crate) fn report_thrown(&mut self, thrown: &Value, context: &str) {
         let error = self.exchange_error(thrown);
         self.runtime()
-            .report_exception(&error, &serde_json::json!({ "context": context }));
+            .report_exception(&error, &serde_json::json!({ "context": context }).into());
     }
     pub(crate) fn regexp(&self, literal: &str) -> Result<Value, Thrown> {
         let pattern = super::regex::Pattern::literal(literal)

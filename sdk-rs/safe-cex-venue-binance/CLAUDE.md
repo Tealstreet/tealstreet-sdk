@@ -623,6 +623,14 @@ paths independently; both must compile and fail the named native test, then pass
 after exact source restoration. Other owners and generic instantiations remain
 outside this finite evidence.
 
+Native HTTP weight guards receive canonical shared AxiosHeaders on both successful
+responses and reconstructed rejection responses. NativeImports reads and invokes
+the actual get method with the original header receiver. The native
+`production_native_request_weight_callbacks_observe_success_and_rejection` test
+compares five signed request outcomes, including mixed-case weight/retry headers,
+against actual maintained TS guards with installed Axios. Its only request stub
+is the terminal RestAdapter; the factories, signer and response guards are live.
+
 The twenty history/API/lifecycle capabilities have individual source-role records
 and authenticated native compiler probes in `scripts/lifecycle-alias-contracts.mjs`.
 Their real native owner/HTTP/socket/signing/Store witnesses and compiled controls
@@ -650,6 +658,18 @@ production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
 receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
+
+The public ticker handlers consume canonical native EventArray values from the
+constructed public classes. The old PublicEvent/PublicEvents JSON adapter and its
+oracle-only test/control tail are removed; they had no production caller.
+The actual native ticker census in private_classes retains source comparisons for
+all three families; its production field-routing control requires three compiled
+failures and exact-restored passes.
+
+Keep production imports explicit. The canonical accepted-set scanner must prove
+macro provenance across each source scope; wildcard imports can hide that proof
+even when the current business logic compiles. Import changes also require review
+of any affected source pins; nested helper bodies keep their existing contracts.
 
 The private-construction Clone reviews in the Binance construction policy cover
 three reusable capabilities: the inverse listener retry context, shared class

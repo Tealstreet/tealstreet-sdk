@@ -37,8 +37,10 @@ impl WorkerPortTimers for NativeStoreTimers {
             .spawn_local(Box::pin(async move {
                 match sleep.await {
                     Ok(()) => callback(),
-                    Err(error) => runtime
-                        .report_exception(&error, &json!({"module":"native account Store timer"})),
+                    Err(error) => runtime.report_exception(
+                        &error,
+                        &json!({"module":"native account Store timer"}).into(),
+                    ),
                 }
             }))
             .into()
@@ -52,8 +54,10 @@ impl WorkerPortTimers for NativeStoreTimers {
 }
 impl StoreUpdateThrottleHost for NativeStoreTimers {
     fn report_store_timer_error(&self, error: &ExchangeError) {
-        self.runtime
-            .report_exception(error, &json!({"module":"native account Store delivery"}));
+        self.runtime.report_exception(
+            error,
+            &json!({"module":"native account Store delivery"}).into(),
+        );
     }
 }
 
