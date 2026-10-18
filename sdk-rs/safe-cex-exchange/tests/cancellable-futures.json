@@ -300,13 +300,16 @@
     {
       "owner": "src/closed_positions.rs::resolve_closed_positions",
       "boundaries": [
-        "async-function",
+        "future-signature",
+        "future-return",
+        "async-block",
         "await",
         "await"
       ],
-      "producer_sha256": "296a37fb527beccb9dc85356614b26e74ae6466fb126821e0c91a5b311d91042",
-      "classification": "no-owned-latch",
-      "reason": "Selects one caller-owned journal callback then transforms the returned provenance locally; no shared pending marker."
+      "producer_sha256": "aab201d3cf7b8ba5cafca134179e34fb3b0c95713838d9c4efbff1bae870bbfc",
+      "classification": "delegated",
+      "reason": "The resolver invokes its selected retained fetch capability during the call and delegates both fetch Promise and resolver continuation ownership to the canonical eager driver. Dropping the returned waiter or original source cannot cancel the fetch; closed_position_timing compares real NativeRuntime startup, held continuation and ready/rejected settlement against maintained TS. No resolver-local latch or task registry.",
+      "delegate": "eager::start_eager"
     },
     {
       "owner": "src/cross_trade/manager.rs::CrossTradeManager::audit_copier_positions",

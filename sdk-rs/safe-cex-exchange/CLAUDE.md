@@ -1949,3 +1949,10 @@ materialization follows that source chain and the canonical retained response.
 Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
 signed requests before JSON. Original JS object identity remains an owned-tree residual.
 
+
+The mapped closed-position resolver requires a runtime and retained static fetch
+callbacks. It starts its selected fetch during invocation with `start_eager`;
+the runtime owns continuation after the waiter/source drop. Fetch and resolver
+Promise boundaries share the canonical driver. `closed_position_timing` checks
+six maintained-source profiles with NativeRuntime; the separate typed result
+surrogate/alias boundary remains in CLOSED_POSITIONS_AUDIT.md.
