@@ -280,6 +280,12 @@ JSON summaries are not the value oracle. Capture/replay equality and both
 native repeatability checks gate each mapper claim. Source hashes identify the
 runner, worker, planner, host inventory and transport used by each report.
 
+Each replay run also records `timings` with method names and monotonic wall
+milliseconds. These cover the complete operation, including HTTP, native decoding,
+Store updates and returned IPC values. They exclude the preceding replay-clock
+advance and stay outside SDK value comparisons. For an options-enabled Bybit run,
+`refreshMarkets` measures bootstrap rather than an isolated decoder call.
+
 Native controlled WS replay also requires `rawTasks.version === 1` with scope
 `exchange-runtime`. Unknown, finite, unpolled or awakened runtime work blocks the
 receipt, even when frame counters match and `pendingJobs` is zero. Only reviewed
@@ -294,3 +300,12 @@ retain their earlier, narrower qualification; do not promote them retroactively.
 asynchronous callback switch to finite work before entering that callback, so a
 later sleep inside it still blocks drain. Waking a reviewed idle task makes it
 blocking immediately, before its next poll; cancellation removes its receipt.
+
+The REST plan compares the public `Exchange` surface. Bybit's
+`fetchOptionMarkets`, `fetchTickersRaw` and `fetchTickersWithoutParse` are
+concrete-class helpers, absent from both `Exchange` and `CallableMethodsInWorker`.
+The worker's `CallMethodHandler` rejects all three even when the receiver has
+those properties. The hosted exchange-server forwards calls through this same
+worker dispatch. Both probe implementations therefore decline direct helper
+calls; public `fetchMarkets`/`refreshMarkets` and `fetchTickers` exercise their
+production callers. Option-chain and expiry reads remain in the options profile.
