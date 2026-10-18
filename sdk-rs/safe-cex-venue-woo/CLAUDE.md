@@ -171,13 +171,12 @@ parse/trim a retried string again; a real-client recorder pins that phase bounda
 The public oracle pins a later source relabel appearing through info while the
 Rust witness retains its earlier snapshot; the manifest declares this choice.
 
-`public_socket::ping` and `handle_ping_event` are callable heartbeat operations
-on a core-owned BaseWebSocket. Ping checks disposal before recording monotonic
-time and sends only afterwards, so a host send failure retains the recorded
-time. Pong delegates disposal and readiness to core send. Forty actual-source
-cases include base.send, missing/closed/open sockets and host errors; the clock
-is observed through core latency reporting. This slice adds no socket lifecycle
-registration and no Store writer.
+The constructed public/private heartbeat members use `socket_classes::heartbeat`
+with the actual receiver's live setters and send/sendWithLog properties. The three
+unused typed core-socket facades and their native facade/control tail are retired.
+`HEARTBEAT_REVIEW.md` records 24 maintained-source/real-binding profiles, including
+signed-zero timestamps, retained UTF16 payloads and original thrown values. The
+archived 40 public and 40 private source cases remain source-only observations.
 
 The test-linked public socket dispatcher uses the shared parser, receive tracking
 and core live-list callback dispatch. A 126-case oracle executes the actual
@@ -259,13 +258,10 @@ regressions compiled and failed against master, covering all three public topics
 ignored metadata, overflow/signed zero, and normalized identifier admission.
 Private timestamp callbacks retain their existing JSON input boundary.
 
-`private_socket` extracts the private ping and timestamp helper. Ping keeps the
-source sendWithLog wrapper: diagnostics are checked after sending, and heartbeat
-classification stops diagnostic publication. Disposal prevents both timestamp
-updates and sending. The timestamp helper uses shared Number coercion, rejects
+`private_socket` retains the timestamp helper. The timestamp helper uses shared Number coercion, rejects
 nonpositive/nonfinite input, then floors with the source 1e12 unit threshold.
 Its JSON input boundary excludes native NaN and executable coercion hooks.
-Neither operation registers the pending private socket lifecycle.
+The decoder does not register the private socket lifecycle.
 
 The legacy fills interface inventory refuses heritage clauses before enumerating
 local members. Its permanent actual-source inherited-number mutation must hit
@@ -544,3 +540,7 @@ The configured-class/source regression also pins falsy fallback and empty result
 History page parsing uses shared get-key admission before object mapping: null
 and stock arrays without a symbol are skipped; primitives retain the source lookup
 failure. The signed class regression preserves valid sibling fills and error text.
+
+The inactive V3 sequence function/result and their orphan literal codecs are retired.
+Only audit facades called them; constructed-class/import-graph and native receiver
+probes plus real legacy orderbook coverage remain. See WS_STATE_GATES.md and ledger row 46.

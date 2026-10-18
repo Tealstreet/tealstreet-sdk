@@ -179,8 +179,8 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         "SECONDARY native first attempt"
     );
     assert!(
-        !socket.base().has_websocket(),
-        "SECONDARY owned dial window"
+        socket.base().has_websocket(),
+        "SECONDARY ready dial is installed at call time"
     );
     let expected_symbols = match index as usize {
         0 => vec!["1", "2", "7"],
@@ -426,6 +426,7 @@ fn secondary_fallback_and_cancellation() {
         "SECONDARY resumable dial is pending"
     );
     runtime3.pending_dial.set(false);
+    runtime3.dial_waker.borrow_mut().take().unwrap().wake();
     pump(&runtime3);
     assert!(
         socket3.base().has_websocket(),
@@ -676,4 +677,78 @@ fn secondary_state_views_mutate_the_bound_protocol() {
     socket.base().dispose();
     runtime.discard_tasks();
     drop(parent);
+}
+
+#[test]
+fn secondary_connect_installs_ready_socket_before_polling() {
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetusdc,
+        ExchangeName::Bitgetinverse,
+    ] {
+        let (parent, _, runtime, socket) = fixture(name, false, 1.0);
+        socket.connect_and_subscribe().unwrap();
+        assert!(
+            socket.base().has_websocket(),
+            "SECONDARY eager ready dial installs before runtime polling"
+        );
+        assert_eq!(
+            runtime.dials.borrow().as_slice(),
+            ["wss://ws.bitget.com/v2/ws/public"]
+        );
+        assert_eq!(topic_keys(&socket), ["BTC", "SOL", "BNB"]);
+        socket
+            .on_markets_changed(&["ZERO".into(), "NEW".into(), "OTHER".into()])
+            .unwrap();
+        assert_packet(
+            runtime.io.sent.borrow().last().unwrap(),
+            match parent.name() {
+                ExchangeName::Bitget => "USDT-FUTURES",
+                ExchangeName::Bitgetusdc => "USDC-FUTURES",
+                _ => "COIN-FUTURES",
+            },
+            "ticker",
+            &["NEW"],
+        );
+        socket.base().dispose();
+        runtime.discard_tasks();
+    }
+}
+
+#[test]
+fn secondary_pending_dial_starts_now_and_dispose_drops_its_io() {
+    let (parent, _, runtime, socket) = fixture(ExchangeName::Bitget, false, -0.0);
+    runtime.pending_dial.set(true);
+    let original_owners = Rc::strong_count(&runtime.io);
+    socket.connect_and_subscribe().unwrap();
+    assert_eq!(
+        runtime.dials.borrow().len(),
+        1,
+        "SECONDARY pending dial starts before runtime polling"
+    );
+    // Separate compiled presence RED is tracked in EAGER_DIAL_AUDIT.md.
+    assert!(
+        !socket.base().has_websocket(),
+        "pending native handshake has not supplied a handle yet"
+    );
+    assert!(!socket.base().is_connected());
+    assert!(
+        Rc::strong_count(&runtime.io) > original_owners,
+        "pending dial owns real host I/O"
+    );
+    socket.base().dispose();
+    assert_eq!(
+        Rc::strong_count(&runtime.io),
+        original_owners,
+        "SECONDARY dispose drops pending dial I/O before runtime polling"
+    );
+    runtime.pending_dial.set(false);
+    runtime.dial_waker.borrow_mut().take().unwrap().wake();
+    pump(&runtime);
+    assert!(
+        !socket.base().has_websocket(),
+        "cancelled eager dial never installs a stale socket"
+    );
+    drop(parent);
+    runtime.discard_tasks();
 }

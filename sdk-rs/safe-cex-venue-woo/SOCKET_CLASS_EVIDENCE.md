@@ -41,6 +41,14 @@ Canonical declarations are referenced rather than duplicated:
 `sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy`, and
 `sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict`.
 
+## Subsequent heartbeat review
+
+`HEARTBEAT_REVIEW.md` supersedes the typed-heartbeat convenience choice above:
+the three unused facades and their exact native facade/control tail are retired.
+The canonical constructed-member path retains live sender/setter semantics and
+has 24 actual-source/native profiles. The original gate measurements below are
+historical and do not claim coverage of a retained facade.
+
 ## Measurements at the gate SHA
 
 | Gate | Exit and observed result |

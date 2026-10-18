@@ -559,7 +559,7 @@ fn poll_loop_uses_source_fallback_and_disables_infinity() {
         let deadline = source["sleep_ms"].as_u64().unwrap();
         assert_eq!(source["queued_calls"], 0);
         assert_eq!(source["callback_ms"], 0);
-        f.runtime.advance(0);
+        f.runtime.advance(deadline / 2);
         assert_eq!(calls.get(), 0, "poll loop must not run immediately");
         f.runtime.advance(deadline - 1);
         assert_eq!(calls.get(), 0, "source interval must elapse");
