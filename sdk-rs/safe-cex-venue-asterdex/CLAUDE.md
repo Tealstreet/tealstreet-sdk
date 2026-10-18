@@ -213,7 +213,10 @@ Promise in another task. `tests/eager_sdk_binding.rs` compares the maintained
 whole TS class with NativeRuntime and signed reqwest loopback requests: missing
 credentials log before polling; discarded getAccount/changePositionMode waiters
 retain their held HTTP continuation and Store effect. This family proof does
-not resolve the separate socket or validateAccount error-envelope findings.
+not by itself close the socket or validation error-envelope findings.
+`VALIDATION_ERROR_REVIEW.md` records the later real HTTP/setup-error witnesses: retained
+error markers come from the existing origin, and unsupported protocols use the
+shared transport classification rather than a network-reset diagnostic.
 
 Public socket ingress uses canonical retained capture, then derives the existing
 typed Value callback argument. String fields and keys use the canonical typed

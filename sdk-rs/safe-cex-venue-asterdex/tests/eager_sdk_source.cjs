@@ -30,7 +30,7 @@ const { DefaultStore } = require(path.join(root, 'packages/safe-cex/src/store/st
     const logs = [];
     venue.on('log', (message) => logs.push(message));
     try {
-      const error = await venue.validateAccount().then(
+      const error = await (process.argv.includes('--balance') ? venue.fetchBalance() : venue.validateAccount()).then(
         () => assert.fail('must reject'),
         (error) => error,
       );
@@ -47,7 +47,9 @@ const { DefaultStore } = require(path.join(root, 'packages/safe-cex/src/store/st
           code: error.code ?? null,
           isAxiosError: error.isAxiosError ?? false,
           status: error.response?.status ?? null,
-          logs: logs.filter((message) => /Failed to get account:|Account validation failed:/.test(message)),
+          logs: logs.filter((message) =>
+            /Failed to get account:|Account validation failed:|Failed to fetch balance:/.test(message),
+          ),
         }),
       );
     } finally {
