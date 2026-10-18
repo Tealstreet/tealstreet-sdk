@@ -415,3 +415,8 @@ call-prefix witnesses and independent production controls are documented in
 EAGER_DIAL_AUDIT.md. Pending I/O is dropped on disposal before runtime polling.
 The separate missing CONNECTING handle during a held handshake remains an open
 FIX-audit finding; do not mark the assigned secondary connect row complete yet.
+
+The transport retry target also compares Error, AxiosError and plain-object
+rejections through the maintained full factory. Only Error instances preserve
+top-level retry fields there. Its owned-transport control traverses the actual
+JsRestAdapter and REST host before the constructed Bitget retry chain.
