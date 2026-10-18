@@ -52,24 +52,50 @@ fn finite_or_zero(value: f64) -> f64 {
     if value.is_finite() { value } else { 0.0 }
 }
 
-pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>, ExchangeError> {
-    let id = first(o, &["orderId", "orderID", "i"]);
-    let symbol = first(o, &["symbol", "s"])
-        .and_then(Value::as_str)
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
+fn info_first<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
+    keys.iter().enumerate().find_map(|(i, key)| {
+        row.get(key)
+            .filter(|v| !v.is_nullish() || i + 1 == keys.len())
+    })
+}
+fn info_text(value: Option<&Input>) -> Result<String, ExchangeError> {
+    safe_cex_num::js_retained_string(value).map_err(|e| type_error(e.message))
+}
+fn info_number(value: Option<&Input>) -> Result<f64, ExchangeError> {
+    safe_cex_num::js_retained_number(value).map_err(|e| type_error(e.message))
+}
+fn info_true(value: Option<&Input>) -> bool {
+    value.is_some_and(|v| matches!(v, Input::Bool(true)) || v.text_equals("true"))
+}
+pub fn map_order<I: Clone + Into<Input>>(
+    o: &I,
+    orders: &[Order],
+    now: f64,
+) -> Result<Option<Order>, ExchangeError> {
+    let retained: Input = o.clone().into();
+    let o = &retained;
+    let id = info_first(o, &["orderId", "orderID", "i"]);
+    let symbol = info_first(o, &["symbol", "s"])
+        .and_then(Input::as_text)
+        .and_then(|s| String::from_utf16(s).ok())
         .map(|s| s.replace('-', ""));
     let kind = table(
         &constants::ORDER_TYPE,
-        &text(first(o, &["type", "o"]))?.to_uppercase(),
+        &info_text(info_first(o, &["type", "o"]))?.to_uppercase(),
     )?;
     let side = table(
         &constants::ORDER_SIDE,
-        &text(first(o, &["side", "S"]))?.to_uppercase(),
+        &info_text(info_first(o, &["side", "S"]))?.to_uppercase(),
     )?;
-    let raw_status = first(o, &["status", "X"]);
+    let raw_status = info_first(o, &["status", "X"]);
     let status = if raw_status.is_none() {
         Some(OrderStatus::Open)
     } else {
-        table(&constants::ORDER_STATUS, &text(raw_status)?.to_uppercase())?
+        table(
+            &constants::ORDER_STATUS,
+            &info_text(raw_status)?.to_uppercase(),
+        )?
     };
     let (Some(id), Some(symbol), Some(kind), Some(side), Some(status)) =
         (id, symbol, kind, side, status)
@@ -79,31 +105,31 @@ pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>,
     if symbol.is_empty() {
         return Ok(None);
     }
-    let close = strict_true(o.get("closePosition"));
-    let raw_amount = first(o, &["origQty", "quantity", "q"]);
-    let price = number(first(o, &["price", "p"]))?;
-    let stop = number(first(o, &["stopPrice", "sp"]))?;
+    let close = info_true(o.get("closePosition"));
+    let raw_amount = info_first(o, &["origQty", "quantity", "q"]);
+    let price = info_number(info_first(o, &["price", "p"]))?;
+    let stop = info_number(info_first(o, &["stopPrice", "sp"]))?;
     let amount = if raw_amount.is_none() && close {
         0.0
     } else {
-        number(raw_amount)?
+        info_number(raw_amount)?
     };
-    let zero = json!(0);
-    let filled = number(
-        first(o, &["executedQty", "z"])
-            .filter(|v| !v.is_null())
+    let zero = Input::Float(0.0);
+    let filled = info_number(
+        info_first(o, &["executedQty", "z"])
+            .filter(|v| !v.is_nullish())
             .or(Some(&zero)),
     )?;
     if !amount.is_finite() || !filled.is_finite() {
         return Ok(None);
     }
-    let id = text(Some(id))?;
+    let id = info_text(Some(id))?;
     let existing = orders.iter().find(|order| order.id == id);
-    let raw_tif = first(o, &["timeInForce", "f"]);
-    let tif = if strict_true(o.get("postOnly")) {
+    let raw_tif = info_first(o, &["timeInForce", "f"]);
+    let tif = if info_true(o.get("postOnly")) {
         Some(OrderTimeInForce::PostOnly)
     } else {
-        table(&constants::TIME_IN_FORCE, &text(raw_tif)?)?.or_else(|| {
+        table(&constants::TIME_IN_FORCE, &info_text(raw_tif)?)?.or_else(|| {
             if raw_tif.is_none() {
                 existing.and_then(|o| (o.time_in_force).into_value())
             } else {
@@ -114,7 +140,7 @@ pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>,
     let trigger = if matches!(kind, OrderType::TakeProfit | OrderType::StopLoss) {
         table(
             &constants::ORDER_TRIGGER_TYPE,
-            &text(first(o, &["workingType", "wt"]))?,
+            &info_text(info_first(o, &["workingType", "wt"]))?,
         )?
     } else {
         None
@@ -137,7 +163,7 @@ pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>,
         amount,
         filled,
         remaining: subtract(amount, filled),
-        reduce_only: strict_true(first(o, &["reduceOnly", "ro", "R"])).into(),
+        reduce_only: info_true(info_first(o, &["reduceOnly", "ro", "R"])).into(),
         close: (Some(close)).into(),
         info: (Some(o.clone().into())).into(),
         time_in_force: (tif).into(),

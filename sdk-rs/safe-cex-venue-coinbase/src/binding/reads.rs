@@ -11,9 +11,10 @@ use safe_cex_exchange::{
     runtime::ExchangeError,
 };
 use serde_json::{Value, json};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use std::{cell::RefCell, rc::Rc};
 
-pub(super) fn items(data: &Value, field: &str) -> Result<ReadItems, PortfolioFailure> {
+pub(super) fn items(data: &Input, field: &str) -> Result<ReadItems, PortfolioFailure> {
     let value = if field.is_empty() {
         data
     } else {

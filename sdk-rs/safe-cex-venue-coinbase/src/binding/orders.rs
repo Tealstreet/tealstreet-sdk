@@ -66,7 +66,7 @@ impl Host {
     }
     pub(super) fn synced_order(order: Order) -> SyncedOrderRoot {
         let mut fields = order;
-        let info = Rc::new(RefCell::new(fields.info.take().unwrap_or(Value::Null)));
+        let info = Rc::new(RefCell::new(fields.info.take().unwrap_or(safe_cex_types::retained_json::RetainedJsonInput::Null)));
         Rc::new(RefCell::new(SyncedOrder { fields, info }))
     }
     pub(super) fn native_orders(orders: &SyncedOrders) -> Vec<Order> {

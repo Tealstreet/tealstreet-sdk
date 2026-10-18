@@ -5,9 +5,9 @@ use crate::{
     starbase_auth::{CoinbaseStarbasePromise as Promise, CoinbaseStarbasePromiseSpawner},
     utils::normalize_cfm_contract_size,
 };
-use safe_cex_num::{
-    js_date_parse, js_number, js_string, js_time_clip, js_truthy, multiply, parse_float,
-};
+use safe_cex_num::{js_date_parse, js_time_clip, js_truthy, multiply, parse_float};
+use safe_cex_num::{js_retained_number, js_retained_string};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     MarginType, Market, Position, PositionExtra, PositionMode, PositionSide, Ticker,
     model_utils::create_position_id, object_map::JsObjectMap,
@@ -19,7 +19,7 @@ use std::{
 };
 
 /// Retained inert response-item root: info points at the original item, never a re-encoding.
-pub type ReadItem = Rc<RefCell<Value>>;
+pub type ReadItem = Rc<RefCell<Input>>;
 /// Original response array; CFM for-of iteration reads its live length.
 pub type ReadItems = Rc<RefCell<Vec<ReadItem>>>;
 pub type ReadMarket = Rc<RefCell<Market>>;
@@ -87,9 +87,9 @@ fn detail(err: &PortfolioFailure) -> Option<Value> {
         err.value.as_ref().and_then(|v| v.get("message")).cloned()
     }
 }
-fn prop<'a>(value: Option<&'a Value>, key: &str) -> Result<Option<&'a Value>, PortfolioFailure> {
+fn prop<'a>(value: Option<&'a Input>, key: &str) -> Result<Option<&'a Input>, PortfolioFailure> {
     match value {
-        None | Some(Value::Null) => Err(error(
+        None | Some(Input::Null | Input::Undefined) => Err(error(
             "TypeError",
             &format!(
                 "Cannot read properties of {} (reading '{key}')",
@@ -99,33 +99,35 @@ fn prop<'a>(value: Option<&'a Value>, key: &str) -> Result<Option<&'a Value>, Po
         Some(value) => Ok(value.get(key)),
     }
 }
-fn has_length(value: Option<&Value>) -> bool {
+fn has_length(value: Option<&Input>) -> bool {
     match value {
-        Some(Value::Array(v)) => !v.is_empty(),
-        Some(Value::String(v)) => !v.is_empty(),
-        Some(Value::Object(v)) => js_truthy(v.get("length")),
+        Some(Input::Array(v)) => !v.is_empty(),
+        Some(Input::Text(v)) => !v.is_empty(),
+        Some(Input::Object(_)) => value
+            .and_then(|v| v.get("length"))
+            .is_some_and(Input::is_truthy),
         _ => false,
     }
 }
-fn float(value: Option<&Value>) -> Result<f64, PortfolioFailure> {
+fn float(value: Option<&Input>) -> Result<f64, PortfolioFailure> {
     text(value).map(|v| parse_float(&v))
 }
-fn text(value: Option<&Value>) -> Result<String, PortfolioFailure> {
-    js_string(value).map_err(|e| error(&e.name, &e.message))
+fn text(value: Option<&Input>) -> Result<String, PortfolioFailure> {
+    js_retained_string(value).map_err(|e| error(&e.name, &e.message))
 }
-fn or<'a>(value: Option<&'a Value>, fallback: &'a Value) -> Option<&'a Value> {
-    if js_truthy(value) {
+fn or<'a>(value: Option<&'a Input>, fallback: &'a Input) -> Option<&'a Input> {
+    if value.is_some_and(Input::is_truthy) {
         value
     } else {
         Some(fallback)
     }
 }
-fn date<H: MarketPositionHost>(host: &H, value: Option<&Value>) -> Result<f64, PortfolioFailure> {
+fn date<H: MarketPositionHost>(host: &H, value: Option<&Input>) -> Result<f64, PortfolioFailure> {
     match value {
-        Some(Value::String(_) | Value::Array(_) | Value::Object(_)) => js_string(value)
+        Some(Input::Text(_) | Input::Array(_) | Input::Object(_)) => js_retained_string(value)
             .map(|v| js_date_parse(&v, |ms| host.local_wall_time_to_utc(ms)))
             .map_err(|e| error(&e.name, &e.message)),
-        _ => js_number(value)
+        _ => js_retained_number(value)
             .map(js_time_clip)
             .map_err(|e| error(&e.name, &e.message)),
     }
@@ -240,14 +242,17 @@ fn spot_cfm<H: MarketPositionHost + 'static>(
         Box::pin(async move {
             let result = async {
                 let reply = r.host.get(PRODUCTS, params).await?;
-                let products: Vec<Value> = reply
+                let products: Vec<Input> = reply
                     .items
                     .borrow()
                     .iter()
                     .map(|p| p.borrow().clone())
                     .collect();
-                let fields = format_spot_cfm_tickers(&json!({"products":products}))
-                    .map_err(|e| error("Error", &e))?;
+                let fields = format_spot_cfm_tickers(&Input::Object(vec![(
+                    "products".encode_utf16().collect(),
+                    Input::Array(products),
+                )]))
+                .map_err(|e| error("Error", &e))?;
                 Ok(Rc::new(RefCell::new(
                     fields
                         .into_iter()
@@ -287,7 +292,7 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                 let items = match r.host.get(INSTRUMENTS, None).await {
                     Ok(reply) => Ok(reply.items),
                     Err(err) => {
-                        let response = prop(err.value.as_ref(), "response")?;
+                        let response = err.value.as_ref().and_then(|v| v.get("response"));
                         let data = response.and_then(|v| v.get("data"));
                         if data.is_some_and(Value::is_array) {
                             let items = r
@@ -298,7 +303,7 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                                 return Err(err);
                             }
                             Ok(items)
-                        } else if has_length(data) {
+                        } else if has_length(data.cloned().map(Input::from).as_ref()) {
                             // Source adopts this body before evaluating .filter.
                             Err(error("TypeError", "data.filter is not a function"))
                         } else {
@@ -314,12 +319,16 @@ pub fn fetch_tickers_intx<H: MarketPositionHost + 'static>(
                 let mut tickers = vec![];
                 for item in items?.borrow().clone() {
                     let m = item.borrow();
-                    if m["trading_state"] != "TRADING" || m["type"] != "PERP" {
+                    if !m
+                        .get("trading_state")
+                        .is_some_and(|v| v.text_equals("TRADING"))
+                        || !m.get("type").is_some_and(|v| v.text_equals("PERP"))
+                    {
                         continue;
                     }
                     let symbol = format!("{}-INTX", text(m.get("symbol"))?);
                     let raw = markets.get(&symbol).and_then(|m| m.borrow().info.clone());
-                    let zero = json!("0");
+                    let zero = Input::from(json!("0"));
                     let interval = float(or(m.get("funding_interval"), &zero))? / 1000.0 / 1000.0;
                     let quote = m.get("quote");
                     let mut fields = ticker(symbol);
@@ -371,7 +380,7 @@ pub fn fetch_tickers_v3<H: MarketPositionHost + 'static>(
         Box::pin(async move {
             let result = (|| {
                 let mut tickers = vec![];
-                let zero = json!("0");
+                let zero = Input::from(json!("0"));
                 for market in r.host.markets().borrow().iter() {
                     let m = market.borrow();
                     let info = m.info.as_ref().ok_or_else(|| {
@@ -380,7 +389,7 @@ pub fn fetch_tickers_v3<H: MarketPositionHost + 'static>(
                             "Cannot read properties of undefined (reading 'price')",
                         )
                     })?;
-                    if info.is_null() {
+                    if info.is_nullish() {
                         return Err(error(
                             "TypeError",
                             "Cannot read properties of null (reading 'price')",
@@ -463,7 +472,7 @@ pub fn fetch_positions<H: MarketPositionHost + 'static>(
                 let fields = position(market.borrow().symbol.clone());
                 positions.push(Rc::new(ReadPosition {
                     fields,
-                    info: Some(Rc::new(RefCell::new(json!({})))),
+                    info: Some(Rc::new(RefCell::new(Input::Object(vec![])))),
                 }));
             }
             Ok(Rc::new(RefCell::new(positions)))
@@ -499,7 +508,7 @@ pub fn fetch_open_positions_cfm<H: MarketPositionHost + 'static>(
                 };
                 let p = item.borrow();
                 let mut fields = position(text(p.get("product_id"))?);
-                fields.side = if p["side"] == "LONG" {safe_cex_types::ModelField::Value(PositionSide::Long)} else {safe_cex_types::ModelField::Value(PositionSide::Short)};
+                fields.side = if p.get("side").unwrap_or(&Input::Undefined) == "LONG" {safe_cex_types::ModelField::Value(PositionSide::Long)} else {safe_cex_types::ModelField::Value(PositionSide::Short)};
                 fields.entry_price = float(p.get("avg_entry_price"))?;
                 let mark = float(p.get("current_price"))?;
                 let size = float(p.get("number_of_contracts"))?.abs();
@@ -542,11 +551,13 @@ pub fn fetch_open_positions_intx<H: MarketPositionHost + 'static>(
                     .get(INTX_POSITIONS, Some(json!({"portfolio_uuid":uuid})))
                     .await?;
                 let mut positions = vec![];
-                let ten = json!("10");
+                let ten = Input::from(json!("10"));
                 for item in reply.items.borrow().clone() {
                     let p = item.borrow();
                     let mut fields = position(text(p.get("symbol"))?);
-                    fields.side = if p["position_side"] == "POSITION_SIDE_LONG" {
+                    fields.side = if p.get("position_side").unwrap_or(&Input::Undefined)
+                        == "POSITION_SIDE_LONG"
+                    {
                         safe_cex_types::ModelField::Value(PositionSide::Long)
                     } else {
                         safe_cex_types::ModelField::Value(PositionSide::Short)

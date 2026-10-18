@@ -10,6 +10,7 @@ use crate::{
     utils::normalize_coinbase_usd_equivalent_product_id,
 };
 use safe_cex_num::{adjust, js_number_string, js_string, js_truthy};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{OrderSide, OrderStatus, OrderType};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
@@ -85,23 +86,36 @@ fn decimal_key(text: &str) -> Option<(String, i64)> {
     }
     Some((digits, power))
 }
-fn exact_decimal(raw: Option<&Value>, number: f64) -> bool {
-    let Some(raw) = raw.and_then(Value::as_str).and_then(decimal_key) else {
+fn exact_decimal(raw: Option<&Input>, number: f64) -> bool {
+    let Some(raw) = raw
+        .and_then(Input::as_text)
+        .and_then(|v| String::from_utf16(v).ok())
+        .as_deref()
+        .and_then(decimal_key)
+    else {
         return false;
     };
     Some(raw) == decimal_key(&js_number_string(number))
 }
-fn positive_decimal(raw: Option<&Value>) -> bool {
+fn positive_decimal(raw: Option<&Input>) -> bool {
     is_coinbase_unsigned_decimal(raw) && !is_coinbase_zero_decimal(raw)
 }
-fn prop<'a>(v: Option<&'a Value>, key: &str) -> Option<&'a Value> {
+fn prop<'a>(v: Option<&'a Input>, key: &str) -> Option<&'a Input> {
     v.and_then(|v| v.get(key))
 }
-fn nullish<'a>(a: Option<&'a Value>, b: impl FnOnce() -> Option<&'a Value>) -> Option<&'a Value> {
-    if a.is_none_or(Value::is_null) { b() } else { a }
+fn nullish<'a>(a: Option<&'a Input>, b: impl FnOnce() -> Option<&'a Input>) -> Option<&'a Input> {
+    if a.is_none_or(Input::is_nullish) {
+        b()
+    } else {
+        a
+    }
 }
-fn truthy_or<'a>(a: Option<&'a Value>, b: impl FnOnce() -> Option<&'a Value>) -> Option<&'a Value> {
-    if js_truthy(a) { a } else { b() }
+fn truthy_or<'a>(a: Option<&'a Input>, b: impl FnOnce() -> Option<&'a Input>) -> Option<&'a Input> {
+    if a.is_some_and(Input::is_truthy) {
+        a
+    } else {
+        b()
+    }
 }
 pub fn update_order<H: OrderEditHost + 'static>(
     r: Rc<OrderEditReceiver<H>>,
@@ -175,14 +189,15 @@ pub fn update_order<H: OrderEditHost + 'static>(
                 m.is_spot == Some(true)
                     && m.is_expiring != Some(true)
                     && m.contract_size == Some(1.0)
-                    && prop(info, "product_type") == Some(&json!("SPOT"))
+                    && prop(info, "product_type").is_some_and(|v| v.text_equals("SPOT"))
                     && prop(info, "future_product_details").is_none()
             };
             if !proven {
                 let unit = {
                     let m = market.borrow();
                     if m.is_expiring.unwrap_or(false)
-                        || prop(m.info.as_ref(), "product_type") == Some(&json!("FUTURE"))
+                        || prop(m.info.as_ref(), "product_type")
+                            .is_some_and(|v| v.text_equals("FUTURE"))
                     {
                         "CFM contract"
                     } else {
@@ -217,7 +232,7 @@ pub fn update_order<H: OrderEditHost + 'static>(
                 let status = raw.get("status");
                 let kind = raw.get("order_type");
                 let side = nullish(raw.get("order_side"), || raw.get("side"));
-                let zero = Value::from("");
+                let zero = Input::Text(vec![]);
                 let stop = nullish(raw.get("stop_price"), || Some(&zero));
                 let expected_side = if canonical.borrow().fields.side == OrderSide::Buy {
                     "BUY"
@@ -225,23 +240,46 @@ pub fn update_order<H: OrderEditHost + 'static>(
                     "SELL"
                 };
                 let no_trigger = stop
-                    .and_then(Value::as_str)
+                    .and_then(Input::as_text)
+                    .and_then(|v| String::from_utf16(v).ok())
+                    .as_deref()
                     .is_some_and(|v| v.is_empty() || is_coinbase_zero_decimal(stop));
-                let product_matches = product.and_then(Value::as_str).is_some_and(|p| {
-                    p == market.borrow().id
-                        || normalize_coinbase_usd_equivalent_product_id(p)
-                            == normalize_coinbase_usd_equivalent_product_id(&market.borrow().id)
-                });
+                let product_matches = product
+                    .and_then(Input::as_text)
+                    .and_then(|v| String::from_utf16(v).ok())
+                    .as_deref()
+                    .is_some_and(|p| {
+                        p == market.borrow().id
+                            || normalize_coinbase_usd_equivalent_product_id(p)
+                                == normalize_coinbase_usd_equivalent_product_id(&market.borrow().id)
+                    });
                 let allowed = {
                     let c = canonical.borrow();
                     let o = &c.fields;
                     o.status == OrderStatus::Open
                         && o.r#type == OrderType::Limit
-                        && raw_id.and_then(Value::as_str) == Some(o.id.as_str())
+                        && raw_id
+                            .and_then(Input::as_text)
+                            .and_then(|v| String::from_utf16(v).ok())
+                            .as_deref()
+                            == Some(o.id.as_str())
                         && product_matches
-                        && status.and_then(Value::as_str) == Some("OPEN")
-                        && matches!(kind.and_then(Value::as_str), Some("Limit" | "LIMIT"))
-                        && side.and_then(Value::as_str) == Some(expected_side)
+                        && status
+                            .and_then(Input::as_text)
+                            .and_then(|v| String::from_utf16(v).ok())
+                            .as_deref()
+                            == Some("OPEN")
+                        && matches!(
+                            kind.and_then(Input::as_text)
+                                .and_then(|v| String::from_utf16(v).ok())
+                                .as_deref(),
+                            Some("Limit" | "LIMIT")
+                        )
+                        && side
+                            .and_then(Input::as_text)
+                            .and_then(|v| String::from_utf16(v).ok())
+                            .as_deref()
+                            == Some(expected_side)
                         && no_trigger
                         && o.take_profit.is_none()
                         && o.stop_loss.is_none()

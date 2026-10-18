@@ -201,16 +201,21 @@ impl SocketHost {
         self.host.global(&format!("console.{severity}"), args)?;
         Ok(())
     }
-    fn order_values(orders: &SyncedOrders<Frame>) -> Vec<safe_cex_types::Order> {
+    fn order_values(
+        orders: &SyncedOrders<Frame>,
+    ) -> Result<Vec<safe_cex_types::Order>, PortfolioFailure> {
         orders
             .borrow()
             .iter()
             .map(|order| {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
-                fields.info =
-                    (Some(safe_cex_exchange::js_runtime::value::to_retained_input(&to_js(&order.info))?)).into();
-                fields
+                fields.info = (Some(
+                    safe_cex_exchange::js_runtime::value::to_retained_input(&to_js(&order.info))
+                        .map_err(from_thrown)?,
+                ))
+                .into();
+                Ok(fields)
             })
             .collect()
     }

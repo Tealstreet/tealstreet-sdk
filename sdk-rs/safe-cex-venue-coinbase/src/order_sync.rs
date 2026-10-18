@@ -8,6 +8,7 @@ use crate::{
 };
 use indexmap::IndexMap;
 use safe_cex_num::{add, js_string, js_truthy, multiply, parse_float};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Order, OrderExtra, OrderSide};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
@@ -65,9 +66,9 @@ fn error(name: &str, message: &str) -> PortfolioFailure {
         json!({"name":name,"message":message}),
     )))
 }
-fn property(raw: &ReadItem, name: &str) -> Result<Option<Value>, PortfolioFailure> {
+fn property(raw: &ReadItem, name: &str) -> Result<Option<Input>, PortfolioFailure> {
     let raw = raw.borrow();
-    if raw.is_null() {
+    if raw.is_nullish() {
         return Err(error(
             "TypeError",
             &format!("Cannot read properties of null (reading '{name}')"),
@@ -224,21 +225,21 @@ pub trait PrivateOrderScalar: Clone {
     fn is_text(&self, expected: &str) -> bool;
     fn from_text(value: &str) -> Self;
 }
-impl PrivateOrderScalar for Value {
+impl PrivateOrderScalar for Input {
     fn float(&self) -> Result<f64, PortfolioFailure> {
-        float(Some(self))
+        safe_cex_num::js_retained_parse_float(Some(self)).map_err(|e| error(e.name, e.message))
     }
     fn text(&self) -> Result<String, PortfolioFailure> {
-        text(Some(self))
+        safe_cex_num::js_retained_string(Some(self)).map_err(|e| error(e.name, e.message))
     }
     fn truthy(&self) -> bool {
-        js_truthy(Some(self))
+        self.is_truthy()
     }
     fn is_text(&self, expected: &str) -> bool {
-        self.as_str() == Some(expected)
+        self.text_equals(expected)
     }
     fn from_text(value: &str) -> Self {
-        Value::from(value)
+        Input::from(Value::from(value))
     }
 }
 impl PrivateOrderScalar for crate::starbase_public_frames::CoinbaseStarbaseFrameValue {
@@ -274,8 +275,8 @@ pub trait PrivateOrderInfo: Clone {
     fn property(&self, name: &str) -> Result<Option<Self::Scalar>, PortfolioFailure>;
 }
 impl PrivateOrderInfo for ReadItem {
-    type Scalar = Value;
-    fn property(&self, name: &str) -> Result<Option<Value>, PortfolioFailure> {
+    type Scalar = Input;
+    fn property(&self, name: &str) -> Result<Option<Input>, PortfolioFailure> {
         property(self, name)
     }
 }
