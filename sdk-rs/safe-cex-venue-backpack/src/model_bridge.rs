@@ -135,7 +135,7 @@ pub fn ticker(t: reads::Ticker<Value>) -> Result<Ticker, ExchangeError> {
         ask: t.ask,
         last: t.last,
         mark: t.mark,
-        index: t.index,
+        index: Some(t.index),
         mid_price: None,
         percentage: t.percentage,
         open_interest: t.open_interest,

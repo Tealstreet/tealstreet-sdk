@@ -650,7 +650,9 @@ pub struct Ticker {
     pub ask: f64,
     pub last: f64,
     pub mark: f64,
-    pub index: f64,
+    // WOO publishes null for a real market with no index price.
+    #[ts(as = "f64")]
+    pub index: Option<f64>,
 
     pub mid_price: Option<f64>,
     pub percentage: f64,
@@ -4080,7 +4082,8 @@ mod strict_codecs {
         ask: f64,
         last: f64,
         mark: f64,
-        index: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        index: Option<f64>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",

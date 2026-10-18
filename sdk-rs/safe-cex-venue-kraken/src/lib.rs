@@ -18,7 +18,6 @@ pub mod spot_dispatch;
 pub mod spot_reads;
 pub mod spot_types;
 pub mod startup;
-pub mod stream_adapters;
 pub mod stream_updates;
 pub mod tickers;
 pub mod types;

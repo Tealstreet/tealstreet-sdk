@@ -598,8 +598,8 @@ The numeric capture probe executes an independent 11-token inventory, checking
 source row/pair counts and native comparison count. Empty, partial and extra
 iterations must fail even when the source-total guard is bypassed.
 
-Snapshot parity fixes its execution at 72 × 17 preparation steps and 354 ticker
-actions across 70 traces. Source per-case counts, independent native bounds and
+Snapshot parity fixes its execution at 72 × 17 preparation steps and 358 ticker
+actions across 71 traces. Source per-case counts, independent native bounds and
 full-output collection comparisons prevent truncated traces from skipping work.
 
 Task identity fixes each record's case/leaf counts and executed comparisons. Its
@@ -694,3 +694,8 @@ Constructed AsterDEX private-frame/worker emitter witnesses live in
 `../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
 The venue retains private facade tests without importing the worker crate. Both paths preserve
 variadic event arguments; the real fill bridge retains Infinity and object identity.
+
+The ticker baseline corpus includes four nullable-index actions in addition to
+its original 354 comparisons. Actual maintained worker execution observes an
+updated null baseline without a packed null value; null-to-number emits the
+numeric index delta. This preserves the source typeof-number filter.

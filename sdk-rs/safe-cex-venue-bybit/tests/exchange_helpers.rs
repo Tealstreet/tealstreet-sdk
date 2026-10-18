@@ -179,7 +179,7 @@ fn exchange_helpers_native_source_parity() {
             serde_json::from_value::<safe_cex_types::Ticker>(case["ticker"].clone()).unwrap();
         // Distinct native axes must be present before invoking either selector.
         assert_eq!(
-            (ticker.last, ticker.mark, ticker.index),
+            (ticker.last, ticker.mark, ticker.index.unwrap()),
             (17.25, 23.5, 31.75),
             "HELPER decoded native ticker axes"
         );

@@ -466,7 +466,10 @@ fn ticker(
         ask: vf(Some(book), "askPrice")?,
         last: vf(Some(daily), "lastPrice")?,
         mark: vf(Some(price), if spot { "lastPrice" } else { "markPrice" })?,
-        index: vf(Some(price), if spot { "lastPrice" } else { "indexPrice" })?,
+        index: Some(vf(
+            Some(price),
+            if spot { "lastPrice" } else { "indexPrice" },
+        )?),
         percentage: vf(Some(daily), "priceChangePercent")?,
         funding_rate: if spot {
             0.0

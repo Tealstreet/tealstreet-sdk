@@ -188,10 +188,20 @@ fn ticker_derivative_sentinels_are_required_and_preserve_fractional_numbers() {
         );
         let mut invalid = ticker.clone();
         invalid[field] = Value::Null;
-        assert!(
-            serde_json::from_value::<Ticker>(invalid).is_err(),
-            "{field}"
-        );
+        if field == "index" {
+            assert_eq!(
+                serde_json::from_value::<Ticker>(invalid.clone())
+                    .unwrap()
+                    .index,
+                None
+            );
+            roundtrip::<Ticker>(invalid);
+        } else {
+            assert!(
+                serde_json::from_value::<Ticker>(invalid).is_err(),
+                "{field}"
+            );
+        }
     }
     let mut full = ticker;
     full["fundingTime"] = json!(1234.5);

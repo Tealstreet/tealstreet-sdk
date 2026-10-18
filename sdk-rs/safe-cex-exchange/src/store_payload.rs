@@ -17,21 +17,21 @@ pub fn record_sent_update_id_backed_snapshot(update_id: Option<f64>) -> Option<f
 struct Snapshot {
     id: String,
     symbol: String,
-    values: [f64; 11],
+    values: [Option<f64>; 11],
 }
-fn values(ticker: &Ticker) -> [f64; 11] {
+fn values(ticker: &Ticker) -> [Option<f64>; 11] {
     [
-        ticker.bid,
-        ticker.ask,
-        ticker.last,
-        ticker.mark,
+        Some(ticker.bid),
+        Some(ticker.ask),
+        Some(ticker.last),
+        Some(ticker.mark),
         ticker.index,
-        ticker.percentage,
-        ticker.open_interest,
-        ticker.funding_rate,
-        ticker.funding_time,
-        ticker.volume,
-        ticker.quote_volume,
+        Some(ticker.percentage),
+        Some(ticker.open_interest),
+        Some(ticker.funding_rate),
+        Some(ticker.funding_time),
+        Some(ticker.volume),
+        Some(ticker.quote_volume),
     ]
 }
 
@@ -78,8 +78,10 @@ impl TickerBaseline {
                 // JS !==, including NaN !== NaN and +0 === -0.
                 if value != previous.values[field] {
                     previous.values[field] = value;
-                    mask |= 1 << field;
-                    changed.push(value);
+                    if let Some(value) = value {
+                        mask |= 1 << field;
+                        changed.push(value);
+                    }
                 }
             }
             if mask != 0 {

@@ -96,7 +96,7 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
                 ask: 43.,
                 last: 37.,
                 mark: 41.,
-                index: 39.,
+                index: Some(39.),
                 mid_price: None,
                 percentage: 3.,
                 open_interest: 7.,
