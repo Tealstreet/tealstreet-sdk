@@ -654,3 +654,76 @@ fn disconnected_candle_listener_clone_retries_and_shares_cleanup_state() {
     h.exchange.base().dispose().unwrap();
     assert!(h.runtime.reports.borrow().is_empty());
 }
+
+#[test]
+fn production_inverse_depth_overflow_ids_keep_native_sequence_rules() {
+    let mut completed = 0;
+    for buffered in [false, true] {
+        for previous in ["1e400", "-1e400"] {
+            let h = support::fixture(true, false);
+            seed(&h);
+            let socket = connect(&h, SocketSlot::Public);
+            h.http.hold.set(buffered);
+            h.http.replies.borrow_mut().push_back(Ok(from_json(
+                &json!({"lastUpdateId":100,"bids":[["100","2"]],"asks":[["101","3"]]}),
+            )));
+            let seen = Rc::new(RefCell::new(vec![]));
+            let sink = seen.clone();
+            let cleanup = invoke(
+                &h,
+                "listenOrderBook",
+                vec![
+                    Js::str(SYMBOL),
+                    Js::function("capture", move |_, args| {
+                        sink.borrow_mut()
+                            .push(args[0].get("bids")?.get("0")?.get("amount")?.to_number()?);
+                        Ok(Js::Undefined)
+                    }),
+                ],
+            );
+            frame(
+                &socket,
+                json!({"e":"depthUpdate","s":SYMBOL,"U":101,"u":101,"pu":100,"b":[["100","4"]],"a":[]}),
+            );
+            h.runtime.pump();
+            assert_eq!(seen.borrow().len(), usize::from(!buffered));
+            let raw = r#"{"e":"depthUpdate","s":"BTCUSD_PERP","U":102,"u":102,"pu":OVERFLOW,"b":[["100","6"]],"a":[]}"#.replace("OVERFLOW", previous);
+            socket.on_message(&SocketFrame::Text(raw)).unwrap();
+            h.runtime.pump();
+            if buffered {
+                assert!(seen.borrow().is_empty(), "real snapshot remains pending");
+                h.http.release();
+                h.runtime.pump();
+            }
+            assert_eq!(
+                seen.borrow().last().copied(),
+                Some(6.0),
+                "source uses contiguous U when pu overflows, buffered={buffered}, previous={previous}"
+            );
+            assert_eq!(seen.borrow().len(), if buffered { 1 } else { 2 });
+            assert_eq!(
+                h.http.requests.borrow().len(),
+                1,
+                "overflow pu must not trigger a spurious resnapshot"
+            );
+            h.http.hold.set(true);
+            h.http.replies.borrow_mut().push_back(Ok(from_json(
+                &json!({"lastUpdateId":102,"bids":[],"asks":[]}),
+            )));
+            socket.on_message(&SocketFrame::Text(r#"{"e":"depthUpdate","s":"BTCUSD_PERP","U":103,"u":1e400,"pu":102,"b":[],"a":[]}"#.into())).unwrap();
+            h.runtime.pump();
+            assert_eq!(
+                h.http.requests.borrow().len(),
+                2,
+                "nonfinite final ID must request a held resnapshot"
+            );
+            cleanup.call(Js::Undefined, vec![]).unwrap();
+            assert!(h.runtime.reports.borrow().is_empty());
+            completed += 1;
+        }
+    }
+    assert_eq!(
+        completed, 4,
+        "all live/buffered signed overflow cases execute"
+    );
+}
