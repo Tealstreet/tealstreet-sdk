@@ -302,7 +302,7 @@ fn signing_parser_orders_native_integer_keys_before_url_or_wire() {
         "QUERY signing native first value identity"
     );
     let legacy =
-        safe_cex_transport::signing::try_parse_json(serde_json::Value::String(input.into()));
+        safe_cex_transport::signing::try_parse_params_json(serde_json::Value::String(input.into()));
     assert_eq!(
         legacy
             .as_object()

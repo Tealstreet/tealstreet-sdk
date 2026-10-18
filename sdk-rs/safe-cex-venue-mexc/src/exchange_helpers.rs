@@ -173,15 +173,21 @@ pub fn get_replacement_order_amount(order: &Order) -> Result<f64, JsCoercionErro
 }
 // ts: MexcExchange.isStopLikeOrder
 pub fn is_stop_like_order(order: &Order) -> bool {
-    matches!(order.r#type, OrderType::StopLoss | OrderType::TakeProfit)
-        || js_truthy(order.info.as_ref().and_then(|v| v.get("__mexcPlanOrder")))
+    matches!(
+        order.r#type,
+        safe_cex_types::ModelField::Value(OrderType::StopLoss)
+            | safe_cex_types::ModelField::Value(OrderType::TakeProfit)
+    ) || js_truthy(order.info.as_ref().and_then(|v| v.get("__mexcPlanOrder")))
         || js_truthy(order.info.as_ref().and_then(|v| v.get("__mexcStopOrder")))
 }
 // ts: MexcExchange.isStopOrder
 pub fn is_stop_order(order: &Order) -> bool {
     js_truthy(order.info.as_ref().and_then(|v| v.get("__mexcStopOrder")))
-        || (matches!(order.r#type, OrderType::StopLoss | OrderType::TakeProfit)
-            && order.amount == 0.0
+        || (matches!(
+            order.r#type,
+            safe_cex_types::ModelField::Value(OrderType::StopLoss)
+                | safe_cex_types::ModelField::Value(OrderType::TakeProfit)
+        ) && order.amount == 0.0
             && order.remaining == 0.0)
 }
 // ts: MexcExchange.isPlanOrder

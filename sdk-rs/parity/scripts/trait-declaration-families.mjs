@@ -26,7 +26,7 @@ export const families = [
   ['bitrue', 'trading_rest', 'TradingHost', 22, 'bitrue.exchange', 'BitrueExchange#formatCreateOrder', 'uuid'],
   ['orderly', 'runtime_actions', 'RuntimeHost', 22, 'orderly.exchange', 'OrderlyExchange.tick', 'add'],
   ['backpack', 'api_factory', 'Host', 21, 'backpack.api', 'createAPI', 'register_response'],
-  ['grvt', 'composition', 'CompositionHost', 21, 'grvt.exchange', 'GrvtExchange.constructor', 'sdk_env'],
+  ['grvt', 'composition', 'CompositionHost', 22, 'grvt.exchange', 'GrvtExchange.constructor', 'sdk_env'],
   ['hyperliquid', 'balance_state', 'BalanceHost', 21, 'hyperliquid.exchange', 'HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability', 'pair'],
   ['kraken', 'message_dispatch', 'MessageHost', 21, 'krakenspot.ws-private', 'KrakenSpotPrivateWebsocket.onMessage', 'clear_token'],
   ['lighter', 'exchange_state', 'ExchangeStateHost', 21, 'lighter.exchange', 'LighterExchange#rememberPlacedOrderHint', 'define_created_at'],

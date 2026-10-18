@@ -141,7 +141,7 @@ fn normalize_starbase_order_live_typescript_contract() {
                 panic!("numeric-bits case should normalize as ready");
             };
             for (path, actual) in [
-                ("ok.value.price", value.price),
+                ("ok.value.price", value.price.to_number()),
                 ("ok.value.amount", value.amount),
                 ("ok.value.filled", value.filled),
                 ("ok.value.remaining", value.remaining),

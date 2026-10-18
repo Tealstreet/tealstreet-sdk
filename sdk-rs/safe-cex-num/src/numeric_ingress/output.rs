@@ -92,8 +92,12 @@ impl ser::Serializer for Capture {
     fn serialize_unit(self) -> Result<Self::Ok, Error> {
         Ok(JsNumberInput(Node::Null))
     }
-    fn serialize_unit_struct(self, _: &'static str) -> Result<Self::Ok, Error> {
-        self.serialize_unit()
+    fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Error> {
+        if name == safe_cex_types::model_field::UNDEFINED {
+            Ok(JsNumberInput(Node::Undefined))
+        } else {
+            self.serialize_unit()
+        }
     }
     fn serialize_unit_variant(
         self,
@@ -294,6 +298,13 @@ impl SerializeStruct for Object {
         value: &T,
     ) -> Result<(), Error> {
         self.values.push((key.to_owned(), capture(value)?));
+        Ok(())
+    }
+    fn skip_field(&mut self, key: &'static str) -> Result<(), Error> {
+        if self.name == Some(safe_cex_types::model_field::MODEL_RECORD) {
+            self.values
+                .push((key.to_owned(), JsNumberInput(Node::Undefined)));
+        }
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Error> {

@@ -1,4 +1,7 @@
 //! Concrete AsterDEX exchange assembled from the ported bodies and shared runtime.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "native_emitter_tests.rs"]
+mod native_emitter_tests;
 use crate::binding::{self, Rt};
 use safe_cex_exchange::{
     capabilities::{
@@ -15,7 +18,11 @@ use safe_cex_exchange::{
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
-use safe_cex_types::*;
+use safe_cex_types::{
+    Candle, ExchangeAccount, ExchangeName, ExchangeOptions, Execution, ExecutionsOptions, Market,
+    OHLCVOptions, Order, OrderBook, Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts,
+    ValidateAccountResult,
+};
 use std::rc::Rc;
 
 /// A client host is selected using each primary/secondary transport-options object.
@@ -127,7 +134,8 @@ impl Exchange for AsterDEXExchange {
         crate::exchange_helpers::can_sign(
             &self.base().options(),
             &self.rt.shared.extra.version,
-            self.base().options().remote_signer.is_some(),
+            self.base().options().remote_signer.is_some()
+                || self.base().signers.remote_signer.is_some(),
         )
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {

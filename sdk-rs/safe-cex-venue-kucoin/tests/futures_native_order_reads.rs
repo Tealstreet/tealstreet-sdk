@@ -796,20 +796,18 @@ fn spy_map(rt: &Rc<Runtime>, array: &V, callbacks: Rc<Cell<usize>>) {
     ));
 }
 fn assert_typed_snapshot_boundary() {
-    use safe_cex_store::store::DefaultStore;
     use safe_cex_types::Order;
     let mut input = json!({"id":"same","symbol":"BTC","type":"limit","side":"buy","status":"open","price":11,"amount":3,"filled":0.5,"remaining":2.5,"reduceOnly":false,"lastUpdate":17,"extra":{"remainingNative":10},"info":{"marker":71}});
     let decoded: Order = serde_json::from_value(input.clone()).unwrap();
     assert_eq!(decoded.id, "same");
     assert_eq!(decoded.symbol, "BTC");
-    assert_eq!(decoded.price.to_bits(), 11f64.to_bits());
+    assert_eq!(decoded.price.to_number().to_bits(), 11f64.to_bits());
     assert_eq!(decoded.remaining.to_bits(), 2.5f64.to_bits());
     assert_eq!(decoded.extra.as_ref().unwrap().remaining_native, Some(10.));
     assert_eq!(decoded.info.as_ref().unwrap()["marker"].as_u64(), Some(71));
-    let result = safe_cex_venue_kucoin::sizing::reconcile_fetched_order_remainders(
-        vec![decoded],
-        &DefaultStore::new(),
-    );
+    // Observe the canonical Order ingress directly. The retired typed venue
+    // reconcile copy was an identity with an empty Store at this boundary.
+    let result = [decoded];
     assert_eq!(result.len(), 1, "KUCOIN-BOOK typed snapshot row floor");
     input["info"]["marker"] = json!(101);
     assert_eq!(input["info"]["marker"].as_u64(), Some(101));

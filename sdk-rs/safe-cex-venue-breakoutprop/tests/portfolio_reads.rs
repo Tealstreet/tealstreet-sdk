@@ -56,7 +56,7 @@ fn balance(b: &Balance) -> Value {
     v
 }
 fn order(o: &Order) -> Value {
-    let mut v = json!({"id":o.id,"status":o.status,"symbol":o.symbol,"type":o.r#type,"side":o.side,"price":number(o.price),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
+    let mut v = json!({"id":o.id,"status":o.status,"symbol":o.symbol,"type":o.r#type,"side":o.side,"price":number(o.price.to_number()),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
     optional(&mut v, "info", o.info.as_ref().map(observe));
     optional(&mut v, "timeInForce", o.time_in_force.map(|x| json!(x)));
     v
@@ -166,13 +166,16 @@ fn actual_portfolio_reads() {
                         &store,
                         &|ms| ms,
                         symbols.as_deref(),
+                        &log,
                         |e| e.message,
                     )),
                     |v| Value::Array(v.iter().map(position).collect()),
                     &errors,
                 ),
                 "fetchOpenPositions" => result(
-                    run(fetch_open_positions(fetch, &store, &|ms| ms, |e| e.message)),
+                    run(fetch_open_positions(fetch, &store, &|ms| ms, &log, |e| {
+                        e.message
+                    })),
                     |v| {
                         v.map(|p| Value::Array(p.iter().map(position).collect()))
                             .unwrap_or(json!({"$undefined":true}))
@@ -190,20 +193,6 @@ fn actual_portfolio_reads() {
                 _ => unreachable!(),
             };
             assert_eq!(calls.get(), 1, "one_raw_request_{method}");
-            if case["name"] == "missing-unused-account" {
-                assert!(
-                    actual["error"]
-                        .as_str()
-                        .unwrap()
-                        .contains("missing field `account`"),
-                    "read_declared_record_{method}"
-                );
-                assert!(
-                    case["expected"][method].get("ok").is_some(),
-                    "source_read_missing_unused_{method}"
-                );
-                continue;
-            }
             assert_native_cardinality(
                 &actual,
                 &case["expected"][method],
@@ -245,11 +234,11 @@ fn original_rejection_identity_and_eager_call() {
                 Box::pin(async move { f.await.map(|_| ()) })
             }
             "fetchPositions" => {
-                let f = fetch_positions(fetch, &store, &|ms| ms, None, identity);
+                let f = fetch_positions(fetch, &store, &|ms| ms, None, &|_| Ok(()), identity);
                 Box::pin(async move { f.await.map(|_| ()) })
             }
             "fetchOpenPositions" => {
-                let f = fetch_open_positions(fetch, &store, &|ms| ms, identity);
+                let f = fetch_open_positions(fetch, &store, &|ms| ms, &|_| Ok(()), identity);
                 Box::pin(async move { f.await.map(|_| ()) })
             }
             "fetchOrders" => {
@@ -289,11 +278,13 @@ fn deferred_fallback_reads_latest_store() {
                     Box::pin(async move { json!(f.await.unwrap().free) })
                 }
                 "fetchPositions" => {
-                    let f = fetch_positions(fetch, &store, &|ms| ms, None, |e| e.message);
+                    let f =
+                        fetch_positions(fetch, &store, &|ms| ms, None, &|_| Ok(()), |e| e.message);
                     Box::pin(async move { json!(f.await.unwrap()[0].symbol) })
                 }
                 "fetchOpenPositions" => {
-                    let f = fetch_open_positions(fetch, &store, &|ms| ms, |e| e.message);
+                    let f =
+                        fetch_open_positions(fetch, &store, &|ms| ms, &|_| Ok(()), |e| e.message);
                     Box::pin(async move { json!(f.await.unwrap().unwrap()[0].symbol) })
                 }
                 "fetchOrders" => {
@@ -345,18 +336,39 @@ fn inherited_and_utf8_read_boundaries() {
         let method = case["method"].as_str().unwrap();
         let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
         let fetch = || std::future::ready(Ok::<_, String>(Some(input.clone())));
+        if method == "fetchBalance" {
+            let balance = run(fetch_balance(fetch, &store, &|ms| ms, &|_| Ok(()), |e| {
+                e.message
+            }))
+            .unwrap();
+            assert_eq!(
+                (balance.total, balance.used, balance.upnl, balance.free),
+                (131.25, 169.0, 0.0, -37.75)
+            );
+            continue;
+        }
         let error = match method {
             "fetchBalance" => run(fetch_balance(fetch, &store, &|ms| ms, &|_| Ok(()), |e| {
                 e.message
             }))
             .unwrap_err(),
-            "fetchPositions" => run(fetch_positions(fetch, &store, &|ms| ms, None, |e| {
-                e.message
-            }))
+            "fetchPositions" => run(fetch_positions(
+                fetch,
+                &store,
+                &|ms| ms,
+                Some(&["BTCUSD".into()]),
+                &|_| Ok(()),
+                |e| e.message,
+            ))
             .unwrap_err(),
-            "fetchOpenPositions" => {
-                run(fetch_open_positions(fetch, &store, &|ms| ms, |e| e.message)).unwrap_err()
-            }
+            "fetchOpenPositions" => run(fetch_open_positions(
+                fetch,
+                &store,
+                &|ms| ms,
+                &|_| Ok(()),
+                |e| e.message,
+            ))
+            .unwrap_err(),
             "fetchOrders" => run(fetch_orders(fetch, &store, &|ms| ms, &|_| Ok(()), |e| {
                 e.message
             }))
@@ -427,6 +439,7 @@ fn owned_read_info_and_fallbacks() {
                 &store,
                 &|ms| ms,
                 Some(&["BTCUSD".into()]),
+                &|_| Ok(()),
                 |e| e.message,
             ))
             .unwrap()
@@ -435,16 +448,20 @@ fn owned_read_info_and_fallbacks() {
             .unwrap()
             .info
             .unwrap(),
-            "fetchOpenPositions" => {
-                run(fetch_open_positions(fetch, &store, &|ms| ms, |e| e.message))
-                    .unwrap()
-                    .unwrap()
-                    .into_iter()
-                    .next()
-                    .unwrap()
-                    .info
-                    .unwrap()
-            }
+            "fetchOpenPositions" => run(fetch_open_positions(
+                fetch,
+                &store,
+                &|ms| ms,
+                &|_| Ok(()),
+                |e| e.message,
+            ))
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .info
+            .unwrap(),
             "fetchOrders" => run(fetch_orders(fetch, &store, &|ms| ms, &|_| Ok(()), |e| {
                 e.message
             }))
@@ -506,11 +523,25 @@ fn owned_read_info_and_fallbacks() {
             );
         } else {
             let mut fallback = if method == "fetchPositions" {
-                run(fetch_positions(null, &store, &|ms| ms, None, |e| e.message)).unwrap()
+                run(fetch_positions(
+                    null,
+                    &store,
+                    &|ms| ms,
+                    None,
+                    &|_| Ok(()),
+                    |e| e.message,
+                ))
+                .unwrap()
             } else {
-                run(fetch_open_positions(null, &store, &|ms| ms, |e| e.message))
-                    .unwrap()
-                    .unwrap()
+                run(fetch_open_positions(
+                    null,
+                    &store,
+                    &|ms| ms,
+                    &|_| Ok(()),
+                    |e| e.message,
+                ))
+                .unwrap()
+                .unwrap()
             };
             let pos = run(fetch_open_positions(
                 || {
@@ -520,6 +551,7 @@ fn owned_read_info_and_fallbacks() {
                 },
                 &store,
                 &|ms| ms,
+                &|_| Ok(()),
                 |e| e.message,
             ))
             .unwrap()
@@ -596,11 +628,12 @@ fn abandoned_promise_vs_dropped_future() {
                     Box::pin(async move { f.await.map(|_| ()) })
                 }
                 "fetchPositions" => {
-                    let f = fetch_positions(fetch, &store, &local, None, |e| e.message);
+                    let f =
+                        fetch_positions(fetch, &store, &local, None, &|_| Ok(()), |e| e.message);
                     Box::pin(async move { f.await.map(|_| ()) })
                 }
                 "fetchOpenPositions" => {
-                    let f = fetch_open_positions(fetch, &store, &local, |e| e.message);
+                    let f = fetch_open_positions(fetch, &store, &local, &|_| Ok(()), |e| e.message);
                     Box::pin(async move { f.await.map(|_| ()) })
                 }
                 "fetchOrders" => {

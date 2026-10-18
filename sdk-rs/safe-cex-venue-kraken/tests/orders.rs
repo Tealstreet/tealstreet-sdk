@@ -67,7 +67,11 @@ fn assert_order(native: &Order, expected: &Value) {
     assert_eq!(native.status, OrderStatus::Open, "ORDERS native status");
     assert_eq!(expected["status"], "open");
     assert_eq!(
-        match native.r#type {
+        match native
+            .r#type
+            .value()
+            .expect("present source enum in fixture")
+        {
             OrderType::Limit => "limit",
             OrderType::Market => "market",
             OrderType::Conditional => "conditional",
@@ -79,7 +83,7 @@ fn assert_order(native: &Order, expected: &Value) {
         "ORDERS native type"
     );
     assert_eq!(
-        match native.side {
+        match native.side.value().expect("present source enum in fixture") {
             OrderSide::Buy => "buy",
             OrderSide::Sell => "sell",
         },
@@ -87,7 +91,7 @@ fn assert_order(native: &Order, expected: &Value) {
         "ORDERS native side"
     );
     for (key, value) in [
-        ("price", native.price),
+        ("price", native.price.to_number()),
         ("amount", native.amount),
         ("filled", native.filled),
         ("remaining", native.remaining),
@@ -114,8 +118,14 @@ fn assert_order(native: &Order, expected: &Value) {
         expected["timeInForce"],
         "ORDERS native timeInForce"
     );
-    trigger(native.sl_trigger_type, expected.get("slTriggerType"));
-    trigger(native.tp_trigger_type, expected.get("tpTriggerType"));
+    trigger(
+        (native.sl_trigger_type).into_value(),
+        expected.get("slTriggerType"),
+    );
+    trigger(
+        (native.tp_trigger_type).into_value(),
+        expected.get("tpTriggerType"),
+    );
     assert!(
         native.parent_id.is_none()
             && native.close.is_none()
@@ -129,34 +139,34 @@ fn assert_order(native: &Order, expected: &Value) {
 }
 fn fallback(tag: &str, n: f64) -> Order {
     Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id: tag.into(),
-        parent_id: None,
-        status: OrderStatus::Open,
+        parent_id: (None).into(),
+        status: safe_cex_types::ModelField::Value(OrderStatus::Open),
         symbol: format!("STORE-{tag}"),
-        r#type: OrderType::Limit,
-        side: OrderSide::Buy,
-        price: n + 1.25,
+        r#type: safe_cex_types::ModelField::Value(OrderType::Limit),
+        side: safe_cex_types::ModelField::Value(OrderSide::Buy),
+        price: (n + 1.25).into(),
         amount: n + 2.5,
         filled: n + 3.75,
         remaining: n + 4.125,
-        reduce_only: true,
-        close: None,
-        info: Some(json!({"tag":tag})),
-        time_in_force: Some(OrderTimeInForce::PostOnly),
+        reduce_only: true.into(),
+        close: (None).into(),
+        info: (Some(json!({"tag":tag}))).into(),
+        time_in_force: (Some(OrderTimeInForce::PostOnly)).into(),
         last_update: n + 5.5,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
     }
 }
 fn error(name: &str, message: &str, pointer: &Cell<usize>) -> ExchangeError {
     let mut error = ExchangeError::new(message);
     error.name = name.into();
-    error.metadata.code = Some(json!(name));
+    error.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::str(name));
     pointer.set((&*error.metadata as *const _) as usize);
     error
 }

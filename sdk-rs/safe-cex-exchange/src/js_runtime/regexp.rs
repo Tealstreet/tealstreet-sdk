@@ -52,7 +52,7 @@ fn is_line_terminator(c: u16) -> bool {
     matches!(c, 0x0A | 0x0D | 0x2028 | 0x2029)
 }
 
-fn is_space(c: u16) -> bool {
+pub(super) fn is_space(c: u16) -> bool {
     matches!(
         c,
         0x09..=0x0D | 0x20 | 0xA0 | 0x1680 | 0x2000..=0x200A | 0x2028 | 0x2029 | 0x202F | 0x205F
@@ -774,19 +774,23 @@ fn search(program: &Program, this: &Js, input: &[u16]) -> Result<Js, Thrown> {
     Ok(Js::Number(found.map_or(-1.0, |f| f.start as f64)))
 }
 
+/// Split uses ToUint32, including modulo reduction before any integer cast.
+pub(super) fn split_limit(limit: &Js) -> Result<usize, Thrown> {
+    if limit.is_undefined() {
+        return Ok(u32::MAX as usize);
+    }
+    let number = limit.to_number()?;
+    Ok(if number.is_finite() {
+        number.trunc().rem_euclid(4_294_967_296.0) as usize
+    } else {
+        0
+    })
+}
+
 /// RegExp.prototype[@@split]: a sticky match at each position, captures
 /// spliced into the result, honouring the ToUint32 limit.
 fn split(program: &Program, input: &[u16], limit: &Js) -> Result<Js, Thrown> {
-    let limit = if limit.is_undefined() {
-        u32::MAX as usize
-    } else {
-        let n = limit.to_number()?;
-        if n.is_finite() {
-            (n.trunc() as i64).rem_euclid(1 << 32) as usize
-        } else {
-            0
-        }
-    };
+    let limit = split_limit(limit)?;
     let mut out = vec![];
     if limit == 0 {
         return Ok(Js::array(out));

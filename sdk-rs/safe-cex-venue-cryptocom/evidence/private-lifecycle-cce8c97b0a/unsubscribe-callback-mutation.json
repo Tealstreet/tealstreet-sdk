@@ -1,6 +1,0 @@
-{
-  "base_sha": "cce8c97b0a0c965a25c360d8928827888eaf03a1",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n@@ -263,7 +263,7 @@\n             nonce: transport.clock()?,\n         };\n         transport.send(prepared, frame)?;\n-        channels.for_each(|channel| Ok(values(state).remove(&channel)))?;\n+        channels.for_each(|channel| { values(state).remove(&channel); Ok(false) })?;\n     }\n     Ok(())\n }\n",
-  "expected_named_assertion": "CRYPTOCOM-LIFECYCLE-NATIVE-CALLBACK-RESULT unsubscribe-custom-callback-results immediate"
-}

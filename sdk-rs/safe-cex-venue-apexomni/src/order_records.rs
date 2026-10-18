@@ -263,60 +263,48 @@ pub struct CreateOrderOptionsObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broker_id: Option<String>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "CreateOrderOptionsObject")]
+struct CreateOrderOptionsObjectWire {
+    #[serde(rename = "clientOrderId")]
+    client_order_id: String,
+    #[serde(rename = "positionId")]
+    position_id: String,
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "side")]
+    side: OrderSide,
+    #[serde(rename = "type")]
+    r#type: CreateOrderKind,
+    #[serde(rename = "size")]
+    size: String,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "limitFee")]
+    limit_fee: String,
+    #[serde(rename = "timeInForce")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    time_in_force: Option<CreateTimeInForce>,
+    #[serde(rename = "triggerPrice")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    trigger_price: Option<String>,
+    #[serde(rename = "trailingPercent")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    trailing_percent: Option<String>,
+    #[serde(rename = "reduceOnly")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    reduce_only: Option<bool>,
+    #[serde(rename = "brokerId")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    broker_id: Option<String>,
+}
 impl<'de> serde::Deserialize<'de> for CreateOrderOptionsObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "clientOrderId")]
-            client_order_id: String,
-            #[serde(rename = "positionId")]
-            position_id: String,
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "side")]
-            side: OrderSide,
-            #[serde(rename = "type")]
-            r#type: CreateOrderKind,
-            #[serde(rename = "size")]
-            size: String,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "limitFee")]
-            limit_fee: String,
-            #[serde(rename = "timeInForce")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            time_in_force: Option<CreateTimeInForce>,
-            #[serde(rename = "triggerPrice")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            trigger_price: Option<String>,
-            #[serde(rename = "trailingPercent")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            trailing_percent: Option<String>,
-            #[serde(rename = "reduceOnly")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            reduce_only: Option<bool>,
-            #[serde(rename = "brokerId")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            broker_id: Option<String>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    client_order_id: fields.client_order_id,
-                    position_id: fields.position_id,
-                    symbol: fields.symbol,
-                    side: fields.side,
-                    r#type: fields.r#type,
-                    size: fields.size,
-                    price: fields.price,
-                    limit_fee: fields.limit_fee,
-                    time_in_force: fields.time_in_force,
-                    trigger_price: fields.trigger_price,
-                    trailing_percent: fields.trailing_percent,
-                    reduce_only: fields.reduce_only,
-                    broker_id: fields.broker_id,
-                })
+                CreateOrderOptionsObjectWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -373,76 +361,57 @@ pub struct OrderResponseObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_reason: Option<Option<String>>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "OrderResponseObject")]
+struct OrderResponseObjectWire {
+    #[serde(rename = "id")]
+    id: String,
+    #[serde(rename = "clientId")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    client_id: Option<String>,
+    #[serde(rename = "accountId")]
+    account_id: String,
+    #[serde(rename = "symbol")]
+    symbol: ApexMarket,
+    #[serde(rename = "side")]
+    side: OrderSide,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "triggerPrice")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    trigger_price: Option<Option<String>>,
+    #[serde(rename = "trailingPercent")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    trailing_percent: Option<Option<String>>,
+    #[serde(rename = "size")]
+    size: String,
+    #[serde(rename = "remainingSize")]
+    remaining_size: String,
+    #[serde(rename = "type")]
+    r#type: OrderType,
+    #[serde(rename = "createdAt")]
+    created_at: Iso8601,
+    #[serde(rename = "unfillableAt")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    unfillable_at: Option<Option<Iso8601>>,
+    #[serde(rename = "expiresAt")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    expires_at: Option<Iso8601>,
+    #[serde(rename = "status")]
+    status: OrderStatus,
+    #[serde(rename = "timeInForce")]
+    time_in_force: TimeInForce,
+    #[serde(rename = "postOnly")]
+    post_only: bool,
+    #[serde(rename = "cancelReason")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    cancel_reason: Option<Option<String>>,
+}
 impl<'de> serde::Deserialize<'de> for OrderResponseObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "id")]
-            id: String,
-            #[serde(rename = "clientId")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            client_id: Option<String>,
-            #[serde(rename = "accountId")]
-            account_id: String,
-            #[serde(rename = "symbol")]
-            symbol: ApexMarket,
-            #[serde(rename = "side")]
-            side: OrderSide,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "triggerPrice")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            trigger_price: Option<Option<String>>,
-            #[serde(rename = "trailingPercent")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            trailing_percent: Option<Option<String>>,
-            #[serde(rename = "size")]
-            size: String,
-            #[serde(rename = "remainingSize")]
-            remaining_size: String,
-            #[serde(rename = "type")]
-            r#type: OrderType,
-            #[serde(rename = "createdAt")]
-            created_at: Iso8601,
-            #[serde(rename = "unfillableAt")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            unfillable_at: Option<Option<Iso8601>>,
-            #[serde(rename = "expiresAt")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            expires_at: Option<Iso8601>,
-            #[serde(rename = "status")]
-            status: OrderStatus,
-            #[serde(rename = "timeInForce")]
-            time_in_force: TimeInForce,
-            #[serde(rename = "postOnly")]
-            post_only: bool,
-            #[serde(rename = "cancelReason")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            cancel_reason: Option<Option<String>>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    id: fields.id,
-                    client_id: fields.client_id,
-                    account_id: fields.account_id,
-                    symbol: fields.symbol,
-                    side: fields.side,
-                    price: fields.price,
-                    trigger_price: fields.trigger_price,
-                    trailing_percent: fields.trailing_percent,
-                    size: fields.size,
-                    remaining_size: fields.remaining_size,
-                    r#type: fields.r#type,
-                    created_at: fields.created_at,
-                    unfillable_at: fields.unfillable_at,
-                    expires_at: fields.expires_at,
-                    status: fields.status,
-                    time_in_force: fields.time_in_force,
-                    post_only: fields.post_only,
-                    cancel_reason: fields.cancel_reason,
-                })
+                OrderResponseObjectWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }

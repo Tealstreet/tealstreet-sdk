@@ -37,7 +37,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("REST operation must not detach work")
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -47,7 +47,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -247,7 +251,7 @@ fn maintained_typescript_response_body_lookup_and_sequential_placement() {
                     return Ok(vec![]);
                 };
                 let mut order:Order=serde_json::from_value(json!({"id":"mapped-order","status":"open","symbol":"BTCUSDT","type":"limit","side":"buy","price":1,"amount":1,"filled":0,"remaining":1,"reduceOnly":false,"lastUpdate":123})).unwrap();
-                order.info = Some(row.clone());
+                order.info = (Some(row.clone())).into();
                 Ok(vec![order])
             };
             match ready(find_order_by_client_order_id(

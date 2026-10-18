@@ -127,41 +127,35 @@ fn for_each(_: &Realm, callee: V, f: &mut dyn FnMut(V) -> SigningResult<V>) -> S
     Ok(V::Undefined)
 }
 
-/// The values `for...of` / spread visit: arrays (holes as undefined), strings by
-/// code point, Set values and Map entries.
-fn iterate(value: &Js) -> Result<Vec<Js>, Thrown> {
-    Ok(match value {
-        Js::Array(_) => value.array_values().unwrap_or_default(),
-        Js::String(s) => char::decode_utf16(s.iter().copied())
-            .scan(0usize, |at, unit| {
-                let width = unit.as_ref().map_or(1, |c| c.len_utf16());
-                let piece = Js::utf16(&s[*at..*at + width]);
-                *at += width;
-                Some(piece)
-            })
-            .collect(),
-        Js::Set(items) => items.borrow().clone(),
-        Js::Map(entries) => entries
-            .borrow()
-            .iter()
-            .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-            .collect(),
-        other => {
-            return Err(Thrown::type_error(&format!(
-                "{} is not iterable",
-                other.to_display()
+// For-of consumes the shared GetIterator protocol lazily. IteratorStepValue
+// errors escape without closing; a body throw closes but keeps its original cause.
+fn for_of(_: &Realm, data: V, f: &mut dyn FnMut(V) -> SigningResult<()>) -> SigningResult<()> {
+    let iterator = js(to_js(&data).iterator())?;
+    let next = js(iterator.get("next"))?;
+    loop {
+        let step = js(next.call(iterator.clone(), vec![]))?;
+        if !step.is_object() {
+            return Err(to_signing(Thrown::type_error(
+                "Iterator result is not an object",
             )));
         }
-    })
-}
-fn for_of(_: &Realm, data: V, f: &mut dyn FnMut(V) -> SigningResult<()>) -> SigningResult<()> {
-    for item in js(iterate(&to_js(&data)))? {
-        f(to_account(&item))?;
+        if js(step.get("done"))?.truthy() {
+            return Ok(());
+        }
+        let value = js(step.get("value"))?;
+        if let Err(error) = f(to_account(&value)) {
+            // A throw completion wins over return getter/call/result failures.
+            if let Ok(method) = iterator.get("return") {
+                if !method.is_nullish() {
+                    let _ = method.call(iterator.clone(), vec![]);
+                }
+            }
+            return Err(error);
+        }
     }
-    Ok(())
 }
 fn spread(_: &Realm, value: V) -> SigningResult<Vec<V>> {
-    Ok(js(iterate(&to_js(&value)))?
+    Ok(js(to_js(&value).iterable_values())?
         .iter()
         .map(to_account)
         .collect())

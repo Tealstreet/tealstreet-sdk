@@ -46,3 +46,8 @@ pub mod tealstreet;
 pub mod tealstreet_time_source;
 pub mod transport_resolution;
 pub mod ws_relay;
+
+#[cfg(test)]
+mod accepted_frame_shapes;
+
+mod native_data;

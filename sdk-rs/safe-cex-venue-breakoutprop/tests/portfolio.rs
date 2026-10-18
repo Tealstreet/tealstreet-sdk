@@ -1,7 +1,7 @@
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref, js_value_as_f64};
 use safe_cex_store::{StoreUpdate, store::DefaultStore};
-use safe_cex_types::{Balance, Order, Position};
+use safe_cex_types::{Balance, ModelField, Order, Position};
 use safe_cex_venue_breakoutprop::portfolio::*;
 use serde_json::{Value, json};
 use std::{cell::RefCell, process::Command, sync::LazyLock};
@@ -41,8 +41,21 @@ fn optional(value: &mut Value, name: &str, field: Option<Value>) {
         value[name] = field;
     }
 }
+fn model_field<T>(
+    value: &mut Value,
+    name: &str,
+    field: &ModelField<T>,
+    observe: impl FnOnce(&T) -> Value,
+) {
+    match field {
+        ModelField::Absent => {}
+        ModelField::Undefined => value[name] = json!({"$undefined":true}),
+        ModelField::Value(field) => value[name] = observe(field),
+    }
+}
 fn position(p: &Position) -> Value {
-    let mut v = json!({"id":p.id,"symbol":p.symbol,"side":p.side,"entryPrice":number(p.entry_price),"notional":number(p.notional),"leverage":number(p.leverage),"unrealizedPnl":number(p.unrealized_pnl),"contracts":number(p.contracts),"liquidationPrice":number(p.liquidation_price)});
+    let mut v = json!({"id":p.id,"symbol":p.symbol,"entryPrice":number(p.entry_price),"notional":number(p.notional),"leverage":number(p.leverage),"unrealizedPnl":number(p.unrealized_pnl),"contracts":number(p.contracts),"liquidationPrice":number(p.liquidation_price)});
+    model_field(&mut v, "side", &p.side, |x| json!(x));
     optional(&mut v, "marginType", p.margin_type.map(|x| json!(x)));
     optional(&mut v, "positionMode", p.position_mode.map(|x| json!(x)));
     optional(&mut v, "marginSize", p.margin_size.map(number));
@@ -56,7 +69,11 @@ fn balance(b: &Balance) -> Value {
     v
 }
 fn order(o: &Order) -> Value {
-    let mut v = json!({"id":o.id,"status":o.status,"symbol":o.symbol,"type":o.r#type,"side":o.side,"price":number(o.price),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
+    let mut v = json!({"id":o.id,"symbol":o.symbol,"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
+    model_field(&mut v, "status", &o.status, |x| json!(x));
+    model_field(&mut v, "type", &o.r#type, |x| json!(x));
+    model_field(&mut v, "side", &o.side, |x| json!(x));
+    model_field(&mut v, "price", &o.price, |x| number(*x));
     optional(&mut v, "info", o.info.as_ref().map(observe));
     optional(&mut v, "timeInForce", o.time_in_force.map(|x| json!(x)));
     v
@@ -116,7 +133,7 @@ fn actual_portfolio_formatters() {
         actual.insert(
             "formatOpenPositions".into(),
             result(
-                format_open_positions(&input, &store, &|ms| ms),
+                format_open_positions(&input, &store, &|ms| ms, &log),
                 |v| {
                     v.map(|p| Value::Array(p.iter().map(position).collect()))
                         .unwrap_or(json!({"$undefined":true}))
@@ -127,7 +144,7 @@ fn actual_portfolio_formatters() {
         actual.insert(
             "formatPositions".into(),
             result(
-                format_positions(&input, &store, symbols.as_deref(), &|ms| ms),
+                format_positions(&input, &store, symbols.as_deref(), &|ms| ms, &log),
                 |p| Value::Array(p.iter().map(position).collect()),
                 &errors,
             ),
@@ -155,51 +172,15 @@ fn actual_portfolio_formatters() {
         }
         for (method, value) in actual {
             comparisons += 1;
-            if name == "missing-unused-account" {
-                assert!(
-                    value["error"]
-                        .as_str()
-                        .unwrap()
-                        .contains("missing field `account`"),
-                    "declared_record_boundary_{method}"
-                );
-                assert!(
-                    case["expected"][&method].get("ok").is_some(),
-                    "source_accepts_missing_unused_field_{method}"
-                );
-            } else if name == "unknown-position-side" && method != "formatOrders" {
-                assert_eq!(
-                    value["error"], "Unrepresentable position side: UNKNOWN",
-                    "closed_position_boundary"
-                );
-                if method == "formatOpenPositions" {
-                    assert_eq!(
-                        case["expected"][&method]["ok"][0]["side"]["$undefined"], true,
-                        "source_undefined_position_side"
-                    );
-                }
-            } else if name.starts_with("unknown-order-") && method == "formatOrders" {
-                let field = name.strip_prefix("unknown-order-").unwrap();
-                assert_eq!(
-                    value["error"],
-                    format!("Unrepresentable order {field}: UNKNOWN"),
-                    "closed_order_boundary"
-                );
-                assert_eq!(
-                    case["expected"][&method]["ok"][0][field]["$undefined"], true,
-                    "source_undefined_order_field"
-                );
-            } else {
-                assert_native_cardinality(
-                    &value,
-                    &case["expected"][&method],
-                    &format!("portfolio_{method}"),
-                );
-                assert_eq!(
-                    value, case["expected"][&method],
-                    "portfolio_{method}: {name}"
-                );
-            }
+            assert_native_cardinality(
+                &value,
+                &case["expected"][&method],
+                &format!("portfolio_{method}"),
+            );
+            assert_eq!(
+                value, case["expected"][&method],
+                "portfolio_{method}: {name}"
+            );
         }
     }
     assert_eq!(comparisons, 112, "COMPARISON-COUNT portfolio");
@@ -217,7 +198,7 @@ fn owned_info_boundary() {
                 .unwrap()
                 .info
                 .unwrap(),
-            "formatOpenPositions" => format_open_positions(&input, &store, &|ms| ms)
+            "formatOpenPositions" => format_open_positions(&input, &store, &|ms| ms, &|_| Ok(()))
                 .unwrap()
                 .unwrap()
                 .into_iter()
@@ -226,13 +207,15 @@ fn owned_info_boundary() {
                 .info
                 .unwrap(),
             "formatPositions" => {
-                format_positions(&input, &store, Some(&["BTCUSD".into()]), &|ms| ms)
-                    .unwrap()
-                    .into_iter()
-                    .next()
-                    .unwrap()
-                    .info
-                    .unwrap()
+                format_positions(&input, &store, Some(&["BTCUSD".into()]), &|ms| ms, &|_| {
+                    Ok(())
+                })
+                .unwrap()
+                .into_iter()
+                .next()
+                .unwrap()
+                .info
+                .unwrap()
             }
             "formatOrders" => format_orders(&input, &store, &|ms| ms, &|_| Ok(()))
                 .unwrap()
@@ -372,25 +355,30 @@ fn inherited_closed_output_boundary() {
             );
             let expected = format!("Unrepresentable position side: {key}");
             assert_eq!(
-                format_open_positions(&input, &store, &|ms| ms)
+                format_open_positions(&input, &store, &|ms| ms, &|_| Ok(()))
                     .unwrap_err()
                     .message,
                 expected,
                 "inherited_formatOpenPositions_{key}"
             );
-            assert_eq!(
-                format_balance(&input, &store, &|ms| ms, &|_| Ok(()))
-                    .unwrap_err()
-                    .message,
-                expected,
-                "inherited_formatBalance_{key}"
+            assert!(
+                format_balance(&input, &store, &|ms| ms, &|_| Ok(())).is_ok(),
+                "inherited side is unread by balance"
+            );
+            assert!(
+                format_positions(&input, &store, Some(&[]), &|ms| ms, &|_| Ok(()))
+                    .unwrap()
+                    .is_empty(),
+                "unselected inherited side never crosses the public Position boundary"
             );
             assert_eq!(
-                format_positions(&input, &store, None, &|ms| ms)
-                    .unwrap_err()
-                    .message,
+                format_positions(&input, &store, Some(&["BTCUSD".into()]), &|ms| ms, &|_| Ok(
+                    ()
+                ))
+                .unwrap_err()
+                .message,
                 expected,
-                "inherited_formatPositions_{key}"
+                "inherited selected position remains an explicit output refusal"
             );
         } else {
             assert_eq!(case["methodsSucceed"], json!(["formatOrders"]));
@@ -433,5 +421,78 @@ fn formatter_logger_failure_preserves_metadata() {
         };
         assert_eq!(result, Err(original), "LOGGER-PROPAGATION {method}");
         assert_eq!(calls.get(), 1, "LOGGER native calls {method}");
+    }
+}
+
+#[test]
+fn source_only_fields_and_unread_collections_match_typescript() {
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/portfolio_unused_fields_oracle.cjs"
+        ))
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.as_array().unwrap().len(), 82);
+    for case in cases.as_array().unwrap() {
+        let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        let store = DefaultStore::new();
+        let state: Value = serde_json::from_str(case["storeRaw"].as_str().unwrap()).unwrap();
+        let patch = StoreUpdate {
+            balance: Some(js_from_value_ref(&state["balance"]).unwrap()),
+            positions: Some(js_from_value_ref(&state["positions"]).unwrap()),
+            orders: Some(js_from_value_ref(&state["orders"]).unwrap()),
+            markets: Some(js_from_value_ref(&state["markets"]).unwrap()),
+            tickers: Some(js_from_value_ref(&state["tickers"]).unwrap()),
+            ..Default::default()
+        };
+        safe_cex_store::Store::update(&store, patch, false).unwrap();
+        let errors = RefCell::new(Vec::new());
+        let log = |message: &str| {
+            errors.borrow_mut().push(message.to_owned());
+            Ok(())
+        };
+        let method = case["method"].as_str().unwrap();
+        let actual = match method {
+            "formatBalance" => result(
+                format_balance(&input, &store, &|ms| ms, &log),
+                |b| balance(&b),
+                &errors,
+            ),
+            "formatOpenPositions" => result(
+                format_open_positions(&input, &store, &|ms| ms, &log),
+                |rows| {
+                    rows.map(|rows| Value::Array(rows.iter().map(position).collect()))
+                        .unwrap_or(json!({"$undefined":true}))
+                },
+                &errors,
+            ),
+            "formatPositions" => result(
+                format_positions(&input, &store, None, &|ms| ms, &log),
+                |rows| Value::Array(rows.iter().map(position).collect()),
+                &errors,
+            ),
+            "formatOrders" => result(
+                format_orders(&input, &store, &|ms| ms, &log),
+                |rows| {
+                    rows.map(|rows| Value::Array(rows.iter().map(order).collect()))
+                        .unwrap_or(json!({"$undefined":true}))
+                },
+                &errors,
+            ),
+            _ => panic!("source method inventory"),
+        };
+        assert_eq!(
+            actual, case["expected"],
+            "{method} malformedUnread={}",
+            case["malformedUnread"]
+        );
     }
 }

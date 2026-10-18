@@ -2,11 +2,21 @@
 
 Shared utilities for the Tealstreet CLI and web terminal.
 
+## Branding (`src/brand.ts`)
+
+Runtime text that names the product — REPL `help`, `accounts` guidance, the
+docs URL — reads `getCliBrand()`. The standalone CLI sets it at startup from
+its build-time brand; the web CLI keeps the Tealstreet default. Never put a
+product name or a `tealstreet.io` URL in a printed string directly; a
+whitelabel binary greps its help for the source brand. The routing flags are
+accepted as both `--proxy`/`--tunnel`/`--ws-route` and `--tealstreet-*` on
+every brand; `brand.flags` only decides which spelling help shows.
+
 ## Account commands
 
 - `accounts add` and `accounts import` must build/validate new accounts through
   `@tealstreet/safe-cex/src/accounts/buildExchangeAccountConfig` before
-  persisting. Manual add supports `--tealstreet-proxy` / `--proxy-region` so
+  persisting. Manual add supports `--proxy` (alias `--tealstreet-proxy`) / `--proxy-region` so
   standalone CLI can express the same saved account routing shape as the web
   "Use Tealstreet IPs" checkbox. Do not add CLI-local exchange credential
   schemas; derive required fields from safe-cex.

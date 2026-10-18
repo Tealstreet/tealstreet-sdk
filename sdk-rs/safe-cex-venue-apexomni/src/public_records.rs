@@ -33,58 +33,43 @@ pub struct TickerObject {
     #[serde(rename = "volume24h")]
     pub volume24h: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TickerObject")]
+struct TickerObjectWire {
+    #[serde(rename = "fundingRate")]
+    funding_rate: String,
+    #[serde(rename = "highPrice24h")]
+    high_price24h: String,
+    #[serde(rename = "indexPrice")]
+    index_price: String,
+    #[serde(rename = "lastPrice")]
+    last_price: String,
+    #[serde(rename = "lowPrice24h")]
+    low_price24h: String,
+    #[serde(rename = "nextFundingTime")]
+    next_funding_time: String,
+    #[serde(rename = "openInterest")]
+    open_interest: String,
+    #[serde(rename = "oraclePrice")]
+    oracle_price: String,
+    #[serde(rename = "predictedFundingRate")]
+    predicted_funding_rate: String,
+    #[serde(rename = "price24hPcnt")]
+    price24h_pcnt: String,
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "tradeCount")]
+    trade_count: String,
+    #[serde(rename = "turnover24h")]
+    turnover24h: String,
+    #[serde(rename = "volume24h")]
+    volume24h: String,
+}
 impl<'de> serde::Deserialize<'de> for TickerObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "fundingRate")]
-            funding_rate: String,
-            #[serde(rename = "highPrice24h")]
-            high_price24h: String,
-            #[serde(rename = "indexPrice")]
-            index_price: String,
-            #[serde(rename = "lastPrice")]
-            last_price: String,
-            #[serde(rename = "lowPrice24h")]
-            low_price24h: String,
-            #[serde(rename = "nextFundingTime")]
-            next_funding_time: String,
-            #[serde(rename = "openInterest")]
-            open_interest: String,
-            #[serde(rename = "oraclePrice")]
-            oracle_price: String,
-            #[serde(rename = "predictedFundingRate")]
-            predicted_funding_rate: String,
-            #[serde(rename = "price24hPcnt")]
-            price24h_pcnt: String,
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "tradeCount")]
-            trade_count: String,
-            #[serde(rename = "turnover24h")]
-            turnover24h: String,
-            #[serde(rename = "volume24h")]
-            volume24h: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    funding_rate: fields.funding_rate,
-                    high_price24h: fields.high_price24h,
-                    index_price: fields.index_price,
-                    last_price: fields.last_price,
-                    low_price24h: fields.low_price24h,
-                    next_funding_time: fields.next_funding_time,
-                    open_interest: fields.open_interest,
-                    oracle_price: fields.oracle_price,
-                    predicted_funding_rate: fields.predicted_funding_rate,
-                    price24h_pcnt: fields.price24h_pcnt,
-                    symbol: fields.symbol,
-                    trade_count: fields.trade_count,
-                    turnover24h: fields.turnover24h,
-                    volume24h: fields.volume24h,
-                })
+                TickerObjectWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -102,28 +87,23 @@ pub struct DepthObject {
     #[serde(rename = "u")]
     pub u: f64,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "DepthObject")]
+struct DepthObjectWire {
+    #[serde(rename = "a")]
+    a: Vec<Vec<String>>,
+    #[serde(rename = "b")]
+    b: Vec<Vec<String>>,
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "u")]
+    u: f64,
+}
 impl<'de> serde::Deserialize<'de> for DepthObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "a")]
-            a: Vec<Vec<String>>,
-            #[serde(rename = "b")]
-            b: Vec<Vec<String>>,
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "u")]
-            u: f64,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    a: fields.a,
-                    b: fields.b,
-                    s: fields.s,
-                    u: fields.u,
-                })
+                DepthObjectWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -145,34 +125,27 @@ pub struct TradeObject {
     #[serde(rename = "t")]
     pub t: f64,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TradeObject")]
+struct TradeObjectWire {
+    #[serde(rename = "i")]
+    i: String,
+    #[serde(rename = "p")]
+    p: String,
+    #[serde(rename = "S")]
+    side: String,
+    #[serde(rename = "v")]
+    v: String,
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "t")]
+    t: f64,
+}
 impl<'de> serde::Deserialize<'de> for TradeObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "i")]
-            i: String,
-            #[serde(rename = "p")]
-            p: String,
-            #[serde(rename = "S")]
-            side: String,
-            #[serde(rename = "v")]
-            v: String,
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "t")]
-            t: f64,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    i: fields.i,
-                    p: fields.p,
-                    side: fields.side,
-                    v: fields.v,
-                    s: fields.s,
-                    t: fields.t,
-                })
+                TradeObjectWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -200,43 +173,33 @@ pub struct KlineObject {
     #[serde(rename = "tr")]
     pub tr: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "KlineObject")]
+struct KlineObjectWire {
+    #[serde(rename = "s")]
+    s: String,
+    #[serde(rename = "i")]
+    i: String,
+    #[serde(rename = "t")]
+    t: f64,
+    #[serde(rename = "c")]
+    c: String,
+    #[serde(rename = "h")]
+    h: String,
+    #[serde(rename = "l")]
+    l: String,
+    #[serde(rename = "o")]
+    o: String,
+    #[serde(rename = "v")]
+    v: String,
+    #[serde(rename = "tr")]
+    tr: String,
+}
 impl<'de> serde::Deserialize<'de> for KlineObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "s")]
-            s: String,
-            #[serde(rename = "i")]
-            i: String,
-            #[serde(rename = "t")]
-            t: f64,
-            #[serde(rename = "c")]
-            c: String,
-            #[serde(rename = "h")]
-            h: String,
-            #[serde(rename = "l")]
-            l: String,
-            #[serde(rename = "o")]
-            o: String,
-            #[serde(rename = "v")]
-            v: String,
-            #[serde(rename = "tr")]
-            tr: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    s: fields.s,
-                    i: fields.i,
-                    t: fields.t,
-                    c: fields.c,
-                    h: fields.h,
-                    l: fields.l,
-                    o: fields.o,
-                    v: fields.v,
-                    tr: fields.tr,
-                })
+                KlineObjectWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -256,31 +219,27 @@ pub struct HistoryFundingObject {
     #[serde(rename = "fundingTimestamp")]
     pub funding_timestamp: f64,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "HistoryFundingObject")]
+struct HistoryFundingObjectWire {
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "rate")]
+    rate: String,
+    #[serde(rename = "price")]
+    price: String,
+    #[serde(rename = "fundingTime")]
+    funding_time: f64,
+    #[serde(rename = "fundingTimestamp")]
+    funding_timestamp: f64,
+}
 impl<'de> serde::Deserialize<'de> for HistoryFundingObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "rate")]
-            rate: String,
-            #[serde(rename = "price")]
-            price: String,
-            #[serde(rename = "fundingTime")]
-            funding_time: f64,
-            #[serde(rename = "fundingTimestamp")]
-            funding_timestamp: f64,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    symbol: fields.symbol,
-                    rate: fields.rate,
-                    price: fields.price,
-                    funding_time: fields.funding_time,
-                    funding_timestamp: fields.funding_timestamp,
-                })
+                HistoryFundingObjectWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -301,34 +260,27 @@ pub struct CurrencyObject {
     #[serde(rename = "iconUrl")]
     pub icon_url: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "CurrencyObject")]
+struct CurrencyObjectWire {
+    #[serde(rename = "id")]
+    id: String,
+    #[serde(rename = "starkExAssetId")]
+    stark_ex_asset_id: String,
+    #[serde(rename = "starkExResolution")]
+    stark_ex_resolution: String,
+    #[serde(rename = "stepSize")]
+    step_size: String,
+    #[serde(rename = "showStep")]
+    show_step: String,
+    #[serde(rename = "iconUrl")]
+    icon_url: String,
+}
 impl<'de> serde::Deserialize<'de> for CurrencyObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "id")]
-            id: String,
-            #[serde(rename = "starkExAssetId")]
-            stark_ex_asset_id: String,
-            #[serde(rename = "starkExResolution")]
-            stark_ex_resolution: String,
-            #[serde(rename = "stepSize")]
-            step_size: String,
-            #[serde(rename = "showStep")]
-            show_step: String,
-            #[serde(rename = "iconUrl")]
-            icon_url: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    id: fields.id,
-                    stark_ex_asset_id: fields.stark_ex_asset_id,
-                    stark_ex_resolution: fields.stark_ex_resolution,
-                    step_size: fields.step_size,
-                    show_step: fields.show_step,
-                    icon_url: fields.icon_url,
-                })
+                CurrencyObjectWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -374,70 +326,51 @@ pub struct GlobalObject {
     #[serde(rename = "bybitWithdrawL2Key")]
     pub bybit_withdraw_l2_key: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "GlobalObject")]
+struct GlobalObjectWire {
+    #[serde(rename = "feeAccountId")]
+    fee_account_id: String,
+    #[serde(rename = "feeAccountL2Key")]
+    fee_account_l2_key: String,
+    #[serde(rename = "starkExCollateralCurrencyId")]
+    stark_ex_collateral_currency_id: String,
+    #[serde(rename = "starkExFundingValidityPeriod")]
+    stark_ex_funding_validity_period: f64,
+    #[serde(rename = "starkExMaxFundingRate")]
+    stark_ex_max_funding_rate: String,
+    #[serde(rename = "starkExOrdersTreeHeight")]
+    stark_ex_orders_tree_height: f64,
+    #[serde(rename = "starkExPositionsTreeHeight")]
+    stark_ex_positions_tree_height: f64,
+    #[serde(rename = "starkExPriceValidityPeriod")]
+    stark_ex_price_validity_period: f64,
+    #[serde(rename = "starkExContractAddress")]
+    stark_ex_contract_address: String,
+    #[serde(rename = "registerEnvId")]
+    register_env_id: f64,
+    #[serde(rename = "crossChainAccountId")]
+    cross_chain_account_id: String,
+    #[serde(rename = "crossChainL2Key")]
+    cross_chain_l2_key: String,
+    #[serde(rename = "fastWithdrawAccountId")]
+    fast_withdraw_account_id: String,
+    #[serde(rename = "fastWithdrawFactRegisterAddress")]
+    fast_withdraw_fact_register_address: String,
+    #[serde(rename = "fastWithdrawL2Key")]
+    fast_withdraw_l2_key: String,
+    #[serde(rename = "fastWithdrawMaxAmount")]
+    fast_withdraw_max_amount: String,
+    #[serde(rename = "bybitWithdrawAccountId")]
+    bybit_withdraw_account_id: String,
+    #[serde(rename = "bybitWithdrawL2Key")]
+    bybit_withdraw_l2_key: String,
+}
 impl<'de> serde::Deserialize<'de> for GlobalObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "feeAccountId")]
-            fee_account_id: String,
-            #[serde(rename = "feeAccountL2Key")]
-            fee_account_l2_key: String,
-            #[serde(rename = "starkExCollateralCurrencyId")]
-            stark_ex_collateral_currency_id: String,
-            #[serde(rename = "starkExFundingValidityPeriod")]
-            stark_ex_funding_validity_period: f64,
-            #[serde(rename = "starkExMaxFundingRate")]
-            stark_ex_max_funding_rate: String,
-            #[serde(rename = "starkExOrdersTreeHeight")]
-            stark_ex_orders_tree_height: f64,
-            #[serde(rename = "starkExPositionsTreeHeight")]
-            stark_ex_positions_tree_height: f64,
-            #[serde(rename = "starkExPriceValidityPeriod")]
-            stark_ex_price_validity_period: f64,
-            #[serde(rename = "starkExContractAddress")]
-            stark_ex_contract_address: String,
-            #[serde(rename = "registerEnvId")]
-            register_env_id: f64,
-            #[serde(rename = "crossChainAccountId")]
-            cross_chain_account_id: String,
-            #[serde(rename = "crossChainL2Key")]
-            cross_chain_l2_key: String,
-            #[serde(rename = "fastWithdrawAccountId")]
-            fast_withdraw_account_id: String,
-            #[serde(rename = "fastWithdrawFactRegisterAddress")]
-            fast_withdraw_fact_register_address: String,
-            #[serde(rename = "fastWithdrawL2Key")]
-            fast_withdraw_l2_key: String,
-            #[serde(rename = "fastWithdrawMaxAmount")]
-            fast_withdraw_max_amount: String,
-            #[serde(rename = "bybitWithdrawAccountId")]
-            bybit_withdraw_account_id: String,
-            #[serde(rename = "bybitWithdrawL2Key")]
-            bybit_withdraw_l2_key: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    fee_account_id: fields.fee_account_id,
-                    fee_account_l2_key: fields.fee_account_l2_key,
-                    stark_ex_collateral_currency_id: fields.stark_ex_collateral_currency_id,
-                    stark_ex_funding_validity_period: fields.stark_ex_funding_validity_period,
-                    stark_ex_max_funding_rate: fields.stark_ex_max_funding_rate,
-                    stark_ex_orders_tree_height: fields.stark_ex_orders_tree_height,
-                    stark_ex_positions_tree_height: fields.stark_ex_positions_tree_height,
-                    stark_ex_price_validity_period: fields.stark_ex_price_validity_period,
-                    stark_ex_contract_address: fields.stark_ex_contract_address,
-                    register_env_id: fields.register_env_id,
-                    cross_chain_account_id: fields.cross_chain_account_id,
-                    cross_chain_l2_key: fields.cross_chain_l2_key,
-                    fast_withdraw_account_id: fields.fast_withdraw_account_id,
-                    fast_withdraw_fact_register_address: fields.fast_withdraw_fact_register_address,
-                    fast_withdraw_l2_key: fields.fast_withdraw_l2_key,
-                    fast_withdraw_max_amount: fields.fast_withdraw_max_amount,
-                    bybit_withdraw_account_id: fields.bybit_withdraw_account_id,
-                    bybit_withdraw_l2_key: fields.bybit_withdraw_l2_key,
-                })
+                GlobalObjectWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -515,118 +448,85 @@ pub struct PerpetualContractObject {
     #[serde(rename = "maxPositionValue")]
     pub max_position_value: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "PerpetualContractObject")]
+struct PerpetualContractObjectWire {
+    #[serde(rename = "baselinePositionValue")]
+    baseline_position_value: String,
+    #[serde(rename = "crossId")]
+    cross_id: f64,
+    #[serde(rename = "crossSymbolId")]
+    cross_symbol_id: f64,
+    #[serde(rename = "crossSymbolName")]
+    cross_symbol_name: String,
+    #[serde(rename = "digitMerge")]
+    digit_merge: String,
+    #[serde(rename = "displayMaxLeverage")]
+    display_max_leverage: String,
+    #[serde(rename = "displayMinLeverage")]
+    display_min_leverage: String,
+    #[serde(rename = "enableDisplay")]
+    enable_display: bool,
+    #[serde(rename = "enableOpenPosition")]
+    enable_open_position: bool,
+    #[serde(rename = "enableTrade")]
+    enable_trade: bool,
+    #[serde(rename = "fundingImpactMarginNotional")]
+    funding_impact_margin_notional: String,
+    #[serde(rename = "fundingInterestRate")]
+    funding_interest_rate: String,
+    #[serde(rename = "incrementalInitialMarginRate")]
+    incremental_initial_margin_rate: String,
+    #[serde(rename = "incrementalMaintenanceMarginRate")]
+    incremental_maintenance_margin_rate: String,
+    #[serde(rename = "incrementalPositionValue")]
+    incremental_position_value: String,
+    #[serde(rename = "initialMarginRate")]
+    initial_margin_rate: String,
+    #[serde(rename = "maintenanceMarginRate")]
+    maintenance_margin_rate: String,
+    #[serde(rename = "maxOrderSize")]
+    max_order_size: String,
+    #[serde(rename = "maxPositionSize")]
+    max_position_size: String,
+    #[serde(rename = "minOrderSize")]
+    min_order_size: String,
+    #[serde(rename = "maxMarketPriceRange")]
+    max_market_price_range: String,
+    #[serde(rename = "settleCurrencyId")]
+    settle_currency_id: String,
+    #[serde(rename = "starkExOraclePriceQuorum")]
+    stark_ex_oracle_price_quorum: String,
+    #[serde(rename = "starkExResolution")]
+    stark_ex_resolution: String,
+    #[serde(rename = "starkExRiskFactor")]
+    stark_ex_risk_factor: String,
+    #[serde(rename = "starkExSyntheticAssetId")]
+    stark_ex_synthetic_asset_id: String,
+    #[serde(rename = "stepSize")]
+    step_size: String,
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "symbolDisplayName")]
+    symbol_display_name: String,
+    #[serde(rename = "symbolDisplayName2")]
+    symbol_display_name2: String,
+    #[serde(rename = "tickSize")]
+    tick_size: String,
+    #[serde(rename = "underlyingCurrencyId")]
+    underlying_currency_id: String,
+    #[serde(rename = "maxMaintenanceMarginRate")]
+    max_maintenance_margin_rate: String,
+    #[serde(rename = "maxPositionValue")]
+    max_position_value: String,
+}
 impl<'de> serde::Deserialize<'de> for PerpetualContractObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "baselinePositionValue")]
-            baseline_position_value: String,
-            #[serde(rename = "crossId")]
-            cross_id: f64,
-            #[serde(rename = "crossSymbolId")]
-            cross_symbol_id: f64,
-            #[serde(rename = "crossSymbolName")]
-            cross_symbol_name: String,
-            #[serde(rename = "digitMerge")]
-            digit_merge: String,
-            #[serde(rename = "displayMaxLeverage")]
-            display_max_leverage: String,
-            #[serde(rename = "displayMinLeverage")]
-            display_min_leverage: String,
-            #[serde(rename = "enableDisplay")]
-            enable_display: bool,
-            #[serde(rename = "enableOpenPosition")]
-            enable_open_position: bool,
-            #[serde(rename = "enableTrade")]
-            enable_trade: bool,
-            #[serde(rename = "fundingImpactMarginNotional")]
-            funding_impact_margin_notional: String,
-            #[serde(rename = "fundingInterestRate")]
-            funding_interest_rate: String,
-            #[serde(rename = "incrementalInitialMarginRate")]
-            incremental_initial_margin_rate: String,
-            #[serde(rename = "incrementalMaintenanceMarginRate")]
-            incremental_maintenance_margin_rate: String,
-            #[serde(rename = "incrementalPositionValue")]
-            incremental_position_value: String,
-            #[serde(rename = "initialMarginRate")]
-            initial_margin_rate: String,
-            #[serde(rename = "maintenanceMarginRate")]
-            maintenance_margin_rate: String,
-            #[serde(rename = "maxOrderSize")]
-            max_order_size: String,
-            #[serde(rename = "maxPositionSize")]
-            max_position_size: String,
-            #[serde(rename = "minOrderSize")]
-            min_order_size: String,
-            #[serde(rename = "maxMarketPriceRange")]
-            max_market_price_range: String,
-            #[serde(rename = "settleCurrencyId")]
-            settle_currency_id: String,
-            #[serde(rename = "starkExOraclePriceQuorum")]
-            stark_ex_oracle_price_quorum: String,
-            #[serde(rename = "starkExResolution")]
-            stark_ex_resolution: String,
-            #[serde(rename = "starkExRiskFactor")]
-            stark_ex_risk_factor: String,
-            #[serde(rename = "starkExSyntheticAssetId")]
-            stark_ex_synthetic_asset_id: String,
-            #[serde(rename = "stepSize")]
-            step_size: String,
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "symbolDisplayName")]
-            symbol_display_name: String,
-            #[serde(rename = "symbolDisplayName2")]
-            symbol_display_name2: String,
-            #[serde(rename = "tickSize")]
-            tick_size: String,
-            #[serde(rename = "underlyingCurrencyId")]
-            underlying_currency_id: String,
-            #[serde(rename = "maxMaintenanceMarginRate")]
-            max_maintenance_margin_rate: String,
-            #[serde(rename = "maxPositionValue")]
-            max_position_value: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    baseline_position_value: fields.baseline_position_value,
-                    cross_id: fields.cross_id,
-                    cross_symbol_id: fields.cross_symbol_id,
-                    cross_symbol_name: fields.cross_symbol_name,
-                    digit_merge: fields.digit_merge,
-                    display_max_leverage: fields.display_max_leverage,
-                    display_min_leverage: fields.display_min_leverage,
-                    enable_display: fields.enable_display,
-                    enable_open_position: fields.enable_open_position,
-                    enable_trade: fields.enable_trade,
-                    funding_impact_margin_notional: fields.funding_impact_margin_notional,
-                    funding_interest_rate: fields.funding_interest_rate,
-                    incremental_initial_margin_rate: fields.incremental_initial_margin_rate,
-                    incremental_maintenance_margin_rate: fields.incremental_maintenance_margin_rate,
-                    incremental_position_value: fields.incremental_position_value,
-                    initial_margin_rate: fields.initial_margin_rate,
-                    maintenance_margin_rate: fields.maintenance_margin_rate,
-                    max_order_size: fields.max_order_size,
-                    max_position_size: fields.max_position_size,
-                    min_order_size: fields.min_order_size,
-                    max_market_price_range: fields.max_market_price_range,
-                    settle_currency_id: fields.settle_currency_id,
-                    stark_ex_oracle_price_quorum: fields.stark_ex_oracle_price_quorum,
-                    stark_ex_resolution: fields.stark_ex_resolution,
-                    stark_ex_risk_factor: fields.stark_ex_risk_factor,
-                    stark_ex_synthetic_asset_id: fields.stark_ex_synthetic_asset_id,
-                    step_size: fields.step_size,
-                    symbol: fields.symbol,
-                    symbol_display_name: fields.symbol_display_name,
-                    symbol_display_name2: fields.symbol_display_name2,
-                    tick_size: fields.tick_size,
-                    underlying_currency_id: fields.underlying_currency_id,
-                    max_maintenance_margin_rate: fields.max_maintenance_margin_rate,
-                    max_position_value: fields.max_position_value,
-                })
+                PerpetualContractObjectWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -650,35 +550,31 @@ pub struct GetHistoryFundingOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<f64>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "GetHistoryFundingOptions")]
+struct GetHistoryFundingOptionsWire {
+    #[serde(rename = "symbol")]
+    symbol: String,
+    #[serde(rename = "page")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    page: Option<f64>,
+    #[serde(rename = "beginTimeInclusive")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    begin_time_inclusive: Option<f64>,
+    #[serde(rename = "endTimeExclusive")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    end_time_exclusive: Option<f64>,
+    #[serde(rename = "limit")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    limit: Option<f64>,
+}
 impl<'de> serde::Deserialize<'de> for GetHistoryFundingOptions {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "symbol")]
-            symbol: String,
-            #[serde(rename = "page")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            page: Option<f64>,
-            #[serde(rename = "beginTimeInclusive")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            begin_time_inclusive: Option<f64>,
-            #[serde(rename = "endTimeExclusive")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            end_time_exclusive: Option<f64>,
-            #[serde(rename = "limit")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            limit: Option<f64>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    symbol: fields.symbol,
-                    page: fields.page,
-                    begin_time_inclusive: fields.begin_time_inclusive,
-                    end_time_exclusive: fields.end_time_exclusive,
-                    limit: fields.limit,
-                })
+                GetHistoryFundingOptionsWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -695,26 +591,22 @@ pub struct KeyPair {
     #[serde(rename = "privateKey")]
     pub private_key: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "KeyPair")]
+struct KeyPairWire {
+    #[serde(rename = "publicKey")]
+    public_key: String,
+    #[serde(rename = "publicKeyYCoordinate")]
+    #[serde(default, deserialize_with = "deserialize_present")]
+    public_key_y_coordinate: Option<String>,
+    #[serde(rename = "privateKey")]
+    private_key: String,
+}
 impl<'de> serde::Deserialize<'de> for KeyPair {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "publicKey")]
-            public_key: String,
-            #[serde(rename = "publicKeyYCoordinate")]
-            #[serde(default, deserialize_with = "deserialize_present")]
-            public_key_y_coordinate: Option<String>,
-            #[serde(rename = "privateKey")]
-            private_key: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    public_key: fields.public_key,
-                    public_key_y_coordinate: fields.public_key_y_coordinate,
-                    private_key: fields.private_key,
-                })
+                KeyPairWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -730,25 +622,21 @@ pub struct ApiKeyCredentials {
     #[serde(rename = "passphrase")]
     pub passphrase: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "ApiKeyCredentials")]
+struct ApiKeyCredentialsWire {
+    #[serde(rename = "key")]
+    key: String,
+    #[serde(rename = "secret")]
+    secret: String,
+    #[serde(rename = "passphrase")]
+    passphrase: String,
+}
 impl<'de> serde::Deserialize<'de> for ApiKeyCredentials {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "key")]
-            key: String,
-            #[serde(rename = "secret")]
-            secret: String,
-            #[serde(rename = "passphrase")]
-            passphrase: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    key: fields.key,
-                    secret: fields.secret,
-                    passphrase: fields.passphrase,
-                })
+                ApiKeyCredentialsWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -765,20 +653,19 @@ pub struct PerpetualCurrencyObject {
     pub usdc: Vec<CurrencyObject>,
     pub usdt: Vec<CurrencyObject>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "PerpetualCurrencyObject")]
+struct PerpetualCurrencyObjectWire {
+    usdc: Vec<CurrencyObject>,
+    usdt: Vec<CurrencyObject>,
+}
 impl<'de> serde::Deserialize<'de> for PerpetualCurrencyObject {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            usdc: Vec<CurrencyObject>,
-            usdt: Vec<CurrencyObject>,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    usdc: fields.usdc,
-                    usdt: fields.usdt,
-                })
+                PerpetualCurrencyObjectWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }

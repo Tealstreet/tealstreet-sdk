@@ -20,10 +20,10 @@ use std::rc::Rc;
 
 impl PlacementIterator for JsIterator {
     fn next(&mut self) -> SigningResult<Option<AccountValue>> {
-        Ok(self.step().map(|v| to_account(&v)))
+        Ok(self.step().map_err(to_signing)?.map(|v| to_account(&v)))
     }
     fn close_throw(&mut self, error: TransactionSigningError) -> TransactionSigningError {
-        self.close();
+        let _ = self.close();
         error
     }
 }

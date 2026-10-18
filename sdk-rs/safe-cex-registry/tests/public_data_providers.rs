@@ -1009,3 +1009,77 @@ fn in_process_seed_rechecks_retained_loaded_flags_after_parent_notification() {
         "PROVIDER native adapted market after reentrant loaded mutation"
     );
 }
+
+#[test]
+fn gateway_candles_preserve_every_worker_interval_through_reconnect_and_cleanup() {
+    use serde_json::{Value, json};
+    let intervals = [
+        "1M", "1s", "5s", "15s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h",
+        "12h", "1d", "1w", "3h", "5h", "7h", "8h", "9h", "10h", "11h", "24h", "2d", "3d",
+    ];
+    for interval in intervals {
+        let (_, host, provider) = gateway();
+        provider.connect().unwrap();
+        let socket = host.current();
+        socket.open().unwrap();
+        socket.sent.borrow_mut().clear();
+        let seen = Rc::new(Cell::new(0));
+        let count = seen.clone();
+        let options =
+            serde_json::from_value(json!({"symbol":"BTC:PERP","interval":interval})).unwrap();
+        let off = provider
+            .subscribe_candle(
+                Rc::new(RefCell::new(options)),
+                Rc::new(move |candle| {
+                    assert_candle(candle);
+                    count.set(count.get() + 1);
+                    Ok(())
+                }),
+            )
+            .unwrap();
+        let candle = payload("candle");
+        socket.incoming(&json!({"type":"data","exchangeId":"bybit","channel":"candle","symbol":"BTC:PERP","interval":interval,"data":candle}).to_string()).unwrap();
+        assert_eq!(seen.get(), 1, "GATEWAY-INTERVAL native delivery {interval}");
+        socket.open().unwrap();
+        off().unwrap();
+        let frames: Vec<Value> = socket
+            .sent
+            .borrow()
+            .iter()
+            .map(|text| serde_json::from_str(text).unwrap())
+            .filter(|frame: &Value| frame["channel"] == "candle")
+            .collect();
+        assert_eq!(
+            frames.len(),
+            3,
+            "GATEWAY-INTERVAL native frame count {interval}"
+        );
+        for (frame, kind) in frames.iter().zip(["subscribe", "subscribe", "unsubscribe"]) {
+            assert_eq!(frame["type"], kind);
+            assert_eq!(frame["symbol"], "BTC:PERP");
+            assert_eq!(
+                frame["interval"], interval,
+                "GATEWAY-INTERVAL native frame interval"
+            );
+            let typed: safe_cex_types::gateway::GatewayMessage =
+                serde_json::from_value(frame.clone()).unwrap();
+            assert_eq!(
+                serde_json::to_value(typed.interval).unwrap(),
+                json!(interval)
+            );
+        }
+        provider.dispose().unwrap();
+    }
+    let source = std::process::Command::new("node")
+        .arg(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/gateway-interval-source.cjs"),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "GATEWAY-INTERVAL actual source: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+}

@@ -388,9 +388,12 @@ impl MessageHost for SocketHost {
         value.to_js_string().map(|s| s.to_vec()).map_err(ex)
     }
     fn stringify(&self, value: &Js) -> Result<Vec<u16>, ExchangeError> {
-        let json = serde_json::to_string(&to_json(value).map_err(ex)?)
-            .map_err(|e| ExchangeError::new(e.to_string()))?;
-        Ok(units(&json))
+        self.rt
+            .global("JSON.stringify")
+            .and_then(|stringify| stringify.call(Js::Undefined, vec![value.clone()]))
+            .and_then(|json| json.to_js_string())
+            .map(|json| json.to_vec())
+            .map_err(ex)
     }
     fn includes(&self, value: &Js, text: &'static str) -> Result<bool, ExchangeError> {
         if value.is_nullish() {
@@ -586,15 +589,12 @@ impl CandleUpdateHost for SocketHost {
         Ok(())
     }
     fn date_ms(&self, value: &Js) -> Result<f64, ExchangeError> {
-        let n = match value {
-            Js::String(s) => safe_cex_num::js_date_parse(&lossy(s), |n| n),
+        let primitive = safe_cex_exchange::js_runtime::ops::to_primitive(value).map_err(ex)?;
+        let n = match primitive {
+            Js::String(s) => safe_cex_num::js_date_parse_utf16(&s, |n| n),
             other => other.to_number().map_err(ex)?,
         };
-        Ok(if !n.is_finite() || n.abs() > 8_640_000_000_000_000.0 {
-            f64::NAN
-        } else {
-            n.trunc() + 0.0
-        })
+        Ok(safe_cex_num::js_time_clip(n))
     }
     fn candle_for_each(
         &self,
@@ -633,9 +633,7 @@ impl BookHost for SocketHost {
     // ts: `v(msg, 'bids') || []` iterated with for-of.
     fn iterable_or_empty(&self, value: Rc<Js>) -> Result<Self::Items, ExchangeError> {
         let items = if value.truthy() {
-            value
-                .array_values()
-                .ok_or_else(|| ExchangeError::new("book levels are not iterable"))?
+            value.iterable_values().map_err(ex)?
         } else {
             vec![]
         };
@@ -707,8 +705,8 @@ impl BookHost for SocketHost {
         let map = cache.get(side_name(side)).map_err(ex)?;
         let entries = map.call_method("entries", vec![]).map_err(ex)?;
         let mut out = entries
-            .array_values()
-            .unwrap_or_default()
+            .iterable_values()
+            .map_err(ex)?
             .iter()
             .map(|pair| {
                 let price = pair.get("0").and_then(|v| v.to_number()).map_err(ex)?;
@@ -928,22 +926,12 @@ impl AuthHost for SocketHost {
             "signed" => self.this().get("signedChallenge").map_err(ex)?,
             "remote" => {
                 if self.rt.base().signers.remote_signer.is_some() {
-                    let name = self
-                        .rt
-                        .shared
-                        .extra
-                        .options
-                        .remote_signer
-                        .as_ref()
-                        .and_then(|r| {
-                            serde_json::to_value(r)
-                                .ok()
-                                .and_then(|v| v.get("accountName").cloned())
-                        });
-                    Js::object(vec![(
-                        "accountName",
-                        name.map(|v| from_json(&v)).unwrap_or(Js::Undefined),
-                    )])
+                    // Shared hosted-account construction injects the signer and
+                    // accountName into the live parent options, after typed input.
+                    self.parent()?
+                        .get("options")
+                        .and_then(|options| options.get("remoteSigner"))
+                        .map_err(ex)?
                 } else {
                     Js::Undefined
                 }

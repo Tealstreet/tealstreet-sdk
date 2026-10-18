@@ -238,7 +238,7 @@ impl OrderEditHost for EditHost {
         let e = self.trace.next("place");
         let v = &e["order"];
         assert_eq!(o.symbol, v["symbol"].as_str().unwrap());
-        assert_eq!(o.kind, safe_cex_types::OrderType::Limit);
+        assert_eq!(o.r#type, safe_cex_types::OrderType::Limit);
         assert_eq!(o.side, safe_cex_types::OrderSide::Buy);
         match o.price {
             Some(a) => num(a, &v["price"], "native replacement price"),
@@ -248,7 +248,7 @@ impl OrderEditHost for EditHost {
             Some(a) => num(a, &v["amount"], "native replacement size"),
             None => assert_eq!(v["amount"], json!({"$undefined":true})),
         };
-        assert_eq!(Some(o.reduce_only), v["reduceOnly"].as_bool());
+        assert_eq!(o.reduce_only.into_value(), v["reduceOnly"].as_bool());
         Ok(ready(
             &self.q,
             self.place_error
@@ -315,7 +315,7 @@ impl OrderEditHost for EditHost {
 }
 fn order(v: &Value) -> SyncedOrderRoot {
     let mut fields: safe_cex_types::Order = serde_json::from_value(v.clone()).unwrap();
-    fields.info = None;
+    fields.info = (None).into();
     Rc::new(RefCell::new(SyncedOrder {
         fields,
         info: Rc::new(RefCell::new(v["info"].clone())),

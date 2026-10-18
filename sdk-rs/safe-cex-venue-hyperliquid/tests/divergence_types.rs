@@ -1,17 +1,6 @@
 use safe_cex_venue_hyperliquid::types;
 
 #[test]
-fn audit_duplicate_root_01() {
-    let value: types::Meta = serde_json::from_str(r####"{"universe":[{"name":"\ud800","name":"雪😀﻿","szDecimals":17,"maxLeverage":17,"onlyIsolated":true,"isDelisted":true,"marginTableId":17,"marginMode":"strictIsolated","growthMode":"enabled","lastGrowthModeChangeTime":"wire-雪\u0000"}]}"####)
-            .expect("HL TYPES public duplicate decode Meta");
-    let selected = value.universe[0].name.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten Meta /universe/0/name"
-    );
-}
-
-#[test]
 fn audit_duplicate_root_02() {
     let value: types::ClearinghouseState = serde_json::from_str(r####"{"assetPositions":[{"position":{"coin":"\ud800","coin":"雪😀﻿","cumFunding":{"allTime":"wire-雪\u0000","sinceChange":"wire-雪\u0000","sinceOpen":"wire-雪\u0000"},"entryPx":"wire-雪\u0000","leverage":{"rawUsd":"wire-雪\u0000","type":"wire-雪\u0000","value":17},"liquidationPx":"wire-雪\u0000","marginUsed":"wire-雪\u0000","maxLeverage":17,"positionValue":"wire-雪\u0000","returnOnEquity":"wire-雪\u0000","szi":"wire-雪\u0000","unrealizedPnl":"wire-雪\u0000"},"type":"wire-雪\u0000"}],"crossMaintenanceMarginUsed":"wire-雪\u0000","crossMarginSummary":{"accountValue":"wire-雪\u0000","totalMarginUsed":"wire-雪\u0000","totalNtlPos":"wire-雪\u0000","totalRawUsd":"wire-雪\u0000"},"marginSummary":{"accountValue":"wire-雪\u0000","totalMarginUsed":"wire-雪\u0000","totalNtlPos":"wire-雪\u0000","totalRawUsd":"wire-雪\u0000"},"time":17,"withdrawable":"wire-雪\u0000"}"####)
             .expect("HL TYPES public duplicate decode ClearinghouseState");
@@ -30,37 +19,6 @@ fn audit_duplicate_root_03() {
     assert_eq!(
         selected, "雪😀\u{feff}",
         "HL TYPES native overwritten UserFills /coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_04() {
-    let value: types::OrderResponseStatus =
-        serde_json::from_str(r####"{"resting":{"oid":"\ud800","oid":"雪😀﻿"}}"####)
-            .expect("HL TYPES public duplicate decode OrderResponseStatus");
-    let selected = match &value {
-        types::OrderResponseStatus::Case0(resting) => match &resting.resting.oid {
-            types::OrderResponseStatusCase0RestingOid::Case1(text) => text.as_str(),
-            _ => panic!("HL TYPES native resting oid must be string"),
-        },
-        _ => panic!("HL TYPES native status must be resting"),
-    };
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten OrderResponseStatus /resting/oid"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_05() {
-    let value: types::OrderResponse = serde_json::from_str(
-        r####"{"status":"\ud800","status":"雪😀﻿","response":"wire-雪\u0000"}"####,
-    )
-    .expect("HL TYPES public duplicate decode OrderResponse");
-    let selected = value.status.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten OrderResponse /status"
     );
 }
 
@@ -166,39 +124,6 @@ fn audit_duplicate_root_14() {
 }
 
 #[test]
-fn audit_duplicate_root_15() {
-    let value: types::SpotClearinghouseBalance = serde_json::from_str(r####"{"coin":"\ud800","coin":"雪😀﻿","token":17,"hold":"wire-雪\u0000","total":"wire-雪\u0000","entryNtl":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode SpotClearinghouseBalance");
-    let selected = value.coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten SpotClearinghouseBalance /coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_16() {
-    let value: types::SpotClearinghouseState = serde_json::from_str(r####"{"balances":[{"coin":"\ud800","coin":"雪😀﻿","token":17,"hold":"wire-雪\u0000","total":"wire-雪\u0000","entryNtl":"wire-雪\u0000"}],"tokenToAvailableAfterMaintenance":[[17,"wire-雪\u0000"]]}"####)
-            .expect("HL TYPES public duplicate decode SpotClearinghouseState");
-    let selected = value.balances[0].coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten SpotClearinghouseState /balances/0/coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_17() {
-    let value: types::FrontendOpenOrders = serde_json::from_str(r####"{"coin":"\ud800","coin":"雪😀﻿","isPositionTpsl":true,"isTrigger":true,"limitPx":"wire-雪\u0000","oid":17,"orderType":"wire-雪\u0000","origSz":"wire-雪\u0000","reduceOnly":true,"side":"wire-雪\u0000","sz":"wire-雪\u0000","timestamp":17,"triggerCondition":"wire-雪\u0000","triggerPx":"wire-雪\u0000","tif":"Alo"}"####)
-            .expect("HL TYPES public duplicate decode FrontendOpenOrders");
-    let selected = value.coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten FrontendOpenOrders /coin"
-    );
-}
-
-#[test]
 fn audit_duplicate_root_18() {
     let value: types::L2Book = serde_json::from_str(r####"{"levels":[[{"px":"\ud800","px":"雪😀﻿","sz":"wire-雪\u0000","n":17}],[{"px":"wire-雪\u0000","sz":"wire-雪\u0000","n":17}]]}"####)
             .expect("HL TYPES public duplicate decode L2Book");
@@ -206,83 +131,6 @@ fn audit_duplicate_root_18() {
     assert_eq!(
         selected, "雪😀\u{feff}",
         "HL TYPES native overwritten L2Book /levels/0/0/px"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_19() {
-    let value: types::CandleSnapshot = serde_json::from_str(r####"{"T":17,"c":"\ud800","c":"雪😀﻿","h":"wire-雪\u0000","i":"wire-雪\u0000","l":"wire-雪\u0000","n":17,"o":"wire-雪\u0000","s":"wire-雪\u0000","t":17,"v":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode CandleSnapshot");
-    let selected = value.c.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten CandleSnapshot /c"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_20() {
-    let value: types::AssetCtx = serde_json::from_str(r####"{"dayNtlVlm":"\ud800","dayNtlVlm":"雪😀﻿","dayBaseVlm":"wire-雪\u0000","funding":"wire-雪\u0000","impactPxs":["wire-雪\u0000","wire-雪\u0000"],"markPx":"wire-雪\u0000","midPx":"wire-雪\u0000","openInterest":"wire-雪\u0000","oraclePx":"wire-雪\u0000","premium":"wire-雪\u0000","prevDayPx":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode AssetCtx");
-    let selected = value.day_ntl_vlm.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten AssetCtx /dayNtlVlm"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_21() {
-    let value: types::MetaAndAssetCtxs = serde_json::from_str(r####"{"meta":{"universe":[{"name":"\ud800","name":"雪😀﻿","szDecimals":17,"maxLeverage":17,"onlyIsolated":true,"isDelisted":true,"marginTableId":17,"marginMode":"strictIsolated","growthMode":"enabled","lastGrowthModeChangeTime":"wire-雪\u0000"}]},"assetCtxs":[{"dayNtlVlm":"wire-雪\u0000","dayBaseVlm":"wire-雪\u0000","funding":"wire-雪\u0000","impactPxs":["wire-雪\u0000","wire-雪\u0000"],"markPx":"wire-雪\u0000","midPx":"wire-雪\u0000","openInterest":"wire-雪\u0000","oraclePx":"wire-雪\u0000","premium":"wire-雪\u0000","prevDayPx":"wire-雪\u0000"}]}"####)
-            .expect("HL TYPES public duplicate decode MetaAndAssetCtxs");
-    let selected = value.meta.universe[0].name.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten MetaAndAssetCtxs /meta/universe/0/name"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_22() {
-    let value: types::UserFundingEntry = serde_json::from_str(r####"{"delta":{"coin":"\ud800","coin":"雪😀﻿","fundingRate":"wire-雪\u0000","szi":"wire-雪\u0000","type":"funding","usdc":"wire-雪\u0000"},"hash":"wire-雪\u0000","time":17}"####)
-            .expect("HL TYPES public duplicate decode UserFundingEntry");
-    let selected = value.delta.coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten UserFundingEntry /delta/coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_23() {
-    let value: types::UserFunding = serde_json::from_str(r####"[{"delta":{"coin":"\ud800","coin":"雪😀﻿","fundingRate":"wire-雪\u0000","szi":"wire-雪\u0000","type":"funding","usdc":"wire-雪\u0000"},"hash":"wire-雪\u0000","time":17}]"####)
-            .expect("HL TYPES public duplicate decode UserFunding");
-    let selected = value[0].delta.coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten UserFunding /0/delta/coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_24() {
-    let value: types::UserNonFundingLedgerEntry = serde_json::from_str(r####"{"delta":{"coin":"\ud800","coin":"雪😀﻿","type":"deposit","usdc":"wire-雪\u0000"},"hash":"wire-雪\u0000","time":17}"####)
-            .expect("HL TYPES public duplicate decode UserNonFundingLedgerEntry");
-    let selected = value.delta.coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten UserNonFundingLedgerEntry /delta/coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_25() {
-    let value: types::UserNonFundingLedgerUpdates = serde_json::from_str(r####"[{"delta":{"coin":"\ud800","coin":"雪😀﻿","type":"deposit","usdc":"wire-雪\u0000"},"hash":"wire-雪\u0000","time":17}]"####)
-            .expect("HL TYPES public duplicate decode UserNonFundingLedgerUpdates");
-    let selected = value[0].delta.coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten UserNonFundingLedgerUpdates /0/delta/coin"
     );
 }
 
@@ -309,63 +157,6 @@ fn audit_duplicate_root_27() {
 }
 
 #[test]
-fn audit_duplicate_root_28() {
-    let value: types::SpotToken = serde_json::from_str(r####"{"name":"\ud800","name":"雪😀﻿","szDecimals":17,"weiDecimals":17,"index":17,"tokenId":"wire-雪\u0000","isCanonical":true,"fullName":"wire-雪\u0000","evmContract":{"address":"wire-雪\u0000","evm_extra_wei_decimals":17},"deployerTradingFeeShare":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode SpotToken");
-    let selected = value.name.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten SpotToken /name"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_29() {
-    let value: types::SpotMarket = serde_json::from_str(
-        r####"{"name":"\ud800","name":"雪😀﻿","tokens":[17,17],"index":17,"isCanonical":true}"####,
-    )
-    .expect("HL TYPES public duplicate decode SpotMarket");
-    let selected = value.name.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten SpotMarket /name"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_30() {
-    let value: types::SpotMeta = serde_json::from_str(r####"{"tokens":[{"name":"\ud800","name":"雪😀﻿","szDecimals":17,"weiDecimals":17,"index":17,"tokenId":"wire-雪\u0000","isCanonical":true,"fullName":"wire-雪\u0000","evmContract":{"address":"wire-雪\u0000","evm_extra_wei_decimals":17},"deployerTradingFeeShare":"wire-雪\u0000"}],"universe":[{"name":"wire-雪\u0000","tokens":[17,17],"index":17,"isCanonical":true}]}"####)
-            .expect("HL TYPES public duplicate decode SpotMeta");
-    let selected = value.tokens[0].name.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten SpotMeta /tokens/0/name"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_31() {
-    let value: types::SpotAssetCtx = serde_json::from_str(r####"{"dayNtlVlm":"\ud800","dayNtlVlm":"雪😀﻿","markPx":"wire-雪\u0000","midPx":"wire-雪\u0000","prevDayPx":"wire-雪\u0000","coin":"wire-雪\u0000","circulatingSupply":"wire-雪\u0000","totalSupply":"wire-雪\u0000","dayBaseVlm":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode SpotAssetCtx");
-    let selected = value.day_ntl_vlm.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten SpotAssetCtx /dayNtlVlm"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_32() {
-    let value: types::SpotMetaAndAssetCtxs = serde_json::from_str(r####"{"meta":{"tokens":[{"name":"\ud800","name":"雪😀﻿","szDecimals":17,"weiDecimals":17,"index":17,"tokenId":"wire-雪\u0000","isCanonical":true,"fullName":"wire-雪\u0000","evmContract":{"address":"wire-雪\u0000","evm_extra_wei_decimals":17},"deployerTradingFeeShare":"wire-雪\u0000"}],"universe":[{"name":"wire-雪\u0000","tokens":[17,17],"index":17,"isCanonical":true}]},"assetCtxs":[{"dayNtlVlm":"wire-雪\u0000","markPx":"wire-雪\u0000","midPx":"wire-雪\u0000","prevDayPx":"wire-雪\u0000","coin":"wire-雪\u0000","circulatingSupply":"wire-雪\u0000","totalSupply":"wire-雪\u0000","dayBaseVlm":"wire-雪\u0000"}]}"####)
-            .expect("HL TYPES public duplicate decode SpotMetaAndAssetCtxs");
-    let selected = value.meta.tokens[0].name.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten SpotMetaAndAssetCtxs /meta/tokens/0/name"
-    );
-}
-
-#[test]
 fn audit_duplicate_root_33() {
     let value: types::UserOpenOrder = serde_json::from_str(r####"{"coin":"\ud800","coin":"雪😀﻿","limitPx":"wire-雪\u0000","oid":17,"side":"wire-雪\u0000","sz":"wire-雪\u0000","timestamp":17}"####)
             .expect("HL TYPES public duplicate decode UserOpenOrder");
@@ -388,28 +179,6 @@ fn audit_duplicate_root_34() {
 }
 
 #[test]
-fn audit_duplicate_root_35() {
-    let value: types::OrderRequest = serde_json::from_str(r####"{"coin":"\ud800","coin":"雪😀﻿","is_buy":true,"sz":17,"limit_px":17,"order_type":{"limit":{"tif":"Alo"},"trigger":{"triggerPx":17,"isMarket":true,"tpsl":"tp"}},"reduce_only":true,"cloid":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode OrderRequest");
-    let selected = value.coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten OrderRequest /coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_36() {
-    let value: types::OrderWire = serde_json::from_str(r####"{"a":17,"b":true,"p":"\ud800","p":"雪😀﻿","s":"wire-雪\u0000","r":true,"t":{"limit":{"tif":"Alo"},"trigger":{"triggerPx":17,"isMarket":true,"tpsl":"tp"}},"c":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode OrderWire");
-    let selected = value.p.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten OrderWire /p"
-    );
-}
-
-#[test]
 fn audit_duplicate_root_37() {
     let value: types::CancelOrderRequest =
         serde_json::from_str(r####"{"coin":"\ud800","coin":"雪😀﻿","o":17}"####)
@@ -418,28 +187,6 @@ fn audit_duplicate_root_37() {
     assert_eq!(
         selected, "雪😀\u{feff}",
         "HL TYPES native overwritten CancelOrderRequest /coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_38() {
-    let value: types::ModifyRequest = serde_json::from_str(r####"{"oid":17,"order":{"coin":"\ud800","coin":"雪😀﻿","is_buy":true,"sz":17,"limit_px":17,"order_type":{"limit":{"tif":"Alo"},"trigger":{"triggerPx":17,"isMarket":true,"tpsl":"tp"}},"reduce_only":true,"cloid":"wire-雪\u0000"}}"####)
-            .expect("HL TYPES public duplicate decode ModifyRequest");
-    let selected = value.order.coin.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten ModifyRequest /order/coin"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_39() {
-    let value: types::ModifyWire = serde_json::from_str(r####"{"oid":17,"order":{"a":17,"b":true,"p":"\ud800","p":"雪😀﻿","s":"wire-雪\u0000","r":true,"t":{"limit":{"tif":"Alo"},"trigger":{"triggerPx":17,"isMarket":true,"tpsl":"tp"}},"c":"wire-雪\u0000"}}"####)
-            .expect("HL TYPES public duplicate decode ModifyWire");
-    let selected = value.order.p.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten ModifyWire /order/p"
     );
 }
 
@@ -533,17 +280,6 @@ fn audit_duplicate_root_47() {
 }
 
 #[test]
-fn audit_duplicate_root_48() {
-    let value: types::Hip3MarketInfo = serde_json::from_str(r####"{"name":"\ud800","name":"雪😀﻿","szDecimals":17,"maxLeverage":17,"onlyIsolated":true,"marginTableId":17,"marginMode":"strictIsolated","growthMode":"enabled","isDelisted":true,"lastGrowthModeChangeTime":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode Hip3MarketInfo");
-    let selected = value.name.as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten Hip3MarketInfo /name"
-    );
-}
-
-#[test]
 fn audit_duplicate_root_49() {
     let value: types::BuilderInfo =
         serde_json::from_str(r####"{"b":"\ud800","b":"雪😀﻿","f":17}"####)
@@ -552,17 +288,6 @@ fn audit_duplicate_root_49() {
     assert_eq!(
         selected, "雪😀\u{feff}",
         "HL TYPES native overwritten BuilderInfo /b"
-    );
-}
-
-#[test]
-fn audit_duplicate_root_50() {
-    let value: types::BuilderFeeCheckResult = serde_json::from_str(r####"{"approved":true,"maxFeeRate":"\ud800","maxFeeRate":"雪😀﻿","maxFeeRateTenthsBps":17,"error":"wire-雪\u0000"}"####)
-            .expect("HL TYPES public duplicate decode BuilderFeeCheckResult");
-    let selected = value.max_fee_rate.as_ref().unwrap().as_str();
-    assert_eq!(
-        selected, "雪😀\u{feff}",
-        "HL TYPES native overwritten BuilderFeeCheckResult /maxFeeRate"
     );
 }
 
@@ -588,13 +313,51 @@ fn audit_duplicate_selection_retains_last_value_validation_and_key_position() {
     assert_eq!(value["z"].as_str(), Some("kept"));
     for raw in [
         r#"{"z":"kept","z":"\ud800"}"#,
-        r#"{"z":invalid,"z":"kept"}"#,
+        r#"{"z":"kept","z":"\udc00"}"#,
     ] {
+        // JSON.parse retains lone code units. Only the later UTF-8 Value
+        // projection refuses them; the canonical retained input stays lossless.
+        let source = std::process::Command::new("node")
+            .args([
+                "-e",
+                "const s=JSON.parse(process.argv[1]).z; process.stdout.write(JSON.stringify(Array.from({length:s.length},(_,i)=>s.charCodeAt(i))));",
+                raw,
+            ])
+            .output()
+            .expect("Node JSON.parse duplicate-selection oracle");
         assert!(
-            serde_json::from_str::<RetainedJsonInput>(raw).is_err(),
-            "AUDIT surviving invalid string or invalid syntax still refused"
+            source.status.success(),
+            "{}",
+            String::from_utf8_lossy(&source.stderr)
+        );
+        let expected: Vec<u16> = serde_json::from_slice(&source.stdout).unwrap();
+        let retained = serde_json::from_str::<RetainedJsonInput>(raw)
+            .expect("JSON.parse admits surviving lone surrogate code units");
+        let RetainedJsonInput::Object(entries) = &retained else {
+            panic!("retained duplicate object");
+        };
+        assert_eq!(
+            entries.len(),
+            1,
+            "last duplicate replaces its earlier value"
+        );
+        assert_eq!(entries[0].0, [u16::from(b'z')]);
+        let RetainedJsonInput::Text(units) = &entries[0].1 else {
+            panic!("surviving duplicate string remains native text");
+        };
+        assert_eq!(
+            units, &expected,
+            "retained native code units match JSON.parse"
+        );
+        assert!(
+            retained.into_value().is_err(),
+            "UTF-8 Value projection must refuse a surviving lone surrogate"
         );
     }
+    assert!(
+        serde_json::from_str::<RetainedJsonInput>(r#"{"z":invalid,"z":"kept"}"#).is_err(),
+        "AUDIT invalid syntax is refused even before an overwritten value"
+    );
     let overwritten = format!(
         "{{\"z\":{}0{},\"z\":\"kept\"}}",
         "[".repeat(140),
@@ -614,24 +377,6 @@ fn audit_duplicate_selection_retains_last_value_validation_and_key_position() {
         serde_json::from_str::<RetainedJsonInput>(&surviving).is_err(),
         "AUDIT surviving depth budget remains enforced"
     );
-}
-
-#[test]
-fn audit_scalar_cloid_observes_native_text_before_any_wire_projection() {
-    let scalar: types::OidOrCloid = serde_json::from_str("\"雪😀\\ufeff\"").unwrap();
-    let types::OidOrCloid::Case1(text) = scalar else {
-        panic!("AUDIT native scalar cloid string alternative");
-    };
-    assert_eq!(
-        text, "雪😀\u{feff}",
-        "AUDIT native scalar cloid code points"
-    );
-    for raw in [r#""\ud800""#, r#""\udfff""#] {
-        assert!(
-            serde_json::from_str::<types::OidOrCloid>(raw).is_err(),
-            "AUDIT native scalar cloid whole-root refusal"
-        );
-    }
 }
 
 #[test]

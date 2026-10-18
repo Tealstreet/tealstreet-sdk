@@ -40,18 +40,6 @@ impl ZkLinkHost for Services {
         self.host().record("sdk:init", vec![]);
         Box::pin(async { Ok(()) })
     }
-    fn now_ms(&self) -> f64 {
-        1700001234567.
-    }
-    fn pack_amount(&self, _: &J) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
-    fn pack_fee(&self, _: &J) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
-    fn pubkey_hash(&self) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
     fn builder(&self, _: TransactionKind, _: Vec<J>) -> Result<ZkLinkHandle, ExchangeError> {
         panic!("not used by lifecycle")
     }
@@ -63,18 +51,6 @@ impl ZkLinkHost for Services {
         panic!("not used by lifecycle")
     }
     fn create_signed_contract(&self, _: ZkLinkHandle) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
-    fn create_signed_order(&self, _: ZkLinkHandle) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
-    fn sign_transfer(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        panic!("not used by lifecycle")
-    }
-    fn sign_withdraw(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        panic!("not used by lifecycle")
-    }
-    fn sign_change_pubkey(&self, _: ZkLinkHandle, _: bool) -> ExchangeFuture<'_, J> {
         panic!("not used by lifecycle")
     }
 }
@@ -130,7 +106,10 @@ impl ApexServices for Services {
     fn throttle_fetch_orders(&self) -> Result<(), ExchangeError> {
         panic!("not used by lifecycle")
     }
-    fn place_orders(&self, _: Vec<PlaceOrderOpts>) -> ExchangeFuture<'_, Vec<String>> {
+    fn place_orders(
+        &self,
+        _: Vec<safe_cex_types::PreparedOrderOpts>,
+    ) -> ExchangeFuture<'_, Vec<String>> {
         panic!("not used by lifecycle")
     }
     fn dayjs_value_ms(&self, input: Option<f64>) -> Result<f64, ExchangeError> {
@@ -153,7 +132,10 @@ impl ApexServices for Services {
         opts: OHLCVOptions,
         callback: Rc<dyn Fn(Candle) -> Result<(), ExchangeError>>,
     ) -> Result<Cleanup, ExchangeError> {
-        assert_eq!(opts.interval, Timeframe::M1);
+        assert_eq!(
+            opts.interval,
+            safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1)
+        );
         self.host().record(
             "listen:candle",
             vec![obj(vec![("symbol", s(opts.symbol)), ("interval", s("1m"))])],
@@ -324,13 +306,13 @@ fn run_lifecycle(name: &str) {
             .unwrap();
         }
         if variant == 1 && name.contains("Snapshot") {
-            venue
-                .last_websocket_positions_update
-                .set(Some(1700001234067.));
+            let stamp = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms() - 500.;
+            FIXTURE_STAMPS.with(|stamps| stamps.borrow_mut().push((stamp, 1700001234067.)));
+            venue.last_websocket_positions_update.set(Some(stamp));
             let mut p = Store::positions(store.as_ref()).to_vec();
-            p[0].last_update = Some(1700001234067.);
+            p[0].last_update = Some(stamp).into();
             p[0].id = "BTC-USDC:short".into();
-            p[0].side = PositionSide::Short;
+            p[0].side = safe_cex_types::ModelField::Value(PositionSide::Short);
             Store::update(
                 store.as_ref(),
                 StoreUpdate {
@@ -355,9 +337,10 @@ fn run_lifecycle(name: &str) {
         };
         let actual = futures::executor::block_on(async {
             match name {
-                "validateAccount" => {
-                    obj(vec![("error", s(venue.validate_account().await.unwrap()))])
-                }
+                "validateAccount" => obj(vec![(
+                    "error",
+                    J::from(venue.validate_account().await.unwrap().into_value()),
+                )]),
                 "start" => {
                     venue.start().await.unwrap();
                     J::Undefined
@@ -378,9 +361,9 @@ fn run_lifecycle(name: &str) {
                     let opts = OHLCVOptions {
                         symbol: "BTCUSDC".into(),
                         interval: if variant == 1 {
-                            Timeframe::D1
+                            safe_cex_types::AnyTimeframe::Variant1(Timeframe::D1)
                         } else {
-                            Timeframe::M1
+                            safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1)
                         },
                         limit: Some(if variant == 2 {
                             0.
@@ -412,7 +395,7 @@ fn run_lifecycle(name: &str) {
                 "listenOHLCV" => {
                     let opts = OHLCVOptions {
                         symbol: "BTCUSDC".into(),
-                        interval: Timeframe::M1,
+                        interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
                         from: None,
                         to: None,
                         limit: None,
@@ -614,7 +597,7 @@ fn candle_response_shapes_match_actual_source() {
         host.operations.borrow_mut().clear();
         let opts = OHLCVOptions {
             symbol: "BTCUSDC".into(),
-            interval: Timeframe::M1,
+            interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
             from: None,
             to: Some(1700001234567.),
             limit: Some(3.),

@@ -1437,39 +1437,43 @@ pub fn normalize_coinbase_starbase_order(
     let info = private_order_info(gateway);
     CoinbaseStarbaseParityResult::Ready {
         value: safe_cex_types::Order {
-            client_order_id: None,
+            client_order_id: (None).into(),
             id: gateway.id.clone(),
-            parent_id: None,
-            status: map_order_status(gateway.state),
+            parent_id: (None).into(),
+            status: (map_order_status(gateway.state)).into(),
             symbol: gateway.legacy_saved_symbol.clone(),
-            r#type: kind,
-            side: map_order_side(gateway.direction),
+            r#type: (kind).into(),
+            side: (map_order_side(gateway.direction)).into(),
             price: match gateway.price {
-                CoinbaseStarbaseOrderPrice::Number(value) => value,
-                CoinbaseStarbaseOrderPrice::Market(_) => 0.0,
+                CoinbaseStarbaseOrderPrice::Number(value) => (value).into(),
+                CoinbaseStarbaseOrderPrice::Market(_) => (0.0).into(),
             },
             amount,
             filled: 0.0,
             remaining: amount,
-            reduce_only: gateway.reduce_only.unwrap_or(false),
-            close: None,
-            info: Some(info),
-            time_in_force,
+            reduce_only: gateway.reduce_only.unwrap_or(false).into(),
+            close: (None).into(),
+            info: (Some(info)).into(),
+            time_in_force: time_in_force.into(),
             last_update: gateway.last_update_timestamp_ms,
-            trigger_type: None,
-            tp_trigger_type: (kind == safe_cex_types::OrderType::TakeProfit)
+            trigger_type: (None).into(),
+            tp_trigger_type: ((kind == safe_cex_types::OrderType::TakeProfit)
                 .then_some(trigger_type)
-                .flatten(),
-            sl_trigger_type: (kind == safe_cex_types::OrderType::StopLoss)
+                .flatten())
+            .into(),
+            sl_trigger_type: ((kind == safe_cex_types::OrderType::StopLoss)
                 .then_some(trigger_type)
-                .flatten(),
-            take_profit: (kind == safe_cex_types::OrderType::TakeProfit)
+                .flatten())
+            .into(),
+            take_profit: ((kind == safe_cex_types::OrderType::TakeProfit)
                 .then_some(gateway.trigger_price)
-                .flatten(),
-            stop_loss: (kind == safe_cex_types::OrderType::StopLoss)
+                .flatten())
+            .into(),
+            stop_loss: ((kind == safe_cex_types::OrderType::StopLoss)
                 .then_some(gateway.trigger_price)
-                .flatten(),
-            extra: None,
+                .flatten())
+            .into(),
+            extra: (None).into(),
         },
     }
 }

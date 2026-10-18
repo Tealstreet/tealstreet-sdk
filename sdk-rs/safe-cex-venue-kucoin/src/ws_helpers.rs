@@ -10,20 +10,22 @@ pub enum KucoinPublicRole {
     Detail,
     Snapshot,
 }
+// Private Serde companion; the public entry retains its admission checks.
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(remote = "KucoinPublicRole")]
+#[serde(rename_all = "lowercase")]
+enum KucoinPublicRoleWire {
+    Detail,
+    Snapshot,
+}
+
 impl<'de> Deserialize<'de> for KucoinPublicRole {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "lowercase")]
-        enum Wire {
-            Detail,
-            Snapshot,
-        }
         let text = String::deserialize(deserializer)?;
-        let wire = Wire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(text))?;
-        Ok(match wire {
-            Wire::Detail => Self::Detail,
-            Wire::Snapshot => Self::Snapshot,
-        })
+        KucoinPublicRoleWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+            text,
+        ))
     }
 }
 // ts: parseNumber

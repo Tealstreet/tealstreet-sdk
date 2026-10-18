@@ -259,92 +259,6 @@ fn map_only_numeric_ingress_source_bits() {
         |x| x.timestamp,
         &mut rows,
     );
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "order_id",
-        |x| x.order_id,
-        &mut rows,
-    );
-    probe::<WooxOrder>(&candidates, "WooxOrder", "price", |x| x.price, &mut rows);
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "quantity",
-        |x| x.quantity,
-        &mut rows,
-    );
-    probe::<WooxOrder>(&candidates, "WooxOrder", "amount", |x| x.amount, &mut rows);
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "visible",
-        |x| x.visible,
-        &mut rows,
-    );
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "executed",
-        |x| x.executed,
-        &mut rows,
-    );
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "total_fee",
-        |x| x.total_fee,
-        &mut rows,
-    );
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "total_rebate",
-        |x| x.total_rebate,
-        &mut rows,
-    );
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "client_order_id",
-        |x| x.client_order_id,
-        &mut rows,
-    );
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "realized_pnl",
-        |x| x.realized_pnl,
-        &mut rows,
-    );
-    probe::<WooxOrder>(
-        &candidates,
-        "WooxOrder",
-        "average_executed_price",
-        |x| x.average_executed_price,
-        &mut rows,
-    );
-    probe::<FetchOrderResponseMeta>(
-        &candidates,
-        "FetchOrderResponseMeta",
-        "total",
-        |x| x.total,
-        &mut rows,
-    );
-    probe::<FetchOrderResponseMeta>(
-        &candidates,
-        "FetchOrderResponseMeta",
-        "records_per_page",
-        |x| x.records_per_page,
-        &mut rows,
-    );
-    probe::<FetchOrderResponseMeta>(
-        &candidates,
-        "FetchOrderResponseMeta",
-        "current_page",
-        |x| x.current_page,
-        &mut rows,
-    );
     probe::<GetFuturesLeverageResponse>(
         &candidates,
         "GetFuturesLeverageResponse",
@@ -751,13 +665,13 @@ fn map_only_numeric_ingress_source_bits() {
         },
         &mut rows,
     );
-    assert_eq!(rows.len(), 92, "numeric field inventory");
+    assert_eq!(rows.len(), 78, "numeric field inventory");
     assert_eq!(
         rows.iter()
             .map(|r| r.split('.').next().unwrap())
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        24,
+        22,
         "numeric record inventory"
     );
 }

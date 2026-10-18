@@ -20,7 +20,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_store::{store::DefaultStore, virtual_clock::VIRTUAL_CLOCK};
 use safe_cex_transport::{TransportProvider, socket::SocketFrame, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use serde_json::{Value, json};
@@ -119,7 +119,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -129,8 +129,10 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, error: &Value, _: &Value) {
-        self.reports.borrow_mut().push(error.to_string());
+    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+        self.reports
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(error));
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         self.reports.borrow_mut().push(error.to_string());
@@ -504,11 +506,21 @@ fn connect_dials_the_profile_url_and_open_subscribes_account_all_then_orders_wit
             "[Lighter][PWS] Connecting (direct, attempt #1): {URL}"
         )]
     );
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
     world.runtime.deliver(0, WsEvent::Open);
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
+    let frames = world.sent(0);
+    let timestamp = frames[0]["timestamp"]
+        .as_f64()
+        .expect("native ping timestamp");
+    assert!(
+        timestamp >= before && timestamp <= after,
+        "ping uses the synced virtual clock"
+    );
     assert_eq!(
-        world.sent(0),
+        frames,
         vec![
-            ping_frame(START),
+            ping_frame(timestamp),
             json!({"type": "subscribe", "channel": "account_all/7"}),
             json!({"type": "subscribe", "channel": "account_all_orders/7", "auth": "tok-1"}),
         ],
@@ -588,17 +600,14 @@ fn account_all_payload_updates_orders_positions_and_throttled_balance() {
     );
 }
 
-/// Ping frame timestamps, stepping the clock a second at a time.
-fn pings_until(world: &World, until: f64) -> Vec<f64> {
+/// Observe dispatch timing on the host scheduler, independently of the synced payload clock.
+fn ping_count_until(world: &World, until: f64) -> usize {
     while world.runtime.now.get() < START + until {
-        world.runtime.advance(1_000.0);
+        world
+            .runtime
+            .advance((START + until - world.runtime.now.get()).min(1_000.0));
     }
-    world
-        .sent(0)
-        .iter()
-        .filter(|f| f["type"] == "ping")
-        .map(|f| f["timestamp"].as_f64().unwrap() - START)
-        .collect()
+    world.sent(0).iter().filter(|f| f["type"] == "ping").count()
 }
 
 #[test]
@@ -607,14 +616,14 @@ fn pong_schedules_the_next_ping_at_the_ping_interval() {
     world.open();
     world.message(0, json!({"type": "pong"}));
     assert_eq!(
-        pings_until(&world, 5_000.0),
-        vec![0.0],
+        ping_count_until(&world, 5_000.0),
+        1,
         "only onOpen's ping so far"
     );
-    let pings = pings_until(&world, 10_000.0);
+    let before_deadline = ping_count_until(&world, 9_999.0);
     assert!(
-        pings.contains(&10_000.0),
-        "pong arms the next ping at getPingIntervalMs(): {pings:?}"
+        ping_count_until(&world, 10_000.0) > before_deadline,
+        "pong arms the next ping at getPingIntervalMs()"
     );
 }
 
@@ -686,5 +695,284 @@ fn token_failure_logs_and_skips_the_orders_subscription() {
             .get("hasPendingAccountAllOrdersSubscribe")
             .unwrap()
             .truthy()
+    );
+}
+
+#[test]
+fn production_private_position_loop_consumes_live_iterators() {
+    for shape in ["set", "set-values", "map-values", "array"] {
+        let world = world();
+        let position = |id| Js::object(vec![("id", Js::str(id)), ("size", Js::str("1"))]);
+        let (a, b, c) = (position("a"), position("b"), position("c"));
+        let source = match shape {
+            "map-values" => {
+                let map = Js::new_map();
+                map.call_method("set", vec![Js::str("a"), a]).unwrap();
+                map.call_method("set", vec![Js::str("b"), b.clone()])
+                    .unwrap();
+                map
+            }
+            "array" => Js::array(vec![a, b.clone()]),
+            _ => {
+                let set = Js::new_set();
+                set.call_method("add", vec![a]).unwrap();
+                set.call_method("add", vec![b.clone()]).unwrap();
+                set
+            }
+        };
+        let input = if shape.ends_with("values") {
+            source.call_method("values", vec![]).unwrap()
+        } else {
+            source.clone()
+        };
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let trace = seen.clone();
+        let parent = world.socket.get("parent").unwrap();
+        parent
+            .define(
+                "mapPosition",
+                Js::function("mapPosition", move |_, args| {
+                    let id = args[0].get("id")?.to_display();
+                    trace.borrow_mut().push(id.clone());
+                    if id == "a" {
+                        match shape {
+                            "map-values" => {
+                                source.call_method("delete", vec![Js::str("b")])?;
+                                source.call_method("set", vec![Js::str("c"), c.clone()])?;
+                            }
+                            "array" => {
+                                source.set("1", c.clone())?;
+                            }
+                            _ => {
+                                source.call_method("delete", vec![b.clone()])?;
+                                source.call_method("add", vec![c.clone()])?;
+                            }
+                        }
+                    }
+                    Ok(Js::Undefined)
+                }),
+            )
+            .unwrap();
+        world
+            .socket
+            .call_method("handlePositionTopic", vec![input])
+            .unwrap();
+        assert_eq!(
+            &*seen.borrow(),
+            &["a", "c"],
+            "{shape}: live source for-of trace"
+        );
+        assert!(
+            world.store.positions().is_empty(),
+            "nonzero unmapped rows do not synthesize closes"
+        );
+    }
+}
+
+#[test]
+fn production_private_position_loop_closes_only_after_a_body_throw() {
+    for mode in ["body", "next", "done", "value"] {
+        let world = world();
+        let iterator = Js::new_set().call_method("values", vec![]).unwrap();
+        let closes = Rc::new(Cell::new(0));
+        let close_count = closes.clone();
+        let original = Js::str("original failure");
+        let receiver = iterator.clone();
+        iterator
+            .define(
+                "return",
+                Js::function("return", move |this, _| {
+                    assert!(this.same_reference(&receiver), "IteratorClose receiver");
+                    close_count.set(close_count.get() + 1);
+                    Err(Thrown::error(
+                        "Error",
+                        "close failure must not replace the body throw",
+                    ))
+                }),
+            )
+            .unwrap();
+        let failure = original.clone();
+        iterator
+            .define(
+                "next",
+                Js::function("next", move |_, _| {
+                    if mode == "next" {
+                        return Err(Thrown::new(failure.clone()));
+                    }
+                    let step = Js::object(vec![
+                        ("done", Js::Bool(false)),
+                        ("value", Js::object(vec![("size", Js::str("1"))])),
+                    ]);
+                    if mode == "done" || mode == "value" {
+                        let failure = failure.clone();
+                        step.define_accessor(
+                            mode,
+                            Some(Rc::new(move |_| Err(Thrown::new(failure.clone())))),
+                            None,
+                        );
+                    }
+                    Ok(step)
+                }),
+            )
+            .unwrap();
+        let parent = world.socket.get("parent").unwrap();
+        parent
+            .define(
+                "mapPosition",
+                Js::function("mapPosition", |_, _| {
+                    Err(Thrown::error("Error", "mapping failure"))
+                }),
+            )
+            .unwrap();
+        let failure = original.clone();
+        parent
+            .define(
+                "log",
+                Js::function("log", move |_, _| Err(Thrown::new(failure.clone()))),
+            )
+            .unwrap();
+        let error = world
+            .socket
+            .call_method("handlePositionTopic", vec![iterator])
+            .unwrap_err();
+        assert!(
+            error.value.strict_equals(&original),
+            "{mode}: original throw wins"
+        );
+        assert_eq!(
+            closes.get(),
+            usize::from(mode == "body"),
+            "{mode}: IteratorClose boundary"
+        );
+    }
+}
+
+#[test]
+fn production_private_position_close_spread_accepts_iterator_values() {
+    let world = world();
+    // Use the actual Store mutator rather than this fixture's dispatch recorder.
+    let native_store = store::facade(world.store.clone());
+    world
+        .socket
+        .get("store")
+        .unwrap()
+        .define(
+            "updatePositions",
+            native_store.get("updatePositions").unwrap(),
+        )
+        .unwrap();
+    world
+        .store
+        .add_or_update_position(
+            serde_json::from_value(json!({
+                "id":"p", "symbol":"ETH", "side":"long", "entryPrice":10,
+                "notional":10, "leverage":2, "unrealizedPnl":0, "contracts":1,
+                "liquidationPrice":1, "marginSize":120
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let pair = Js::array(vec![
+        Js::object(vec![("id", Js::str("p"))]),
+        Js::object(vec![
+            ("contracts", Js::Number(0.0)),
+            ("marginSize", Js::Undefined),
+        ]),
+    ]);
+    let closes = Js::new_set();
+    closes.call_method("add", vec![pair]).unwrap();
+    let values = closes.call_method("values", vec![]).unwrap();
+    world
+        .socket
+        .define(
+            "resolveExplicitlyClosedPositionUpdates",
+            Js::function("resolveExplicitlyClosedPositionUpdates", move |_, _| {
+                Ok(values.clone())
+            }),
+        )
+        .unwrap();
+    world
+        .socket
+        .get("parent")
+        .unwrap()
+        .define(
+            "mapPosition",
+            Js::function("mapPosition", |_, _| Ok(Js::Undefined)),
+        )
+        .unwrap();
+    let revision = world.store.update_ids().positions;
+    world
+        .socket
+        .call_method(
+            "handlePositionTopic",
+            vec![Js::array(vec![Js::object(vec![("size", Js::str("0"))])])],
+        )
+        .unwrap();
+    let positions = world.store.positions();
+    assert_eq!(
+        positions[0].contracts, 0.0,
+        "spread must deliver its close pair to the actual Store"
+    );
+    assert!(positions[0].margin_size.is_undefined());
+    assert_eq!(world.store.update_ids().positions, revision + 1.0);
+}
+
+#[test]
+fn orders_flattening_calls_the_live_owner_helper_after_its_type_guard() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/ws-state-oracle.cjs"
+        ))
+        .output()
+        .expect("maintained Lighter flattening arrows");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let world = world();
+    let payload = Js::object(vec![]);
+    let expected = Js::array(vec![]);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let observed = calls.clone();
+    let (owner, input, result) = (world.socket.clone(), payload.clone(), expected.clone());
+    world
+        .socket
+        .set(
+            "flattenByMarketPayload",
+            Js::function("input", move |this, args| {
+                observed.borrow_mut().push(json!({
+                    "receiver":this.same_reference(&owner),
+                    "payload":args[0].same_reference(&input),
+                    "include":args[1].truthy(),
+                }));
+                Ok(result.clone())
+            }),
+        )
+        .unwrap();
+    let result = world
+        .socket
+        .call_method("flattenOrdersByMarket", vec![payload])
+        .unwrap();
+    let string = world
+        .socket
+        .call_method("flattenOrdersByMarket", vec![Js::str("x")])
+        .unwrap();
+    let function = world
+        .socket
+        .call_method(
+            "flattenOrdersByMarket",
+            vec![Js::function("input", |_, _| Ok(Js::Undefined))],
+        )
+        .unwrap();
+    assert_eq!(
+        json!({
+            "same":result.same_reference(&expected), "calls":*calls.borrow(),
+            "stringLength":string.array_values().unwrap().len(),
+            "functionLength":function.array_values().unwrap().len(),
+        }),
+        source["flattenOrdersDispatch"]
     );
 }

@@ -12,7 +12,8 @@ use crate::{
 use indexmap::IndexMap;
 use safe_cex_num::{adjust, js_number, js_number_string, js_string, js_truthy};
 use safe_cex_types::{
-    Market, Order, OrderExtra, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PlaceOrderOpts,
+    Market, Order, OrderExtra, OrderSide, OrderStatus, OrderTimeInForce, OrderType,
+    PreparedOrderOpts,
 };
 use serde_json::{Map, Value, json};
 use std::{cell::RefCell, rc::Rc, task::Poll};
@@ -115,7 +116,7 @@ pub trait CoinbaseOrderHost {
     fn markets_by_id(&mut self) -> &IndexMap<String, Rc<Market>>;
     fn resolve_caller_client_order_id(
         &mut self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Option<String>, CoinbaseOrderFailure>;
     fn uuid(&mut self) -> String;
     fn post_create_order(
@@ -222,7 +223,7 @@ pub fn resolve_market_by_coinbase_product_id(
 // ts: CoinbaseExchange.formatCreateOrder
 pub fn format_create_order(
     host: &mut impl CoinbaseOrderHost,
-    opts: &PlaceOrderOpts,
+    opts: &PreparedOrderOpts,
 ) -> Result<PlaceOrderRequest, CoinbaseOrderFailure> {
     let market = host
         .market_by_symbol(&opts.symbol)
@@ -416,9 +417,10 @@ pub fn emit_orders_fetch_error(
 // ts: CoinbaseExchange.placeOrder
 pub fn place_order<H: CoinbaseOrderHost + 'static>(
     host: Rc<RefCell<H>>,
-    opts: PlaceOrderOpts,
+    opts: impl Into<PreparedOrderOpts>,
     spawn: &CoinbaseStarbasePromiseSpawner,
 ) -> CoinbaseStarbasePromise<Result<Vec<String>, CoinbaseOrderFailure>> {
+    let opts = opts.into();
     CoinbaseStarbasePromise::from_future(
         Box::pin(async move {
             host.borrow_mut().resolve_caller_client_order_id(&opts)?;

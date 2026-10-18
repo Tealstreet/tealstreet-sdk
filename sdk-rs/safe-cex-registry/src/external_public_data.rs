@@ -1,11 +1,16 @@
 use crate::{
     in_process_public_data::{CandleObserver, OrderbookObserver},
-    public_data::*,
-    public_data_host::*,
+    public_data::{
+        EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS, EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS,
+        get_candle_subscription_key, parse_candle_subscription_key,
+    },
+    public_data_host::{
+        MarketBatch, PublicDataCleanup, PublicDataParent, PublicDataUpdate, TickerBatch,
+    },
 };
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
 use safe_cex_types::{
-    Candle, OHLCVOptions, OrderBook, Timeframe,
+    AnyTimeframe, Candle, OHLCVOptions, OrderBook,
     gateway::{GatewayChannel, GatewayMessage, GatewayMessageType},
 };
 use serde_json::Value;
@@ -80,7 +85,7 @@ fn remove(map: &ListenerMap, key: &str) {
 fn has_listener(map: &ListenerMap, key: &str) -> bool {
     lookup(map, key).is_some_and(|set| set.borrow().iter().any(Option::is_some))
 }
-fn timeframe(interval: &Timeframe) -> String {
+fn timeframe(interval: &AnyTimeframe) -> String {
     serde_json::to_value(interval)
         .unwrap()
         .as_str()
@@ -92,7 +97,7 @@ fn message(
     exchange: &str,
     channel: Option<GatewayChannel>,
     symbol: Option<String>,
-    interval: Option<Timeframe>,
+    interval: Option<AnyTimeframe>,
 ) -> GatewayMessage {
     GatewayMessage {
         message_type: kind,
@@ -515,7 +520,7 @@ impl ExternalPublicDataProvider {
                     &self.exchange_id,
                     Some(GatewayChannel::Candle),
                     Some(opts.symbol.clone()),
-                    Some(opts.interval),
+                    Some(opts.interval.clone()),
                 )
             };
             self.send(request)?;
@@ -552,7 +557,7 @@ impl ExternalPublicDataProvider {
                             &provider.exchange_id,
                             Some(GatewayChannel::Candle),
                             Some(opts.symbol.clone()),
-                            Some(opts.interval),
+                            Some(opts.interval.clone()),
                         )
                     };
                     provider.send(request)?;

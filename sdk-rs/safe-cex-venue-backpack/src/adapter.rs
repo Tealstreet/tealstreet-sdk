@@ -1,8 +1,8 @@
 //! Owned exchange composition and concrete state-backed method frames.
 use crate::native_value::NativeValue;
 use crate::{
-    native_http::Client, native_value::Value, order_actions as actions, public_control::JsString,
-    rest_reads as reads,
+    native_http::RoutedClient, native_value::Value, order_actions as actions,
+    public_control::JsString, rest_reads as reads,
 };
 use safe_cex_exchange::{
     exchange::BaseExchange,
@@ -20,7 +20,7 @@ pub type DateParser = Rc<dyn Fn(JsString) -> Result<f64, ExchangeError>>;
 // ts: BackpackExchange
 pub struct BackpackExchange {
     pub base: Rc<BaseExchange>,
-    pub xhr: Rc<Client>,
+    pub xhr: RoutedClient,
     pub account_leverage_limit: Cell<f64>,
     pub grafana_endpoints_every: &'static [&'static str],
     pub grafana_endpoints_periodic: &'static [&'static str],
@@ -57,23 +57,39 @@ impl BackpackExchange {
             },
         );
         let base = Rc::new(base);
-        let o = base.options();
-        let options = Rc::new(RefCell::new(crate::api_factory::Options {
-            testnet: o.testnet.unwrap_or(false),
-            recv_window: o.extra.as_ref().and_then(|v| v.recv_window),
-            tunnel: o.tealstreet_tunnel.unwrap_or(false),
-            key: o.key.clone(),
-            secret: o.secret.clone(),
+        let options = base.options();
+        let secondary_proxy = options
+            .secondary_proxy_url
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .or_else(|| runtime.transport().public_cors_proxy());
+        let factory = Rc::new(RefCell::new(crate::native_http::Factory {
+            base: base.clone(),
+            build,
+            install,
         }));
-        let xhr = crate::api_factory::create_api(
-            Rc::new(RefCell::new(crate::native_http::Factory {
-                base: base.clone(),
-                build: Some(build),
-                install,
-            })),
-            options,
+        let primary = crate::api_factory::create_api(
+            factory.clone(),
+            Rc::new(RefCell::new(options.clone())),
         )?;
-        xhr.limit_requests(base.runtime.clone(), 10);
+        primary.limit_requests(base.runtime.clone(), 10);
+        let reader = if let Some(key) = options.secondary_key.as_ref().filter(|key| !key.is_empty())
+        {
+            let mut secondary = options.clone();
+            secondary.key.clone_from(key);
+            if let Some(secret) = &options.secondary_secret {
+                secondary.secret.clone_from(secret);
+            }
+            if let Some(passphrase) = &options.secondary_passphrase {
+                secondary.passphrase = Some(passphrase.clone());
+            }
+            secondary.override_proxy_url = secondary_proxy;
+            crate::api_factory::create_api(factory, Rc::new(RefCell::new(secondary)))?
+        } else {
+            primary.clone()
+        };
+        let xhr = RoutedClient::new(primary, reader);
         let owner = Rc::new_cyclic(|weak| Self {
             base,
             xhr,
@@ -170,10 +186,7 @@ impl BackpackExchange {
         crate::account_reads::get_position_mode()
     }
     pub fn dispose(&self) -> Result<(), ExchangeError> {
-        for task in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
-        }
-        self.base.dispose()?;
+        self.base.set_disposed_flag(true);
         self.public_websocket
             .get()
             .expect("constructed public socket")
@@ -366,7 +379,7 @@ impl reads::Host for Frame {
         (self.owner.date_parse)(v)
     }
     fn clock(&mut self) -> Result<f64, ExchangeError> {
-        Ok(self.owner.runtime.now_ms())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn public_only(&mut self) -> Result<bool, ExchangeError> {
         let o = self.owner.base.options();
@@ -609,18 +622,19 @@ impl actions::Host for Frame {
         let o = o.borrow();
         Ok(actions::Options {
             symbol: units(&o.symbol),
-            kind: o.r#type,
-            side: o.side,
+            r#type: o.r#type.into_property(),
+            side: o.side.into_property(),
             amount: o.amount,
-            price: Some(o.price),
-            time_in_force: o.time_in_force,
-            reduce_only: o.reduce_only,
+            price: o.price.into_value(),
+            time_in_force: (o.time_in_force).into_value(),
+            reduce_only: o.reduce_only.into_property(),
             trigger_price: None,
             take_profit: None,
             stop_loss: None,
             tp_trigger_type: None,
             sl_trigger_type: None,
-            client_id: None,
+            client_order_id: None,
+            ..Default::default()
         })
     }
     fn order_id(&mut self, o: &Self::Existing) -> Result<JsString, ExchangeError> {

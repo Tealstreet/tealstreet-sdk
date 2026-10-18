@@ -5,23 +5,16 @@ pub enum ApiType {
     Papi,
     Fapi,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "ApiType", rename_all = "lowercase")]
+enum ApiTypeWire {
+    Papi,
+    Fapi,
+}
 impl<'de> serde::Deserialize<'de> for ApiType {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "lowercase")]
-        enum Wire {
-            Papi,
-            Fapi,
-        }
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let value =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
-        Ok(match value {
-            Wire::Papi => Self::Papi,
-            Wire::Fapi => Self::Fapi,
-        })
+        ApiTypeWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(text))
     }
 }
 
@@ -33,24 +26,18 @@ pub enum BinanceOrderBookApplyResult {
     Ignored,
     Gap,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "BinanceOrderBookApplyResult", rename_all = "lowercase")]
+enum BinanceOrderBookApplyResultWire {
+    Applied,
+    Ignored,
+    Gap,
+}
 impl<'de> serde::Deserialize<'de> for BinanceOrderBookApplyResult {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "lowercase")]
-        enum Wire {
-            Applied,
-            Ignored,
-            Gap,
-        }
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let value =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
-        Ok(match value {
-            Wire::Applied => Self::Applied,
-            Wire::Ignored => Self::Ignored,
-            Wire::Gap => Self::Gap,
-        })
+        BinanceOrderBookApplyResultWire::deserialize(
+            serde::de::value::StringDeserializer::<D::Error>::new(text),
+        )
     }
 }

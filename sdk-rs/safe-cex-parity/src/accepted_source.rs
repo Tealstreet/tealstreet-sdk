@@ -466,7 +466,8 @@ struct LocalTypes {
     generated_provider_file: bool,
     generated_provider_module: bool,
     number_output_used: bool,
-    number_output_glob: bool,
+    glob_import: bool,
+    serde_forward_used: bool,
     number_output_imported: bool,
     number_output_shadowed: bool,
     module_recipes: ModuleRecipes,
@@ -662,6 +663,23 @@ impl LocalTypes {
             .last()
             .map(|part| part.ident.to_string())
             .unwrap_or_default();
+        // Reviewed serde 1.0.229 expands this identifier-only form solely to
+        // forwarding Deserializer methods. Rustdoc inventories those methods;
+        // this permission neither classifies them nor admits arbitrary items.
+        if name == "forward_to_deserialize_any"
+            && item.path.segments.len() == 2
+            && item.path.segments[0].ident == "serde"
+            && item
+                .path
+                .segments
+                .iter()
+                .all(|part| part.arguments.is_empty())
+            && self.verified_macro_origins.contains("serde")
+            && serde_forward_grammar(item.tokens.clone())
+        {
+            self.serde_forward_used = true;
+            return;
+        }
         let origin = if qualified {
             item.path
                 .segments
@@ -965,7 +983,7 @@ impl<'ast> Visit<'ast> for LocalTypes {
                 _ => false,
             }
         }
-        self.number_output_glob |= glob(&item.tree);
+        self.glob_import |= glob(&item.tree);
         // Only a direct `safe_cex_num::js_number_output` binding authorizes the
         // unqualified spelling; any other binding of that name revokes it.
         fn number_output_bindings(
@@ -1512,6 +1530,52 @@ fn token_keyword_grammar(tokens: proc_macro2::TokenStream) -> bool {
 }
 
 // These expression macros do not declare decoder APIs; shadowing definitions are rejected.
+fn serde_forward_grammar(tokens: proc_macro2::TokenStream) -> bool {
+    let mut count = 0;
+    for token in tokens {
+        let proc_macro2::TokenTree::Ident(name) = token else {
+            return false;
+        };
+        if !matches!(
+            name.to_string().as_str(),
+            "bool"
+                | "i8"
+                | "i16"
+                | "i32"
+                | "i64"
+                | "i128"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "u128"
+                | "f32"
+                | "f64"
+                | "char"
+                | "str"
+                | "string"
+                | "bytes"
+                | "byte_buf"
+                | "option"
+                | "unit"
+                | "unit_struct"
+                | "newtype_struct"
+                | "seq"
+                | "tuple"
+                | "tuple_struct"
+                | "map"
+                | "struct"
+                | "enum"
+                | "identifier"
+                | "ignored_any"
+        ) {
+            return false;
+        }
+        count += 1;
+    }
+    count > 0
+}
+
 fn expression_macro(name: &str) -> bool {
     matches!(
         name,
@@ -1587,10 +1651,15 @@ pub fn local_types_with_recipes(
             .names
             .push(("UNSUPPORTED_MACRO_IMPORT_SCOPE".into(), 1, 0));
     }
-    if visitor.number_output_used && visitor.number_output_glob {
+    if visitor.number_output_used && visitor.glob_import {
         visitor
             .names
             .push(("UNSUPPORTED_NUMBER_OUTPUT_IMPORT_SCOPE".into(), 1, 0));
+    }
+    if visitor.serde_forward_used && visitor.glob_import {
+        visitor
+            .names
+            .push(("UNSUPPORTED_SERDE_FORWARD_IMPORT_SCOPE".into(), 1, 0));
     }
     Ok(visitor.names)
 }
@@ -1598,6 +1667,60 @@ pub fn local_types_with_recipes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn serde_forwarding_requires_verified_origin_and_bounded_method_tokens() {
+        let call = |tokens: &str| {
+            format!(
+                "impl<'de> serde::Deserializer<'de> for Input {{ serde::forward_to_deserialize_any! {{ {tokens} }} }}"
+            )
+        };
+        for (source, verified, accepted) in [
+            (call("bool i8 struct enum ignored_any"), true, true),
+            (call("bool"), false, false),
+            (call(""), true, false),
+            (call("bool mystery"), true, false),
+            (call("bool; struct Hidden;"), true, false),
+            (
+                call("bool { fn decode(_: &str) -> bool { true } }"),
+                true,
+                false,
+            ),
+            (call("<V: Visitor<'de>> bool"), true, false),
+            (
+                call("bool").replace("serde::forward", "vendor::forward"),
+                true,
+                false,
+            ),
+            (
+                call("bool").replace("serde::forward", "forward"),
+                true,
+                false,
+            ),
+            (format!("mod serde {{}} {}", call("bool")), true, false),
+            (format!("use vendor::*; {}", call("bool")), true, false),
+            (
+                format!("use vendor as serde; {}", call("bool")),
+                true,
+                false,
+            ),
+        ] {
+            let mut visitor = LocalTypes {
+                verified_macro_origins: if verified {
+                    ["serde".into()].into()
+                } else {
+                    HashSet::new()
+                },
+                ..LocalTypes::default()
+            };
+            visitor.visit_file(&syn::parse_file(&source).unwrap());
+            assert_eq!(
+                visitor.names.is_empty() && !(visitor.serde_forward_used && visitor.glob_import),
+                accepted,
+                "SERDE-FORWARD origin/grammar refusal: {source}: {:?}",
+                visitor.names
+            );
+        }
+    }
     #[test]
     fn number_output_unqualified_spelling_requires_a_direct_verified_import() {
         let scan = |source: &str| {

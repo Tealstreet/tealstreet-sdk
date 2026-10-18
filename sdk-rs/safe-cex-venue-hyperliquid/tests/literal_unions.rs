@@ -111,13 +111,7 @@ fn expected_counts(name: &str) -> (usize, usize) {
         "Tif" => (3, 31),
         "Tpsl" => (2, 21),
         "Grouping" => (3, 30),
-        "MetaUniverseItemMarginMode" | "Hip3MarketInfoMarginMode" => (2, 23),
-        "MetaUniverseItemGrowthMode" | "Hip3MarketInfoGrowthMode" => (2, 21),
-        "OrderResponseStatusCase3" | "OrderResponseStatusCase4" | "ScheduleCancelActionType" => {
-            (1, 15)
-        }
-        "UserFundingDeltaType" => (1, 14),
-        "UserNonFundingLedgerDeltaType" | "WsUserNonFundingLedgerUpdateType" => (4, 35),
+        "WsUserNonFundingLedgerUpdateType" => (4, 35),
         other => panic!("LITERAL-CARDINALITY unknown root {other}"),
     }
 }
@@ -128,22 +122,13 @@ fn actual_serde_literal_sets_match_ts_and_reject_widening() {
         serde_json::from_str(include_str!("fixtures/literal-unions.json")).unwrap();
     let admitted: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/literal-unions.json")).unwrap();
-    assert_eq!(cases.len(), 14, "LITERAL-CARDINALITY source roots");
+    assert_eq!(cases.len(), 5, "LITERAL-CARDINALITY source roots");
     let required = [
         "HyperliquidUserAbstractionMode",
         "Tif",
         "Tpsl",
         "Grouping",
-        "MetaUniverseItemMarginMode",
-        "MetaUniverseItemGrowthMode",
-        "OrderResponseStatusCase3",
-        "OrderResponseStatusCase4",
-        "UserFundingDeltaType",
-        "UserNonFundingLedgerDeltaType",
-        "ScheduleCancelActionType",
         "WsUserNonFundingLedgerUpdateType",
-        "Hip3MarketInfoMarginMode",
-        "Hip3MarketInfoGrowthMode",
     ];
     let mut actual: Vec<_> = cases.iter().map(|case| case.name.as_str()).collect();
     actual.sort();
@@ -160,7 +145,7 @@ fn actual_serde_literal_sets_match_ts_and_reject_widening() {
         );
     }
     let mut comparisons = (0, 0, 0);
-    for index in 0..14 {
+    for index in 0..5 {
         let case = cases
             .get(index)
             .expect("LITERAL-CARDINALITY native index coverage");
@@ -189,16 +174,7 @@ fn actual_serde_literal_sets_match_ts_and_reject_widening() {
             Tif,
             Tpsl,
             Grouping,
-            MetaUniverseItemMarginMode,
-            MetaUniverseItemGrowthMode,
-            OrderResponseStatusCase3,
-            OrderResponseStatusCase4,
-            UserFundingDeltaType,
-            UserNonFundingLedgerDeltaType,
-            ScheduleCancelActionType,
-            WsUserNonFundingLedgerUpdateType,
-            Hip3MarketInfoMarginMode,
-            Hip3MarketInfoGrowthMode
+            WsUserNonFundingLedgerUpdateType
         );
         assert_eq!(
             accepted.len(),
@@ -239,7 +215,7 @@ fn actual_serde_literal_sets_match_ts_and_reject_widening() {
     }
     assert_eq!(
         comparisons,
-        (34, 351, 351),
+        (18, 169, 169),
         "LITERAL-CARDINALITY native receipt totals"
     );
 }

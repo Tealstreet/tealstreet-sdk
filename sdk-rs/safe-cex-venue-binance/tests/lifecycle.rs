@@ -41,26 +41,23 @@ fn wire(v: &EventValue) -> Value {
                 json!(v)
             }
         }
-        EventValue::String(v) => json!(v),
-        EventValue::Array(v) => Value::Array(v.borrow().iter().map(wire).collect()),
-        EventValue::Object(v) => Value::Object(
-            v.borrow()
-                .fields
+        EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
+        EventValue::Array(v) => Value::Array(array_values(v).iter().map(wire).collect()),
+        EventValue::Object(_) => Value::Object(
+            v.spread()
                 .iter()
                 .map(|(k, v)| (k.clone(), wire(v)))
                 .collect(),
         ),
-        EventValue::Enum(v) => v.wire(),
-        EventValue::Inherited(_) => panic!("no inherited callable in authored lifecycle graph"),
-        EventValue::Builtin(_) => panic!("no builtin referent in authored lifecycle graph"),
+        _ => panic!("no unsupported value in authored lifecycle graph"),
     }
 }
 fn p(v: &EventValue, key: &str) -> EventValue {
     v.get(key).unwrap()
 }
 fn own(v: &EventValue, key: &str) -> bool {
-    if let EventValue::Object(o) = v {
-        o.borrow().fields.contains_key(key)
+    if matches!(v, EventValue::Object(_)) {
+        v.has_own(key)
     } else {
         false
     }
@@ -84,7 +81,11 @@ fn s(v: EventValue, expected: &str, label: &str) {
     let EventValue::String(actual) = v else {
         panic!("{label}: native String variant")
     };
-    assert_eq!(actual, expected, "{label}: native string");
+    assert_eq!(
+        actual.as_ref(),
+        expected.encode_utf16().collect::<Vec<_>>(),
+        "{label}: native string"
+    );
 }
 fn boolean(v: EventValue, expected: bool, label: &str) {
     let EventValue::Bool(actual) = v else {
@@ -96,7 +97,7 @@ fn arr(v: &EventValue) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("native Array")
     };
-    a.borrow().clone()
+    array_values(a)
 }
 fn syn(k: LifecycleSync) -> &'static str {
     match k {
@@ -203,7 +204,9 @@ fn setup(f: Value, venue: &'static str, family: &'static str) -> Bind {
     );
     let mut e = ExchangeError::new("lifecycle fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!("lifecycle-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "lifecycle-code"
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"lifecycle detail"}}));
     let count = f
         .get("count")
@@ -273,8 +276,9 @@ impl LifecycleBindings for Bind {
         }
         if k == LifecycleSync::Log && st.name() == "log-mutates-lengths" {
             if let EventValue::Array(a) = &st.tickers {
-                a.borrow_mut()
+                EventValue::Array(a.clone())
                     .push(decoded(json!({"id":"ticker-C","last":6.7})))
+                    .unwrap()
             }
         }
         if k == LifecycleSync::Update && st.name() == "capture-version-mutation" {
@@ -449,7 +453,7 @@ impl LifecycleBindings for Bind {
                 let EventValue::Array(a) = &st.count else {
                     panic!()
                 };
-                a.borrow_mut().push(number(16.0));
+                EventValue::Array(a.clone()).push(number(16.0)).unwrap();
             }
             let st = st.clone();
             Ok(Rc::new(move |args| {
@@ -501,7 +505,7 @@ fn original(e: &Failure, st: &State, label: &str) {
         "{label}: native error message"
     );
     assert_eq!(
-        e.code,
+        observed_error_code(&e.code),
         Some(json!("lifecycle-code")),
         "{label}: native code"
     );
@@ -512,7 +516,7 @@ fn original(e: &Failure, st: &State, label: &str) {
     );
 }
 fn failure(e: Option<&Failure>, st: &State) -> Value {
-    e.map(|e|json!({"original":Rc::ptr_eq(e,&st.error),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})).unwrap_or(Value::Null)
+    e.map(|e|json!({"original":Rc::ptr_eq(e,&st.error),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})).unwrap_or(Value::Null)
 }
 fn project(st: &State, result: &Result<(), Failure>, timer_error: Option<&Failure>) -> Value {
     let effects=st.effects.borrow().iter().map(|e|{let refs=if e.k==LifecycleSync::Update{let row=&e.args[0];json!({"markets":p(row,"markets").same(&st.markets),"tickers":p(row,"tickers").same(&st.tickers),"orders":p(row,"orders").same(&st.orders),"risk":p(row,"positions").same(&st.risk),"positions":p(row,"positions").same(&st.positions),"balance":p(row,"balance").same(&st.balance),"loadedFresh":if own(row,"loaded"){json!(!p(row,"loaded").same(&e.loaded_before))}else{Value::Null},"loadedNested":own(row,"loaded")&&p(&p(row,"loaded"),"nested").same(&p(&st.initial_loaded,"nested"))})}else{Value::Null};json!({"name":syn(e.k),"args":e.args.iter().map(wire).collect::<Vec<_>>(),"receiver":e.receiver,"refs":refs})}).collect::<Vec<_>>();
@@ -652,7 +656,11 @@ fn start_native(st: &State, result: &Result<(), Failure>, label: &str) {
                 e.message, "Cannot read properties of null (reading 'length')",
                 "{label}: native length read precedes conversion"
             );
-            assert_eq!(e.code, None, "{label}: native generated code");
+            assert_eq!(
+                observed_error_code(&e.code),
+                None,
+                "{label}: native generated code"
+            );
             assert_eq!(e.response, None, "{label}: native generated response");
         } else {
             original(e, st, label)
@@ -1299,4 +1307,17 @@ fn pm_tick() {
 #[ignore = "requires direct TypeScript oracle"]
 fn spot_tick() {
     test("spot", "tick")
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

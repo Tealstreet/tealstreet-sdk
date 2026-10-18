@@ -11,7 +11,7 @@ use safe_cex_transport::{
     signing::{HttpSigningResponse, RemoteSignerRequest, RemoteSignerResponse, SignedConfig},
 };
 use safe_cex_types::ws_auth::WsAuthResponse;
-use safe_cex_venue_binance::private_event_value::EventValue;
+use safe_cex_venue_binance::private_event_value::{EventOps, EventValue};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -46,7 +46,9 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserSigner {
                     Some(Value::Object(map)) => map,
                     _ => Default::default(),
                 };
-                if let Some(Value::Object(body)) = request.config.data {
+                if let Some(Value::Object(body)) =
+                    request.config.data.map(|value| value.into_value().unwrap())
+                {
                     params.extend(body);
                 }
                 params.insert("timestamp".into(), json!(1_700_000_000_000u64));

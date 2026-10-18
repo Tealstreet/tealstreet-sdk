@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test, { before } from 'node:test';
 import { buildScanner } from './accepted-scanner.mjs';
-import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition } from './accepted-number-output.mjs';
+import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition, numberOutputDefinitionCovers } from './accepted-number-output.mjs';
 
 const sdk = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 let scanner;
@@ -76,7 +76,7 @@ test('numeric provider recipe and unconditional source route reject executed mut
   context.metadata.packages[0].manifest_path = path.join(copiedSdk, 'safe-cex-num/Cargo.toml');
   context.metadata.packages[0].targets[0].src_path = path.join(copiedSdk, 'safe-cex-num/src/lib.rs');
   context.artifacts[0].target.src_path = context.metadata.packages[0].targets[0].src_path;
-  const worker = `import fs from 'node:fs'; import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition } from ${JSON.stringify(pathToFileURL(path.join(copiedSdk, 'safe-cex-parity/scripts/accepted-number-output.mjs')).href)}; const value = JSON.parse(fs.readFileSync(process.argv[1])); verifiedNumberOutputOrigin(value.doc, value.consumer, value.metadata, value.artifacts, process.argv[2]); const doc = { root:0, index:{0:{crate_id:0,name:'safe_cex_num',span:{filename:'safe-cex-num/src/lib.rs'},inner:{module:{}}}}}; verifiedNumberOutputDefinition(doc, value.metadata.packages[0], value.metadata, value.artifacts, process.argv[2]);`;
+  const worker = `import fs from 'node:fs'; import assert from 'node:assert/strict'; import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition, numberOutputDefinitionCovers } from ${JSON.stringify(pathToFileURL(path.join(copiedSdk, 'safe-cex-parity/scripts/accepted-number-output.mjs')).href)}; const value = JSON.parse(fs.readFileSync(process.argv[1])); verifiedNumberOutputOrigin(value.doc, value.consumer, value.metadata, value.artifacts, process.argv[2]); const doc = { root:0, index:{0:{crate_id:0,name:'safe_cex_num',span:{filename:'safe-cex-num/src/lib.rs'},inner:{module:{}}}}}; const definition = verifiedNumberOutputDefinition(doc, value.metadata.packages[0], value.metadata, value.artifacts, process.argv[2]); const scan = (await import('node:child_process')).spawnSync(process.argv[2], ['--macro-origins-json','[]',definition.file], {encoding:'utf8'}); assert.equal(scan.status,0,scan.stderr); const uncovered=scan.stdout.trim().split('\\n').filter(Boolean).map(line=>line.split('\\t')).filter(([file,ident,row,column])=>ident.startsWith('UNSUPPORTED_')&&!numberOutputDefinitionCovers(definition,file,ident,row,column)); assert.deepEqual(uncovered,[], 'unreviewed numeric definition scanner events');`;
   const input = path.join(root, 'compiler-context.json');
   fs.writeFileSync(input, JSON.stringify(context));
   const execute = () => spawnSync(process.execPath, ['--input-type=module', '--eval', worker, input, scanner], { encoding: 'utf8' });
@@ -87,6 +87,7 @@ test('numeric provider recipe and unconditional source route reject executed mut
     ['safe-cex-num/src/numeric_ingress.rs', 'mod eligibility;', '#[cfg(not(doc))] mod eligibility;', 'numeric provider conditional route', /unconditional source route required/],
     ['safe-cex-num/src/numeric_ingress/eligibility.rs', '#[macro_export]', '#[macro_export(local_inner_macros)]', 'numeric provider export attributes', /unconditional source route required/],
     ['safe-cex-num/src/numeric_ingress/eligibility.rs', '#[macro_export]', 'mod duplicate { macro_rules! js_number_output { () => {} } }\n#[macro_export]', 'numeric provider nested duplicate declaration', /unique reviewed macro definition required/],
+    ['safe-cex-num/src/numeric_ingress/eligibility.rs', '#[macro_export]', '#[macro_export] macro_rules! unreviewed_export { () => {} }\n#[macro_export]', 'numeric provider unrelated export attribute', /unreviewed numeric definition scanner events/],
   ]) {
     const file = path.join(copiedSdk, relative), source = fs.readFileSync(file, 'utf8');
     assert.equal(source.split(before).length, 2, 'mutation selects exactly one maintained source occurrence');
@@ -127,4 +128,34 @@ test('numeric source inspection refuses opaque arguments later shadows and every
     assert.match(guard.stderr, /DOC_CONFIGURATION changes production discovery/);
   }
   assert.equal(scan(positive), '');
+}));
+
+
+test('numeric definition coverage retains exact export and declaration positions', () => fixture((root, original) => {
+  const provider = original.metadata.packages[0];
+  const doc = { root: 0, index: { 0: { crate_id: 0, name: 'safe_cex_num', span: { filename: 'safe-cex-num/src/lib.rs' }, inner: { module: {} } } } };
+  const definition = verifiedNumberOutputDefinition(doc, provider, original.metadata, original.artifacts, scanner);
+  const context = path.join(root, 'definition.json');
+  fs.writeFileSync(context, JSON.stringify(definition));
+  const module = new URL('./accepted-number-output.mjs', import.meta.url).href;
+  for (const [label, anchor, replacement, assertion] of [
+    ['numeric definition export coverage', '[definition, definition.exportAttribute]', '[definition]', `assert.ok(covers(d,d.file,a.ident,a.line,a.column),'numeric definition export coverage must retain the verified attribute');`],
+    ['numeric definition export position', 'Number(column) === marker.column', 'true', `assert.equal(covers(d,d.file,a.ident,a.line,a.column+1),false,'numeric definition export position must refuse a nearby attribute');`],
+  ]) {
+    const run = mutant => spawnSync(process.execPath, ['--input-type=module','--eval', `import assert from 'node:assert/strict';import fs from 'node:fs';import {registerHooks} from 'node:module';${mutant ? `registerHooks({load(url,context,next){const loaded=next(url,context);if(url!==${JSON.stringify(module)})return loaded;const source=String(loaded.source),anchor=${JSON.stringify(anchor)};assert.equal(source.split(anchor).length,2);return {...loaded,source:source.replace(anchor,${JSON.stringify(replacement)})};}});` : ''}const {numberOutputDefinitionCovers:covers}=await import(${JSON.stringify(module)});const d=JSON.parse(fs.readFileSync(${JSON.stringify(context)}));const a=d.exportAttribute;${assertion}`],{encoding:'utf8'});
+    let result=run(false);assert.equal(result.status,0,result.stderr);
+    result=run(true);assert.equal(result.status,1,result.stderr);
+    assert.match(result.stderr,new RegExp(label+' must'));
+    console.log(`${label}: named assertion; process exit 1`);
+    result=run(false);assert.equal(result.status,0,result.stderr);
+  }
+  for(const marker of [definition,definition.exportAttribute]) {
+    assert.equal(numberOutputDefinitionCovers(definition,definition.file,marker.ident,marker.line,marker.column),true);
+    assert.equal(numberOutputDefinitionCovers(definition,definition.file,marker.ident,marker.line+1,marker.column),false);
+    assert.equal(numberOutputDefinitionCovers(definition,definition.file,marker.ident,marker.line,marker.column+1),false);
+    assert.equal(numberOutputDefinitionCovers(definition,definition.file,'UNSUPPORTED_ATTRIBUTE_EXPANSION:unknown',marker.line,marker.column),false);
+    assert.equal(numberOutputDefinitionCovers(null,definition.file,marker.ident,marker.line,marker.column),false);
+  }
+  const foreign=path.join(root,'elsewhere.rs');fs.writeFileSync(foreign,'');
+  assert.equal(numberOutputDefinitionCovers(definition,foreign,definition.exportAttribute.ident,definition.exportAttribute.line,definition.exportAttribute.column),false);
 }));

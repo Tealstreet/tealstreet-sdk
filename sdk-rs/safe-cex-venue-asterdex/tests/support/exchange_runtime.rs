@@ -1,4 +1,10 @@
-//! Scripted AsterDEX transport and deterministic scheduler.
+// Scripted AsterDEX transport and deterministic scheduler.
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
@@ -21,6 +27,7 @@ use std::{
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
 pub struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     pub now: Rc<Cell<f64>>,
     pub jobs: RefCell<Vec<Job>>,
     pub console: RefCell<Vec<String>>,
@@ -28,6 +35,7 @@ pub struct Runtime {
     pub sent: Rc<RefCell<Vec<String>>>,
     pub random_values: RefCell<VecDeque<f64>>,
     pub urls: RefCell<Vec<String>>,
+    pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub http_options: RefCell<Vec<safe_cex_types::ExchangeOptions>>,
 }
 
@@ -40,18 +48,33 @@ impl ExchangeTask for Task {
 
 impl Runtime {
     pub fn pump(&self) {
-        let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
-        let mut pending = vec![];
-        for (mut f, c) in jobs {
-            if !c.get()
-                && f.as_mut()
-                    .poll(&mut Context::from_waker(Waker::noop()))
-                    .is_pending()
-            {
-                pending.push((f, c));
+        self.sleep_wakers.wake_due(self.now.get());
+        for _ in 0..64 {
+            let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
+            if jobs.is_empty() {
+                return;
+            }
+            let signal = std::sync::Arc::new(virtual_time::WakeSignal::default());
+            let waker = signal.waker();
+            let mut cx = Context::from_waker(&waker);
+            let mut pending = vec![];
+            let mut progressed = false;
+            for (mut future, cancelled) in jobs {
+                if cancelled.get() {
+                    continue;
+                }
+                if future.as_mut().poll(&mut cx).is_pending() {
+                    pending.push((future, cancelled));
+                } else {
+                    progressed = true;
+                }
+            }
+            let added = !self.jobs.borrow().is_empty();
+            self.jobs.borrow_mut().extend(pending);
+            if !progressed && !added && !signal.take() {
+                return;
             }
         }
-        self.jobs.borrow_mut().extend(pending);
     }
 }
 
@@ -63,12 +86,14 @@ impl ExchangeRuntime for Runtime {
         self.now.get()
     }
     fn sleep(&self, d: u64) -> ExchangeFuture<'static, ()> {
-        let at = self.now.get() + d as f64;
         let now = self.now.clone();
-        Box::pin(std::future::poll_fn(move |_| {
+        let at = now.get() + d as f64;
+        let sleeper = self.sleep_wakers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -78,7 +103,9 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((f, c.clone()));
         Box::new(Task(c))
     }
-    fn console(&self, _: &str, message: &str) {
+    fn console_values(&self, _: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.console.borrow_mut().push(message.into());
     }
     fn unique_id(&self) -> String {
@@ -90,7 +117,7 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         self.random_values.borrow_mut().pop_front().unwrap_or(0.375)
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, e: &ExchangeError, _: &Value) {
@@ -101,20 +128,23 @@ impl ExchangeRuntime for Runtime {
     }
 }
 
-struct Socket {
-    events: RefCell<VecDeque<WsEvent>>,
+pub struct Socket {
+    pub events: Rc<RefCell<VecDeque<WsEvent>>>,
     sent: Rc<RefCell<Vec<String>>>,
-    closed: Cell<bool>,
+    pub closed: Cell<bool>,
 }
 impl WsSocket for Socket {
     fn ready_state(&self) -> u8 {
         if self.closed.get() { 3 } else { 1 }
     }
     fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
-        match self.events.borrow_mut().pop_front() {
-            Some(event) => Box::pin(async move { Ok(event) }),
-            None => Box::pin(std::future::pending()),
-        }
+        let events = self.events.clone();
+        Box::pin(std::future::poll_fn(move |_| {
+            events
+                .borrow_mut()
+                .pop_front()
+                .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+        }))
     }
     fn send(&self, message: &str) -> Result<(), ExchangeError> {
         self.sent.borrow_mut().push(message.into());
@@ -146,13 +176,14 @@ impl WsRuntime for Runtime {
         _: WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
-        self.urls.borrow_mut().push(url);
-        let socket: Rc<dyn WsSocket> = Rc::new(Socket {
-            events: RefCell::new(VecDeque::from([WsEvent::Open])),
+        self.urls.borrow_mut().push(url.clone());
+        let socket = Rc::new(Socket {
+            events: Rc::new(RefCell::new(VecDeque::from([WsEvent::Open]))),
             sent: self.sent.clone(),
             closed: Cell::new(false),
         });
-        Box::pin(async move { Ok(socket) })
+        self.sockets.borrow_mut().push((url, socket.clone()));
+        Box::pin(async move { Ok(socket as Rc<dyn WsSocket>) })
     }
     fn headers_capable(&self) -> bool {
         true
@@ -206,10 +237,26 @@ impl RestAdapter for Wire {
                 status,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(data),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap(),
+                ),
             })
         })
     }
+}
+pub fn runtime_fixture() -> Rc<Runtime> {
+    Rc::new(Runtime {
+        sleep_wakers: virtual_time::SleepWakers::default(),
+        now: Rc::new(Cell::new(1700000000000.0)),
+        jobs: RefCell::default(),
+        console: RefCell::default(),
+        errors: RefCell::default(),
+        sent: Rc::default(),
+        random_values: RefCell::default(),
+        urls: RefCell::default(),
+        sockets: RefCell::default(),
+        http_options: RefCell::default(),
+    })
 }
 pub fn fixture(
     options: Value,
@@ -220,16 +267,7 @@ pub fn fixture(
     Arc<Wire>,
 ) {
     use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
-    let runtime = Rc::new(Runtime {
-        now: Rc::new(Cell::new(1700000000000.0)),
-        jobs: RefCell::default(),
-        console: RefCell::default(),
-        errors: RefCell::default(),
-        sent: Rc::default(),
-        random_values: RefCell::default(),
-        urls: RefCell::default(),
-        http_options: RefCell::default(),
-    });
+    let runtime = runtime_fixture();
     #[expect(clippy::arc_with_non_send_sync)]
     let wire = Arc::new(Wire::default());
     let store = Rc::new(safe_cex_store::store::DefaultStore::new());

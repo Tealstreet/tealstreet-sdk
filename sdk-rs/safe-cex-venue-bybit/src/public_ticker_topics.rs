@@ -79,7 +79,7 @@ pub fn handle_active_ticker_symbols_changed<E>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn on_markets_changed<E, F: Future<Output = Result<(), E>>>(
+pub fn on_markets_changed<E, F: Future<Output = Result<(), E>>>(
     added_symbols: Vec<String>,
     has_ws: impl FnOnce() -> bool,
     is_disposed: impl FnOnce() -> bool,
@@ -87,23 +87,33 @@ pub async fn on_markets_changed<E, F: Future<Output = Result<(), E>>>(
     set: impl FnOnce(Rc<RefCell<Value>>) -> Result<(), E>,
     mut send: impl FnMut(&str) -> Result<(), E>,
     mut sleep: impl FnMut(u64) -> F,
-) -> Result<(), E> {
-    if added_symbols.is_empty() || !has_ws() || is_disposed() {
-        return Ok(());
+) -> impl Future<Output = Result<(), E>> {
+    let prepared = (|| {
+        if added_symbols.is_empty() || !has_ws() || is_disposed() {
+            return Ok(None);
+        }
+        let topics: Vec<String> = added_symbols
+            .into_iter()
+            .map(|symbol| format!("tickers.{symbol}"))
+            .collect();
+        let merged = current()?
+            .into_iter()
+            .chain(topics.iter().cloned())
+            .map(Value::String)
+            .collect();
+        set(Rc::new(RefCell::new(Value::Array(merged))))?;
+        let chunks: Vec<Vec<String>> = topics.chunks(10).map(<[String]>::to_vec).collect();
+        send(&subscription(&chunks[0]))?;
+        Ok(Some((chunks, sleep(5))))
+    })();
+    async move {
+        if let Some((chunks, first)) = prepared? {
+            first.await?;
+            for topics in chunks.into_iter().skip(1) {
+                send(&subscription(&topics))?;
+                sleep(5).await?;
+            }
+        }
+        Ok(())
     }
-    let topics: Vec<String> = added_symbols
-        .into_iter()
-        .map(|symbol| format!("tickers.{symbol}"))
-        .collect();
-    let merged = current()?
-        .into_iter()
-        .chain(topics.iter().cloned())
-        .map(Value::String)
-        .collect();
-    set(Rc::new(RefCell::new(Value::Array(merged))))?;
-    for topics in topics.chunks(10) {
-        send(&subscription(topics))?;
-        sleep(5).await?;
-    }
-    Ok(())
 }

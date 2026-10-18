@@ -12,12 +12,7 @@ use crate::{
 use safe_cex_types::{
     BothPositionSide, ExecutionPositionSide, IncomeCategory, OrderSide, PositionSide,
 };
-use std::{
-    cell::{Cell, RefCell},
-    future::Future,
-    pin::Pin,
-    rc::Rc,
-};
+use std::{cell::Cell, future::Future, pin::Pin, rc::Rc};
 const RANGE_WINDOW: f64 = 604800000.0;
 const RANGE_LIMIT: f64 = 1000.0;
 const RANGE_DELAY: f64 = 2000.0;
@@ -59,7 +54,7 @@ pub trait HistoryBindings {
     fn iso(&mut self, time: EventValue) -> Result<String, Failure>;
 }
 fn empty() -> EventValue {
-    EventValue::Array(Rc::new(RefCell::new(vec![])))
+    EventValue::array(vec![])
 }
 fn array(v: EventValue) -> EventValue {
     if matches!(v, EventValue::Array(_)) {
@@ -87,15 +82,15 @@ fn map(
     let len = a.borrow().len();
     let mut out = vec![];
     for i in 0..len {
-        let value = { a.borrow().get(i).cloned() };
+        let value = { a.borrow().get(i).cloned().flatten() };
         if let Some(v) = value {
             out.push(f(v)?);
         }
     }
-    Ok(EventValue::Array(Rc::new(RefCell::new(out))))
+    Ok(EventValue::array(out))
 }
 fn omit(v: EventValue) -> EventValue {
-    EventValue::object(
+    EventValue::record_object(
         v.spread()
             .into_iter()
             .filter(|(_, v)| !matches!(v, EventValue::Undefined))
@@ -106,7 +101,7 @@ fn optional(v: &EventValue, key: &str) -> Result<EventValue, Failure> {
     if v.nullish() {
         Ok(EventValue::Undefined)
     } else {
-        v.get(key)
+        v.read(key)
     }
 }
 fn endpoint(key: &str) -> &'static str {
@@ -133,13 +128,13 @@ fn err_message(e: &Failure) -> EventValue {
 }
 fn execution(value: String) -> EventValue {
     match value.as_str() {
-        "both" => EventValue::Enum(PrivateEnum::Execution(&ExecutionPositionSide::Both(
+        "both" => EventValue::enum_value(PrivateEnum::Execution(&ExecutionPositionSide::Both(
             BothPositionSide::Both,
         ))),
-        "long" => EventValue::Enum(PrivateEnum::Execution(&ExecutionPositionSide::Side(
+        "long" => EventValue::enum_value(PrivateEnum::Execution(&ExecutionPositionSide::Side(
             PositionSide::Long,
         ))),
-        "short" => EventValue::Enum(PrivateEnum::Execution(&ExecutionPositionSide::Side(
+        "short" => EventValue::enum_value(PrivateEnum::Execution(&ExecutionPositionSide::Side(
             PositionSide::Short,
         ))),
         _ => string(value),
@@ -147,8 +142,8 @@ fn execution(value: String) -> EventValue {
 }
 fn side(value: String) -> EventValue {
     match value.as_str() {
-        "buy" => EventValue::Enum(PrivateEnum::Side(OrderSide::Buy)),
-        "sell" => EventValue::Enum(PrivateEnum::Side(OrderSide::Sell)),
+        "buy" => EventValue::enum_value(PrivateEnum::Side(OrderSide::Buy)),
+        "sell" => EventValue::enum_value(PrivateEnum::Side(OrderSide::Sell)),
         _ => string(value),
     }
 }
@@ -158,16 +153,16 @@ pub fn map_user_trade(
     mut lowercase: impl FnMut(String) -> Result<String, Failure>,
 ) -> Result<EventValue, Failure> {
     let out = record([]);
-    out.define("id", entry.get("id")?.optional_id("entry.id")?);
-    out.define("symbol", entry.get("symbol")?);
-    out.define(
+    out.write("id", entry.read("id")?.optional_id("entry.id")?);
+    out.write("symbol", entry.read("symbol")?);
+    out.write(
         "orderId",
-        entry.get("orderId")?.optional_id("entry.orderId")?,
+        entry.read("orderId")?.optional_id("entry.orderId")?,
     );
-    out.define("price", number(entry.get("price")?.number()?));
-    out.define("qty", number(entry.get("qty")?.number()?));
-    let q = entry.get("quoteQty")?;
-    out.define(
+    out.write("price", number(entry.read("price")?.number()?));
+    out.write("qty", number(entry.read("qty")?.number()?));
+    let q = entry.read("quoteQty")?;
+    out.write(
         "quoteQty",
         if q.nullish() {
             EventValue::Undefined
@@ -175,28 +170,28 @@ pub fn map_user_trade(
             number(q.number()?)
         },
     );
-    out.define("realizedPnl", number(entry.get("realizedPnl")?.number()?));
-    out.define(
+    out.write("realizedPnl", number(entry.read("realizedPnl")?.number()?));
+    out.write(
         "positionSide",
         execution(lowercase(
-            nullish(entry.get("positionSide")?, string("BOTH")).text()?,
+            nullish(entry.read("positionSide")?, string("BOTH")).text()?,
         )?),
     );
-    out.define(
+    out.write(
         "side",
-        side(lowercase(nullish(entry.get("side")?, string("")).text()?)?),
+        side(lowercase(nullish(entry.read("side")?, string("")).text()?)?),
     );
-    out.define("buyer", entry.get("buyer")?);
-    out.define("maker", entry.get("maker")?);
-    out.define("commission", number(entry.get("commission")?.number()?));
-    out.define("commissionAsset", entry.get("commissionAsset")?);
-    out.define("time", number(entry.get("time")?.number()?));
+    out.write("buyer", entry.read("buyer")?);
+    out.write("maker", entry.read("maker")?);
+    out.write("commission", number(entry.read("commission")?.number()?));
+    out.write("commissionAsset", entry.read("commissionAsset")?);
+    out.write("time", number(entry.read("time")?.number()?));
     Ok(out)
 }
 fn execution_row(entry: EventValue, b: &mut impl HistoryBindings) -> Result<EventValue, Failure> {
     let out = record([]);
-    let id = entry.get("id")?;
-    out.define(
+    let id = entry.read("id")?;
+    out.write(
         "id",
         if id.nullish() {
             EventValue::Undefined
@@ -204,56 +199,56 @@ fn execution_row(entry: EventValue, b: &mut impl HistoryBindings) -> Result<Even
             string(id.text()?)
         },
     );
-    out.define(
+    out.write(
         "timestamp",
-        number((entry.get("time")?.number()? / 1000.0).floor()),
+        number((entry.read("time")?.number()? / 1000.0).floor()),
     );
-    out.define("symbol", entry.get("symbol")?);
-    out.define(
+    out.write("symbol", entry.read("symbol")?);
+    out.write(
         "orderId",
-        entry.get("orderId")?.optional_id("entry.orderId")?,
+        entry.read("orderId")?.optional_id("entry.orderId")?,
     );
-    out.define("price", number(entry.get("price")?.float()?));
-    out.define("qty", number(entry.get("qty")?.float()?));
-    out.define(
+    out.write("price", number(entry.read("price")?.float()?));
+    out.write("qty", number(entry.read("qty")?.float()?));
+    out.write(
         "side",
         fallback(
             table(
                 crate::binance_types::ORDER_SIDE,
-                entry.get("side")?,
+                entry.read("side")?,
                 PrivateEnum::Side,
             )?,
-            EventValue::Enum(PrivateEnum::Side(OrderSide::Buy)),
+            EventValue::enum_value(PrivateEnum::Side(OrderSide::Buy)),
         ),
     );
-    out.define(
+    out.write(
         "commission",
-        number(fallback(entry.get("commission")?, string("0")).float()?),
+        number(fallback(entry.read("commission")?, string("0")).float()?),
     );
-    out.define("commissionAsset", entry.get("commissionAsset")?);
-    let p = entry.get("positionSide")?;
-    out.define(
+    out.write("commissionAsset", entry.read("commissionAsset")?);
+    let p = entry.read("positionSide")?;
+    out.write(
         "positionSide",
         if p.truthy() {
-            b.normalize_side(entry.get("positionSide")?)?
+            b.normalize_side(entry.read("positionSide")?)?
         } else {
             EventValue::Undefined
         },
     );
-    let pnl = entry.get("realizedPnl")?.float()?;
-    out.define(
+    let pnl = entry.read("realizedPnl")?.float()?;
+    out.write(
         "realizedPnl",
         if pnl.is_finite() {
-            number(entry.get("realizedPnl")?.float()?)
+            number(entry.read("realizedPnl")?.float()?)
         } else {
             EventValue::Undefined
         },
     );
-    let maker = entry.get("maker")?;
-    out.define(
+    let maker = entry.read("maker")?;
+    out.write(
         "maker",
         if matches!(maker, EventValue::Bool(_)) {
-            entry.get("maker")?
+            entry.read("maker")?
         } else {
             EventValue::Undefined
         },
@@ -278,11 +273,11 @@ pub async fn historical_fills(
             }
         )));
     }
-    let symbol = opts.get("symbol")?;
-    let order = opts.get("orderId")?;
-    let from = opts.get("from")?;
-    let to = opts.get("to")?;
-    let raw = opts.get("limit")?;
+    let symbol = opts.read("symbol")?;
+    let order = opts.read("orderId")?;
+    let from = opts.read("from")?;
+    let to = opts.read("to")?;
+    let raw = opts.read("limit")?;
     let limit = if matches!(raw, EventValue::Undefined) {
         number(1000.0)
     } else {
@@ -297,15 +292,12 @@ pub async fn historical_fills(
             ("limit", number(min(limit.number()?, 1000.0))),
         ]);
         if order.truthy() {
-            params.define("orderId", order)
+            params.write("orderId", order)
         }
         let windows = if from.truthy() && to.truthy() {
             b.split(from, to, crate::utils::USER_TRADES_MAX_WINDOW_MS)?
         } else {
-            EventValue::Array(Rc::new(RefCell::new(vec![record([
-                ("startTime", from),
-                ("endTime", to),
-            ])])))
+            EventValue::array(vec![record([("startTime", from), ("endTime", to)])])
         };
         let EventValue::Array(windows) = windows else {
             return Err(type_error("windows is not iterable"));
@@ -313,21 +305,19 @@ pub async fn historical_fills(
         let mut rows = vec![];
         let mut i = 0;
         loop {
-            let window = windows.borrow().get(i).cloned();
+            let window = windows.borrow().get(i).cloned().flatten();
             let Some(window) = window else { break };
             i += 1;
             let get = b.capture_get(HistoryClient::Private)?;
-            let request = EventValue::object(params.spread());
-            request.define("startTime", window.get("startTime")?);
-            request.define("endTime", window.get("endTime")?);
+            let request = EventValue::record_object(params.spread());
+            request.write("startTime", window.read("startTime")?);
+            request.write("endTime", window.read("endTime")?);
             let data = get(endpoint("USER_TRADES"), omit(request))?.await?;
             if let EventValue::Array(a) = data {
-                rows.extend(a.borrow().iter().cloned())
+                rows.extend(array_values(&a))
             }
         }
-        map(EventValue::Array(Rc::new(RefCell::new(rows))), |entry| {
-            execution_row(entry, b)
-        })
+        map(EventValue::array(rows), |entry| execution_row(entry, b))
     }
     .await;
     match result {
@@ -353,13 +343,13 @@ pub async fn historical_orders(
     let result = async {
         let get = b.capture_get(HistoryClient::Private)?;
         let params = omit(record([
-            ("symbol", opts.get("symbol")?),
-            ("startTime", opts.get("from")?),
-            ("endTime", opts.get("to")?),
+            ("symbol", opts.read("symbol")?),
+            ("startTime", opts.read("from")?),
+            ("endTime", opts.read("to")?),
             (
                 "limit",
                 number(min(
-                    fallback(opts.get("limit")?, number(1000.0)).number()?,
+                    fallback(opts.read("limit")?, number(1000.0)).number()?,
                     1000.0,
                 )),
             ),
@@ -369,18 +359,16 @@ pub async fn historical_orders(
         let EventValue::Array(a) = rows else {
             unreachable!()
         };
-        let mut out = a
-            .borrow()
-            .iter()
+        let mut out = array_values(&a)
+            .into_iter()
             .filter(|r| !matches!(r, EventValue::Null))
-            .cloned()
             .collect::<Vec<_>>();
         // Stable sort, with NaN comparator treated as zero by Array.sort.
         for i in 1..out.len() {
             let mut j = i;
             while j > 0 {
-                let delta = out[j].get("createdTime")?.number()?
-                    - out[j - 1].get("createdTime")?.number()?;
+                let delta = out[j].read("createdTime")?.number()?
+                    - out[j - 1].read("createdTime")?.number()?;
                 // `!(delta > 0.0)` is NOT `delta <= 0.0`: a NaN delta (either
                 // createdTime missing, so Number(undefined)) must take the
                 // break, and the rewritten form would not. The source sorts
@@ -393,7 +381,7 @@ pub async fn historical_orders(
                 j -= 1;
             }
         }
-        Ok(EventValue::Array(Rc::new(RefCell::new(out))))
+        Ok(EventValue::array(out))
     }
     .await;
     match result {
@@ -415,21 +403,21 @@ async fn income(opts: EventValue, b: &mut impl HistoryBindings) -> Result<EventV
     )]);
     for key in ["symbol", "incomeType", "startTime", "endTime"] {
         if optional(&opts, key)?.truthy() {
-            params.define(key, opts.get(key)?);
+            params.write(key, opts.get(key)?);
         }
     }
     let get = b.capture_get(HistoryClient::Private)?;
     let data = get(endpoint("INCOME"), params)?.await?;
     map(array(data), |r| {
         let out = record([]);
-        out.define("symbol", r.get("symbol")?);
-        out.define("incomeType", r.get("incomeType")?);
-        out.define("income", number(r.get("income")?.float()?));
-        out.define("asset", r.get("asset")?);
-        out.define("timestamp", r.get("time")?);
-        out.define("tranId", r.get("tranId")?);
-        out.define("tradeId", r.get("tradeId")?);
-        out.define("category", b.category(r.get("incomeType")?)?);
+        out.write("symbol", r.read("symbol")?);
+        out.write("incomeType", r.read("incomeType")?);
+        out.write("income", number(r.read("income")?.float()?));
+        out.write("asset", r.read("asset")?);
+        out.write("timestamp", r.read("time")?);
+        out.write("tranId", r.read("tranId")?);
+        out.write("tradeId", r.read("tradeId")?);
+        out.write("category", b.category(r.read("incomeType")?)?);
         Ok(out)
     })
 }
@@ -487,9 +475,9 @@ pub async fn income_range(
                 }
             )));
         }
-        let from = p.get("startTime")?;
-        let to = p.get("endTime")?;
-        let limit = p.get("limit")?;
+        let from = p.read("startTime")?;
+        let to = p.read("endTime")?;
+        let limit = p.read("limit")?;
         let page = resolve()?;
         page(record([
             ("startTime", from),
@@ -520,9 +508,9 @@ pub async fn income_range(
             }
         )));
     }
-    let records = result.get("records")?;
-    let truncated = result.get("truncated")?;
-    let exhausted = result.get("exhaustedChunks")?;
+    let records = result.read("records")?;
+    let truncated = result.read("truncated")?;
+    let exhausted = result.read("exhaustedChunks")?;
     if truncated.truthy() {
         let log = b.capture_log()?;
         let from = b.iso(start)?;
@@ -555,7 +543,7 @@ pub async fn public_trades(
     )?
     .await?;
     map(array(data), |r| {
-        let id = r.get("id")?;
+        let id = r.read("id")?;
         if id.nullish() {
             return Err(type_error(format!(
                 "Cannot read properties of {} (reading 'toString')",
@@ -566,8 +554,8 @@ pub async fn public_trades(
                 }
             )));
         }
-        if let EventValue::Object(o) = &id {
-            if o.borrow().fields.contains_key("toString") {
+        if matches!(id, EventValue::Object(_)) {
+            if id.has_own("toString") {
                 return Err(type_error("trade.id.toString is not a function"));
             }
         }
@@ -575,13 +563,13 @@ pub async fn public_trades(
         Ok(record([
             ("id", id),
             ("symbol", symbol.clone()),
-            ("price", number(r.get("price")?.float()?)),
-            ("qty", number(r.get("qty")?.float()?)),
-            ("quoteQty", number(r.get("quoteQty")?.float()?)),
-            ("timestamp", r.get("time")?),
+            ("price", number(r.read("price")?.float()?)),
+            ("qty", number(r.read("qty")?.float()?)),
+            ("quoteQty", number(r.read("quoteQty")?.float()?)),
+            ("timestamp", r.read("time")?),
             (
                 "side",
-                EventValue::Enum(PrivateEnum::Side(if r.get("isBuyerMaker")?.truthy() {
+                EventValue::enum_value(PrivateEnum::Side(if r.read("isBuyerMaker")?.truthy() {
                     OrderSide::Sell
                 } else {
                     OrderSide::Buy
@@ -606,15 +594,17 @@ pub fn income_category(raw: EventValue) -> Result<EventValue, Failure> {
         &serde_json::Value::String(text),
     ))
     .map_err(|e| type_error(e.message))?;
-    Ok(EventValue::Enum(PrivateEnum::Income(match category {
-        IncomeCategory::RealizedPnl => &IncomeCategory::RealizedPnl,
-        IncomeCategory::Funding => &IncomeCategory::Funding,
-        IncomeCategory::Commission => &IncomeCategory::Commission,
-        IncomeCategory::Rebate => &IncomeCategory::Rebate,
-        IncomeCategory::Transfer => &IncomeCategory::Transfer,
-        IncomeCategory::Liquidation => &IncomeCategory::Liquidation,
-        IncomeCategory::Other => &IncomeCategory::Other,
-    })))
+    Ok(EventValue::enum_value(PrivateEnum::Income(
+        match category {
+            IncomeCategory::RealizedPnl => &IncomeCategory::RealizedPnl,
+            IncomeCategory::Funding => &IncomeCategory::Funding,
+            IncomeCategory::Commission => &IncomeCategory::Commission,
+            IncomeCategory::Rebate => &IncomeCategory::Rebate,
+            IncomeCategory::Transfer => &IncomeCategory::Transfer,
+            IncomeCategory::Liquidation => &IncomeCategory::Liquidation,
+            IncomeCategory::Other => &IncomeCategory::Other,
+        },
+    )))
 }
 
 pub type CandleCallback = Rc<dyn Fn(EventValue) -> Result<(), Failure>>;
@@ -650,8 +640,8 @@ pub fn listen_candle(
     let disposed = Rc::new(Cell::new(false));
     let unsubscribe = b.capture_public()?(opts.clone(), callback.clone())?;
     let fetch = b.capture_fetch()?;
-    let params = EventValue::object(opts.spread());
-    params.define("limit", number(1.0));
+    let params = EventValue::record_object(opts.spread());
+    params.write("limit", number(1.0));
     let future = fetch(params)?;
     let owner = b.seed_owner();
     let cancelled = disposed.clone();
@@ -661,10 +651,12 @@ pub fn listen_candle(
             if cancelled.get() || (owner.disposed)()? {
                 return Ok(());
             }
-            let index = candles.get("length")?.number()? - 1.0;
+            let index = candles.read("length")?.number()? - 1.0;
             let latest = if let EventValue::String(s) = &candles {
                 if index.is_finite() && index >= 0.0 {
-                    s.chars()
+                    EventValue::String(s.clone())
+                        .text()?
+                        .chars()
                         .nth(index as usize)
                         .map(|c| string(c.to_string()))
                         .unwrap_or(EventValue::Undefined)

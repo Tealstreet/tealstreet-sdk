@@ -1,3 +1,4 @@
+use crate::js_runtime::value::Js;
 use std::{future::Future, pin::Pin, rc::Rc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -44,7 +45,7 @@ impl PartialEq for ExchangeErrorOrigin {
 }
 impl Eq for ExchangeErrorOrigin {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ExchangeErrorMetadata {
     /// Opaque local origin. This makes ExchangeError local-thread, matching its
     /// runtime callbacks and Store subscriber causes; it is not Send or Sync.
@@ -66,8 +67,33 @@ pub struct ExchangeErrorMetadata {
     pub url: Option<String>,
     pub method: Option<String>,
     pub original_error: Option<serde_json::Value>,
-    pub code: Option<serde_json::Value>,
+    pub code: Option<Js>,
 }
+impl PartialEq for ExchangeErrorMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        let code_equal = match (&self.code, &other.code) {
+            (None, None) => true,
+            (Some(Js::Number(a)), Some(Js::Number(b))) => a.to_bits() == b.to_bits(),
+            (Some(a), Some(b)) => a.strict_equals(b),
+            _ => false,
+        };
+        code_equal
+            && self.origin == other.origin
+            && self.store_subscriber_ids == other.store_subscriber_ids
+            && self.store_subscriber_cause == other.store_subscriber_cause
+            && self.is_axios_error == other.is_axios_error
+            && self.request == other.request
+            && self.stack == other.stack
+            && self.response == other.response
+            && self.context == other.context
+            && self.config == other.config
+            && self.enhanced_message == other.enhanced_message
+            && self.url == other.url
+            && self.method == other.method
+            && self.original_error == other.original_error
+    }
+}
+impl Eq for ExchangeErrorMetadata {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExchangeError {
     pub message: String,
@@ -154,26 +180,38 @@ impl From<safe_cex_store::StoreMutationError> for ExchangeError {
         projected
     }
 }
+impl From<safe_cex_num::JsCoercionError> for ExchangeError {
+    fn from(error: safe_cex_num::JsCoercionError) -> Self {
+        let mut projected = Self::new(error.message);
+        projected.name = error.name.into();
+        projected.origin = Some(ExchangeErrorOrigin::new(error));
+        projected
+    }
+}
 impl From<safe_cex_transport::RestFailure> for ExchangeError {
     fn from(error: safe_cex_transport::RestFailure) -> Self {
-        let mut projected = Self::new(error.message.clone());
-        projected.code = error
-            .code
-            .as_ref()
-            .map(|code| serde_json::Value::String(code.clone()));
+        let mut projected = if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+            error.transport_error.as_deref()
+            && let Some(cause) = origin
+                .error()
+                .downcast_ref::<crate::js_runtime::value::owned::OwnedCallbackError>()
+        {
+            crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error()
+        } else {
+            let mut projected = Self::new(error.message.clone());
+            if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =
+                error.transport_error.as_deref()
+            {
+                projected.name = cause.name.into();
+            }
+            projected.code = error.code.as_ref().map(|code| Js::str(code));
+            projected
+        };
         projected.context = error.context.as_deref().cloned();
         projected.response = error.response.as_ref().map(|response| {
             // Existing JSON consumers receive a view. The retained RestFailure
             // remains the native authority for request, response and transport.
-            let data = match &response.body {
-                safe_cex_transport::RestResponseBody::Encoded(bytes) => {
-                    serde_json::from_slice(bytes).unwrap_or_else(|_| {
-                        serde_json::Value::String(String::from_utf8_lossy(bytes).into_owned())
-                    })
-                }
-                safe_cex_transport::RestResponseBody::Untransformed(value)
-                | safe_cex_transport::RestResponseBody::Transformed(value) => value.clone(),
-            };
+            let data = response_json_view(&response.body);
             let mut view = serde_json::Map::new();
             view.insert("status".into(), response.status.into());
             if let Some(reason) = &response.reason {
@@ -190,8 +228,51 @@ impl From<safe_cex_transport::RestFailure> for ExchangeError {
         projected
     }
 }
+// Deliberately lossy legacy JSON error view. The origin retains the authoritative
+// RestFailure, including exact UTF-16, native number bits and transform phase.
+pub fn response_json_view(body: &safe_cex_transport::RestResponseBody) -> serde_json::Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    fn utf8_view(value: Input) -> Input {
+        match value {
+            Input::Text(units) => {
+                Input::Text(String::from_utf16_lossy(&units).encode_utf16().collect())
+            }
+            Input::Array(values) => Input::Array(values.into_iter().map(utf8_view).collect()),
+            Input::Object(fields) => Input::Object(
+                fields
+                    .into_iter()
+                    .map(|(key, value)| {
+                        (
+                            String::from_utf16_lossy(&key).encode_utf16().collect(),
+                            utf8_view(value),
+                        )
+                    })
+                    .collect(),
+            ),
+            other => other,
+        }
+    }
+    let data = match body {
+        safe_cex_transport::RestResponseBody::Encoded(bytes) => {
+            let text: Vec<u16> = String::from_utf8_lossy(bytes).encode_utf16().collect();
+            // Only physical bytes receive this JSON view. Native strings keep
+            // their existing value, and the original encoded body stays owned
+            // by the RestFailure even when parsing this secondary view fails.
+            Input::parse_json(&text).unwrap_or(Input::Text(text))
+        }
+        _ => body.clone().into_data(),
+    };
+    let value = utf8_view(data);
+    let json = safe_cex_num::js_retained_json_stringify(&value).expect("retained tree JSON view");
+    json.map_or(serde_json::Value::Null, |text| {
+        serde_json::from_str(&text).expect("UTF-8 JSON error view")
+    })
+}
+
 pub type ExchangeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ExchangeError>> + 'a>>;
-pub type Listener = Rc<dyn Fn(&str, &serde_json::Value) -> Result<(), ExchangeError>>;
+pub type Listener = Rc<dyn Fn(&str, &Js) -> Result<(), ExchangeError>>;
+/// The actual emitted argument list, including zero arguments and array values.
+pub type ArgsListener = Rc<dyn Fn(&str, &[Js]) -> Result<(), ExchangeError>>;
 pub type Cleanup = Box<dyn FnOnce()>;
 /// Cleanup of an event subscription can itself emit and fail.
 pub type ListenerCleanup = Box<dyn FnOnce() -> Result<(), ExchangeError>>;
@@ -206,7 +287,13 @@ pub trait ExchangeRuntime {
     /// Schedule on the monotonic clock; even zero delay yields a scheduler turn.
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()>;
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask>;
-    fn console(&self, severity: &str, message: &str);
+    /// Original console arguments, including native Error references. Hosts must
+    /// observe these values before choosing a terminal or telemetry representation.
+    fn console_values(&self, severity: &str, values: &[Js]);
+    /// Convenience for the existing typed Rust callers; there is one host path.
+    fn console(&self, severity: &str, message: &str) {
+        self.console_values(severity, &[Js::str(message)]);
+    }
     fn unique_id(&self) -> String;
     fn is_worker(&self) -> bool;
     fn random(&self) -> f64;
@@ -214,9 +301,9 @@ pub trait ExchangeRuntime {
     /// Production hosts must not swallow this callback: owned asynchronous work
     /// uses it for unawaited failures independently of transport diagnostics.
     fn report_exception(&self, error: &ExchangeError, context: &serde_json::Value);
-    /// Preserve a non-string JSON error value at the host reporting boundary.
-    /// Wrapping it in ExchangeError changes the source report's value and type.
-    fn report_raw_exception(&self, error: &serde_json::Value, context: &serde_json::Value);
+    /// Original exception, retaining native Error name/message and reference identity.
+    /// A JSON projection here loses non-enumerable Error properties and identity.
+    fn report_raw_exception(&self, error: &Js, context: &serde_json::Value);
     fn execute_worker_request(
         &self,
         request: serde_json::Value,
@@ -231,4 +318,71 @@ pub trait RemoteSigner: safe_cex_transport::signing::RemoteSigner {
 pub struct ExchangeSigners {
     pub remote_signer: Option<Rc<dyn RemoteSigner>>,
     pub payload_signer: Option<Rc<dyn safe_cex_crypto::PayloadSigner>>,
+}
+
+/// Read diagnostic data without invoking user getters or conversion hooks.
+fn diagnostic_string(value: &Js, key: &str) -> Option<String> {
+    use crate::js_runtime::value::{Prop, utf16};
+    let key = utf16(key);
+    let mut current = value.clone();
+    let mut seen = Vec::new();
+    while let Js::Object(object) = current {
+        if seen.iter().any(|seen| Rc::ptr_eq(seen, &object)) {
+            return None;
+        }
+        seen.push(object.clone());
+        if let Some(property) = object.props.borrow().get(&key) {
+            return match property {
+                Prop::Data(Js::String(text))
+                | Prop::DataDescriptor {
+                    value: Js::String(text),
+                    ..
+                } => Some(String::from_utf16_lossy(text)),
+                _ => None,
+            };
+        }
+        let prototype = object.proto.borrow().clone();
+        current = prototype?;
+    }
+    None
+}
+
+/// Terminal presentation after the original values reach the console capability.
+/// Object inspection never executes user code; native Error data remains visible.
+pub fn console_text(values: &[Js]) -> String {
+    values
+        .iter()
+        .map(|value| {
+            if let Js::Object(object) = value {
+                if object.class == "Error" {
+                    let name = diagnostic_string(value, "name").unwrap_or_else(|| "Error".into());
+                    let message = diagnostic_string(value, "message").unwrap_or_default();
+                    return match (name.is_empty(), message.is_empty()) {
+                        (true, _) => message,
+                        (_, true) => name,
+                        _ => format!("{name}: {message}"),
+                    };
+                }
+            }
+            if value.is_object() {
+                format!("[{}]", value.type_of())
+            } else {
+                value.to_display()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Text-only fixture observation after receiving the retained exception. Native
+/// production reporting uses console_text; rich sinks should retain Js directly.
+pub fn exception_text(error: &Js) -> String {
+    if let Js::Object(object) = error
+        && object.class == "Error"
+    {
+        return diagnostic_string(error, "message").unwrap_or_default();
+    }
+    crate::js_runtime::value::to_json(error)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| console_text(std::slice::from_ref(error)))
 }

@@ -2,20 +2,27 @@
 //! Numeric lexemes and visitor bits survive until explicit JSON projection.
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use serde_json::{Error, Value, value::RawValue};
+use serde_json::{Error, Value};
 use std::fmt;
+mod parser;
 const RAW_TOKEN: &str = "$serde_json::private::RawValue";
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RetainedJsonInput {
+    /// Native JavaScript undefined; never constructed from JSON input.
+    Undefined,
     Null,
     Bool(bool),
-    Text(String),
+    Text(Vec<u16>),
     Lexeme(String),
     Float(f64),
     Array(Vec<Self>),
-    Object(Vec<(String, Self)>),
+    Object(Vec<(Vec<u16>, Self)>),
 }
 impl RetainedJsonInput {
+    /// JSON.parse semantics, retaining native UTF-16 and binary64 values.
+    pub fn parse_json(text: &[u16]) -> Result<Self, Error> {
+        parser::parse(text, false, 0)
+    }
     pub fn from_value(value: Value) -> Result<Self, Error> {
         from_value_at_depth(value, 0)
     }
@@ -46,7 +53,7 @@ fn from_value_at_depth(value: Value, depth: usize) -> Result<RetainedJsonInput, 
     Ok(match value {
         Value::Null => RetainedJsonInput::Null,
         Value::Bool(value) => RetainedJsonInput::Bool(value),
-        Value::String(value) => RetainedJsonInput::Text(value),
+        Value::String(value) => RetainedJsonInput::Text(value.encode_utf16().collect()),
         Value::Number(value) => RetainedJsonInput::Lexeme(value.to_string()),
         Value::Array(values) => RetainedJsonInput::Array(
             values
@@ -57,76 +64,26 @@ fn from_value_at_depth(value: Value, depth: usize) -> Result<RetainedJsonInput, 
         Value::Object(values) => RetainedJsonInput::Object(
             values
                 .into_iter()
-                .map(|(key, value)| Ok((key, from_value_at_depth(value, depth + 1)?)))
+                .map(|(key, value)| {
+                    Ok((
+                        key.encode_utf16().collect(),
+                        from_value_at_depth(value, depth + 1)?,
+                    ))
+                })
                 .collect::<Result<_, Error>>()?,
         ),
     })
 }
 
-// Private module-scope visitors remain visible to the accepted-set inventory.
-struct ObjectVisitor(usize);
-impl<'de> Visitor<'de> for ObjectVisitor {
-    type Value = Vec<(String, RetainedJsonInput)>;
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a JSON object")
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut entries: Vec<(String, Box<RawValue>)> = Vec::new();
-        while let Some((key, raw)) = map.next_entry::<String, Box<RawValue>>()? {
-            if let Some((_, old)) = entries.iter_mut().find(|(old, _)| *old == key) {
-                *old = raw;
-            } else {
-                entries.push((key, raw));
-            }
-        }
-        entries
-            .into_iter()
-            .map(|(key, raw)| {
-                raw_node(raw.get(), self.0 + 1)
-                    .map(|value| (key, value))
-                    .map_err(de::Error::custom)
-            })
-            .collect()
-    }
-}
-
-// Parse objects as maps of RawValue, never as Value. This also prevents JSON
-// objects with serde_json's private Number key being mistaken for numbers.
+// Serde RawValue carries original JSON text. Reuse the same grammar while
+// retaining number spelling for the existing numeric-ingress profile.
 fn raw_node(raw: &str, depth: usize) -> Result<RetainedJsonInput, Error> {
     if depth >= 128 {
         return Err(de::Error::custom(
             "numeric ingress recursion limit exceeded",
         ));
     }
-    let text = raw.trim();
-    Ok(match text.as_bytes().first() {
-        Some(b'n') => {
-            let _: () = serde_json::from_str(text)?;
-            RetainedJsonInput::Null
-        }
-        Some(b't' | b'f') => RetainedJsonInput::Bool(serde_json::from_str(text)?),
-        Some(b'"') => RetainedJsonInput::Text(serde_json::from_str(text)?),
-        Some(b'[') => {
-            let entries: Vec<Box<RawValue>> = serde_json::from_str(text)?;
-            RetainedJsonInput::Array(
-                entries
-                    .into_iter()
-                    .map(|raw| raw_node(raw.get(), depth + 1))
-                    .collect::<Result<_, _>>()?,
-            )
-        }
-        Some(b'{') => {
-            let mut decoder = serde_json::Deserializer::from_str(text);
-            RetainedJsonInput::Object(decoder.deserialize_map(ObjectVisitor(depth))?)
-        }
-        _ => {
-            // RawValue has already validated JSON's grammar, not Number(string)'s
-            // broader grammar. Keep its spelling until a numeric visitor needs it.
-            let _: Box<RawValue> = serde_json::from_str(text)?;
-            text.parse::<f64>().map_err(de::Error::custom)?;
-            RetainedJsonInput::Lexeme(text.to_owned())
-        }
-    })
+    parser::parse(&raw.encode_utf16().collect::<Vec<_>>(), true, depth)
 }
 
 struct Capture;
@@ -134,6 +91,9 @@ impl<'de> Visitor<'de> for Capture {
     type Value = RetainedJsonInput;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("JSON numeric input")
+    }
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+        BufferVisitor.visit_f64(v)
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         if map.next_key::<String>()?.as_deref() != Some(RAW_TOKEN) {
@@ -172,10 +132,10 @@ impl<'de> Visitor<'de> for BufferVisitor {
         Ok(RetainedJsonInput::Bool(v))
     }
     fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
-        Ok(RetainedJsonInput::Text(v.to_owned()))
+        Ok(RetainedJsonInput::Text(v.encode_utf16().collect()))
     }
     fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
-        Ok(RetainedJsonInput::Text(v))
+        Ok(RetainedJsonInput::Text(v.encode_utf16().collect()))
     }
     fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
         Ok(RetainedJsonInput::Lexeme(v.to_string()))
@@ -195,8 +155,8 @@ impl<'de> Visitor<'de> for BufferVisitor {
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut entries = Vec::new();
-        while let Some(entry) = map.next_entry()? {
-            entries.push(entry);
+        while let Some((key, value)) = map.next_entry::<String, RetainedJsonInput>()? {
+            entries.push((key.encode_utf16().collect(), value));
         }
         Ok(RetainedJsonInput::Object(entries))
     }
@@ -204,9 +164,14 @@ impl<'de> Visitor<'de> for BufferVisitor {
 
 fn into_value(input: RetainedJsonInput) -> Result<Value, serde_json::Error> {
     Ok(match input {
+        RetainedJsonInput::Undefined => {
+            return Err(de::Error::custom("undefined has no standalone JSON value"));
+        }
         RetainedJsonInput::Null => Value::Null,
         RetainedJsonInput::Bool(value) => Value::Bool(value),
-        RetainedJsonInput::Text(value) => Value::String(value),
+        RetainedJsonInput::Text(value) => {
+            Value::String(String::from_utf16(&value).map_err(de::Error::custom)?)
+        }
         RetainedJsonInput::Lexeme(value) => serde_json::from_str(&value)?,
         RetainedJsonInput::Float(value) if value.is_nan() => {
             return Err(de::Error::custom("numeric passthrough refuses NaN JSON"));
@@ -224,13 +189,25 @@ fn into_value(input: RetainedJsonInput) -> Result<Value, serde_json::Error> {
         RetainedJsonInput::Array(values) => Value::Array(
             values
                 .into_iter()
-                .map(into_value)
+                .map(|value| {
+                    if matches!(value, RetainedJsonInput::Undefined) {
+                        Ok(Value::Null)
+                    } else {
+                        into_value(value)
+                    }
+                })
                 .collect::<Result<_, _>>()?,
         ),
         RetainedJsonInput::Object(values) => Value::Object(
             values
                 .into_iter()
-                .map(|(key, value)| Ok((key, into_value(value)?)))
+                .filter(|(_, value)| !matches!(value, RetainedJsonInput::Undefined))
+                .map(|(key, value)| {
+                    Ok((
+                        String::from_utf16(&key).map_err(de::Error::custom)?,
+                        into_value(value)?,
+                    ))
+                })
                 .collect::<Result<_, serde_json::Error>>()?,
         ),
     })
@@ -271,10 +248,23 @@ mod tests {
     }
 
     #[test]
+    fn lexical_parser_keeps_the_callers_starting_depth() {
+        assert!(super::raw_node("1", 127).is_ok());
+        assert!(super::raw_node("[1]", 127).is_err());
+        assert!(super::raw_node("1", 128).is_err());
+    }
+
+    #[test]
     fn retained_projection_object_preserves_every_member() {
         let input = RetainedJsonInput::Object(vec![
-            ("first".into(), RetainedJsonInput::Lexeme("11".into())),
-            ("second".into(), RetainedJsonInput::Lexeme("23".into())),
+            (
+                "first".encode_utf16().collect(),
+                RetainedJsonInput::Lexeme("11".into()),
+            ),
+            (
+                "second".encode_utf16().collect(),
+                RetainedJsonInput::Lexeme("23".into()),
+            ),
         ]);
         assert!(
             matches!(&input, RetainedJsonInput::Object(values) if values.len() == 2),

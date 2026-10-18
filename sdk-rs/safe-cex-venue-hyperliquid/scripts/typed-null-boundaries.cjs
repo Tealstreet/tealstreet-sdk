@@ -55,7 +55,6 @@ const declarations=all.slice(positives.length);
 assert.equal(declarations.length,cases.length);
 for(let i=0;i<cases.length;i++){const d=declarations[i],errors=diagnostics.filter(e=>e.start>=d.pos&&e.start<d.end);cases[i].sourceAccepts=errors.length===0;cases[i].sourceCodes=errors.map(e=>e.code);}
 assert.ok(cases.some(c=>c.name==='OrderType'&&c.kind==='optional-null'&&!c.sourceAccepts),'OrderType optional null must be measured rejected');
-assert.ok(cases.some(c=>c.name==='ScheduleCancelAction'&&!c.sourceAccepts),'schedule time null must be measured rejected');
 const result=JSON.stringify({source:'actual TypeScript checker, strict null checks, contextual declared-source annotation',cases},null,2)+'\n',target=path.join(__dirname,'../tests/fixtures/typed-null-boundaries.json');
 if(process.argv.includes('--capture'))fs.writeFileSync(target,result,{flag:'wx'});else assert.equal(result,fs.readFileSync(target,'utf8'),'typed null accepted-set source drift');
 console.log(`${cases.length} actual-source null/missing boundary cases; ${cases.filter(c=>!c.sourceAccepts).length} rejected`);

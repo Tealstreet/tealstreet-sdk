@@ -1,6 +1,0 @@
-{
-  "base_sha": "cce8c97b0a0c965a25c360d8928827888eaf03a1",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n@@ -280,7 +280,7 @@\n ) -> Result<(), T::Error> {\n     let timer = state.reconnect_auth_timer.borrow().clone();\n     host.clear_timeout(timer)?;\n-    values(state).clear();\n+    let _ = values(state);\n     state.is_authenticated.set(false);\n     if state.ws.borrow().is_some() {\n         let socket = state.ws.borrow().clone();\n",
-  "expected_named_assertion": "CRYPTOCOM-LIFECYCLE-NATIVE-STATE dispose-live immediate"
-}

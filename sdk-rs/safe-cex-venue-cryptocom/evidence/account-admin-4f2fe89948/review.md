@@ -1,9 +1,0 @@
-Read-only sub-agent review /root/review_auth_witness, bound to committed SHA 4f2fe8994826f63a08f4098aa854b7d7fca1ad1f, direct parent e6e3fe88995fee8ca4e89c0b4de4e87a6f101e0c.
-
-No blocker at explicit typed host-operation and driven native-future boundaries. Repeatable retained zero-argument catch callback, eager invocation before first await, native await continuations, original-error preservation and finally override match complete source bodies. Before-poll/held-await/native UTF-16/f64 fields and pointer assertions precede final inventories. Actual source constants/helpers are evaluated. Background balance driver supplies original dependency-promise effects when catch lookup fails/custom catch bypasses that promise; this validates those fixtures, not a general scheduler.
-
-Exactly nine exchange rows pending->ported/adapted. All added public traits/types/methods and private Begun/begin/finish/log/optional-chain/catch/finally helpers have explained qualified ownership in their manifest notes. Autonomous JavaScript scheduling, cancellation/drop, class/property/builtin/Error/transport bindings and end-to-end integration remain pending. No completed exchange class/constructor or Promise-runtime claim. Floor93 stops index92 validation-restore-overrides-error; no exhaustive enumeration claim. Unused expectedNativeFields fixture metadata removed before this SHA.
-
-The prior callback issue was corrected before commitment: catch_balance uses FnMut()+'static, permitting a custom dependency to retain/call the zero-argument callback multiple times; fixture89 observes two native undefined returns. The provisional oracle setup failure was corrected by supplying the actual authentication constant; unexpected untagged exceptions now fail oracle setup instead of being accepted as normal outputs.
-
-Reviewer ran no Cargo, edits, CLAUDE.md/agent-memory reads, or human review. Active mutation controls and gate exits were not certified by this static review.

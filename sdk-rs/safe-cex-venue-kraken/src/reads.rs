@@ -11,11 +11,29 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{error::Error, future::Future};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AccountLogParams {
     start_time: f64,
     limit: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "AccountLogParams", rename_all = "camelCase")]
+struct AccountLogParamsWire {
+    start_time: f64,
+    limit: f64,
+}
+
+impl<'de> Deserialize<'de> for AccountLogParams {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let input = <JsNumberInput as Deserialize<'de>>::deserialize(d)?;
+        input
+            .decode_with(|decoder| {
+                AccountLogParamsWire::deserialize(safe_cex_types::strict_decode::object(decoder))
+            })
+            .map_err(serde::de::Error::custom)
+    }
 }
 impl JsNumberOutput for AccountLogParams {
     fn check_number_output(&self) {
@@ -137,21 +155,21 @@ pub fn fetch_spot_positions(store: &dyn Store) -> Vec<Position> {
             positions.push(Position {
                 id: format!("{}:{label}", market.symbol),
                 symbol: market.symbol.clone(),
-                side,
+                side: side.into(),
                 entry_price: 0.0,
                 notional: 0.0,
                 leverage: 1.0,
                 unrealized_pnl: 0.0,
                 contracts: 0.0,
                 liquidation_price: 0.0,
-                margin_type: Some(MarginType::Isolated),
-                position_mode: Some(PositionMode::OneWay),
-                info: Some(serde_json::json!({})),
-                realized_pnl: None,
-                margin_size: None,
-                extra: None,
-                last_update: None,
-                option: None,
+                margin_type: (Some(MarginType::Isolated)).into(),
+                position_mode: (Some(PositionMode::OneWay)).into(),
+                info: (Some(serde_json::json!({}))).into(),
+                realized_pnl: (None).into(),
+                margin_size: (None).into(),
+                extra: (None).into(),
+                last_update: (None).into(),
+                option: (None).into(),
             });
         }
     }
@@ -248,11 +266,30 @@ where
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 struct HistoricalOptions {
     account: String,
     from: Option<f64>,
     to: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "HistoricalOptions")]
+struct HistoricalOptionsWire {
+    account: String,
+    from: Option<f64>,
+    to: Option<f64>,
+}
+
+impl<'de> Deserialize<'de> for HistoricalOptions {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let input = <JsNumberInput as Deserialize<'de>>::deserialize(d)?;
+        input
+            .decode_with(|decoder| {
+                HistoricalOptionsWire::deserialize(safe_cex_types::strict_decode::object(decoder))
+            })
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl JsNumberOutput for HistoricalOptions {
@@ -281,4 +318,70 @@ pub async fn fetch_historical_positions(
         false,
     )
     .await
+}
+
+#[cfg(test)]
+mod accepted_shape {
+    use super::{AccountLogParams, HistoricalOptions};
+    use crate::accepted_record_shapes_support as support;
+    #[test]
+    fn account_log_params_rejects_complete_positional_array() {
+        support::positive::<AccountLogParams>(
+            r#"{"startTime":-0,"limit":7.25,"ignored":true}"#,
+            |d| {
+                assert_eq!(d.start_time.to_bits(), (-0.0_f64).to_bits());
+                assert_eq!(d.limit.to_bits(), 7.25_f64.to_bits());
+            },
+        );
+        support::positive::<AccountLogParams>(
+            r#"{"startTime":9007199254740993,"limit":1e400}"#,
+            |d| {
+                assert_eq!(
+                    d.start_time.to_bits(),
+                    9_007_199_254_740_992.0_f64.to_bits()
+                );
+                assert_eq!(d.limit.to_bits(), f64::INFINITY.to_bits());
+            },
+        );
+        support::rejects::<AccountLogParams>(
+            "[19.5,7.25]",
+            &[
+                "{}",
+                r#"{"start_time":19.5,"limit":7.25}"#,
+                r#"{"startTime":null,"limit":7.25}"#,
+            ],
+        );
+    }
+    #[test]
+    fn historical_options_rejects_complete_positional_array() {
+        support::positive::<HistoricalOptions>(
+            r#"{"account":"account-A","from":-0,"to":93.5,"ignored":true}"#,
+            |d| {
+                assert_eq!(d.account, "account-A");
+                assert_eq!(d.from.unwrap().to_bits(), (-0.0_f64).to_bits());
+                assert_eq!(d.to.unwrap().to_bits(), 93.5_f64.to_bits());
+            },
+        );
+        for raw in [
+            r#"{"account":"account-B"}"#,
+            r#"{"account":"account-B","from":null,"to":null}"#,
+        ] {
+            support::positive::<HistoricalOptions>(raw, |d| {
+                assert_eq!(d.account, "account-B");
+                assert!(d.from.is_none() && d.to.is_none());
+            });
+        }
+        support::positive::<HistoricalOptions>(
+            r#"{"account":"NUM","from":5e-324,"to":-1e400}"#,
+            |d| {
+                assert_eq!(d.account, "NUM");
+                assert_eq!(d.from.unwrap().to_bits(), 1);
+                assert_eq!(d.to.unwrap().to_bits(), f64::NEG_INFINITY.to_bits());
+            },
+        );
+        support::rejects::<HistoricalOptions>(
+            r#"["account-A",71.25,93.5]"#,
+            &["{}", r#"{"account":15}"#],
+        );
+    }
 }

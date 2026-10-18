@@ -1,4 +1,10 @@
 //! Scripted transport and runtime for driving the production CryptocomExchange.
+mod release {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/release.rs"
+    ));
+}
 use safe_cex_exchange::js_runtime::{
     client::JsHttpHost,
     promise::JsFuture,
@@ -23,15 +29,24 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
+
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
 #[derive(Default)]
 pub struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     pub now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
     pub console: RefCell<Vec<(String, String)>>,
+    pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -41,12 +56,15 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     pub fn pump(&self) {
+        self.sleep_wakers.wake_due(self.now.get());
         for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let signal = std::sync::Arc::new(virtual_time::WakeSignal::default());
+            let waker = signal.waker();
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -61,7 +79,7 @@ impl Runtime {
             }
             let added = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !added {
+            if !progressed && !added && !signal.take() {
                 return;
             }
         }
@@ -81,10 +99,12 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleeper = self.sleep_wakers.register(at);
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -94,7 +114,9 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.console
             .borrow_mut()
             .push((severity.into(), message.into()));
@@ -111,8 +133,10 @@ impl ExchangeRuntime for Runtime {
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         self.reports.borrow_mut().push(error.message.clone());
     }
-    fn report_raw_exception(&self, error: &Value, _: &Value) {
-        self.reports.borrow_mut().push(error.to_string());
+    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+        self.reports
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(error));
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
@@ -155,7 +179,10 @@ impl WsSocket for Socket {
 }
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
-        Arc::new(safe_cex_transport::DirectTransport)
+        self.provider
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| Arc::new(safe_cex_transport::DirectTransport))
     }
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         panic!("Crypto.com binding E2E never tunnels")
@@ -209,11 +236,11 @@ pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
-    held: RefCell<Option<(String, Rc<Cell<bool>>)>>,
+    held: RefCell<Option<(String, Rc<release::Release>)>>,
 }
 impl Http {
-    pub fn hold(&self, path: &str) -> Rc<Cell<bool>> {
-        let released = Rc::new(Cell::new(false));
+    pub fn hold(&self, path: &str) -> Rc<release::Release> {
+        let released = Rc::new(release::Release::default());
         *self.held.borrow_mut() = Some((path.into(), released.clone()));
         released
     }
@@ -291,14 +318,7 @@ impl JsHttpHost for Http {
             .map(|(_, released)| released.clone());
         Box::pin(async move {
             if let Some(released) = held {
-                std::future::poll_fn(move |_| {
-                    if released.get() {
-                        Poll::Ready(())
-                    } else {
-                        Poll::Pending
-                    }
-                })
-                .await;
+                released.wait().await;
             }
             result
         })
@@ -318,7 +338,14 @@ pub fn options() -> ExchangeOptions {
 }
 
 pub fn harness(options: ExchangeOptions, script: impl FnOnce(&Http)) -> Harness {
-    let runtime = Rc::new(Runtime::default());
+    harness_on(Rc::new(Runtime::default()), options, script)
+}
+
+pub fn harness_on(
+    runtime: Rc<Runtime>,
+    options: ExchangeOptions,
+    script: impl FnOnce(&Http),
+) -> Harness {
     runtime.now.set(1_700_000_000_000.0);
     let http = Rc::new(Http::default());
     *http.runtime.borrow_mut() = Some(runtime.clone());
@@ -362,4 +389,53 @@ impl Harness {
     pub fn venue(&self) -> &dyn Exchange {
         self.exchange.as_ref()
     }
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Runtime::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.now.set(runtime.now.get() + 9.0);
+    runtime.pump();
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.now.set(runtime.now.get() + 1.0);
+    runtime.pump();
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.now.set(runtime.now.get() + 10.0);
+    runtime.pump();
+    assert!(!latest.take(), "dropped sleep must not wake");
 }

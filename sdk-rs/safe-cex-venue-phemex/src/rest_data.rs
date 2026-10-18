@@ -1100,3 +1100,54 @@ pub async fn fetch_ohlcv<H: DataHost>(h: &mut H, opts: H::V) -> Result<H::V, H::
         }
     }
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn utf16_encoder_preserves_native_units() {
+        assert_eq!(units(""), Vec::<u16>::new());
+        assert_eq!(units("A🚀\0"), vec![65, 55357, 56960, 0]);
+        assert_eq!(units("é雪"), vec![233, 38634]);
+    }
+
+    #[test]
+    fn endpoint_lookup_preserves_selected_wire_paths() {
+        assert_eq!(endpoint("MARKETS"), "/public/products");
+        assert_eq!(endpoint("TICKERS"), "/md/v3/ticker/24hr/all");
+        assert_eq!(endpoint("KLINE"), "/exchange/public/md/v2/kline/list");
+        assert!(std::panic::catch_unwind(|| endpoint("not-an-endpoint")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod accepted_outbound_contract {
+    #[allow(dead_code, unused_imports)]
+    mod fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/accepted_host_fixture.rs"
+        ));
+    }
+    #[test]
+    fn label_encodes_supplied_text_through_host() {
+        use safe_cex_exchange::js_runtime::value::Js;
+        let mut host = fixture::Host::new(&serde_json::Value::Null);
+        for (text, expected) in [
+            ("A🚀\0", vec![65, 0xd83d, 0xde80, 0]),
+            ("é雪", vec![233, 38634]),
+            ("", vec![]),
+        ] {
+            let value = super::label(&mut host, text);
+            let Js::String(units) = value else {
+                panic!("label must return native text")
+            };
+            assert_eq!(
+                units.as_ref(),
+                expected.as_slice(),
+                "label native UTF16 units"
+            );
+        }
+    }
+}

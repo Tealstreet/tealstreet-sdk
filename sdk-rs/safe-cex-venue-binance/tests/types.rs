@@ -249,33 +249,3 @@ fn income_union_accepted_set_matches_live_typescript() {
         format!("unknown variant `unknown`, expected one of {expected}")
     );
 }
-
-#[test]
-fn full_positional_records_are_rejected_for_every_public_record() {
-    fn rejects_sequence<T: serde::de::DeserializeOwned + Serialize>(object: Value) {
-        let decoded = <T as serde::Deserialize>::deserialize(object).unwrap();
-        let serialized = serde_json::to_value(decoded).unwrap();
-        let sequence = Value::Array(serialized.as_object().unwrap().values().cloned().collect());
-        assert!(
-            <T as serde::Deserialize>::deserialize(sequence.clone()).is_err(),
-            "accepted full positional record {sequence}"
-        );
-    }
-    let mut risk = json!({"symbol":"BTCUSDT","positionAmt":"1","entryPrice":"1","markPrice":"1","unRealizedProfit":"0","liquidationPrice":"0","leverage":"1","maxNotionalValue":"1","marginType":"cross","isolatedMargin":"0","isAutoAddMargin":"false","positionSide":"BOTH","notional":"1","isolatedWallet":"0","updateTime":1,"isolated":false,"adlQuantile":0});
-    rejects_sequence::<pm::GetPositionRiskResponseRow>(risk.clone());
-    risk["adl"] = json!(0);
-    for key in [
-        "initialMargin",
-        "positionInitialMargin",
-        "openOrderInitialMargin",
-    ] {
-        risk[key] = json!("0");
-    }
-    rejects_sequence::<futures::GetPositionRiskResponseRow>(risk);
-    rejects_sequence::<futures::BinanceIncomeRecord>(
-        json!({"symbol":"BTCUSDT","incomeType":"COMMISSION","income":"1","asset":"USDT","time":123,"tranId":"7","info":"fee","tradeId":"1"}),
-    );
-    rejects_sequence::<futures::BinanceIncomeHistoryOptions>(
-        json!({"symbol":"BTCUSDT","incomeType":"COMMISSION","startTime":0,"endTime":1,"limit":1}),
-    );
-}

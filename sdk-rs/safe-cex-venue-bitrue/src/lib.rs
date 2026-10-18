@@ -27,3 +27,6 @@ pub mod runtime_lifecycle;
 
 pub mod composition;
 pub mod public_streams;
+
+pub mod binding;
+pub use binding::{BitrueDependencies, BitrueExchange};

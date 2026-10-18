@@ -178,6 +178,22 @@ impl Harness {
             false,
         )
         .unwrap();
+        let json: Rc<dyn Fn(&V) -> Result<Rc<Value>, E>> = Rc::new({
+            let views = views.clone();
+            move |v: &V| match v.as_ref() {
+                Js::Null => Ok(Rc::new(Value::Null)),
+                Js::B(v) => Ok(Rc::new(json!(v))),
+                Js::N(v) => Ok(Rc::new(json!(v))),
+                Js::S(v) => Ok(Rc::new(json!(v))),
+                _ => Ok(views
+                    .borrow()
+                    .iter()
+                    .find(|(input, _)| Rc::ptr_eq(input, v))
+                    .expect("existing JSON payload slot")
+                    .1
+                    .clone()),
+            }
+        });
         let operations = Rc::new(SocketClassOps {
             stream: stream.clone(),
             derive,
@@ -192,21 +208,12 @@ impl Harness {
                 let store = store.clone();
                 move |_| store.clone() as Rc<dyn Store>
             }),
-            json: Rc::new({
-                let views = views.clone();
-                move |v: &V| match v.as_ref() {
-                    Js::Null => Ok(Rc::new(Value::Null)),
-                    Js::B(v) => Ok(Rc::new(json!(v))),
-                    Js::N(v) => Ok(Rc::new(json!(v))),
-                    Js::S(v) => Ok(Rc::new(json!(v))),
-                    _ => Ok(views
-                        .borrow()
-                        .iter()
-                        .find(|(input, _)| Rc::ptr_eq(input, v))
-                        .expect("existing JSON payload slot")
-                        .1
-                        .clone()),
-                }
+            json: json.clone(),
+            ticker_data: Rc::new(move |value: &V| {
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    (*json(value)?).clone(),
+                )
+                .map_err(|error| Rc::new(error.to_string()))
             }),
             exchange_error: Rc::new(|e| Rc::new(e.message)),
         });
@@ -605,7 +612,13 @@ fn native_public_bindings_execute_and_retain_shared_state() {
     drop(tickers);
     h.runtime.imports.borrow_mut().insert(
         "jsonParse".into(),
-        function(|_, a| Ok(decode(&safe_cex_transport::how::json_parse(&text(&a[0]))))),
+        function(|_, a| {
+            Ok(decode(
+                &safe_cex_transport::how::json_parse(&text(&a[0]))
+                    .into_value()
+                    .unwrap(),
+            ))
+        }),
     );
     h.method(
         &r,
@@ -847,7 +860,13 @@ fn native_private_bindings_preserve_async_and_live_heartbeat() {
     );
     h.runtime.imports.borrow_mut().insert(
         "jsonParse".into(),
-        function(|_, a| Ok(decode(&safe_cex_transport::how::json_parse(&text(&a[0]))))),
+        function(|_, a| {
+            Ok(decode(
+                &safe_cex_transport::how::json_parse(&text(&a[0]))
+                    .into_value()
+                    .unwrap(),
+            ))
+        }),
     );
     h.method(
         &r,

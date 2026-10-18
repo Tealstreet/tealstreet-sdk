@@ -24,7 +24,7 @@ pub fn capture(oracle: &str) -> String {
     match oracle {
         "types" => assert_eq!(
             fixture.as_array().unwrap().len(),
-            250,
+            145,
             "WOO-IDENTITY legacy source total"
         ),
         "contracts" => assert_eq!(

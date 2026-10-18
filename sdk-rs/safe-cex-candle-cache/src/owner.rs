@@ -43,8 +43,6 @@ mod host {
             }
         }
     }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
     struct Request {
         cache_key: String,
         interval: AnyTimeframe,
@@ -53,6 +51,22 @@ mod host {
         limit: f64,
         now_ms: Option<f64>,
         use_persistent_backend: Option<bool>,
+    }
+    #[derive(Deserialize)]
+    #[serde(remote = "Request", rename_all = "camelCase")]
+    struct RequestWire {
+        cache_key: String,
+        interval: AnyTimeframe,
+        from_ms: f64,
+        to_ms: f64,
+        limit: f64,
+        now_ms: Option<f64>,
+        use_persistent_backend: Option<bool>,
+    }
+    impl<'de> Deserialize<'de> for Request {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            RequestWire::deserialize(safe_cex_types::strict_decode::object(d))
+        }
     }
     pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -199,6 +213,64 @@ mod host {
                 (-0.0_f64).to_bits(),
                 "{field}: owner ingress must retain the sign"
             );
+        }
+    }
+    #[test]
+    fn owner_request_preserves_fields_and_refuses_complete_array() {
+        use safe_cex_types::Timeframe;
+        fn check(request: Request) {
+            assert_eq!(request.cache_key, "native-field-key");
+            assert_eq!(request.interval, AnyTimeframe::Variant1(Timeframe::M1));
+            assert_eq!(request.from_ms.to_bits(), 1.25_f64.to_bits());
+            assert_eq!(request.to_ms.to_bits(), 99.5_f64.to_bits());
+            assert_eq!(request.limit.to_bits(), 7.75_f64.to_bits());
+            assert_eq!(request.now_ms.unwrap().to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(request.use_persistent_backend, Some(true));
+        }
+        let raw = r#"{"cacheKey":"native-field-key","interval":"1m","fromMs":1.25,"toMs":99.5,"limit":7.75,"nowMs":-0,"usePersistentBackend":true}"#;
+        let value: Value = serde_json::from_str(raw).unwrap();
+        check(serde_json::from_str(raw).unwrap());
+        check(serde_json::from_value(value.clone()).unwrap());
+        check(Request::deserialize(&value).unwrap());
+        check(<Request as Deserialize>::deserialize(value).unwrap());
+        let array = r#"["native-field-key","1m",1.25,99.5,7.75,-0,true]"#;
+        let value: Value = serde_json::from_str(array).unwrap();
+        assert!(
+            serde_json::from_str::<Request>(array).is_err(),
+            "complete ordered array must be refused by raw request decoder"
+        );
+        assert!(
+            serde_json::from_value::<Request>(value.clone()).is_err(),
+            "complete ordered array must be refused by owned request decoder"
+        );
+        assert!(
+            Request::deserialize(&value).is_err(),
+            "complete ordered array must be refused by borrowed request decoder"
+        );
+        assert!(
+            <Request as Deserialize>::deserialize(value).is_err(),
+            "complete ordered array must be refused by qualified request decoder"
+        );
+        for invalid in [
+            json!([]),
+            json!(null),
+            json!(true),
+            json!(1),
+            json!("request"),
+            json!({}),
+        ] {
+            assert!(serde_json::from_str::<Request>(&invalid.to_string()).is_err());
+            assert!(serde_json::from_value::<Request>(invalid.clone()).is_err());
+            assert!(Request::deserialize(&invalid).is_err());
+            assert!(<Request as Deserialize>::deserialize(invalid).is_err());
+        }
+        for extra in ["", r#", "nowMs":null,"usePersistentBackend":null"#] {
+            let raw = format!(
+                r#"{{"cacheKey":"missing-optionals","interval":"1m","fromMs":1,"toMs":2,"limit":3{extra}}}"#
+            );
+            let request: Request = serde_json::from_str(&raw).unwrap();
+            assert!(request.now_ms.is_none());
+            assert!(request.use_persistent_backend.is_none());
         }
     }
 }

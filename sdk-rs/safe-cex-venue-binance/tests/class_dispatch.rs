@@ -129,8 +129,8 @@ fn dispatch_native_live_lists_payload_and_errors() {
     let t = trace.clone();
     first.borrow_mut().push(Rc::new(move |events: EventValue| {
         t.borrow_mut().push("broadcast".into());
-        let x = events.get("0")?;
-        x.define("native", number(4.2));
+        let x = events.read("0")?;
+        x.write("native", number(4.2));
         let t = t.clone();
         weak.upgrade().unwrap().borrow_mut().push(Rc::new(move |_| {
             t.borrow_mut().push("appended".into());
@@ -149,7 +149,7 @@ fn dispatch_native_live_lists_payload_and_errors() {
         "kline.BTC".into(),
         Handler::List(Rc::new(RefCell::new(vec![
             Rc::new(move |events: EventValue| {
-                let value = events.get("0")?.get("native")?;
+                let value = events.read("0")?.read("native")?;
                 if check.get() {
                     assert!(
                         matches!(value,EventValue::Number(v)if v==4.2),
@@ -232,20 +232,20 @@ fn dispatch_native_overflow_signed_zero_and_deep_frame() {
     let seen = Rc::new(std::cell::Cell::new(0));
     let count = seen.clone();
     let callback: safe_cex_venue_binance::public_listeners::Parser = Rc::new(move |events| {
-        let first = events.get("0")?;
-        let infinity = first.get("n")?;
+        let first = events.read("0")?;
+        let infinity = first.read("n")?;
         assert!(
             matches!(infinity,EventValue::Number(v)if v==f64::INFINITY),
             "native JSON overflow is Infinity"
         );
-        let zero = first.get("zero")?;
+        let zero = first.read("zero")?;
         assert!(
             matches!(zero,EventValue::Number(v)if v==0.0&&v.is_sign_negative()),
             "native JSON negative zero sign"
         );
-        let mut node = first.get("deep")?;
+        let mut node = first.read("deep")?;
         for _ in 0..150 {
-            node = node.get("0")?;
+            node = node.read("0")?;
         }
         assert!(
             matches!(node,EventValue::Number(v)if v==4.2),

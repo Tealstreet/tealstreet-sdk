@@ -134,6 +134,11 @@ concurrency:
 
 env:
   RUSTFLAGS: -Dwarnings
+  # The test tier ran out of runner disk (os error 28) even after the SDK purge;
+  # incremental state and debug info are most of target/ and CI never uses them.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
 
 defaults:
   run:
@@ -183,6 +188,15 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+      # The test tier builds every crate plus the TS/native oracles and ran the
+      # hosted runner out of disk (os error 28) late in the job. Drop preinstalled
+      # SDKs this workflow never uses before the build starts.
+      - name: Free runner disk for the test tier
+        if: matrix.check == 'test'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: Cache cargo
         uses: actions/cache@v6
         with:
@@ -190,9 +204,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             sdk-rs/target
-          key: ${{ runner.os }}-cargo-sdk-rs-${{ matrix.check }}-${{ hashFiles('sdk-rs/**/Cargo.toml', 'sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          key: ${{ runner.os }}-cargo-sdk-rs-nodebug-${{ matrix.check }}-${{ hashFiles('sdk-rs/**/Cargo.toml', 'sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-sdk-rs-${{ matrix.check }}-
+            ${{ runner.os }}-cargo-sdk-rs-nodebug-${{ matrix.check }}-
       - name: Bootstrap Rust
         run: rustup toolchain install stable --profile minimal --no-self-update
       # Bootstrap provides rustup; this loads the workspace pin and components.
@@ -245,7 +259,14 @@ jobs:
         run: |
           node --test safe-cex-exchange/scripts/cancellable-futures.test.cjs
           cargo test --locked -p safe-cex-exchange --all-features --test cancellable_future_inventory --jobs 2
+      - name: Fetch binding ratchet base
+        if: matrix.check == 'test' && github.event_name == 'pull_request'
+        env:
+          BINDING_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$BINDING_BASE_SHA"
       - name: Run ${{ matrix.check }}
+        env:
+          VENUE_BINDING_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
         run: ${{ matrix.command }}
       - name: Run Lighter Go-WASM vector oracle
         if: matrix.check == 'test'
@@ -268,6 +289,8 @@ jobs:
           cargo test --locked -p safe-cex-transport --doc
       - name: Check exchange core parity and lifecycle
         if: matrix.check == 'test'
+        env:
+          VENUE_BINDING_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
           node safe-cex-exchange/scripts/ci-deps.cjs "$RUNNER_TEMP/exchange-typescript-deps"
           corepack yarn --cwd "$RUNNER_TEMP/exchange-typescript-deps" install --frozen-lockfile --ignore-scripts --non-interactive
@@ -449,7 +472,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22.x
+          node-version: 24.20.0
       - name: Install isolated oracle dependencies from the repo lockfile
         working-directory: .
         run: |

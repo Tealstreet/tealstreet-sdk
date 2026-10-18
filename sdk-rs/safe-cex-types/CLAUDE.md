@@ -87,11 +87,23 @@ is None and present null is Some(Null). Existing numeric lexemes, including
 overflow and signed zero, survive; native NaN is refused. This is JSON capture,
 not JavaScript wire projection; Num owns typed ingress and output eligibility.
 
+Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
+float directly. Capture accepts that event using the same Float path as the
+newtype buffer, preserving signed zero, infinities and NaN payload bits. JSON
+projection still refuses NaN and carries infinities as valid overflow lexemes;
+the raw-token map protocol remains strict. The retained_native_f64 and Num
+passthrough_native_f64 targets cover both direct capture and public projection.
+
 OrderRiskProfile serialization follows its source construction branch. The
 loss-side limit branch places positionSize before fee; all other risk branches
 place it last. Rust-only position_size_before_fee metadata selects the order,
 is omitted from TypeScript bindings and wire output, and defaults false on
 record decode. Numeric values and optional-field nullability are unchanged.
+
+CurrencyBalance uses the same private remote-companion pattern as the records
+below, with the object guard at its concrete Deserialize implementation. It
+retains declared Balance and available/locked payloads without normalization and
+has no hidden function-local decoder.
 
 The field checker refuses interface heritage in both dependency discovery and
 shape enumeration. Required inherited fields must never disappear behind a
@@ -151,3 +163,56 @@ JSON syntax and surviving-value refusals remain separate negative cases.
 ExchangeOptions.polymarket carries the five runtime account fields consumed by the Polymarket constructor. Its typed ExchangeOptionsPolymarket record uses existing UTF-8 credential strings and native f64 signerType; do not coerce numeric signature modes or replace the venue retained UTF-16 Text record with it. The source root declaration lacks this opts-as-any extension, so the field is skipped only in generated static TS, never in native serialization or source projection.
 
 Balance.currencies stores CurrencyBalance: either the declared recursive Balance or the actual Crypto.com REST available/locked row. Serialization preserves the selected source field names; there is no computed free/used/total normalization. The static TypeScript declaration still names Balance, so its generated annotation remains unchanged while the runtime violation is recorded on the owning manifest row. Both runtime shapes require objects; available/locked are required non-null numbers.
+
+DisplayedPosition decodes its flattened Position through the original MapAccess.
+The private streaming filter consumes display-only fields and forwards payload
+seeds unchanged, preserving raw decimal/-0 numbers and retained info lexemes
+without Serde Content buffering. The remote serializer companion keeps exact
+canonical field/serde metadata; optional null and duplicate-field rejection remain
+explicit. Direct raw JSON, private-companion and bounded map-seed witnesses cover
+this seam; plain serde numeric decoding still has its ordinary overflow policy.
+
+OHLCVOptions.interval uses the existing AnyTimeframe union for worker runtime requests. Its 27 literals match maintained AnyTimeframe exactly; the source request annotation remains narrower. The ts-rs field projection exports Timeframe to match that live declaration, while the private wire retains AnyTimeframe and its existing object and optional-field guards.
+
+Order and Position use `ModelField<T>` for output enums, Order.price, and their
+optional fields. `Absent`, own `Undefined`, and `Value` stay distinct through the
+native model codec; JSON serialization omits the first two. Explicit JSON null
+remains invalid for non-nullable values (info may retain null). Numeric undefined
+is not NaN: arithmetic readers explicitly use `to_number()`. Copying a missing
+property into an object literal uses `into_property()` to create own undefined.
+The static TS declarations and strict public PlaceOrderOpts stay unchanged.
+
+`PreparedOrderOpts` is the one internal placement carrier for amendments copied
+from output models. Its type/side can be undefined; venue source branches decide
+what to do with them. It does not add a permissive public placement decoder.
+`tests/support/model-field-corpus.cjs` supplies the 126-case Node presence corpus
+used by the real native bridge and account encoder tests. Store merge policy is
+a separate change; Option-like read helpers do not implement patch policy.
+
+RetainedJsonInput text and own keys use UTF-16 units. Its shared iterative parser
+serves both native JSON.parse (binary64 numbers) and raw Serde capture (numeric
+lexemes). Duplicate assignment keeps the first key position; only surviving
+values receive the lexical typed-ingress depth budget. Native parsing has no
+explicit typed depth budget. Projection to serde_json::Value remains fallible
+for lone units and NaN; it never substitutes replacement text.
+The retained_utf16 target observes exact keys, both rows, numeric bits, reserved
+Serde-looking keys and all 65,536 raw/escaped code units before projection.
+`node ../safe-cex-parity/scripts/retained-json-contracts.mjs --package=safe-cex-types`
+checks nine exact compiler-owned retained APIs and their bounded native/default
+outputs. It retires the deleted ObjectVisitor and checks the shared parser's
+actual signature; the full model/local/feature/target inventories remain separate.
+
+The accepted-set ModelField visitor review executes the fixed f64 decoder through
+ordinary JSON, native Serde unit and Default paths; native presence and number
+bits are observed before serialization. PreparedOrderOpts, its private wire and
+optional decoder have independent native field witnesses in the same scoped
+`accepted-model-field-native.test.mjs` target. Generic helper delegation requires
+an exact source review and the inventoried decoder's native observations.
+
+Order.reduceOnly uses ModelField<bool>: absent, own undefined, false and true
+remain distinct in native codecs. Its internal PreparedOrderOpts amendment copy
+uses the same carrier; public PlaceOrderOpts keeps Option<bool> and refuses
+non-booleans. The real native/Store presence target covers 48 actual-source
+upsert/patch combinations. BingX's real amendment witness compares the complete
+signed request against actual source execution and requires undefined reduceOnly
+to be omitted from the wire and HMAC preimage.

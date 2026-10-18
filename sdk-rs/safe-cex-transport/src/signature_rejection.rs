@@ -56,7 +56,7 @@ pub fn is_binance_style_signature_rejection(data: &Value) -> Result<bool, JsCoer
 }
 
 fn coercion_failure(error: JsCoercionError, request: &RestRequest) -> RestFailure {
-    RestFailure::pre_transmit(error.message.into(), request.clone())
+    RestFailure::from_transport(crate::TransportError::JavaScript(error), request.clone())
 }
 
 /// ts: signatureRejectedResponse(isRejection)(error), the axios-retry condition for a

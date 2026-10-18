@@ -359,22 +359,16 @@ impl BackpackPublicWebSocket {
             })));
     }
     pub fn dispose(&self) -> Result<(), ExchangeError> {
-        self.listeners.handlers.borrow_mut().clear();
-        self.ticker_handler.cancel();
         self.subscriptions
             .borrow_mut()
             .clone_from(&control::Subscriptions::default());
-        self.listeners.topics.borrow_mut().clear();
         self.listeners.states.borrow_mut().clear();
         self.listeners.fetchers.borrow_mut().clear();
         for (_, t) in &*self.listeners.throttles.borrow() {
             t.cancel();
         }
         self.listeners.throttles.borrow_mut().clear();
-        for task in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
-        }
-        self.base.dispose();
+        self.base.close_current_websocket();
         Ok(())
     }
     pub fn on_message(self: &Rc<Self>, frame: &SocketFrame) -> Result<(), ExchangeError> {

@@ -158,3 +158,55 @@ Not run: workspace compilation, full crate test suite, host or wasm clippy,
 credentialed HTTP, live sockets, full adapter integration, v3 tests or CI reruns.
 Standard array methods are modeled; overridden methods/species and complete
 prototype/callback replacement coverage are not claimed.
+
+
+## Shared strict-row decision and reduceOnly presence (2026-10-18)
+
+The earlier eight-row operation-body proof above remains scoped to those raw
+bodies. The configured production fetchOrders boundary now enforces shared-type
+decisions 3/3b: omit only malformed amount/filled/reduceOnly rows, emit their
+field, original typed value and id, and preserve valid neighboring rows. TS keeps
+malformed rows; this refusal is an explicitly accepted divergence. Missing or
+own-undefined reduceOnly is valid through ModelField<bool>, alongside false/true.
+Public placement input remains strict, without bool/number/string coercion.
+
+`mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding`
+executes each bad field through both the public Exchange read and the configured
+fetch-to-Store path. One good limit row plus three good algo rows survive; the
+undefined and false properties remain distinct. Against e6597a197f, the compiled
+first case failed the whole read with invalid string amount. With the cutover,
+all six paths pass and each reports exactly one refusal. The raw runtime-value
+mapAlgoOrder/fetchAlgoOrders witnesses and fixtures are unchanged.
+
+`safe-cex-exchange/tests/order_reduce_only_presence.rs` executes 48 actual-TS
+Store combinations for single/bulk upsert and patch, observes Order/Prepared
+native presence before JSON omission, and rejects non-booleans at output and
+public input boundaries. The compiled baseline refused absent reduceOnly.
+BingX binding's undefined amendment regression also compiled/fails when the
+pre-cutover production sources are restored, then passes after exact restoration:
+its entire wire body and HMAC match the actual maintained class and API signer,
+with controlled clock/UUID entropy and installed qs/real HMAC.
+
+Native scoped verification after merging master: WOO23 unit +37 order +18 read
++24 stream tests pass; BingX46 binding +10 completion pass; Apex5 unmapped/strict-row
+tests pass; shared native-model8, Store contract/risk6 and Store composition1 pass.
+Required all-feature cancellation7, override8 and binding25 checks pass. Type model
+utilities2 pass with the existing live-source oracle still dependency-gated.
+The extractor check reports zero updates. Compiler-only checks of all explicit
+model consumers and their test targets passed before master integration; the
+newly merged Apex false assertion was migrated and its real binding suite passes.
+
+
+Final follow-up: the live type-model oracle also passes (3/3 with include-ignored).
+Actual accepted native decoder probes pass for three model-record owners and five
+ModelField/Prepared owners; the full types inventory records151 Deserialize and70
+alternate-only owners. Native FFI/registry compiles. Strict Clippy passes for all21
+affected production libraries on native and Wasm, plus WOO/BingX all targets on
+both targets. Full parity passes7459 rows/16622 public items; extractor check0.
+Only the five reviewed unchanged nested helpers' containing-file pins were
+refreshed; no unrelated core cancellation/override body pin was changed.
+
+After the final normal master merge (5a784f2f55), the required inventories pass
+again (7 cancellation, 8 override, 25 binding). BingX binding/completion passes
+58 tests; Apex binding/unmapped passes53. Native FFI/registry compile, full parity
+(7459 rows/16619 public items), and extraction freshness (0 changes) pass.

@@ -11,7 +11,11 @@ pub fn ping(socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
 }
 
 pub fn subscribe(socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
-    socket.send_with_log(r#"{"op":"subscribe","args":["order","position"]}"#)
+    if socket.emitter().name() == "bybitspot" {
+        crate::private_ws_lifecycle::spot_subscribe(|frame| socket.send_with_log(frame))
+    } else {
+        socket.send_with_log(r#"{"op":"subscribe","args":["order","position"]}"#)
+    }
 }
 
 pub fn connect_and_subscribe(
@@ -126,3 +130,5 @@ pub fn send_reconnect_sequence(
         Ok(())
     });
 }
+
+pub(crate) mod messages;

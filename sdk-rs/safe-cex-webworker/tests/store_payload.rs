@@ -1,5 +1,5 @@
+use safe_cex_exchange::store_payload::*;
 use safe_cex_types::Ticker;
-use safe_cex_webworker::store_payload::*;
 use serde_json::{Value, json};
 fn number(v: &Value) -> f64 {
     match v.as_str() {

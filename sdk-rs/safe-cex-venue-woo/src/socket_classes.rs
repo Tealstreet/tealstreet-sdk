@@ -17,6 +17,7 @@ pub struct SocketClassOps<V, E, H> {
     /// Existing immutable JSON ingress; caller-owned mutable objects are outside this adapter.
     /// Never walk or coerce V to manufacture this view.
     pub json: Rc<dyn Fn(&V) -> Result<Rc<Value>, E>>,
+    pub ticker_data: Rc<dyn Fn(&V) -> Result<safe_cex_types::retained_json::RetainedJsonInput, E>>,
     pub exchange_error: Rc<dyn Fn(ExchangeError) -> E>,
 }
 #[derive(Clone, Copy)]
@@ -57,7 +58,7 @@ fn invoke<V: Clone + 'static, E: 'static, H: control::Host<Value = V, Error = E>
         PublicMember::Ping => return ping_public(&h.stream, receiver),
         PublicMember::PingEvent => return handle_ping_event(&h.stream, receiver),
         PublicMember::Tickers | PublicMember::Bbo | PublicMember::Marks => {
-            let data = (h.json)(&arg(0))?;
+            let data = (h.ticker_data)(&arg(0))?;
             let store = (h.store)(receiver);
             match member {
                 PublicMember::Tickers => {

@@ -51,3 +51,35 @@ where
     }
     Ok(data.expect("an explicit null error field requires a present response"))
 }
+
+/// Production language-value entry. `get_error` is the shared `v` primitive,
+/// and the response object is returned by identity on the explicit-null branch.
+pub async fn fetch_tickers_raw_value<F>(
+    read: impl FnOnce(&'static str) -> F,
+    get_error: impl FnOnce(
+        &safe_cex_exchange::js_runtime::value::Js,
+    ) -> Result<
+        safe_cex_exchange::js_runtime::value::Js,
+        safe_cex_exchange::js_runtime::value::Thrown,
+    >,
+    emit: impl FnOnce(
+        safe_cex_exchange::js_runtime::value::Js,
+    ) -> Result<(), safe_cex_exchange::js_runtime::value::Thrown>,
+) -> Result<safe_cex_exchange::js_runtime::value::Js, safe_cex_exchange::js_runtime::value::Thrown>
+where
+    F: Future<
+        Output = Result<
+            safe_cex_exchange::js_runtime::value::Js,
+            safe_cex_exchange::js_runtime::value::Thrown,
+        >,
+    >,
+{
+    use safe_cex_exchange::js_runtime::value::Js;
+    let data = read("/md/v3/ticker/24hr/all").await?;
+    let error = get_error(&data)?;
+    if !error.strict_equals(&Js::Null) {
+        emit(error)?;
+        return Ok(Js::Null);
+    }
+    Ok(data)
+}

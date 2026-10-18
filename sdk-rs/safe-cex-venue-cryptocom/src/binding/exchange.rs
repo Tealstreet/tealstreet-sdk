@@ -160,6 +160,36 @@ impl CryptocomExchange {
             to_typed(&value).map_err(err)
         })
     }
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        member: &str,
+        first: Js,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        let reporter = self.rt.shared.runtime.clone();
+        let listener = Js::function("callback", move |_, a| {
+            let value = a.into_iter().next().unwrap_or(Js::Undefined);
+            match to_typed::<T>(&value) {
+                Ok(typed) => callback(typed),
+                Err(error) => reporter.report_exception(
+                    &error.to_exchange_error(),
+                    &serde_json::json!({"source": "cryptocom listener payload"}),
+                ),
+            }
+            Ok(Js::Undefined)
+        });
+        let cleanup = self
+            .rt
+            .this
+            .call_method(member, vec![first, listener])
+            .map_err(err)?;
+        Ok(Box::new(move || {
+            if cleanup.is_callable() {
+                cleanup.call(Js::Undefined, vec![]).map_err(err)?;
+            }
+            Ok(())
+        }))
+    }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
@@ -263,9 +293,34 @@ impl Exchange for CryptocomExchange {
         let a = args!(js(&options));
         self.invoke("updateOrder", a)
     }
+    fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        let a = args!(js(&options));
+        self.invoke("fetchOHLCV", a)
+    }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        self.listen("listenOHLCV", from_typed(&options).map_err(err)?, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        self.listen("listenOrderBook", Js::str(&symbol), callback)
+    }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
         let a = args!(js(&orders));
         self.invoke_unit("cancelOrders", a)
+    }
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        let a = args!(js(&symbol));
+        self.invoke_unit("cancelSymbolOrders", a)
+    }
+    fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
+        self.invoke_unit("cancelAllOrders", vec![])
     }
     // ts: base.ts:989 — inherited scheduleCancel rejects.
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
@@ -287,3 +342,7 @@ impl Exchange for CryptocomExchange {
         Box::pin(async { Ok(vec![]) })
     }
 }
+
+#[cfg(test)]
+#[path = "iterable_tests.rs"]
+mod iterable_tests;

@@ -51,6 +51,7 @@ publish = false
 # License remains unset until the overseer resolves public/licensing decision D4.
 
 [workspace.dependencies]
+safe-cex-venue-breakoutprop = { path = "safe-cex-venue-breakoutprop" }
 safe-cex-venue-hyperliquid = { path = "safe-cex-venue-hyperliquid" }
 # Exact regex pin is deliberate: cargo update cannot take security patches; bump this requirement explicitly.
 regex = "=1.13.1"
@@ -95,21 +96,31 @@ safe-cex-transport = { path = "safe-cex-transport" }
 safe-cex-crypto = { path = "safe-cex-crypto" }
 safe-cex-exchange = { path = "safe-cex-exchange" }
 safe-cex-registry = { path = "safe-cex-registry" }
+safe-cex-venue-apexomni = { path = "safe-cex-venue-apexomni" }
 safe-cex-venue-asterdex = { path = "safe-cex-venue-asterdex" }
+safe-cex-venue-orderly = { path = "safe-cex-venue-orderly" }
 safe-cex-venue-kucoin = { path = "safe-cex-venue-kucoin" }
 safe-cex-venue-mexc = { path = "safe-cex-venue-mexc" }
 safe-cex-venue-backpack = { path = "safe-cex-venue-backpack" }
 safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
 safe-cex-venue-bingx = { path = "safe-cex-venue-bingx" }
 safe-cex-venue-bitget = { path = "safe-cex-venue-bitget" }
+safe-cex-venue-bitrue = { path = "safe-cex-venue-bitrue" }
 safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
 safe-cex-venue-blofin = { path = "safe-cex-venue-blofin" }
 safe-cex-venue-bybit = { path = "safe-cex-venue-bybit" }
 safe-cex-venue-coinbase = { path = "safe-cex-venue-coinbase" }
+safe-cex-venue-cryptocom = { path = "safe-cex-venue-cryptocom" }
+safe-cex-venue-paradex = { path = "safe-cex-venue-paradex" }
+safe-cex-venue-phemex = { path = "safe-cex-venue-phemex" }
 safe-cex-venue-okx = { path = "safe-cex-venue-okx" }
 safe-cex-venue-kraken = { path = "safe-cex-venue-kraken" }
+safe-cex-venue-lighter = { path = "safe-cex-venue-lighter" }
+safe-cex-venue-grvt = { path = "safe-cex-venue-grvt" }
 safe-cex-venue-polymarket = { path = "safe-cex-venue-polymarket" }
+safe-cex-venue-txflow = { path = "safe-cex-venue-txflow" }
 safe-cex-venue-woo = { path = "safe-cex-venue-woo" }
+safe-cex-venue-weex = { path = "safe-cex-venue-weex" }
 safe-cex-candle-cache = { path = "safe-cex-candle-cache" }
 safe-cex = { path = "safe-cex" }
 safe-cex-ffi = { path = "safe-cex-ffi" }

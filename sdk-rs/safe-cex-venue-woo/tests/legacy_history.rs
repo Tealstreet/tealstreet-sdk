@@ -261,8 +261,12 @@ fn legacy_response_phase_preserves_native_rows() {
     let data = json!({"rows":[{"id":"first"},null,{"id":"last"}]});
     let phases = [
         RestResponseBody::Encoded(serde_json::to_vec(&data).unwrap()),
-        RestResponseBody::Untransformed(data.clone()),
-        RestResponseBody::Transformed(data.clone()),
+        RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone()).unwrap(),
+        ),
+        RestResponseBody::Transformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone()).unwrap(),
+        ),
     ];
     let query = WooLegacyFillsQuery {
         symbol: None,

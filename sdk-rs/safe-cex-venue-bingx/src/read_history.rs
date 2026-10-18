@@ -15,7 +15,7 @@ use safe_cex_num::{
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::RestRequest;
 use safe_cex_types::{
-    Candle, Execution, ExecutionsOptions, OHLCVOptions, Order, OrderSide, OrderType, Timeframe,
+    Candle, Execution, ExecutionsOptions, OHLCVOptions, Order, OrderSide, OrderType,
     retained_json::RetainedJsonInput,
 };
 use serde::Serialize;
@@ -78,22 +78,38 @@ fn stringify(v: &Value) -> Result<String, ExchangeError> {
         .map_err(|e| error(e.message))?
         .ok_or_else(|| error("undefined history log"))
 }
-pub fn timeframe_name(t: Timeframe) -> &'static str {
+pub fn timeframe_name(t: safe_cex_types::AnyTimeframe) -> &'static str {
     match t {
-        Timeframe::M1 => "1m",
-        Timeframe::M3 => "3m",
-        Timeframe::M5 => "5m",
-        Timeframe::M15 => "15m",
-        Timeframe::M30 => "30m",
-        Timeframe::H1 => "1h",
-        Timeframe::H2 => "2h",
-        Timeframe::H4 => "4h",
-        Timeframe::H6 => "6h",
-        Timeframe::H12 => "12h",
-        Timeframe::D1 => "1d",
-        Timeframe::W1 => "1w",
+        safe_cex_types::AnyTimeframe::Variant0(safe_cex_types::SecondsTimeframe::S1) => "1s",
+        safe_cex_types::AnyTimeframe::Variant0(safe_cex_types::SecondsTimeframe::S5) => "5s",
+        safe_cex_types::AnyTimeframe::Variant0(safe_cex_types::SecondsTimeframe::S15) => "15s",
+        safe_cex_types::AnyTimeframe::Variant0(safe_cex_types::SecondsTimeframe::S30) => "30s",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1) => "1m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M3) => "3m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M5) => "5m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M15) => "15m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M30) => "30m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H1) => "1h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H2) => "2h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H4) => "4h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H6) => "6h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H12) => "12h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::D1) => "1d",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::W1) => "1w",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H3) => "3h",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H5) => "5h",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H7) => "7h",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H8) => "8h",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H9) => "9h",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H10) => "10h",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H11) => "11h",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::H24) => "24h",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::D2) => "2d",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::D3) => "3d",
+        safe_cex_types::AnyTimeframe::Variant2(safe_cex_types::ExtendedTimeframe::MN1) => "1M",
     }
 }
+
 pub fn candle(row: &Value) -> Result<Candle, ExchangeError> {
     if row.is_null() {
         return Err(error("Cannot read properties of null (reading 'time')"));
@@ -173,7 +189,7 @@ impl BingxReadHistory {
             if let Some(mut order) = map_order(
                 raw,
                 &self.reads.base.store.orders(),
-                self.reads.base.runtime.now_ms(),
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )? {
                 if order.r#type == OrderType::StopLoss {
                     let mark = self
@@ -186,10 +202,10 @@ impl BingxReadHistory {
                     if mark.is_some_and(|m| {
                         m.is_finite()
                             && m > 0.0
-                            && ((order.side == OrderSide::Buy && order.price < m)
-                                || (order.side == OrderSide::Sell && order.price > m))
+                            && ((order.side == OrderSide::Buy && order.price.to_number() < m)
+                                || (order.side == OrderSide::Sell && order.price.to_number() > m))
                     }) {
-                        order.r#type = OrderType::TakeProfit;
+                        order.r#type = (OrderType::TakeProfit).into();
                         order.tp_trigger_type = order.sl_trigger_type;
                     }
                 }
@@ -199,7 +215,7 @@ impl BingxReadHistory {
         Ok(orders)
     }
     pub async fn fetch_ohlcv(&self, opts: &OHLCVOptions) -> Result<Vec<Candle>, ExchangeError> {
-        let interval = timeframe_name(opts.interval);
+        let interval = timeframe_name(opts.interval.clone());
         let (digits, unit) = interval.split_at(
             interval
                 .find(|c: char| !c.is_ascii_digit())

@@ -105,8 +105,8 @@ fn native_position_side_mode_precedence_flip_and_fetch_error() {
         let opts = &case["opts"];
         let options = PositionSideOptions {
             symbol: opts["symbol"].as_str().unwrap(),
-            side: js_from_value::<OrderSide>(opts["side"].clone()).unwrap(),
-            order_type: js_from_value::<OrderType>(opts["type"].clone()).unwrap(),
+            side: (js_from_value::<OrderSide>(opts["side"].clone()).unwrap()).into(),
+            order_type: (js_from_value::<OrderType>(opts["type"].clone()).unwrap()).into(),
             reduce_only: opts["reduceOnly"].as_bool().unwrap(),
         };
         let calls = Cell::new(0);
@@ -126,8 +126,8 @@ fn native_position_side_mode_precedence_flip_and_fetch_error() {
     }
     let opts = PositionSideOptions {
         symbol: "ETHUSDT",
-        side: OrderSide::Buy,
-        order_type: OrderType::Limit,
+        side: safe_cex_types::ModelField::Value(OrderSide::Buy),
+        order_type: safe_cex_types::ModelField::Value(OrderType::Limit),
         reduce_only: false,
     };
     let error = ready(get_position_side(&opts, |symbol| {
@@ -187,7 +187,10 @@ fn native_confirmed_mode_cache_first_rekeys_first_id_and_preserves_fields() {
         for (p, row) in positions.iter().zip(rows) {
             assert_eq!(p.id, row["id"].as_str().unwrap(), "native_position_id");
             assert_eq!(p.symbol, row["symbol"].as_str().unwrap());
-            assert_eq!(p.side, js_from_value(row["side"].clone()).unwrap());
+            assert_eq!(
+                p.side,
+                js_from_value::<safe_cex_types::PositionSide>(row["side"].clone()).unwrap()
+            );
             assert_eq!(p.position_mode, Some(expected_mode));
             assert_eq!(p.margin_type, Some(MarginType::Cross));
             assert_eq!(

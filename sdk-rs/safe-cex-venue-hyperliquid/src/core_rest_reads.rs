@@ -2794,8 +2794,10 @@ async fn fetch_ohlcv_body<H: RestReadHost>(
             h.call(&function, &receiver, &arguments)?
         };
         let elements = h.rest_array_binding(&binding, &[false, true, true])?;
-        let amount = elements[1].clone();
-        let unit = elements[2].clone();
+        // The host returns the selected bindings only; the leading hole consumes
+        // an iterator item without occupying a returned binding slot.
+        let amount = elements[0].clone();
+        let unit = elements[1].clone();
         let end = {
             let condition = {
                 let object = opts.clone();

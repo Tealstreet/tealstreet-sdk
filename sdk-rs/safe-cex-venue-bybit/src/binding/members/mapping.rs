@@ -3,7 +3,7 @@
 use crate::binding::{
     host::{get_key, text},
     rt::Rt,
-    value::{Js, Thrown, from_json, from_typed},
+    value::{Js, Thrown, from_json},
 };
 use serde_json::Value;
 
@@ -384,16 +384,16 @@ pub(crate) fn map_position(rt: &Rt, this: &Js, p: &Js) -> Result<Js, Thrown> {
         ("lastUpdate", now(rt)?),
     ]);
     if crate::options::is_bybit_option_symbol(&symbol_text) {
-        let greeks = crate::options::map_bybit_option_greeks(&super::super::value::to_json(p)?)
-            .map_err(|m| Thrown::error("Error", &m))?;
+        let greeks = super::options::map_option_greeks(p)?;
         let out = position.spread_object()?;
         out.set("leverage", Js::Number(1.))?;
         out.set("liquidationPrice", Js::Number(0.))?;
         out.set(
             "option",
-            match greeks {
-                Some(greeks) => Js::object(vec![("greeks", from_typed(&greeks)?)]),
-                None => Js::object(vec![]),
+            if greeks.truthy() {
+                Js::object(vec![("greeks", greeks)])
+            } else {
+                Js::object(vec![])
             },
         )?;
         return Ok(out);

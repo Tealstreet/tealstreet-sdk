@@ -13,15 +13,8 @@ pub mod ws_public;
 
 pub mod public_subscriptions;
 
-pub mod private_lifecycle;
-
-pub mod public_lifecycle;
-
-pub mod account_admin;
-
 pub mod ws_payloads;
 
-pub mod account_envelopes;
 pub mod api_error;
 
 pub mod rest_reads;
@@ -46,3 +39,9 @@ pub mod public_endpoints;
 pub mod signing_value;
 
 mod wire_record;
+
+#[cfg(test)]
+mod accepted_test_support;
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_cryptocom;

@@ -1,7 +1,7 @@
 #[path = "support/model_identity.rs"]
 mod model_identity;
+use safe_cex_exchange::store_payload::*;
 use safe_cex_types::StoreData;
-use safe_cex_webworker::store_payload::*;
 use serde_json::{Value, json};
 fn normalized(v: Value) -> Value {
     match v {
@@ -124,12 +124,12 @@ fn store_payload_preparation_matches_live_full_snapshots_and_incremental_transit
     );
     // These must remain typed copies, not a JSON round-trip that converts to null.
     input.balance.total = f64::INFINITY;
-    input.orders[0].price = f64::NAN;
+    input.orders[0].price = f64::NAN.into();
     input.positions[0].contracts = f64::NEG_INFINITY;
     input.displayed_positions[0].position.entry_price = -0.0;
     let output = sanitize_for_post_message(&input, false, false);
     assert_eq!(output.balance.unwrap().total, f64::INFINITY);
-    assert!(output.orders.unwrap()[0].price.is_nan());
+    assert!(output.orders.unwrap()[0].price.to_number().is_nan());
     assert_eq!(output.positions.unwrap()[0].contracts, f64::NEG_INFINITY);
     assert_eq!(
         output.displayed_positions.unwrap()[0]
@@ -161,15 +161,15 @@ fn assert_snapshot_identity(
     let order = &actual.orders.as_ref().unwrap()[0];
     check!(order,expected["orders"][0]; "id"=>id,"symbol"=>symbol,"price"=>price,"amount"=>amount,"filled"=>filled,"remaining"=>remaining,"lastUpdate"=>last_update,"reduceOnly"=>reduce_only);
     assert!(
-        matches!(order.side, safe_cex_types::OrderSide::Buy),
+        order.side == safe_cex_types::OrderSide::Buy,
         "SNAPSHOT-IDENTITY native order side"
     );
     assert!(
-        matches!(order.r#type, safe_cex_types::OrderType::Limit),
+        order.r#type == safe_cex_types::OrderType::Limit,
         "SNAPSHOT-IDENTITY native order type"
     );
     assert!(
-        matches!(order.status, safe_cex_types::OrderStatus::Open),
+        order.status == safe_cex_types::OrderStatus::Open,
         "SNAPSHOT-IDENTITY native order status"
     );
     for (position, source) in [
@@ -184,7 +184,7 @@ fn assert_snapshot_identity(
     ] {
         check!(position,source; "id"=>id,"symbol"=>symbol,"entryPrice"=>entry_price,"contracts"=>contracts,"notional"=>notional,"leverage"=>leverage,"unrealizedPnl"=>unrealized_pnl,"liquidationPrice"=>liquidation_price);
         assert!(
-            matches!(position.side, safe_cex_types::PositionSide::Long),
+            position.side == safe_cex_types::PositionSide::Long,
             "SNAPSHOT-IDENTITY native position side"
         );
     }

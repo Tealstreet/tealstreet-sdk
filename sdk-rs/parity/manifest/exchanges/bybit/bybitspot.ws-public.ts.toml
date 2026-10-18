@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.ws-public.ts"
-rust_files = [ "safe-cex-venue-bybit/src/public_ticker_topics.rs", "safe-cex-venue-bybit/src/public_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_public.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/public_ticker_topics.rs", "safe-cex-venue-bybit/src/public_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs", "safe-cex-venue-bybit/src/ws_public/streams.rs", "safe-cex-venue-bybit/src/book_mapping.rs", "safe-cex-venue-bybit/src/ws_public/single_candles.rs", "safe-cex-venue-bybit/src/candle_mapping.rs" ]
 
 [[symbol]]
 ts = "BybitPublicWebsocket"
@@ -8,7 +8,7 @@ kind = "class"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Concrete ticker topic lifecycle FINDING ddi2il-38 is repaired: initial parent active selection, constructor active callback, markets callback replacement and retained topic-set reconciliation now execute through PublicTopics and the existing body ports. Full public class coverage remains pending for its separately unbound OHLCV/order-book members; constructor and ticker lifecycle claims are scoped on their own rows."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#handleActiveTickerSymbolsChanged"
@@ -16,15 +16,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/public_ticker_topics.rs::handle_active_ticker_symbols_changed"
 status = "ported"
-note = "BybitPublicWebsocket method body: Preserves disposed early return, previous-topic Set snapshot, synchronization before connected-state lookup, and ordered filtering of newly added string topics. Sends successive chunks of ten only when connected; existing topics remain subscribed. Explicit state/getter/sync/send callbacks retain failure order and partial state; decoded op/args precede wire assertions. Shared UTF-8 string boundary applies; constructors/dialing/event registration are pending. Renamed Rust target: safe-cex-venue-bybit/src/public_ticker_topics.rs::handle_active_ticker_symbols_changed."
+note = "BybitPublicWebsocket method body: Preserves disposed early return, previous-topic Set snapshot, synchronization before connected-state lookup, and ordered filtering of newly added string topics. Sends successive chunks of ten only when connected; existing topics remain subscribed. Explicit state/getter/sync/send callbacks retain failure order and partial state; decoded op/args precede wire assertions. Shared UTF-8 string boundary applies; constructors/dialing/event registration are pending. Renamed Rust target: safe-cex-venue-bybit/src/public_ticker_topics.rs::handle_active_ticker_symbols_changed. Concrete Spot construction now installs this body through PublicTopics::new; pre-dial and connected/offline active changes are exercised by the actual socket pump."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.constructor"
 kind = "constructor"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public.rs::PublicProtocol::new", "safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::new", "safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics" ]
+status = "divergent"
+note = "CHOSEN: concrete PublicProtocol::new and PublicTopics::new receive the shared typed base, weak venue, runtime and category rather than a JS class receiver. They retain ticker topics and listener identity; the Spot profile registers activeTickerSymbols:changed during construction, before any dial. Primary profiles retain category-wide selection and register no active callback. Core BaseWebSocket owns transport and cancellation. tests/public_topic_binding.rs executes actual facade construction and socket pumps, including 24 maintained-source constructor/handler compositions and six compiled consumer controls. This constructor/state claim does not complete the class OHLCV/order-book methods or timer-recovery binding. Renamed Rust target: safe-cex-venue-bybit/src/ws_public.rs::PublicProtocol::new. Renamed Rust target: safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::new. Renamed Rust target: safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#getCurrentTickerTopics"
@@ -62,9 +62,9 @@ note = "CHOSEN: BybitPublicWebsocket source concrete receiver lookups become exp
 ts = "BybitPublicWebsocket.onOpen"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/public_ws_lifecycle.rs::on_open"
-status = "ported"
-note = "BybitPublicWebsocket Method body preserves disposed guard, synchronous topic sync, unawaited subscription starter, ping, markets off/on with distinct handler rereads, and final reconnect flag/notification. Explicit receiver callbacks supply ordinary bound methods; the starter schedules an independently owned operation and reports only synchronous invocation errors, never its asynchronous rejection. Pending/rejected source starter promises do not block this body. Handler replacement by off is visible to on; no full socket/host scheduler composition claim. Renamed Rust target: safe-cex-venue-bybit/src/public_ws_lifecycle.rs::on_open."
+rs = [ "safe-cex-venue-bybit/src/public_ws_lifecycle.rs::on_open", "safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::on_open" ]
+status = "divergent"
+note = "CHOSEN: the existing lifecycle body now runs inside concrete PublicProtocol via PublicTopics::on_open. It synchronizes retained topics through the live parent getTickerSymbolsForPublicStream receiver, starts the canonical eager subscription body under core ownership, pings, replaces only its own markets listener, then optionally emits reconnect. Typed Store/topic snapshots and listener IDs replace executable source property aliases/function identity; the shared UTF-8 boundary applies. Physical-pump tests and 24 actual-source compositions cover active/fallback selection, pre-dial changes, offline retention, repeated opens and multi-chunk sends; six compiled consumer controls fail then restore. OHLCV/order-book class methods remain separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/public_ws_lifecycle.rs::on_open. Renamed Rust target: safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::on_open."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#onMarketsChanged"
@@ -72,15 +72,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/public_ticker_topics.rs::on_markets_changed"
 status = "divergent"
-note = "CHOSEN: BybitPublicWebsocket owned added-symbol Vec projects the source {added:market[]} payload to the only field used; executable symbol/index getters, sparse arrays, market-object alias mutation and lone UTF-16 surrogates are outside this boundary. Rust Future starts on first poll and cancels on drop instead of Promise scheduling. Explicit socket/disposed/topic/set/send/sleep callbacks preserve guard order, duplicate-preserving append, committed topic state before sends and awaited five-ms delays after every ten-topic chunk, including the last. Disposal during sleep does not add a new guard; full constructor/event-loop composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/public_ticker_topics.rs::on_markets_changed."
+note = "CHOSEN: BybitPublicWebsocket owned added-symbol Vec projects the source {added:market[]} payload to the only field used; executable symbol/index getters, sparse arrays, market-object alias mutation and lone UTF-16 surrogates are outside this boundary. The first send and first sleep factory run at invocation before the returned Future is polled; only its remaining tail is poll-driven and cancels on drop instead of Promise scheduling. Explicit socket/disposed/topic/set/send/sleep callbacks preserve guard order, duplicate-preserving append, committed topic state before sends and awaited five-ms delays after every ten-topic chunk, including the last. Disposal during sleep does not add a new guard; full constructor/event-loop composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/public_ticker_topics.rs::on_markets_changed. Concrete PublicTopics binds this body to the parent markets emitter, preserving duplicate appended symbols and eager first send. Core owns and cancels its async tail; malformed executable market objects remain outside the declared typed Market emitter profile."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.dispose"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/public_ws_lifecycle.rs::dispose"
+rs = [ "safe-cex-venue-bybit/src/public_ws_lifecycle.rs::dispose", "safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::dispose" ]
 status = "ported"
-note = "BybitPublicWebsocket Method body obtains the active-symbol handler and removes activeTickerSymbols:changed before invoking the base disposer; it does not add a disposed guard. Explicit ordinary receiver callbacks retain handler identity, error propagation and partial disposal order. Full class construction/event registration and the base disposer implementation are separate claims. Renamed Rust target: safe-cex-venue-bybit/src/public_ws_lifecycle.rs::dispose."
+note = "BybitPublicWebsocket Method body obtains the active-symbol handler and removes activeTickerSymbols:changed before invoking the base disposer; it does not add a disposed guard. Explicit ordinary receiver callbacks retain handler identity, error propagation and partial disposal order. Full class construction/event registration and the base disposer implementation are separate claims. Renamed Rust target: safe-cex-venue-bybit/src/public_ws_lifecycle.rs::dispose. Renamed Rust target: safe-cex-venue-bybit/src/public_ws_lifecycle.rs::dispose. Renamed Rust target: safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::dispose."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.ping"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/public_ws_lifecycle.rs::subscribe"
 status = "divergent"
-note = "CHOSEN: BybitPublicWebsocket owned plain map of dense declared string/string-array topics replaces the mutable source Object.values input; executable index/property getters, sparse arrays and non-JSON aliases are excluded. ECMAScript numeric key order and one-level flattening precede ten-topic chunks and awaited ten-ms sleeps after every chunk, including the last. Native Future starts on first poll and cancels on drop rather than Promise scheduling; generic caller errors retain identity and partial sends. Shared UTF-8 boundary applies, disposal during sleep does not add a guard, and live host/socket scheduler composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/public_ws_lifecycle.rs::subscribe."
+note = "CHOSEN: BybitPublicWebsocket owned plain map of dense declared string/string-array topics replaces the mutable source Object.values input; executable index/property getters, sparse arrays and non-JSON aliases are excluded. ECMAScript numeric key order and one-level flattening precede ten-topic chunks and awaited ten-ms sleeps after every chunk, including the last. The first send and sleep factory execute eagerly before returning the Future; its remaining tail is poll-driven and cancels on drop rather than Promise scheduling; generic caller errors retain identity and partial sends. Shared UTF-8 boundary applies, disposal during sleep does not add a guard, and live host/socket scheduler composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/public_ws_lifecycle.rs::subscribe. Concrete PublicTopics starts this canonical body before ping, preserving first-chunk/ping/later-chunk order in the 24 actual-source compositions; core owns its remaining tail."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.onMessage"
@@ -125,10 +125,10 @@ note = ""
 [[symbol]]
 ts = "BybitPublicWebsocket.listenOHLCV"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public/single_candles.rs::listen_ohlcv", "safe-cex-venue-bybit/src/candle_mapping.rs::apply_kline" ]
+status = "ported"
+note = "Live kline/trade state and subscription lifecycle run through the real socket. Dedicated class retry and cleanup quirks remain distinct from primary active/retry cancellation and diagnostics. Native calendar helper extends source bars without losing numeric bits; 12 maintained-source sequences and 2172 mapper outcomes cover the wired behavior. Renamed source member to safe-cex-venue-bybit/src/ws_public/single_candles.rs::listen_ohlcv, safe-cex-venue-bybit/src/candle_mapping.rs::apply_kline."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.listenOHLCVOld"
@@ -141,7 +141,7 @@ note = ""
 [[symbol]]
 ts = "BybitPublicWebsocket.listenOrderBook"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public/streams.rs::listen_order_book", "safe-cex-venue-bybit/src/book_mapping.rs::BookState::apply" ]
+status = "ported"
+note = "Rust rename: safe-cex-venue-bybit/src/ws_public/streams.rs::listen_order_book composes core-owned subscription and resync timers, handler replacement and cleanup; safe-cex-venue-bybit/src/book_mapping.rs::BookState::apply maps source snapshots/deltas. Real socket tests cover each family and the maintained source oracle covers 996 cases/1755 outcomes."

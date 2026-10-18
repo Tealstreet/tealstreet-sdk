@@ -1154,3 +1154,85 @@ Clippy, wasm compilation/Clippy, parity Rust tests, or CI. The historical table
 mutation/census findings above were not remeasured. This evidence covers the
 named code SHA; the following evidence-only commit adds this record and does
 not claim new code validation.
+
+## Native reconnect dispatch
+
+The two `native_reconnect_tests::typed_*` regressions construct KucoinExchange
+with NativeRuntime, NativeHttpHost, the reqwest adapter and real loopback HTTP
+and WebSocket peers. Both futures sockets acquire a token, connect, receive a
+typed reconnect, synchronously clear source session fields, obtain another
+signed bullet response and dial with its fresh token. The expected reset fields
+come from executing the maintained TypeScript reconnect method bodies in Node.
+`tests/reconnect-controls.py` runs both tests against pre-fix master production
+files, requires the named token-reset failures, restores exact source bytes and
+requires both tests to pass again.
+
+Four additional native tests deliver private orders, match/fill, position and
+wallet frames through the actual binding. They assert the order Store and bare
+incremental fill event. Position/wallet frames trigger the source's delayed
+orders-only snapshot and preserve seeded positions/balance, matching the
+inherited TypeScript BaseExchange.fetchAndSetPrivateSnapshot implementation.
+
+## Production order-reader cleanup (2026-10-18 SGT)
+
+The old src/order_reads.rs implementation, its eight tests, source-only oracle
+and cardinality control are retired. Earlier measurements of that copy above
+are historical, not production coverage. The constructed Exchange installs
+futures_native_order_reads through binding/futures.rs. Its retained component
+tests remain; tests/order_reads_binding.rs additionally drives actual HTTP
+requests and the real Store. Redirecting the live normal reader to the algo
+endpoint compiles, leaves all eight old copy tests passing, and fails the new
+binding witness at duplicated algo IDs. Exact restoration passes. The new
+witness also checks ordered endpoints/params, native contract-size scaling and
+failed-normal/empty-algo Store category preservation. This deletion changes no
+production algorithm or shared representation policy.
+
+
+## Production Spot I/O cleanup (2026-10-18 SGT)
+
+The parallel typed spot_reads/spot_writes implementations, their four test
+targets and exclusive source oracles are retired. Earlier measurements of those
+copies are historical. Production already installs spot_native_order_reads
+through spot_exchange_class; its native/source component cases remain. New
+tests/spot_io_binding.rs drives the actual constructed Exchange, HTTP factory
+and Store for market precision, distinct ticker prices and fallback, active
+symbol discovery/paging and three cancellation routes with exact params. Three
+compiled mutations independently change the live ticker bid field, discovery
+endpoint and cancel-all endpoint. Each leaves its corresponding retired-copy
+tests passing but fails the constructed witness. Exact restoration passes all
+three constructed tests. This is deletion of unused code, not an algorithm
+cutover or a resolution of shared typed projection/identity policy.
+
+
+## Production account-copy cleanup (2026-10-18 SGT)
+
+The unused typed accounts module and its exclusive response_default parser are
+retired, with their three account/validation/notification test targets and
+source-only oracles. Earlier measurements of those copies are historical. The
+constructed Futures and Spot exchanges already use the retained native account
+modules; their existing component/source cases remain. The paired package and CI guard now include exchange_trait in the venue oracle command. Changing only the production futures userId read
+to referrerUserId compiles and leaves all eight old typed account tests passing,
+but fails futures_binds_all_sixteen_defaults at empty ID versus user-1. Exact
+restoration passes. The actual constructed test and its runtime fixture are
+unchanged, preserving concurrent private-topic work. Canonical shared transport
+parsing and all shared body/API/representation policies remain unchanged.
+
+## Typed trading-copy retirement (2026-10-18)
+
+Production class dispatch uses the native mapping/formatter/helper bodies. The
+unused typed mappers, formatters, order_helpers and seven sizing functions are
+removed with five exclusive test targets, four source oracles and formatter-only
+cardinality controls. Nineteen decoder contracts owned only by those copies are
+removed; all surviving contract objects are unchanged. Live typed to_api_symbol
+and api_margin_coin stay, and the sizing source extractor retains the two methods
+needed by ws_helpers. No native implementation or shared model API changes.
+
+Before deletion, a compiled actual native amount mutation leaves all ten typed
+mapper tests green but fails constructed order_reads_binding. A compiled native
+buy/sell mutation leaves all four typed formatter tests green but fails the
+constructed futures exchange_trait request payload assertion. Both witnesses pass
+after exact byte restoration. Existing native/source helper, mapping/formatter,
+order-read and constructed exchange targets remain wired. The Order snapshot
+supplement retains every assertion while dropping an empty-Store identity call
+to the retired helper. Earlier typed-copy counts and refusal findings in this
+file are historical evidence, not coverage of the installed production route.

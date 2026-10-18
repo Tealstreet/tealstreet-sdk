@@ -29,6 +29,8 @@ const cases = JSON.parse(fs.readFileSync(0,'utf8'));
 const results = [];
 for (const vector of cases) {
   now = vector.now;
+  if (vector.mode === 'bigint-query') vector.config.params.orderId = BigInt(vector.config.params.orderId);
+  if (vector.mode === 'bigint-body') vector.config.data.orderId = BigInt(vector.config.data.orderId);
   const calls = [];
   const options = {...vector.options};
   if (vector.mode === 'callback' || vector.mode === 'failure') options.payloadSigner = async request => {

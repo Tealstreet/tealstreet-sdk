@@ -25,6 +25,17 @@ pub(super) fn spawner(runtime: Rc<dyn ExchangeRuntime>) -> CoinbaseStarbasePromi
     })
 }
 
+// Adapt the existing shared source-UUID helper to the host entropy capability.
+pub(super) fn uuid(runtime: &dyn ExchangeRuntime) -> String {
+    safe_cex_crypto::uuid::uuid_with_entropy(|bytes| {
+        for byte in bytes {
+            *byte = (runtime.random() * 64.0) as u8;
+        }
+        Ok(())
+    })
+    .expect("runtime entropy fill is infallible")
+}
+
 pub(super) struct CryptoHost {
     pub runtime: Rc<dyn ExchangeRuntime>,
 }
@@ -59,10 +70,10 @@ impl CdpSigningHost for CryptoHost {
         Ok(Promise::resolved(result))
     }
     fn current_time_ms(&self) -> Result<f64, PortfolioFailure> {
-        Ok(self.runtime.now_ms())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn uuid(&self) -> Result<String, PortfolioFailure> {
-        Ok(self.runtime.unique_id())
+        Ok(uuid(self.runtime.as_ref()))
     }
     fn sign_ed25519(
         &self,
@@ -137,7 +148,7 @@ mod tests {
             self.jobs.borrow_mut().push(future);
             Box::new(Task)
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             "fixture-nonce".into()
         }
@@ -148,7 +159,7 @@ mod tests {
             0.5
         }
         fn report_exception(&self, _: &ExchangeError, _: &Value) {}
-        fn report_raw_exception(&self, _: &Value, _: &Value) {}
+        fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
         fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
             Box::pin(async { Ok(Value::Null) })
         }
@@ -228,6 +239,9 @@ mod tests {
                 "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
                 STANDARD.encode(bytes)
             );
+            let before = (safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+                / 1000.0)
+                .floor();
             let token = drive(
                 runtime.as_ref(),
                 cdp_signing::sign(
@@ -239,11 +253,38 @@ mod tests {
             )
             .unwrap();
             let (payload, signature) = token.rsplit_once('.').unwrap();
+            let after = (safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+                / 1000.0)
+                .floor();
+            let encoding = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+            let (header, body) = payload.split_once('.').unwrap();
+            let claims: Value = serde_json::from_slice(&encoding.decode(body).unwrap()).unwrap();
+            let nbf = claims["nbf"].as_f64().unwrap();
+            assert!(
+                (before..=after).contains(&nbf),
+                "{label} synced clock JWT nbf"
+            );
             let expected: Vec<u8> = serde_json::from_value(case["payload"].clone()).unwrap();
+            let expected = String::from_utf8(expected).unwrap();
+            let (source_header, source_body) = expected.split_once('.').unwrap();
+            let mut source_claims: Value =
+                serde_json::from_slice(&encoding.decode(source_body).unwrap()).unwrap();
+            source_claims["nbf"] = json!(nbf as u64);
+            source_claims["exp"] = json!(nbf as u64 + 120);
+            let mut source_header: Value =
+                serde_json::from_slice(&encoding.decode(source_header).unwrap()).unwrap();
+            // The primitive oracle supplies fixture-nonce as its uuid import;
+            // the concrete host now uses source uuid with controlled entropy.
+            source_header["nonce"] = json!("MMMMMMMMMMMMMMMMMMMMM");
             assert_eq!(
-                payload.as_bytes(),
-                expected,
-                "{label} exact source JWT preimage"
+                encoding.decode(header).unwrap(),
+                serde_json::to_vec(&source_header).unwrap(),
+                "{label} exact source JWT header with native entropy"
+            );
+            assert_eq!(
+                encoding.decode(body).unwrap(),
+                serde_json::to_vec(&source_claims).unwrap(),
+                "{label} exact source claims with synced time"
             );
             let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .decode(signature)

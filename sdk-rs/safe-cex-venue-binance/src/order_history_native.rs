@@ -44,7 +44,7 @@ fn lookup<'a, T>(
     mapped: impl FnOnce(&'a T) -> PrivateEnum,
 ) -> EventValue {
     match js_table_lookup(table, key) {
-        TableHit::Mapped(value) => EventValue::Enum(mapped(value)),
+        TableHit::Mapped(value) => EventValue::enum_value(mapped(value)),
         TableHit::Inherited(_) | TableHit::Missing => {
             EventValue::from_prototype(realm.inherited(key))
         }
@@ -83,7 +83,7 @@ pub fn map_binance_historical_order_native(
         order_type = lookup(TYPES, &text(row, "type")?, realm, |v| PrivateEnum::Type(*v));
     }
     if order_type.nullish() {
-        order_type = EventValue::Enum(PrivateEnum::Type(OrderType::Limit));
+        order_type = EventValue::enum_value(PrivateEnum::Type(OrderType::Limit));
     }
     const STATUSES: &[(&str, OrderStatus)] = &[
         ("NEW", OrderStatus::Open),
@@ -97,13 +97,13 @@ pub fn map_binance_historical_order_native(
         PrivateEnum::Status(*v)
     });
     if status.nullish() {
-        status = EventValue::Enum(PrivateEnum::Status(OrderStatus::Closed));
+        status = EventValue::enum_value(PrivateEnum::Status(OrderStatus::Closed));
     }
     let price = optional_number(row, "price")?;
     let average_price = optional_number(row, "avgPrice")?;
     let amount = finite_number(row, "origQty")?;
     let filled = finite_number(row, "executedQty")?;
-    let reduce_only = EventValue::Bool(row.get("reduceOnly")?.truthy());
+    let reduce_only = EventValue::Bool(row.read("reduceOnly")?.truthy());
     static SIDES: &[(&str, ExecutionPositionSide)] = &[
         ("BOTH", ExecutionPositionSide::Both(BothPositionSide::Both)),
         ("LONG", ExecutionPositionSide::Side(PositionSide::Long)),
@@ -121,7 +121,10 @@ pub fn map_binance_historical_order_native(
         [
             ("id".into(), string(id)),
             ("symbol".into(), string(symbol)),
-            ("side".into(), EventValue::Enum(PrivateEnum::Side(side))),
+            (
+                "side".into(),
+                EventValue::enum_value(PrivateEnum::Side(side)),
+            ),
             ("type".into(), order_type),
             ("status".into(), status),
             ("price".into(), price),

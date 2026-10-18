@@ -1,4 +1,4 @@
-//! Bybit market-startup diagnostics and HyroTrader rejection predicates.
+//! Bybit market-startup diagnostics; active Hyro recovery owns its rejection state.
 use crate::exchange_helpers::{number_or_undefined, string_or_undefined};
 use safe_cex_num::{TableHit, js_number, js_number_string, js_string, js_table_lookup, js_truthy};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -318,45 +318,4 @@ pub fn is_bybit_leverage_not_modified(
     }
     .to_lowercase();
     Ok(code == 110043. || (message.contains("leverage") && message.contains("not modified")))
-}
-#[derive(Debug, Clone, PartialEq)]
-pub struct HyroOrderRejectedError {
-    pub message: String,
-    pub name: &'static str,
-}
-impl From<String> for HyroOrderRejectedError {
-    fn from(message: String) -> Self {
-        Self {
-            message,
-            name: "Error",
-        }
-    }
-}
-impl fmt::Display for HyroOrderRejectedError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.message.is_empty() {
-            f.write_str(self.name)
-        } else {
-            write!(f, "{}: {}", self.name, self.message)
-        }
-    }
-}
-impl std::error::Error for HyroOrderRejectedError {}
-pub fn is_duplicate_identity(
-    code: Option<f64>,
-    message: Option<&Value>,
-) -> Result<bool, &'static str> {
-    if matches!(code, Some(10014. | 110072.)) {
-        return Ok(true);
-    }
-    let text = js_string(message.or(Some(&Value::String(String::new()))))
-        .map_err(|e| e.message)?
-        .to_lowercase();
-    Ok(text.contains("duplicate")
-        || text
-            .split(['\n', '\r', '\u{2028}', '\u{2029}'])
-            .any(|part| {
-                part.find("already")
-                    .is_some_and(|i| part[i + 7..].contains("exist"))
-            }))
 }

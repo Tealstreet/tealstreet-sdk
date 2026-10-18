@@ -88,7 +88,7 @@ const signatureRejection = load('packages/safe-cex/src/utils/signatureRejection.
 
 // Resolved (2xx) sign rejections: resendOnSignatureRejection re-signs once through the
 // whole pipeline, sharing its stamp with the rejected-response retry condition.
-const inputs = [
+let inputs = [
   { id: 'resolved-sign-then-ok', replies: [[200, '{"retCode":10004,"retMsg":"error sign!"}'], [200, '{"retCode":0,"retMsg":"OK"}']] },
   { id: 'resolved-sign-twice', replies: [[200, '{"retCode":10004,"retMsg":"error sign!"}'], [200, '{"retCode":10004,"retMsg":"error sign!"}']] },
   { id: 'rejected-then-resolved-sign', replies: [[400, '{"retCode":10004,"retMsg":"error sign!"}'], [200, '{"retCode":10004,"retMsg":"error sign!"}']] },
@@ -96,13 +96,35 @@ const inputs = [
 ];
 const pinnedIds = ['resolved-sign-then-ok', 'resolved-sign-twice', 'rejected-then-resolved-sign', 'resolved-other-error'];
 assert.deepEqual(inputs.map(value => value.id), pinnedIds, 'independent input IDs');
-const expectations = {
+let expectations = {
   'resolved-sign-then-ok': { attempts: 2, retCode: 0, authFailures: 0, authSuccesses: 1, rejected: false },
   'resolved-sign-twice': { attempts: 2, retCode: 10004, authFailures: 1, authSuccesses: 0, rejected: false },
   // axios-retry's resend runs the chain, then the original chain's interceptor runs again.
   'rejected-then-resolved-sign': { attempts: 2, retCode: 10004, authFailures: 2, authSuccesses: 0, rejected: false },
   'resolved-other-error': { attempts: 1, retCode: 10001, authFailures: 0, authSuccesses: 0, rejected: false },
 };
+const nativeBudgets = process.argv.includes('--native-retry-budgets');
+const retryBudgets = nativeBudgets || process.argv.includes('--retry-budgets');
+if (retryBudgets) {
+  inputs = [
+    { id: 'rejected-sign-zero', retries: 0, replies: [[400, '{"retCode":10004,"retMsg":"error sign!"}'], [200, '{"retCode":0,"retMsg":"OK"}']] },
+    { id: 'resolved-sign-zero', retries: 0, replies: [[200, '{"retCode":10004,"retMsg":"error sign!"}'], [200, '{"retCode":0,"retMsg":"OK"}']] },
+    ...[0, 1, 1.5, 5].map((retries, i) => ({ id: ['network-zero', 'network-one', 'network-fraction', 'network-five'][i],
+      retries, network: true, replies: Array.from({ length: 7 }, () => [0, '']) })),
+  ];
+  assert.deepEqual(inputs.map(value => value.id), ['rejected-sign-zero', 'resolved-sign-zero', 'network-zero', 'network-one', 'network-fraction', 'network-five']);
+  expectations = Object.fromEntries([
+    ['rejected-sign-zero', 1, true, 10004], ['resolved-sign-zero', 2, false, 0],
+    ['network-zero', 1, true, null], ['network-one', 2, true, null],
+    ['network-fraction', 3, true, null], ['network-five', 6, true, null],
+  ].map(([id, attempts, rejected, retCode]) => [id, { attempts, rejected, retCode,
+    authFailures: 0, authSuccesses: id === 'resolved-sign-zero' ? 1 : 0 }]));
+}
+if (nativeBudgets) {
+  inputs = [{ id: 'network-own-undefined', retries: undefined }, { id: 'network-nan', retries: NaN }]
+    .map(value => ({ ...value, network: true, replies: Array.from({ length: 7 }, () => [0, '']) }));
+  expectations = Object.fromEntries(inputs.map(value => [value.id, { attempts: 1, rejected: true, retCode: null, authFailures: 0, authSuccesses: 0 }]));
+}
 async function run(input) {
   let nextId = 0, authSuccesses = 0, authFailures = 0;
   const physical = [], payloads = [], logs = [];
@@ -114,10 +136,15 @@ async function run(input) {
       safeCexAxiosCreate(config) {
         return axios.create({ ...config, timeout: 20000, adapter: async current => {
           physical.push({ id: current.params.requestId, data: current.data });
+          if (nativeBudgets) {
+            assert.ok(Object.hasOwn(current['axios-retry'], 'retries'), 'actual retry config retains own key');
+            assert.ok(Object.is(current['axios-retry'].retries, input.retries), 'actual retry config retains native undefined/NaN');
+          }
           const reply = input.replies[physical.length - 1];
           assert.ok(reply, 'unscripted extra physical attempt');
           const [status, data] = reply;
           const response = { status, statusText: String(status), headers: {}, config: current, data };
+          if (input.network) throw new axios.AxiosError('scripted network', 'ERR_NETWORK', current);
           if (status >= 400) throw new axios.AxiosError('venue rejection', 'ERR_BAD_REQUEST', current, undefined, response);
           return response;
         } });
@@ -137,27 +164,28 @@ async function run(input) {
     './bybit.response': response, './bybit.site': { getBybitSiteHeaders: () => ({}) },
     './bybit.types': types, '../../utils/retryReadsOnly': retryReads, '../../utils/signatureRejection': signatureRejection,
   }, apiSource.text, { error: (...args) => logs.push(args) });
-  const exchange = { name: 'bybitinverse', isDemo: false,
+  const exchange = { name: retryBudgets ? 'bybit' : 'bybitinverse', isDemo: false,
     recordAuthSuccess: () => authSuccesses++, recordAuthFailure: () => authFailures++, emitAndLogError() {} };
   const client = api.createAPI(options, exchange);
   let result, rejection;
-  try { result = await client.request({ method: 'post', url: '/private', data: { request: true } }); }
+  try { result = await client.request({ method: 'post', url: '/private', data: { request: true }, ...(retryBudgets ? { method: input.network ? 'get' : 'post', 'axios-retry': { retries: input.retries } } : {}) }); }
   catch (error) { rejection = error; }
   const expected = expectations[input.id];
   assert.equal(physical.length, expected.attempts, 'source physical attempts');
   assert.equal(!!rejection, expected.rejected, 'source rejection');
-  assert.equal(result.data.retCode, expected.retCode, 'source final retCode');
+  const retCode = (result?.data ?? rejection?.response?.data)?.retCode ?? null;
+  assert.equal(retCode, expected.retCode, 'source final retCode');
   assert.equal(authFailures, expected.authFailures, 'source auth failures');
   assert.equal(authSuccesses, expected.authSuccesses, 'source auth successes');
-  assert.deepEqual(payloads, physical.map(() => '1000key20000{"request":true}'), 'every attempt re-signs the same body');
-  return { attempts: physical.length, retCode: result.data.retCode, authFailures, authSuccesses };
+  if (!input.network) assert.deepEqual(payloads, physical.map(() => '1000key20000{"request":true}'), 'every attempt re-signs the same body');
+  return { attempts: physical.length, rejected: !!rejection, retCode, authFailures, authSuccesses };
 }
 (async () => {
   const cases = [];
   for (const input of inputs) cases.push({ id: input.id, source: await run(input) });
-  assert.equal(cases.length, 4, 'executed review case floor');
+  assert.equal(cases.length, nativeBudgets ? 2 : retryBudgets ? 6 : 4, 'executed review case floor');
   process.stdout.write(JSON.stringify({
     scope: 'source-only; unchanged maintained API/response/read-retry/signatureRejection with actual Axios/axios-retry/qs; scripted common constructor/physical adapter and recording signer; no native proof',
-    declaredCases: 4, cases,
+    declaredCases: nativeBudgets ? 2 : retryBudgets ? 6 : 4, cases,
   }) + '\n');
 })().catch(error => { console.error(error); process.exitCode = 1; });

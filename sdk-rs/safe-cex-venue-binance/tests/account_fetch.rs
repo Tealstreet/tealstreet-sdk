@@ -20,7 +20,9 @@ fn run<T>(future: impl Future<Output = T>) -> T {
 fn sentinel() -> ExchangeError {
     let mut error = ExchangeError::new("fixture request");
     error.name = "RangeError".into();
-    error.code = Some(json!("fixture-code"));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "fixture-code"
+    )));
     error.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
     error
 }
@@ -79,7 +81,7 @@ fn assert_error(actual: &ExchangeError, expected: &Value, fixture: &ExchangeErro
         "{label} native error message"
     );
     assert_eq!(
-        actual.code.as_ref(),
+        observed_error_code(&actual.code).as_ref(),
         expected.get("code").filter(|v| !v.is_null()),
         "{label} native error code"
     );
@@ -329,21 +331,21 @@ fn native_spot_positions_preserve_nonfinite_fields_and_identity() {
     let input = Rc::new(vec![Position {
         id: "native-spot".into(),
         symbol: "BTCUSDT".into(),
-        side: PositionSide::Long,
+        side: safe_cex_types::ModelField::Value(PositionSide::Long),
         entry_price: 113.75,
         notional: f64::INFINITY,
         leverage: 1.0,
-        margin_type: None,
-        position_mode: None,
+        margin_type: (None).into(),
+        position_mode: (None).into(),
         unrealized_pnl: f64::from_bits(0x7ff8_0000_0000_0031),
-        realized_pnl: Some(f64::NEG_INFINITY),
+        realized_pnl: (Some(f64::NEG_INFINITY)).into(),
         contracts: 3.6,
         liquidation_price: -0.0,
-        margin_size: None,
-        info: None,
-        extra: None,
-        last_update: None,
-        option: None,
+        margin_size: (None).into(),
+        info: (None).into(),
+        extra: (None).into(),
+        last_update: (None).into(),
+        option: (None).into(),
     }]);
     let forwarded = input.clone();
     let returned = run(fetch_binance_spot_positions(|| {
@@ -391,4 +393,17 @@ fn native_spot_positions_preserve_nonfinite_fields_and_identity() {
         Rc::ptr_eq(&returned, &input),
         "native spot positions identity"
     );
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

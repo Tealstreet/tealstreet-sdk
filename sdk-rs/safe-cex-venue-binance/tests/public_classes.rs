@@ -46,7 +46,9 @@ impl WsSocket for Socket {
         }
         if self.fail.get() {
             let mut e = ExchangeError::new("fixture send");
-            e.metadata.code = Some(json!("fixture-code"));
+            e.metadata.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "fixture-code"
+            )));
             Err(e)
         } else {
             Ok(())
@@ -79,7 +81,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -89,7 +91,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -432,8 +438,8 @@ fn public_classes_share_native_payload_callbacks_reentrancy_and_failure() {
     let nesting = nested.clone();
     let callback: Parser = Rc::new(move |events| {
         if !nesting.get() {
-            *captured.borrow_mut() = Some(events.get("0")?);
-            events.get("0")?.define("native", number(f64::INFINITY));
+            *captured.borrow_mut() = Some(events.read("0")?);
+            events.read("0")?.write("native", number(f64::INFINITY));
             nesting.set(true);
             owner_copy.on_message(r#"{"e":"nested","s":"BTC"}"#)?;
         }
@@ -444,13 +450,13 @@ fn public_classes_share_native_payload_callbacks_reentrancy_and_failure() {
     let counted = calls.clone();
     let original = event.clone();
     let exact: Parser = Rc::new(move |events| {
-        let first = events.get("0")?;
+        let first = events.read("0")?;
         assert!(
             first.same(original.borrow().as_ref().unwrap()),
             "native exact retains original parsed object"
         );
         assert!(
-            matches!(first.get("native")?,EventValue::Number(v)if v==f64::INFINITY),
+            matches!(first.read("native")?,EventValue::Number(v)if v==f64::INFINITY),
             "native exact sees nonfinite mutation without JSON projection"
         );
         counted.set(counted.get() + 1);
@@ -793,7 +799,7 @@ fn saved_core_bridge_decodes_numeric_lexeme_without_frame() {
         "saved".into(),
         vec![Rc::new(|events| {
             assert!(
-                matches!(events.get("0")?.get("native")?,EventValue::Number(v)if v==f64::INFINITY),
+                matches!(events.read("0")?.read("native")?,EventValue::Number(v)if v==f64::INFINITY),
                 "native saved core bridge preserves overflow Number"
             );
             Ok(())

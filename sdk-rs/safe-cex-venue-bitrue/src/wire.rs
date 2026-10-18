@@ -19,7 +19,7 @@ impl JsNumberOutput for OpaqueValue {
         safe_cex_num::js_number_output!(self, struct { } passthrough { value });
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum BitrueOrderType {
     #[serde(rename = "LIMIT")]
     Limit,
@@ -30,6 +30,27 @@ pub enum BitrueOrderType {
     #[serde(rename = "TAKE_PROFIT_MARKET")]
     TakeProfitMarket,
 }
+#[derive(Deserialize)]
+#[serde(remote = "BitrueOrderType")]
+enum BitrueOrderTypeWire {
+    #[serde(rename = "LIMIT")]
+    Limit,
+    #[serde(rename = "MARKET")]
+    Market,
+    #[serde(rename = "STOP_MARKET")]
+    StopMarket,
+    #[serde(rename = "TAKE_PROFIT_MARKET")]
+    TakeProfitMarket,
+}
+impl<'de> Deserialize<'de> for BitrueOrderType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        BitrueOrderTypeWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+            value,
+        ))
+    }
+}
+
 impl JsNumberOutput for BitrueOrderType {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self, enum { Limit, Market, StopMarket, TakeProfitMarket });
@@ -977,13 +998,30 @@ impl JsNumberOutput for FetchOrdersResponseDataItemTriggerType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum FetchOrdersResponseDataItemSide {
     #[serde(rename = "BUY")]
     Buy,
     #[serde(rename = "SELL")]
     Sell,
 }
+#[derive(Deserialize)]
+#[serde(remote = "FetchOrdersResponseDataItemSide")]
+enum FetchOrdersResponseDataItemSideWire {
+    #[serde(rename = "BUY")]
+    Buy,
+    #[serde(rename = "SELL")]
+    Sell,
+}
+impl<'de> Deserialize<'de> for FetchOrdersResponseDataItemSide {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        FetchOrdersResponseDataItemSideWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
+}
+
 impl JsNumberOutput for FetchOrdersResponseDataItemSide {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self, enum { Buy, Sell });

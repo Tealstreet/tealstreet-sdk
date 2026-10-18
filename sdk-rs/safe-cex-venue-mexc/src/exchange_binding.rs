@@ -10,9 +10,8 @@ use crate::{
         stop_order_trend,
     },
     exchange_runtime::{self as account, Callback, ExchangeRuntimeHost, Iteration},
+    method_tasks::{Completion, MethodObserver, Runtime, SessionRuntime, TaskHost},
     order_workflow::{self as workflow, Arguments, OrderWorkflowHost},
-    private_session::{Completion, MethodObserver, SessionRuntime, TaskHost},
-    public_subscriptions::Runtime,
     runtime_assembly::{self as assembly, AssemblyHost},
     submit_validation::{
         MexcOrderSubmitError, assert_regular_order_batch_succeeded,
@@ -116,7 +115,7 @@ pub(crate) fn thrown(error: ExchangeError) -> Thrown {
         let _ = value.define("response", from_json(response));
     }
     if let Some(code) = &error.code {
-        let _ = value.define("code", from_json(code));
+        let _ = value.define("code", code.clone());
     }
     Thrown {
         value,
@@ -342,14 +341,7 @@ impl Host {
             }),
             ("emitAndLogError", |h, a| {
                 let error = arg(&a, 0);
-                let input = match &error {
-                    Js::Undefined => ExchangeErrorInput::Missing,
-                    Js::String(s) => ExchangeErrorInput::Message(String::from_utf16_lossy(s)),
-                    Js::Object(o) if o.class == "Error" => ExchangeErrorInput::Error(Box::new(
-                        Thrown::new(error.clone()).to_exchange_error(),
-                    )),
-                    other => ExchangeErrorInput::Raw(to_json(other)?),
-                };
+                let input = ExchangeErrorInput::Raw(error);
                 h.venue()?.base.emit_and_log_error(input, None, None)?;
                 Ok(Js::Undefined)
             }),
@@ -558,11 +550,11 @@ impl Host {
             }),
             ("noteRegularOrderSubmitError", |h, a| {
                 let mut cooldown = h.cooldown()?;
-                let runtime = h.runtime.clone();
+                let clock = h.venue()?.current_time_ms.clone();
                 note_regular_order_submit_error(
                     &mut cooldown,
                     json(&arg(&a, 0))?.as_ref(),
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 )?;
                 h.set_cooldown(cooldown)?;
                 Ok(Js::Undefined)
@@ -571,10 +563,10 @@ impl Host {
                 let data = arg(&a, 0);
                 let payload = json(&data)?.map(|v| Rc::new(RefCell::new(v)));
                 let mut cooldown = h.cooldown()?;
-                let runtime = h.runtime.clone();
+                let clock = h.venue()?.current_time_ms.clone();
                 let result =
                     assert_regular_order_submit_succeeded(payload.as_ref(), &mut cooldown, &|| {
-                        runtime.now_ms()
+                        clock()
                     });
                 h.set_cooldown(cooldown)?;
                 result.map_err(|e| submit_error(e, &data))?;
@@ -589,20 +581,20 @@ impl Host {
             }),
             ("isRecentlyRejectedRegularOrder", |h, a| {
                 let venue = h.venue()?;
-                let runtime = h.runtime.clone();
+                let clock = venue.current_time_ms.clone();
                 Ok(Js::Bool(is_recently_rejected_regular_order(
                     &mut venue.rejected.borrow_mut(),
                     &text(&arg(&a, 0))?,
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 )))
             }),
             ("notePlacedStopLikeOrder", |h, a| {
                 let venue = h.venue()?;
-                let runtime = h.runtime.clone();
+                let clock = venue.current_time_ms.clone();
                 note_placed_stop_like_order(
                     &mut venue.placed.borrow_mut(),
                     &text(&arg(&a, 0))?,
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 );
                 Ok(Js::Undefined)
             }),
@@ -665,7 +657,9 @@ impl Host {
                 let venue = host.venue()?;
                 let (body, config) = if method == "post" {
                     (
-                        Some(RestBody::Untransformed(to_json(&arg(&a, 1))?)),
+                        Some(RestBody::Untransformed(
+                            safe_cex_exchange::js_runtime::value::to_retained_input(&arg(&a, 1))?,
+                        )),
                         arg(&a, 2),
                     )
                 } else {
@@ -870,6 +864,44 @@ impl TaskHost for Host {
     }
 }
 
+// The common for-of front door for arrays, maps, sets and iterator objects.
+fn for_of_js(value: Js, visitor: &mut Iteration<'_, Js, Thrown>) -> Result<(), Thrown> {
+    let iterator = value.iterator()?;
+    let next = iterator.get("next")?;
+    loop {
+        let step = next.call(iterator.clone(), vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("iterator result is not an object"));
+        }
+        if step.get("done")?.truthy() {
+            return Ok(());
+        }
+        let completion = visitor(step.get("value")?);
+        if matches!(completion, Ok(false)) {
+            continue;
+        }
+        // A body throw wins over IteratorClose errors. A normal break
+        // propagates return()/getter/shape failures.
+        let close = (|| {
+            let method = iterator.get("return")?;
+            if method.is_nullish() {
+                return Ok(());
+            }
+            let returned = method.call(iterator.clone(), vec![])?;
+            if !returned.is_object() {
+                return Err(Thrown::type_error(
+                    "iterator return result is not an object",
+                ));
+            }
+            Ok(())
+        })();
+        return match completion {
+            Err(error) => Err(error),
+            Ok(_) => close,
+        };
+    }
+}
+
 impl ExchangeRuntimeHost for Host {
     fn exchange(&self) -> Js {
         self.this.get().cloned().unwrap_or(Js::Undefined)
@@ -937,49 +969,29 @@ impl ExchangeRuntimeHost for Host {
         from_json(&types::REVERSE_POSITION_MODE).get_key(&mode.to_js_string()?)
     }
     fn promise_all(&self, values: Vec<Js>) -> Result<Rc<Pending>, Thrown> {
-        Ok(Pending::of(Box::pin(promise::all(values))))
+        Ok(Pending::of(Box::pin(
+            promise::all(&self.runtime, values).wait(),
+        )))
     }
     fn for_of(&self, value: Js, visitor: &mut Iteration<'_, Js, Thrown>) -> Result<(), Thrown> {
-        match &value {
-            Js::Object(o) if o.class == "MexcSymbolSettings" => {
-                let venue = self.venue()?;
-                let entries: Vec<_> = venue
-                    .symbol_settings
-                    .borrow()
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                for (symbol, config) in entries {
-                    if visitor(Js::array(vec![Js::str(&symbol), config_js(&config)?]))? {
-                        break;
-                    }
+        // This opaque typed settings view has no JS object protocol. Preserve
+        // its existing projection; actual JS values all use GetIterator below.
+        if matches!(&value, Js::Object(object) if object.class == "MexcSymbolSettings") {
+            let venue = self.venue()?;
+            let entries: Vec<_> = venue
+                .symbol_settings
+                .borrow()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            for (symbol, config) in entries {
+                if visitor(Js::array(vec![Js::str(&symbol), config_js(&config)?]))? {
+                    break;
                 }
-                Ok(())
             }
-            Js::Map(entries) => {
-                let snapshot = entries.borrow().clone();
-                for (k, v) in snapshot {
-                    if visitor(Js::array(vec![k, v]))? {
-                        break;
-                    }
-                }
-                Ok(())
-            }
-            Js::Array(_) => {
-                let mut index = 0usize;
-                while index < value.get("length")?.to_number()? as usize {
-                    if visitor(value.get(&index.to_string())?)? {
-                        break;
-                    }
-                    index += 1;
-                }
-                Ok(())
-            }
-            other => Err(Thrown::type_error(&format!(
-                "{} is not iterable",
-                other.to_display()
-            ))),
+            return Ok(());
         }
+        for_of_js(value, visitor)
     }
     // utils/loop.ts: sleep(minInterval), then a zero-delay setTimeout(fn).
     fn schedule_loop(
@@ -1063,7 +1075,7 @@ impl OrderWorkflowHost for Host {
                 .map_err(|message| Thrown::error("Error", &message))?;
                 Js::str(&id)
             }
-            "now" => Js::Number(self.runtime.now_ms()),
+            "now" => Js::Number((self.venue()?.current_time_ms)()),
             "sleep" => {
                 let runtime = self.runtime.clone();
                 let ms = delay(&a(0))?;
@@ -1279,4 +1291,95 @@ pub(crate) fn dispose(host: &Host) -> Result<(), ExchangeError> {
 
 pub(crate) fn value<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown> {
     from_typed(value)
+}
+
+#[cfg(test)]
+mod iterator_tests {
+    use super::*;
+
+    #[test]
+    fn mexc_map_iterator_empty_admission() {
+        for method in ["values", "keys", "entries", "map"] {
+            let map = Js::new_map();
+            let input = if method == "map" {
+                map
+            } else {
+                map.call_method(method, vec![]).unwrap()
+            };
+            let mut called = false;
+            let result = for_of_js(input, &mut |_| {
+                called = true;
+                Ok(false)
+            });
+            assert!(
+                result.is_ok(),
+                "mexc_empty_map_iterator_is_iterable {method}: {result:?}"
+            );
+            assert!(!called, "empty iterator must not call its visitor");
+        }
+    }
+
+    #[test]
+    fn mexc_map_iterator_nonempty_admission_and_live_mutation() {
+        for method in ["values", "keys", "entries", "map"] {
+            let map = Js::new_map();
+            map.call_method("set", vec![Js::str("a"), Js::Number(-0.0)])
+                .unwrap();
+            map.call_method("set", vec![Js::str("b"), Js::str("removed")])
+                .unwrap();
+            let live = Js::object(vec![("identity", Js::str("live"))]);
+            let input = if method == "map" {
+                map.clone()
+            } else {
+                map.call_method(method, vec![]).unwrap()
+            };
+            let mut rows = vec![];
+            let result = for_of_js(input, &mut |value| {
+                rows.push(value);
+                if rows.len() == 1 {
+                    map.call_method("delete", vec![Js::str("b")])?;
+                    map.call_method("set", vec![Js::str("c"), live.clone()])?;
+                    map.call_method("set", vec![Js::str("d"), Js::Number(f64::NAN)])?;
+                }
+                Ok(false)
+            });
+            assert!(
+                result.is_ok(),
+                "mexc_nonempty_map_iterator_is_iterable {method}: {result:?}"
+            );
+            assert_eq!(
+                rows.len(),
+                3,
+                "mexc iterator visits additions and skips deletion {method}"
+            );
+            if method == "keys" {
+                for (row, expected) in rows.iter().zip(["a", "c", "d"]) {
+                    assert!(row.strict_equals(&Js::str(expected)));
+                }
+            } else {
+                let values: Vec<_> = rows
+                    .iter()
+                    .map(|row| {
+                        if method == "values" {
+                            row.clone()
+                        } else {
+                            row.get("1").unwrap()
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    values[0].to_number().unwrap().to_bits(),
+                    (-0.0_f64).to_bits()
+                );
+                assert!(
+                    values[1].strict_equals(&live),
+                    "native reference identity survives iteration"
+                );
+                assert!(
+                    values[2].to_number().unwrap().is_nan(),
+                    "native NaN survives iteration"
+                );
+            }
+        }
+    }
 }

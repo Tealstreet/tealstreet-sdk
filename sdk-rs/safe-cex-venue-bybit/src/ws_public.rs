@@ -13,6 +13,19 @@ pub fn connect_and_subscribe(
     is_demo: bool,
     direct_override: Option<&str>,
 ) -> Result<(), ExchangeError> {
+    connect_with_notice(socket, runtime, category, is_demo, direct_override, None)
+}
+
+// Dedicated Inverse has its own source proxy notice and catches listener errors.
+// The public standalone helper above retains its separately reviewed profile.
+fn connect_with_notice(
+    socket: &Rc<BaseWebSocket>,
+    runtime: &dyn safe_cex_exchange::websocket::WsRuntime,
+    category: &str,
+    is_demo: bool,
+    direct_override: Option<&str>,
+    proxy_notice: Option<&str>,
+) -> Result<(), ExchangeError> {
     if socket.is_disposed() {
         return Ok(());
     }
@@ -42,7 +55,11 @@ pub fn connect_and_subscribe(
         .resolve_url(primary, &[route.fallback.as_deref()])
         .to_owned();
     if Some(base.as_str()) == route.fallback.as_deref() {
-        parent.emit("grafana-info", "Using tealstreet bybit public linear proxy")?;
+        if let Some(message) = proxy_notice {
+            let _ = parent.emit("grafana-info", message);
+        } else {
+            parent.emit("grafana-info", "Using tealstreet bybit public linear proxy")?;
+        }
     }
     let options = connection_options(&parent.options(), is_demo);
     // Set every input before starting: an inline host can open during this call.
@@ -268,6 +285,7 @@ pub fn handle_tickers_event(
     store: &dyn safe_cex_store::Store,
     frame: &Value,
     is_spot: bool,
+    swap_volume: bool,
 ) -> Result<(), TickerEventError> {
     if frame.is_null() {
         return Err(TickerEventError::Source(
@@ -289,6 +307,11 @@ pub fn handle_tickers_event(
         return Ok(());
     };
     let mut update = safe_cex_store::model_patch::ModelPatch::default();
+    let (base_volume, quote_volume) = if swap_volume {
+        ("turnover24h", "volume24h")
+    } else {
+        ("volume24h", "turnover24h")
+    };
     for (source, target, multiplier) in [
         ("bid1Price", "bid", 1.),
         ("ask1Price", "ask", 1.),
@@ -299,8 +322,8 @@ pub fn handle_tickers_event(
         ("openInterest", "openInterest", 1.),
         ("fundingRate", "fundingRate", 1.),
         ("nextFundingTime", "fundingTime", 1.),
-        ("volume24h", "volume", 1.),
-        ("turnover24h", "quoteVolume", 1.),
+        (base_volume, "volume", 1.),
+        (quote_volume, "quoteVolume", 1.),
     ] {
         let value = &data[source];
         if !crate::api::truthy(value) || (is_spot && source == "nextFundingTime") {
@@ -325,23 +348,57 @@ pub fn handle_tickers_event(
 #[cfg(test)]
 mod tests;
 
+pub(crate) mod candle_recovery;
+pub(crate) mod candles;
+pub(crate) mod single_candles;
+pub(crate) mod streams;
 /// BybitPublicWebsocket for the `bybit` connection: the linear socket, and the
 /// inverse socket when inverse markets are enabled.
+mod topics;
+
 pub(crate) struct PublicProtocol {
     pub parent: std::rc::Weak<crate::exchange::BybitExchange>,
     pub runtime: Rc<dyn safe_cex_exchange::websocket::WsRuntime>,
     pub category: &'static str,
+    topics: topics::PublicTopics,
 }
 impl PublicProtocol {
+    pub(crate) fn new(
+        parent: std::rc::Weak<crate::exchange::BybitExchange>,
+        runtime: Rc<dyn safe_cex_exchange::websocket::WsRuntime>,
+        category: &'static str,
+        base: &safe_cex_exchange::exchange::BaseExchange,
+    ) -> Self {
+        let topics = topics::PublicTopics::new(parent.clone(), runtime.clone(), category, base);
+        Self {
+            parent,
+            runtime,
+            category,
+            topics,
+        }
+    }
     // ts: BybitPublicWebsocket constructor `messageHandlers` — tickers and pong.
-    pub(crate) fn register_handlers(socket: &Rc<BaseWebSocket>) {
+    pub(crate) fn register_handlers(socket: &Rc<BaseWebSocket>, category: &str) {
         let store_socket = Rc::downgrade(socket);
+        let swap_volume = category == "inverse" && socket.emitter().name() != "bybitinverse";
         let tickers: safe_cex_exchange::websocket::MessageHandler = Rc::new(move |json| {
             let Some(socket) = store_socket.upgrade() else {
                 return Ok(());
             };
-            handle_tickers_event(socket.store().as_ref(), json, false)
-                .map_err(|error| ExchangeError::new(error.to_string()))
+            handle_tickers_event(
+                socket.store().as_ref(),
+                json,
+                socket.emitter().name() == "bybitspot",
+                swap_volume,
+            )
+            .map_err(|error| match error {
+                TickerEventError::Store(error) => error.into(),
+                TickerEventError::Source(message) => {
+                    let mut error = ExchangeError::new(message);
+                    error.name = "TypeError".into();
+                    error
+                }
+            })
         });
         let pong_socket = Rc::downgrade(socket);
         let pong: safe_cex_exchange::websocket::MessageHandler =
@@ -369,63 +426,47 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
         let Some(parent) = self.parent.upgrade() else {
             return Ok(());
         };
-        connect_and_subscribe(
+        connect_with_notice(
             &socket,
             self.runtime.as_ref(),
             self.category,
             parent.uses_bybit_demo_environment(),
-            None,
+            if parent.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+                Some(parent.get_bybit_public_ws_url(
+                    crate::exchange::PublicCategory::Linear,
+                    if parent.base.options().testnet == Some(true) {
+                        crate::exchange::Network::Testnet
+                    } else {
+                        crate::exchange::Network::Livenet
+                    },
+                )?)
+            } else if self.category == "spot" {
+                let network = if parent.base.options().testnet == Some(true) {
+                    "testnet"
+                } else {
+                    "livenet"
+                };
+                crate::spot_types::BASE_WS_URL["public"]["spot"][network].as_str()
+            } else {
+                None
+            },
+            if parent.base.name == safe_cex_types::ExchangeName::Bybitinverse {
+                Some("Using tealstreet bybit public inverse proxy")
+            } else {
+                None
+            },
         )
     }
-    // ts: BybitPublicWebsocket.onOpen — one tickers topic per market of this category.
+    // The source has category-wide primary sockets and active-symbol Spot sockets.
     fn on_open(
         &self,
         socket: Rc<BaseWebSocket>,
     ) -> safe_cex_exchange::runtime::ExchangeFuture<'static, ()> {
-        let result = (|| -> Result<(), ExchangeError> {
-            if socket.is_disposed() {
-                return Ok(());
-            }
-            let linear = self.category == "linear";
-            let topics: Vec<String> = socket
-                .store()
-                .markets()
-                .iter()
-                .filter(|m| {
-                    m.option.is_none() && ((m.quote == "USDT" || m.quote == "USDC") == linear)
-                })
-                .map(|m| format!("tickers.{}", m.symbol))
-                .collect();
-            // subscribe(): the first chunk goes out now, each later one 10ms after the last.
-            let mut frames = topics
-                .chunks(10)
-                .map(|chunk| json!({"op": "subscribe", "args": chunk}).to_string())
-                .collect::<Vec<_>>()
-                .into_iter();
-            if let Some(first) = frames.next() {
-                socket.send(&first)?;
-                let rest: Vec<String> = frames.collect();
-                let runtime = self.runtime.clone();
-                let sender = Rc::downgrade(&socket);
-                socket.start_message_operation(async move {
-                    runtime.sleep(10).await?;
-                    for frame in rest {
-                        let Some(socket) = sender.upgrade() else {
-                            return Ok(());
-                        };
-                        socket.send(&frame)?;
-                        runtime.sleep(10).await?;
-                    }
-                    Ok(())
-                });
-            }
-            ping(&socket)?;
-            if self.runtime.enable_reconnecting() {
-                socket.emit_ws_reconnected()?;
-            }
-            Ok(())
-        })();
+        let result = self.topics.on_open(socket);
         Box::pin(async move { result })
+    }
+    fn dispose(&self) {
+        self.topics.dispose();
     }
     fn on_message(
         &self,

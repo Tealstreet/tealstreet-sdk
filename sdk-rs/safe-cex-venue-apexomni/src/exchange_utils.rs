@@ -138,3 +138,127 @@ pub fn fee_helper(
     safe_cex_num::js_to_fixed(math(decimal_multiply(number, scale))? / scale, digits)
         .map_err(str::to_owned)
 }
+
+#[cfg(test)]
+mod accepted_scalar_helper_tests {
+    use super::*;
+    use crate::accepted_scalar_helper_support::*;
+    #[test]
+    fn iso_timestamp_to_epoch_hours_native_output() {
+        check(
+            "exchange_utils::iso_timestamp_to_epoch_hours",
+            17,
+            |value| {
+                serde_json::json!(native_bits(iso_timestamp_to_epoch_hours(
+                    value.as_str().unwrap()
+                )))
+            },
+        );
+    }
+    #[test]
+    fn character_at_native_output() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/accepted-character-source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "actual d8 character fixtures: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        check("exchange_utils::character_at", 11, |value| {
+            serde_json::json!(character_at(
+                value["alphabet"].as_str().unwrap(),
+                float(&value["index"])
+            ))
+        });
+    }
+    #[test]
+    fn d8_native_output() {
+        check("exchange_utils::d8", 9, |value| {
+            let mut calls = 0usize;
+            let draws = value["draws"].as_array().unwrap();
+            let actual = d8(
+                value["length"].as_str().map(|_| float(&value["length"])),
+                value["mode"].as_str(),
+                || {
+                    let v = float(&draws[calls % draws.len()]);
+                    calls += 1;
+                    v
+                },
+            );
+            let variant = match &actual {
+                crate::exchange_utils::RandomId::Undefined => "undefined",
+                crate::exchange_utils::RandomId::Nan => "nan",
+                crate::exchange_utils::RandomId::String(_) => "string",
+            };
+            serde_json::json!({"variant":variant,"text":actual.as_js_string(),"calls":calls})
+        });
+    }
+    #[test]
+    fn generate_apex_random_client_id_native_output() {
+        check(
+            "exchange_utils::generate_apex_random_client_id",
+            4,
+            |value| {
+                let mut clock = 0;
+                let mut entropy = 0;
+                let actual = generate_apex_random_client_id(
+                    value["account"].as_str().unwrap(),
+                    || {
+                        clock += 1;
+                        float(&value["now"])
+                    },
+                    || {
+                        entropy += 1;
+                        float(&value["draw"])
+                    },
+                );
+                serde_json::json!({"text":actual,"clockCalls":clock,"entropyCalls":entropy})
+            },
+        );
+    }
+    #[test]
+    fn calculate_tp_sl_price_native_output() {
+        check("exchange_utils::calculate_tp_sl_price", 8, |value| {
+            serde_json::json!(native_bits(calculate_tp_sl_price(
+                value["side"].as_str().unwrap(),
+                float(&value["market"]),
+                float(&value["step"]),
+            )))
+        });
+    }
+    #[test]
+    fn fee_helper_native_output() {
+        check("exchange_utils::fee_helper", 14, |value| {
+            let input = if value["kind"] == "number" {
+                crate::order_records::Iso8601::Number(float(&value["value"]))
+            } else {
+                crate::order_records::Iso8601::String(value["value"].as_str().unwrap().to_owned())
+            };
+            let mut seen = Vec::new();
+            let actual = fee_helper(
+                &input,
+                value["digits"].as_str().map(|_| float(&value["digits"])),
+                |number| {
+                    seen.push(native_bits(number));
+                    match value["operation"].as_str().unwrap() {
+                        "floor" => Ok(number.floor()),
+                        "ceil" => Ok(number.ceil()),
+                        "round" => Ok(safe_cex_num::math_round(number)),
+                        "error" => Err("host math failed".to_owned()),
+                        _ => unreachable!(),
+                    }
+                },
+            );
+            let result = match actual {
+                Ok(value) => serde_json::json!({"ok":true,"value":value}),
+                Err(message) => serde_json::json!({"ok":false,"message":message}),
+            };
+            serde_json::json!({"result":result,"seen":seen})
+        });
+    }
+}

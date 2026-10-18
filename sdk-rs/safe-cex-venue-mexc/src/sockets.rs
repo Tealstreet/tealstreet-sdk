@@ -21,12 +21,14 @@ use std::{
 
 pub struct MexcSocketDependencies {
     pub runtime: Rc<dyn WsRuntime>,
+    pub current_time_ms: Rc<dyn Fn() -> f64>,
     pub remote_account_name: Option<String>,
     pub emit_fill: Rc<dyn Fn(crate::ws_private::MexcFillEvent) -> Result<(), ExchangeError>>,
 }
 
 pub(crate) struct PrivateProtocol {
     parent: Weak<MexcExchange>,
+    current_time_ms: Rc<dyn Fn() -> f64>,
     handlers: MexcPrivateHandlers,
     remote_account_name: Option<String>,
     heartbeat: RefCell<Option<OwnedOperation>>,
@@ -38,9 +40,11 @@ impl PrivateProtocol {
         runtime: Rc<dyn WsRuntime>,
         handlers: MexcPrivateHandlers,
         remote_account_name: Option<String>,
+        current_time_ms: Rc<dyn Fn() -> f64>,
     ) -> Rc<BaseWebSocket> {
         let protocol = Rc::new(Self {
             parent: Rc::downgrade(parent),
+            current_time_ms,
             handlers,
             remote_account_name,
             heartbeat: RefCell::default(),
@@ -86,7 +90,7 @@ impl PrivateProtocol {
         };
         let options = parent.base().options();
         let api_key = safe_cex_num::js_trim(&options.key).to_owned();
-        let request_time = safe_cex_num::js_number_string(parent.base().runtime.now_ms());
+        let request_time = safe_cex_num::js_number_string((self.current_time_ms)());
         let signature = parent.login_signature(
             api_key.clone(),
             request_time.clone(),
@@ -125,7 +129,7 @@ impl PrivateProtocol {
             let owner = parent.clone();
             let weak_socket = weak_socket.clone();
             parent.base().start_owned_operation(async move {
-                let result = async {
+                let _ = async {
                     let balance = reaction(owner.fetch_balance()).await?;
                     if weak_socket
                         .upgrade()
@@ -142,12 +146,6 @@ impl PrivateProtocol {
                     Ok::<_, ExchangeError>(())
                 }
                 .await;
-                if let Err(error) = result {
-                    owner.base().runtime.report_exception(
-                        &error,
-                        &json!({"operation":"MEXC throttledFetchBalance"}),
-                    );
-                }
             });
             Ok(())
         })?;
@@ -241,7 +239,9 @@ impl WsProtocol for PrivateProtocol {
             SocketFrame::Binary(bytes) => String::from_utf8_lossy(bytes).into_owned(),
             SocketFrame::Close { .. } => return Ok(()),
         };
-        let value = safe_cex_transport::how::big_int_as_string_json_parse(&raw);
+        let value = safe_cex_transport::how::big_int_as_string_json_parse(&raw)
+            .into_value()
+            .map_err(|error| ExchangeError::new(error.to_string()))?;
         if !safe_cex_num::js_truthy(Some(&value)) {
             return Ok(());
         }
@@ -271,7 +271,10 @@ impl WsProtocol for PrivateProtocol {
                 subscribe_private_feeds(socket)?;
                 receive(socket, "[mexc login] success")?;
             } else {
-                receive(socket, &format!("[mexc login] failed {value}"))?;
+                let diagnostic = safe_cex_num::js_json_stringify(&value.clone().into())
+                    .map_err(ExchangeError::from)?
+                    .expect("a parsed JSON frame is a defined value");
+                receive(socket, &format!("[mexc login] failed {diagnostic}"))?;
                 socket.emitter().emit_and_log_error(
                     "MEXC private ws login failed, double check your key and secret",
                     None,

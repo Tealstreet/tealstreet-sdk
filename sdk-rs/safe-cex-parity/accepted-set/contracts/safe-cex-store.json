@@ -1,0 +1,1040 @@
+{
+  "safe_cex_store::socket_health::SocketDiagnosticsSource": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-store/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "lastCloseCode": null,
+      "lastCloseAt": null,
+      "lifetimeCloseCount": null,
+      "onCloseCount": null,
+      "isReconnectPauseActive": null
+    }
+  },
+  "safe_cex_store::store::DefaultStore": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_store::instrument_class::classify_market": {
+    "api": {
+      "kind": "function",
+      "name": "classify_market",
+      "signature": {
+        "inputs": [
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "market",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::Market",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_store::instrument_class::InstrumentClassResult",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/instrument_class.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Classifies a typed Market by metadata; does not accept a serialized Market."
+  },
+  "safe_cex_store::instrument_class::describe_instrument": {
+    "api": {
+      "kind": "function",
+      "name": "describe_instrument",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "result",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_store::instrument_class::InstrumentClassResult",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/instrument_class.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Builds a description from typed instrument fields, not an inbound representation."
+  },
+  "safe_cex_store::instrument_class::is_instrument_class_venue": {
+    "api": {
+      "kind": "function",
+      "name": "is_instrument_class_venue",
+      "signature": {
+        "inputs": [
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/instrument_class.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Venue-name membership predicate; no decoded owner is produced."
+  },
+  "safe_cex_store::instrument_class::tradfi_preflight_message": {
+    "api": {
+      "kind": "function",
+      "name": "tradfi_preflight_message",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "result",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_store::instrument_class::InstrumentClassResult",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/instrument_class.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Formats a preflight diagnostic from a typed instrument classification."
+  },
+  "safe_cex_store::risk::calculate_risk_at_price": {
+    "api": {
+      "kind": "function",
+      "name": "calculate_risk_at_price",
+      "signature": {
+        "inputs": [
+          [
+            "price",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "risk",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::collections::hash::map::HashMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::OrderRiskProfile",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "positions",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Position",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "orders",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Order",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_store::risk::RiskAtPrice",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/risk.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Arithmetic on typed order/position inputs; string arguments select units, not wire shapes."
+  },
+  "safe_cex_store::risk::format_pnl": {
+    "api": {
+      "kind": "function",
+      "name": "format_pnl",
+      "signature": {
+        "inputs": [
+          [
+            "pnl",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "precision",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/risk.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Formats a numeric PnL result for display; output text is not parsed."
+  },
+  "safe_cex_store::risk::format_rounded_number": {
+    "api": {
+      "kind": "function",
+      "name": "format_rounded_number",
+      "signature": {
+        "inputs": [
+          [
+            "val",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "precision",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/risk.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Formats rounded numbers for display; no inbound deserialization."
+  },
+  "safe_cex_store::risk::process_orders_risk_for_positions": {
+    "api": {
+      "kind": "function",
+      "name": "process_orders_risk_for_positions",
+      "signature": {
+        "inputs": [
+          [
+            "maps",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_store::risk::OrdersRiskMaps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "lifetime": "'_"
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "buckets",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::collections::hash::map::HashMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::Order",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "counts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::collections::hash::map::HashMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "primitive": "usize"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "positions",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Position",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "secondary",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "tuple": [
+            {
+              "resolved_path": {
+                "path": "std::collections::hash::map::HashMap",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::OrderRiskProfile",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::Position",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/risk.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Postprocesses typed order and position collections; does not construct them from wire input."
+  },
+  "safe_cex_store::risk::profile": {
+    "api": {
+      "kind": "function",
+      "name": "profile",
+      "signature": {
+        "inputs": [
+          [
+            "side",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::PositionSide",
+                "args": null
+              }
+            }
+          ],
+          [
+            "pnl",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "total",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "rolling",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "size",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "text",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "fee",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "full",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::OrderRiskProfile",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/risk.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Looks up risk profile metadata by symbol; not a parser for an inbound domain owner."
+  },
+  "safe_cex_store::risk::prototype_key": {
+    "api": {
+      "kind": "function",
+      "name": "prototype_key",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/risk.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Detects known prototype keys as a boolean predicate; no decoding."
+  },
+  "safe_cex_store::risk::parse_float": {
+    "api": {
+      "kind": "function",
+      "name": "parse_float",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "f64"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "ECMAScript parseFloat prefix grammar, independently distinct from Number whole-string grammar; tagged non-finite and negative-zero outputs.",
+    "call": "{ let value = $type($value.as_str().expect(\"text witness\")); if value.is_nan() { serde_json::json!(\"NaN\") } else if value == f64::INFINITY { serde_json::json!(\"Infinity\") } else if value == f64::NEG_INFINITY { serde_json::json!(\"-Infinity\") } else if value == 0.0 && value.is_sign_negative() { serde_json::json!(\"-0\") } else { serde_json::json!(value.to_string()) } }",
+    "cases": [
+      {
+        "input": "",
+        "output": "NaN"
+      },
+      {
+        "input": "12tail",
+        "output": "12"
+      },
+      {
+        "input": "0x10",
+        "output": "0"
+      },
+      {
+        "input": "-0",
+        "output": "-0"
+      },
+      {
+        "input": "Infinitytail",
+        "output": "Infinity"
+      },
+      {
+        "input": "-Infinitytail",
+        "output": "-Infinity"
+      },
+      {
+        "input": "1e400",
+        "output": "Infinity"
+      },
+      {
+        "input": "﻿12.5tail",
+        "output": "12.5"
+      },
+      {
+        "input": "12.5",
+        "output": "NaN"
+      }
+    ]
+  },
+  "safe_cex_store::instrument_class::text": {
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Instrument metadata accepts only nonempty ECMAScript-trimmed strings.",
+    "call": "serde_json::json!($type(Some($value)))",
+    "cases": [
+      {
+        "input": null,
+        "output": null
+      },
+      {
+        "input": "",
+        "output": null
+      },
+      {
+        "input": " ﻿x\n",
+        "output": "x"
+      },
+      {
+        "input": "",
+        "output": ""
+      },
+      {
+        "input": 12,
+        "output": null
+      },
+      {
+        "input": {},
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_store::risk::assert_array_key": {
+    "api": {
+      "kind": "function",
+      "name": "assert_array_key",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-store/src/risk.rs",
+    "reason": "Checks forbidden prototype keys as a guard; produces no parsed domain owner."
+  }
+}

@@ -1,6 +1,6 @@
 [[exempt]]
 rs = "safe-cex-crypto/src/zklink.rs::ZkLinkSignature"
-reason = "C3: named packed-byte return shape for the shared Rescue/MuSig primitive; no TypeScript packed-byte record declaration. The source TxSignature string record maps separately to safe-cex-venue-apexomni/src/transaction_records.rs::TxSignature. Packed-to-wire conversion belongs to the unfinished signing adapters, not this primitive return holder."
+reason = "C3: packed-byte return shape for the shared Rescue/MuSig primitive; no local TypeScript packed-byte declaration. The source TxSignature string record maps separately to transaction_records.rs::TxSignature. Native ContractSigner::sign_contract converts the packed result to the source hex wire signature; the constructed Apex placement test compares its complete signed body to the actual pinned SDK."
 
 [[exempt]]
 rs = "safe-cex-ffi/src/lib.rs::parity_probe"
@@ -1565,6 +1565,10 @@ rs = "safe-cex-num/src/json_stringify.rs::JsJsonValue"
 reason = "Shared ECMAScript JSON.stringify input representation preserving undefined and non-finite numbers before serialization; no independent TypeScript source symbol."
 
 [[exempt]]
+rs = "safe-cex-num/src/json_stringify.rs::JsJsonValue::truthy"
+reason = "Shared ECMAScript Boolean conversion for prepared JSON data before JSON.stringify; retains nonfinite-number truthiness at the HOW protocol boundary. No independent TypeScript source symbol."
+
+[[exempt]]
 rs = "safe-cex-num/src/json_stringify.rs::js_json_stringify"
 reason = "Shared ECMAScript JSON.stringify runtime glue for prepared values; no independent TypeScript source symbol."
 
@@ -2085,22 +2089,6 @@ rs = "safe-cex-store/src/notification.rs::StoreNotificationError::from_subscribe
 reason = "External Store implementors construct notification-origin failures with their assigned subscriber identity and original callback cause; no standalone TypeScript declaration."
 
 [[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionError"
-reason = "Adapted fallible subscription sender boundary retains shared coercion and injected ExchangeError without flattening; source throws synchronously, no separate TS error declaration."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::active_subscriptions"
-reason = "Owned native inspection of source private activeSubscriptions Set for caller state/effect witnesses; not a new protocol operation."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionInput"
-reason = "Adapted caller input evaluation boundary for separate source key/envelope stringify reads; prepared JsJsonValue remains supported, general JS getter/toJSON objects are not a native JSON carrier."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionInput::evaluate"
-reason = "Fallible captured JSON-data read per source stringify evaluation; native adapters expose independent effects without a venue-local serializer or implicit JSON projection."
-
-[[exempt]]
 rs = "safe-cex-types/src/validation_error.rs::AccountValidationError"
 reason = "Shared runtime validation error carrier preserves source non-string JSON values without coercion; static declaration projection is recorded on ValidateAccountResult."
 
@@ -2189,22 +2177,6 @@ rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::init"
 reason = "C3 host ABI: init capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
 [[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::now_ms"
-reason = "C3 host ABI: now_ms capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pack_amount"
-reason = "C3 host ABI: pack_amount capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pack_fee"
-reason = "C3 host ABI: pack_fee capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pubkey_hash"
-reason = "C3 host ABI: pubkey_hash capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
 rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::builder"
 reason = "C3 host ABI: builder capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
@@ -2215,26 +2187,6 @@ reason = "C3 host ABI: new_transaction capability corresponds to an imported zkL
 [[exempt]]
 rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::create_signed_contract"
 reason = "C3 host ABI: create_signed_contract capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::create_signed_order"
-reason = "C3 host ABI: create_signed_order capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_transfer"
-reason = "C3 host ABI: sign_transfer capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_withdraw"
-reason = "C3 host ABI: sign_withdraw capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_change_pubkey"
-reason = "C3 host ABI: sign_change_pubkey capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-bybit/src/journal_fold.rs::BybitPositionContext"
-reason = "Native named shape for BybitPositionAdapterDeps.resolveContext's inline optional result; TypeScript declares no standalone context symbol. The dependency row owns the typed callback boundary; this exemption makes no additional parity claim."
 
 [[exempt]]
 rs = "safe-cex-exchange/src/position_intervals.rs::FundingRow"
@@ -2279,6 +2231,10 @@ reason = "Explicit ECMAScript JSON.stringify projection for QueryValue at actual
 [[exempt]]
 rs = "safe-cex-transport/src/provider.rs::RestAdapter::query_in_url"
 reason = "Host adapter capability identifies the external Axios buildURL boundary; custom HOW transports retain config params in their own frame. No source declaration names this native interface operation. Adapter wrappers forward it rather than assuming every adapter renders a URL."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::schedule_ping"
+reason = "C3 socket-host capability exposes the existing core Ping timer slot to the Apex private ping body. The source assigns pingTimeoutId through setTimeout; pong and close share that field. This Rust accessor only delegates to the core scheduler and adds no independent venue behavior or TypeScript declaration. The real Apex binding regressions exercise staggered pong replacement and close cancellation."
 
 [[exempt]]
 rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::has_websocket"
@@ -2725,14 +2681,6 @@ rs = "safe-cex-venue-apexomni/src/lifecycle.rs::ApexServices::place_orders"
 reason = "C3 imported Date/Base/private-socket capability place_orders. This is runtime/dependency glue with no separately exported local TypeScript declaration; mapped placement/cancellation bodies retain venue logic and native call-order assertions."
 
 [[exempt]]
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::RecentOrderCache"
-reason = "C3: ordered storage for the anonymous recentlyPlacedOrders Map field in the mapped inverse/spot methods. A private RefCell vector enforces insert/replace/delete through mapped functions and retains Rc order references; no standalone TypeScript declaration names this field representation. This does not implement an exchange class or constructor."
-
-[[exempt]]
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::RecentOrderCache::snapshot"
-reason = "C3: read-only Map-state observer for the anonymous cache field, exposing ordered keys, placedAt and retained references for native callers and gates. It adds no venue policy or mutation; all cache behavior belongs to the separately mapped functions."
-
-[[exempt]]
 rs = "safe-cex-venue-coinbase/src/json_key_scanner.rs::JsonKeyScanResult"
 reason = "Native tag for the scanner internal JsonKeyScanResult union, which has no extracted source row. The mapped scanner methods execute the grammar and return this tag without introducing a Serde or frame-classification ingress."
 
@@ -2889,11 +2837,7 @@ rs = "safe-cex-venue-apexomni/src/socket_host.rs::ApexSocketHost::set_ping_at"
 reason = "C3 imported BaseWebSocket, runtime, DOM listener, transport, timer or signer capability/carrier. No separate local TypeScript declaration names this host ABI. Mapped public/private bodies retain their own venue control flow and compare consumed primitive arguments; this interface does not stand in for a pending venue method. Host implementations own inherited Base socket state rather than creating a second venue runtime."
 
 [[exempt]]
-rs = "safe-cex-venue-apexomni/src/socket_host.rs::ApexSocketHost::ping_timeout"
-reason = "C3 imported BaseWebSocket, runtime, DOM listener, transport, timer or signer capability/carrier. No separate local TypeScript declaration names this host ABI. Mapped public/private bodies retain their own venue control flow and compare consumed primitive arguments; this interface does not stand in for a pending venue method. Host implementations own inherited Base socket state rather than creating a second venue runtime."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/socket_host.rs::ApexSocketHost::set_ping_timeout"
+rs = "safe-cex-venue-apexomni/src/socket_host.rs::ApexSocketHost::schedule_ping"
 reason = "C3 imported BaseWebSocket, runtime, DOM listener, transport, timer or signer capability/carrier. No separate local TypeScript declaration names this host ABI. Mapped public/private bodies retain their own venue control flow and compare consumed primitive arguments; this interface does not stand in for a pending venue method. Host implementations own inherited Base socket state rather than creating a second venue runtime."
 
 [[exempt]]
@@ -3425,6 +3369,10 @@ rs = "safe-cex-venue-bingx/src/data_reads.rs::BingxDataReads::new"
 reason = "Injection-only partial receiver construction; no source constructor, API factory, startup or websocket implementation is claimed."
 
 [[exempt]]
+rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::PortfolioState"
+reason = "Rust receiver storage behind the Portfolio handle: carries the uuid/type fields observed by mapped portfolio selection and retains unused response metadata. It has no independent source declaration or selection/balance algorithm; the strict source declaration DTO remains separately mapped. Runtime projection behavior belongs to the mapped portfolio bodies, with real-binding missing/malformed metadata regressions."
+
+[[exempt]]
 rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::Portfolio"
 reason = "Native inline return/receiver and external call-site capability for the ten mapped portfolio/balance bodies. Shared handles retain source identity, ordinary currency-object prototype assignment and shallow balance aliases. This helper introduces no independent TS declaration; mapped functions own selection, probing, arithmetic and errors. Full class/transport assembly remains pending."
 
@@ -3878,7 +3826,7 @@ reason = "Native value, receiver/callee and JS language-operation binding for ei
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/private_topics.rs::PrivateTopicsHost::clock_now"
-reason = "Native value, receiver/callee and JS language-operation binding for eight private-topic bodies; actual helper, not a source symbol. Clone preserves identity, primitives bind JS semantics and host owns launched work. Concrete WebSocket/native binding remains pending; eight source body targets mapped separately."
+reason = "Native virtualClock.getCurrentTimeMs host operation used by mapped markWsPositions, not an independent TS declaration. The concrete binding delegates to the shared clock; private_binding_frames proves a fresh WS snapshot survives older REST reconciliation after native clock synchronization."
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/private_topics.rs::PrivateTopicsHost::set_of"
@@ -4822,7 +4770,7 @@ reason = "Native receiver/callback and imported clock, Dayjs, loop, Blob or Base
 
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/read_history.rs::HistoryHost::local_to_utc"
-reason = "Native receiver/callback and imported clock, Dayjs, loop, Blob or BaseWebSocket capability for ten mapped BingX REST history/listener/routing/polling/disposal bodies. No separate TS declaration. Shared public state and real private event/listen-key adapter are linked; full exchange/socket classes and constructors remain pending. No pending venue body is delegated."
+reason = "Native local-wall-time host capability for source Date parsing. The production HistoryHost delegates to required BingxDependencies.local_wall_time_to_utc; the native registry explicitly supplies its UTC profile. Real binding historical_fills_use_host_local_time_conversion compares the actual source fill mapper in Singapore and New York winter/summer and proves explicit offsets bypass the callback. No separate TS declaration."
 
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/read_history.rs::HistoryHost::loop_after"
@@ -6713,34 +6661,6 @@ rs = "safe-cex-venue-hyperliquid/src/core_public_message.rs::CorePublicMessageHo
 reason = "Native primitive/event/object/callee bindings for the mapped core public frame body; full socket class composition remains separate."
 
 [[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotLimiterCallback"
-reason = "Rust carrier for the two anonymous source arrows inside spot waitForToken; captures native waitTime, receiver and original weight. Its execution body maps with waitForToken, and adds no independently named TypeScript export."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost"
-reason = "Rust native-operation binding for the mapped spot limiter bodies; property access, assignment, primitive arithmetic, callback allocation and Promise construction remain explicit host operations, not an extra TypeScript algorithm. Class allocation stays pending."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::number"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::is_undefined"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::binary"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::construct"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::limiter_callback"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
 rs = "safe-cex-venue-hyperliquid/src/candle_listeners.rs::CandleVenue"
 reason = "Rust selector for the two mapped listener bodies, not an extra TypeScript enum."
 
@@ -6927,26 +6847,6 @@ reason = "C3: mandatory local property/call/intrinsic bridge for mapped canonica
 [[exempt]]
 rs = "safe-cex-venue-woo/src/public_canonical.rs::CanonicalCallback"
 reason = "C3: retained arrow callback signature for native mapper and comparator functions; no separately named TypeScript symbol."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/public_canonical.rs::CanonicalModule"
-reason = "C3: native module-lifetime binding carrier holding persistent mapped function objects; no separately named TypeScript symbol."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowOps"
-reason = "C3: mandatory opaque language-operation bridge; Rust owns normalization and comparison bodies; no separately named TypeScript symbol."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference"
-reason = "C3: identity-preserving structural Error representation constraint for the mapped comparison declaration; no separately named TypeScript symbol."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/snapshot_parity.rs::SnapshotPrimitives"
-reason = "C3: mandatory opaque language-operation and module-state bridge for mapped public parity bodies; no separately named TypeScript declaration."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/snapshot_parity.rs::SnapshotParityOps"
-reason = "C3: mandatory opaque language-operation and module-state bridge for mapped public parity bodies; no separately named TypeScript declaration."
 
 [[exempt]]
 rs = "safe-cex-venue-woo/src/legacy_lifecycle.rs::LifecycleOps"
@@ -7223,7 +7123,7 @@ reason = "FFI boundary glue: napi export calling an account's Exchange method by
 
 [[exempt]]
 rs = "safe-cex-ffi/src/native_exchange.rs::signer_available"
-reason = "FFI boundary glue: napi export pushing remote-signer availability from the JS session, with no TypeScript counterpart."
+reason = "FFI boundary glue: napi export acknowledging remote-signer availability from the JS session with Promise<void>, with no TypeScript counterpart. Actual Node native-account-signer-availability regressions verify ordered unavailable/available transitions, closed/never-issued rejection and dispose-retained handles."
 
 [[exempt]]
 rs = "safe-cex-ffi/src/native_exchange.rs::native_account_close"
@@ -7256,3 +7156,295 @@ reason = "Imported SDK JsonRpcSigner.initZklinkSigner Ethereum-signature branch 
 [[exempt]]
 rs = "safe-cex-crypto/src/zklink/contract.rs::ContractSigner::sign_contract"
 reason = "Imported SDK JsonRpcSigner.createSignedContract outside extracted TS roots: exact preimage, existing Rescue/MuSig primitive, canonical decimal fields and source signature wire record. The venue transaction_signing.rs::sign_contract still owns the mapped TS orchestration. Pinned npm24-contract field/signature corpus exercises this capability."
+
+[[exempt]]
+rs = "safe-cex-store/src/model_patch.rs::ModelPatch::set_undefined"
+reason = "Native Store model-patch carrier plumbing for an own undefined property; optional Order/Position fields retain that state instead of losing it before the mapped update path. Does not define Store upsert merge policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::MODEL_FIELD"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::MODEL_RECORD"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::and_then"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::as_deref"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::as_field_ref"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::as_mut"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::as_ref"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::expect"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::filter"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::into_property"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::into_value"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_absent"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_none"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_some"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_some_and"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_undefined"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::map"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::ok_or_else"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::or"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::or_else"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::serialize_field"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::take"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::to_number"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::unwrap"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::unwrap_or"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::unwrap_or_default"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::unwrap_or_else"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::value"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::UNDEFINED"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::deserialize_info"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/prepared_order.rs::PreparedOrderOpts"
+reason = "Internal prepared placement input representation for mapped amendment paths copying Order.type/side, which can be undefined at runtime. Public PlaceOrderOpts remains strict. This carrier adds no placement algorithm or fallback."
+
+[[exempt]]
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::PreparedExecutionOptions"
+reason = "Internal prepared placement input representation for mapped amendment paths copying Order.type/side, which can be undefined at runtime. Public PlaceOrderOpts remains strict. This carrier adds no placement algorithm or fallback."
+
+[[exempt]]
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::PreparedExecutionOrder"
+reason = "Internal prepared placement input representation for mapped amendment paths copying Order.type/side, which can be undefined at runtime. Public PlaceOrderOpts remains strict. This carrier adds no placement algorithm or fallback."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::get_or_insert_with"
+reason = "Shared model presence mutation used by the webworker Order.extra postprocessor: reads absent and undefined as undefined, and creates a present value when the source initializes that property. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-num/src/date.rs::js_date_to_iso_string"
+reason = "Shared ECMAScript Date runtime glue with no exported TypeScript SDK declaration: canonical TimeClip plus UTC ISO rendering and RangeError for invalid dates. The existing websocket timestamp formatter delegates to this helper; native candle bounds use the same implementation."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::parse_json"
+reason = "C3: shared ECMAScript JSON.parse data primitive; one iterative grammar preserves UTF-16 strings/keys and native binary64 numbers for runtime and transport consumers. No standalone TypeScript declaration; typed Value projection remains explicitly fallible."
+
+[[exempt]]
+rs = "safe-cex-types/src/js_coercion.rs::json_quote_utf16"
+reason = "C3: shared ECMAScript JSON string quotation primitive used by the retained writer and runtime JSON.stringify; preserves lone UTF-16 units as escapes. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/js_coercion.rs::js_own_keys_utf16"
+reason = "C3: UTF-16 key adapter to the existing ECMAScript array-index classifier; native key enumeration keeps integer indices ascending and ordinary names in insertion order. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-num/src/json_stringify.rs::js_retained_json_stringify"
+reason = "C3: direct canonical retained-data ECMAScript JSON.stringify projection; shares quotation, number spelling and index ordering with existing prepared-data rendering without a second owned carrier. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-num/src/json_stringify.rs::js_retained_truthy"
+reason = "C3: ECMAScript Boolean conversion on canonical retained data before wire JSON projection; retains undefined/nonfinite/signed-zero truthiness. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/js_coercion.rs::js_retained_string_utf16"
+reason = "C3: canonical retained-tree String(any) glue for Axios form encoding. Shares existing object refusal and number spelling, preserves UTF-16 text, and has no standalone TypeScript declaration; real native request/signing regressions exercise the consumer."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::response_json_view"
+reason = "C3: explicit legacy Rust Error JSON-view boundary, approved by overseer for phase 2. JSON projection loses native nonfinite values and replaces lone units only in this view; the original RestFailure in ExchangeError.origin remains authoritative. Not a new TypeScript behavior or native-body fallback."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/library.rs::qs_stringify"
+reason = "C3: direct entry to the existing shared native npm qs binding for typed WOO signer composition. WOO and imported runtime calls execute the same implementation; no standalone TypeScript SDK declaration or second query algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/globals.rs::stringify_json"
+reason = "C3: shared native JSON.stringify entry delegates the existing production SerializeJSONProperty implementation without a replacer. MEXC normalization uses it directly so native BigInt throws remain covered without a second serializer or JSON carrier."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue"
+reason = "FFI boundary glue (MANIFEST-SPEC section 5): owned structured data carrier between the JS runtime, native account thread and napi. Retains undefined, binary64 bits, UTF-16 strings/keys and BigInt words without JSON. It is not a separately declared TypeScript SDK model; executable values, cycles and depth beyond 512 are explicitly refused by this approved native tree profile. Real napi lossless-value regressions cover the boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue"
+reason = "FFI boundary glue (MANIFEST-SPEC section 5): owned structured data carrier between the JS runtime, native account thread and napi. Retains undefined, binary64 bits, UTF-16 strings/keys and BigInt words without JSON. It is not a separately declared TypeScript SDK model; executable values, cycles and depth beyond 512 are explicitly refused by this approved native tree profile. Real napi lossless-value regressions cover the boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::string"
+reason = "FFI data construction: copies a native diagnostic string into the owned UTF-16 carrier. No venue policy or independent TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::object"
+reason = "FFI data construction: builds ordered owned field pairs for native results/error envelopes. No TypeScript object policy beyond the native tree representation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::as_f64"
+reason = "FFI data observation: returns the stored binary64 only for the Number variant; does not coerce JavaScript inputs or normalize nonfinite bits. No independent source SDK method."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::get"
+reason = "FFI data observation: selects a named field from the already captured ordered native object. Does not invoke getters or add source property semantics; runtime capture and typed admission remain separate tested boundaries."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::encode"
+reason = "FFI typed-value bridge: delegates the existing native serde codec into the runtime JS carrier, then captures the owned tree. Native ModelField presence and numeric/UTF-16 observations remain with their canonical codecs and real account-value tests; no JSON encoding path or extra TypeScript API."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::decode"
+reason = "FFI typed-value bridge: materializes the owned runtime value and delegates canonical typed admission. It does not widen required arguments or add a venue coercion policy. Existing native account decoder/lossless tests own this host boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::from_js"
+reason = "FFI capture glue: copies supported runtime values into the shared owned tree with cycle and 512-depth refusal, preserving own undefined and numeric/UTF-16 data. The approved tree profile is documented by the actual napi value/guard regressions; no independent TypeScript helper declaration is claimed."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::to_js"
+reason = "FFI materialization glue: reconstructs the shared runtime value directly from the owned carrier, including own data properties and BigInt words. It does not JSON-roundtrip payloads or expose a new SDK operation; real napi and signer regressions exercise this seam."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedCallbackError"
+reason = "Native error boundary glue: std::error::Error carrier holding an already captured owned callback rejection so Send/Sync transport errors can retain structured name/message/code. It adds no TypeScript error class or venue failure policy; real signer callback prove-fail regressions cover materialization."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedCallbackError::new"
+reason = "Native error boundary construction: stores the supplied owned callback rejection without interpretation, JSON or venue policy. The carrier has no independent source declaration."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedCallbackError::value"
+reason = "Native error boundary observation: borrows the unchanged owned rejection for canonical runtime reconstruction. No independent TypeScript SDK operation."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_callback.rs::Callback"
+reason = "napi ABI glue: typed JavaScript function handle for the host signer/proxy callback, accepting structured JsData. This names the native function signature, not an additional exchange method."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_callback.rs::Request"
+reason = "napi ABI glue: thread-safe handle to the wrapped host callback. Account ownership and close release the handle; the existing callback/close regressions exercise the real napi path. No independently declared TypeScript SDK type."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_callback.rs::CallbackFuture"
+reason = "napi ABI glue: receiver future for one host callback settlement, adapting synchronous values/throws and Promise fulfillment/rejection to the native executor. It preserves the structured captured error envelope and reports dropped settlement. Real signer callback regressions cover both synchronous and Promise paths; no separate TypeScript SDK class."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_callback.rs::wrap"
+reason = "napi boundary glue: invokes the real host callback on the JS thread and adapts values/throws/Promises into CallbackFuture, retaining name/message/code and inspecting throwing rejection getters with the explicit eight-exception guard. Real napi signer/proxy callback and natural-exit regressions own these semantics; this adds no venue algorithm or parallel JSON path."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_value.rs::JsData"
+reason = "napi ABI glue: FromNapiValue/ToNapiValue wrapper for the shared owned tree, preserving own undefined, numeric bits, UTF-16 keys/strings and BigInt across the addon boundary. It applies the same explicit cycle/depth/unsupported-value profile; actual Node account-value regressions cover it. No independently declared TypeScript model."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::NativeAccount::cancel_startup"
+reason = "Native host lifecycle glue: invalidate pending startup delivery synchronously before an asynchronously dispatched disposal; no standalone TypeScript API. Actual Node native-account-startup tests prove cancellation and suppression of a late full snapshot."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::NativeAccount::exchange_name"
+reason = "Typed native-account identity accessor for host worker logging, with no standalone TypeScript declaration. Reads the actual constructed exchange name instead of decoding it again or adding a prohibited bindings-to-types dependency. Actual native-account-startup tests assert the exchange/account error context."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue"
+reason = "Native account ABI alias of the shared OwnedJsValue tree. Re-export preserves the registry/FFI seam after moving the implementation into exchange; it adds no data policy, serializer or independently declared TypeScript type."
+
+[[exempt]]
+rs = "safe-cex-transport/src/provider.rs::TransportErrorOrigin"
+reason = "Native std::error::Error plumbing: opaque Arc origin retains an owned Send/Sync callback rejection through transport failure without imposing a new TypeScript error class. Canonical exchange error reconstruction and real napi signer regressions own its use."
+
+[[exempt]]
+rs = "safe-cex-transport/src/provider.rs::TransportErrorOrigin::new"
+reason = "Native origin construction: retains the supplied Send/Sync error in Arc, without translating its fields or introducing venue policy. No separate TypeScript SDK constructor."
+
+[[exempt]]
+rs = "safe-cex-transport/src/provider.rs::TransportErrorOrigin::error"
+reason = "Native origin observation: borrows the retained std::error::Error for canonical downcast/materialization. No independent TypeScript SDK operation or error classification."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::console_values"
+reason = "Host console capability: receives the original ordered local Js argument list, including Error references. Mapped BaseExchange::emit_and_log_error and installed console select arguments/policy; this required host declaration adds no SDK behavior. The typed console helper delegates to this same capability. Real Hyro hosted-auth and installed BaseExchange/console identity witnesses cover the direct cutover."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::console_text"
+reason = "Native terminal presentation after the console capability receives retained Js values, rather than a replacement source console algorithm. Reads native Error data descriptors without executing getters; this is not a JSON or rich telemetry boundary. Installed console and raw reporter witnesses retain original references and compare Error name/message first lines with the maintained TS console."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::exception_text"
+reason = "Text-only recording-host observation for existing fixture report lists after report_raw_exception receives the original Js exception. Native Error messages remain visible; non-Error finite fixture views preserve their prior explicit JSON observation. Production NativeRuntime reports through console_text, and rich sinks retain Js directly. The unchanged KuCoin default-binding witness and separate native identity assertions cover these distinct observations."

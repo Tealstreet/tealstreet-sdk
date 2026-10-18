@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { identityAliasProbe } from './accepted-identity-alias.mjs';
 import { reviewedGenericAliasProbe } from './accepted-reviewed-aliases.mjs';
+import { reviewedFunctionPointerAliasProbe } from './accepted-function-pointer-alias.mjs';
+import { reviewedNapiAliasProbe } from './accepted-napi-alias.mjs';
+import { weexKlineTupleProbe } from './accepted-weex-kline-alias.mjs';
 import { localFutureAliasProbe } from './accepted-future-alias.mjs';
 import { loaderFutureAliasProbe } from './accepted-loader-future.mjs';
 import { exchangeFutureAliasProbe } from './accepted-exchange-future.mjs';
@@ -30,6 +33,14 @@ function boundedAst(node, parameter) {
   for (const value of Object.values(node)) boundedAst(value, parameter);
 }
 export function genericAliasProbe(alias, contract, context) {
+  const napi = reviewedNapiAliasProbe(alias, contract, context);
+  if (napi) return napi;
+  const hosted = hostedSignerTupleProbe(alias, contract, context);
+  if (hosted) return hosted;
+  const weex = weexKlineTupleProbe(alias, contract, context);
+  if (weex) return weex;
+  const pointer = reviewedFunctionPointerAliasProbe(alias, contract, context);
+  if (pointer) return pointer;
   if (!(alias.generics?.params ?? []).length) return undefined;
   const reviewed = reviewedGenericAliasProbe(alias, contract, context);
   if (reviewed) return reviewed;
@@ -68,6 +79,31 @@ export function genericAliasProbe(alias, contract, context) {
   assert.ok(context && Array.isArray(context.macroOrigins) && Array.isArray(context.externalTypeAliases), `${label}: actual compiler origin context required`);
   requireCallableCompilerIdentity(alias, probe, context.externalTypeAliases, context.macroOrigins);
   return probe;
+}
+
+// One concrete tuple alias. Its expected native type belongs to this probe,
+// never the contract. The ordinary alias trait probes still execute on it.
+function hostedSignerTupleProbe(alias, contract, context) {
+  if (alias.name !== 'safe_cex_exchange::js_runtime::base_exchange::HostedSigner') return undefined;
+  const label = `${alias.name}: accepted-set assertion: hosted signer tuple`;
+  const path = name => ({ resolved_path: { path: name, args: null } });
+  const applied = (name, type) => ({ resolved_path: { path: name, args: { angle_bracketed: { args: [{ type }], constraints: [] } } } });
+  const target = { tuple: [applied('alloc::rc::Rc', { dyn_trait: { traits: [{ trait: { path: 'safe_cex_exchange::runtime::RemoteSigner', args: null }, generic_params: [] }], lifetime: null } }), applied('core::option::Option', path('alloc::string::String'))] };
+  assert.equal(alias.ident, 'HostedSigner', `${label}: identifier changed`);
+  assert.equal(alias.span?.filename, 'safe-cex-exchange/src/js_runtime/base_exchange.rs', `${label}: source identity changed`);
+  assert.deepEqual(alias.generics, { params: [], where_predicates: [] }, `${label}: generic parameters changed`);
+  assert.deepEqual(alias.rawTarget, target, `${label}: source target changed`);
+  assert.deepEqual(alias.target, target, `${label}: expanded target changed`);
+  assert.equal(contract?.category, 'non-decoder', `${label}: explicit capability classification required`);
+  assert.ok(contract.evidence?.trim() && contract.reason?.trim(), `${label}: specific classification required`);
+  for (const key of ['instantiation', 'aliasProbeExpected', 'aliasProbeKind', 'aliasProbeSuffix', 'nativeCanonical']) assert.equal(contract[key], undefined, `${label}: caller cannot supply ${key}`);
+  for (const key of ['generics', 'rawTarget', 'target']) assert.deepEqual(contract[key], alias[key], `${label}: contract compiler ${key} changed`);
+  assert.ok(context?.macroOrigins?.includes('serde_json') && Array.isArray(context.externalTypeAliases), `${label}: actual compiler context required`);
+  for (const [canonical, kind] of [['alloc::rc::Rc', 'struct'], ['core::option::Option', 'enum'], ['alloc::string::String', 'struct']]) {
+    const rows = context.externalTypeAliases.filter(row => row.name === alias.name && row.canonical === canonical);
+    assert.ok(rows.length === 1 && rows[0].kind === kind && rows[0].artifact?.kind === 'sysroot', `${label}: actual sysroot ${canonical} identity required`);
+  }
+  return { suffix: '', canonical: 'tuple', expectedType: '(::std::rc::Rc<dyn crate::runtime::RemoteSigner>,::core::option::Option<::std::string::String>)', probeKind: 'reviewed-hosted-signer-tuple', monomorphization: 'the actual concrete HostedSigner tuple; no signer execution, account parsing or generic tuple permission' };
 }
 
 // Call AFTER production external aliases have been resolved with the existing

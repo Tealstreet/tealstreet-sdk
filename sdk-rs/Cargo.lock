@@ -2903,6 +2903,8 @@ dependencies = [
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -3888,6 +3890,7 @@ dependencies = [
  "serde_json",
  "syn 3.0.7",
  "tokio",
+ "tokio-tungstenite",
  "trybuild",
 ]
 
@@ -3900,6 +3903,7 @@ dependencies = [
  "napi-derive",
  "safe-cex",
  "safe-cex-registry",
+ "safe-cex-webworker",
  "serde_json",
  "tokio",
  "wasm-bindgen",
@@ -3943,9 +3947,16 @@ name = "safe-cex-parity"
 version = "0.1.0"
 dependencies = [
  "proc-macro2 1.0.107",
+ "safe-cex-exchange",
+ "safe-cex-store",
+ "safe-cex-transport",
+ "safe-cex-types",
+ "safe-cex-venue-asterdex",
+ "safe-cex-webworker",
  "serde",
  "serde_json",
  "syn 3.0.7",
+ "tokio",
  "toml",
 ]
 
@@ -3954,6 +3965,7 @@ name = "safe-cex-registry"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "ed25519-dalek",
  "futures-util",
  "getrandom 0.2.17",
  "hmac 0.12.1",
@@ -3961,21 +3973,32 @@ dependencies = [
  "safe-cex-store",
  "safe-cex-transport",
  "safe-cex-types",
+ "safe-cex-venue-apexomni",
  "safe-cex-venue-asterdex",
  "safe-cex-venue-backpack",
  "safe-cex-venue-binance",
  "safe-cex-venue-bingx",
  "safe-cex-venue-bitget",
+ "safe-cex-venue-bitrue",
  "safe-cex-venue-bitunix",
  "safe-cex-venue-blofin",
+ "safe-cex-venue-breakoutprop",
  "safe-cex-venue-bybit",
  "safe-cex-venue-coinbase",
+ "safe-cex-venue-cryptocom",
+ "safe-cex-venue-grvt",
  "safe-cex-venue-hyperliquid",
  "safe-cex-venue-kraken",
  "safe-cex-venue-kucoin",
+ "safe-cex-venue-lighter",
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
+ "safe-cex-venue-orderly",
+ "safe-cex-venue-paradex",
+ "safe-cex-venue-phemex",
  "safe-cex-venue-polymarket",
+ "safe-cex-venue-txflow",
+ "safe-cex-venue-weex",
  "safe-cex-venue-woo",
  "serde",
  "serde_json",
@@ -4066,6 +4089,7 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4189,6 +4213,7 @@ dependencies = [
 name = "safe-cex-venue-bybit"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-candle-cache",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
@@ -4237,6 +4262,7 @@ name = "safe-cex-venue-grvt"
 version = "0.1.0"
 dependencies = [
  "indexmap 2.14.2",
+ "num-bigint 0.4.6",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
@@ -4288,6 +4314,7 @@ dependencies = [
 name = "safe-cex-venue-kucoin"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "indexmap 2.14.2",
  "safe-cex-crypto",
  "safe-cex-exchange",
@@ -4297,6 +4324,8 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -4326,15 +4355,18 @@ dependencies = [
  "futures",
  "hmac 0.12.1",
  "indexmap 2.14.2",
+ "js-sys",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
  "safe-cex-transport",
  "safe-cex-types",
+ "safe-cex-webworker",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -4360,8 +4392,10 @@ dependencies = [
  "bs58",
  "regex",
  "safe-cex-crypto",
+ "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
@@ -4372,11 +4406,17 @@ dependencies = [
 name = "safe-cex-venue-paradex"
 version = "0.1.0"
 dependencies = [
+ "num-bigint 0.4.6",
  "safe-cex-crypto",
+ "safe-cex-exchange",
  "safe-cex-num",
+ "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
+ "starknet-core",
+ "starknet-crypto",
 ]
 
 [[package]]
@@ -4387,6 +4427,7 @@ dependencies = [
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
@@ -4424,10 +4465,12 @@ name = "safe-cex-venue-weex"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "futures",
  "hmac 0.12.1",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
@@ -4454,6 +4497,7 @@ name = "safe-cex-webworker"
 version = "0.1.0"
 dependencies = [
  "indexmap 2.14.2",
+ "js-sys",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
@@ -4461,6 +4505,7 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]

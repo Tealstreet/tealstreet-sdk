@@ -84,11 +84,15 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
             &store,
             Some("private stream stalled"),
             true,
-            |message, severity| effects.borrow_mut().push(json!(["log", message, severity])),
+            |message, severity| {
+                effects.borrow_mut().push(json!(["log", message, severity]));
+                Ok(())
+            },
             |message| {
                 effects
                     .borrow_mut()
-                    .push(json!(["warning", message, {"forceToast":true}]))
+                    .push(json!(["warning", message, {"forceToast":true}]));
+                Ok(())
             },
         )
         .unwrap();
@@ -98,11 +102,15 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
             &store,
             Some("private stream still stalled"),
             true,
-            |message, severity| effects.borrow_mut().push(json!(["log", message, severity])),
+            |message, severity| {
+                effects.borrow_mut().push(json!(["log", message, severity]));
+                Ok(())
+            },
             |message| {
                 effects
                     .borrow_mut()
-                    .push(json!(["warning", message, {"forceToast":true}]))
+                    .push(json!(["warning", message, {"forceToast":true}]));
+                Ok(())
             },
         )
         .unwrap();
@@ -116,11 +124,15 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
             &store,
             None,
             true,
-            |message, severity| effects.borrow_mut().push(json!(["log", message, severity])),
+            |message, severity| {
+                effects.borrow_mut().push(json!(["log", message, severity]));
+                Ok(())
+            },
             |message| {
                 effects
                     .borrow_mut()
-                    .push(json!(["warning", message, {"forceToast":true}]))
+                    .push(json!(["warning", message, {"forceToast":true}]));
+                Ok(())
             },
         )
         .unwrap();
@@ -130,11 +142,15 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
         .mark_private_user_stream_auth_failed(
             &store,
             Some("invalid signature"),
-            |message, severity| effects.borrow_mut().push(json!(["log", message, severity])),
+            |message, severity| {
+                effects.borrow_mut().push(json!(["log", message, severity]));
+                Ok(())
+            },
             |message| {
                 effects
                     .borrow_mut()
-                    .push(json!(["warning", message, {"forceToast":true}]))
+                    .push(json!(["warning", message, {"forceToast":true}]));
+                Ok(())
             },
         )
         .unwrap();
@@ -143,11 +159,15 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
         .mark_private_user_stream_auth_failed(
             &store,
             None,
-            |message, severity| effects.borrow_mut().push(json!(["log", message, severity])),
+            |message, severity| {
+                effects.borrow_mut().push(json!(["log", message, severity]));
+                Ok(())
+            },
             |message| {
                 effects
                     .borrow_mut()
-                    .push(json!(["warning", message, {"forceToast":true}]))
+                    .push(json!(["warning", message, {"forceToast":true}]));
+                Ok(())
             },
         )
         .unwrap();
@@ -156,11 +176,15 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
         .mark_private_user_stream_auth_failed(
             &store,
             Some(""),
-            |message, severity| effects.borrow_mut().push(json!(["log", message, severity])),
+            |message, severity| {
+                effects.borrow_mut().push(json!(["log", message, severity]));
+                Ok(())
+            },
             |message| {
                 effects
                     .borrow_mut()
-                    .push(json!(["warning", message, {"forceToast":true}]))
+                    .push(json!(["warning", message, {"forceToast":true}]));
+                Ok(())
             },
         )
         .unwrap();
@@ -215,12 +239,23 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
         &store,
         Some("private stream stalled"),
         true,
-        move |message, severity| logged.borrow_mut().push(json!(["log", message, severity])),
-        move |message| warned.borrow_mut().push(json!(["warning", message])),
+        move |message, severity| {
+            logged.borrow_mut().push(json!(["log", message, severity]));
+            Ok(())
+        },
+        move |message| {
+            warned.borrow_mut().push(json!(["warning", message]));
+            Ok(())
+        },
     );
 
-    match result {
-        Err(StoreMutationError::Notification(error)) => {
+    let failure = result.expect_err("health publication retains the Store subscriber failure");
+    assert!(
+        failure.value.is_none(),
+        "Store failure is retained without JSON conversion"
+    );
+    match failure.store_mutation() {
+        Some(StoreMutationError::Notification(error)) => {
             assert_eq!(
                 error.subscriber_id(),
                 0,
@@ -282,9 +317,19 @@ fn subscriber_id_survives_store_to_exchange_error_conversion() {
     );
 
     let mutation = CoinbasePrivateUserStreamHealth::default()
-        .mark_private_user_stream_degraded(&store, Some("degraded"), false, |_, _| {}, |_| {})
+        .mark_private_user_stream_degraded(
+            &store,
+            Some("degraded"),
+            false,
+            |_, _| Ok(()),
+            |_| Ok(()),
+        )
         .expect_err("subscriber failure is returned after the Store mutation");
-    let exchange_error = ExchangeError::from(mutation);
+    assert!(
+        mutation.value.is_none(),
+        "original Store failure retained without encoding"
+    );
+    let exchange_error = ExchangeError::from(mutation.store_mutation().unwrap().clone());
 
     assert_eq!(exchange_error.message, "subscriber failed");
     assert_eq!(exchange_error.store_subscriber_ids, [0]);

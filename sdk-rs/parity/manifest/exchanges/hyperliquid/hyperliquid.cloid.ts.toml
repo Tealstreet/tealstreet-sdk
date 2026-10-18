@@ -40,7 +40,7 @@ kind = "type"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cloid.rs::HyperliquidPlacementRecord"
 status = "ported"
-note = "camelCase serde record matching the sessionStorage/BroadcastChannel JSON; timeInForce is omitted when undefined. Witness: tests/cloid.rs::actual_source_cloid_helpers_match_native_values runs scripts/cloid-oracle.cjs over the actual hyperliquid.cloid.ts, clientOrderId.ts and order-inference modules (34 fixed cases); native values and f64 bits are asserted before any serialization."
+note = "camelCase record matching the sessionStorage/BroadcastChannel JSON; timeInForce is omitted when undefined and rejects present null. The public decoder captures binary64 numbers before its private remote schema and map-only guard; complete positional arrays are refused. Witness: tests/placement_record_ingress.rs checks native fields, optional presence and float bits through public Serde and shared numeric entrypoints, including raw overflow, signed zero and integer rounding. The shared 128-level capture budget and scalar-Unicode symbol boundary remain explicit in crate guidance. tests/cloid.rs::actual_source_cloid_helpers_match_native_values also runs scripts/cloid-oracle.cjs over the actual hyperliquid.cloid.ts, clientOrderId.ts and order-inference modules (34 fixed cases); native values and f64 bits are asserted before any serialization."
 
 [[symbol]]
 ts = "placementRecordFromWire"

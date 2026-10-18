@@ -34,6 +34,7 @@ struct SocketHost {
     next_timer: Cell<u64>,
     timers: RefCell<BTreeMap<u64, SocketTask>>,
     ping_timer: Cell<Option<u64>>,
+    ping_socket: RefCell<Option<std::rc::Weak<ApexOmniPrivateWebsocket>>>,
     private: bool,
     variant: u64,
     name: String,
@@ -53,6 +54,7 @@ impl SocketHost {
             next_timer: Cell::new(1),
             timers: RefCell::new(BTreeMap::new()),
             ping_timer: Cell::new(None),
+            ping_socket: RefCell::new(None),
             private,
             variant,
             name: name.into(),
@@ -152,13 +154,19 @@ impl ApexSocketHost for SocketHost {
     }
     fn send(&self, frame: &str, logged: bool) -> Result<(), ExchangeError> {
         self.raw_frames.borrow_mut().push(frame.to_owned());
-        let mut value = safe_cex_transport::how::json_parse(frame);
+        let mut value = safe_cex_transport::how::json_parse(frame)
+            .into_value()
+            .unwrap();
         if value["op"] == "login" {
             let args = value["args"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|arg| safe_cex_transport::how::json_parse(arg.as_str().unwrap()))
+                .map(|arg| {
+                    safe_cex_transport::how::json_parse(arg.as_str().unwrap())
+                        .into_value()
+                        .unwrap()
+                })
                 .collect::<Vec<_>>();
             value["args"] = json!(args);
         }
@@ -170,11 +178,23 @@ impl ApexSocketHost for SocketHost {
         self.runtime.record("pingAt", vec![n(at)]);
         Ok(())
     }
-    fn ping_timeout(&self) -> Option<u64> {
-        self.ping_timer.get()
-    }
-    fn set_ping_timeout(&self, timer: Option<u64>) -> Result<(), ExchangeError> {
-        self.ping_timer.set(timer);
+    fn schedule_ping(&self, delay_ms: u64) -> Result<(), ExchangeError> {
+        if let Some(timer) = self.ping_timer.get() {
+            self.clear_timeout(timer)?;
+        }
+        let weak = self
+            .ping_socket
+            .borrow()
+            .clone()
+            .expect("private ping receiver");
+        let timer = self.set_timeout(
+            delay_ms,
+            Rc::new(move || {
+                let socket = weak.upgrade().expect("live private socket");
+                Box::pin(async move { socket.ping() })
+            }),
+        )?;
+        self.ping_timer.set(Some(timer));
         Ok(())
     }
     fn track_last_received(&self) -> Result<(), ExchangeError> {
@@ -303,7 +323,7 @@ fn run(privacy: &str, name: &str) {
         if ["positions", "accounts"].contains(&name) {
             let mut p = store.positions()[0].clone();
             p.id = "BTC-USDC:short".into();
-            p.side = PositionSide::Short;
+            p.side = safe_cex_types::ModelField::Value(PositionSide::Short);
             Store::update(
                 store.as_ref(),
                 StoreUpdate {
@@ -334,6 +354,7 @@ fn run(privacy: &str, name: &str) {
         parent.base.on(
             "fill",
             Rc::new(move |_, data| {
+                let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
                 emitter.record("emit", vec![s("fill"), J::from(data.clone())]);
                 Ok(())
             }),
@@ -341,9 +362,11 @@ fn run(privacy: &str, name: &str) {
         let host = SocketHost::new(runtime.clone(), private, variant, name);
         runtime.operations.borrow_mut().clear();
         let input = native::input(&row["input"]);
+        let initial_positions = store.positions().to_vec();
         let mut result = J::Undefined;
         if private {
             let socket = ApexOmniPrivateWebsocket::new(parent.clone(), host.clone()).unwrap();
+            *host.ping_socket.borrow_mut() = Some(Rc::downgrade(&socket));
             if name != "class" {
                 runtime.operations.borrow_mut().clear();
             }
@@ -385,7 +408,14 @@ fn run(privacy: &str, name: &str) {
                         socket.handle_order_topic(&input).unwrap();
                     }
                 }
-                "positions" => socket.handle_position_topic(&input).unwrap(),
+                "positions" => {
+                    if let Err(error) = socket.handle_position_topic(&input) {
+                        result = obj(vec![
+                            ("errorName", s(error.name)),
+                            ("errorMessage", s(error.message)),
+                        ]);
+                    }
+                }
                 "accounts" => socket.handle_ws_accounts_v2_topic(&input).unwrap(),
                 "ordersThrottle" | "positionsThrottle" => {
                     if variant == 1 {
@@ -474,7 +504,7 @@ fn run(privacy: &str, name: &str) {
                         .listen_ohlcv(
                             OHLCVOptions {
                                 symbol: "BTCUSDC".into(),
-                                interval: Timeframe::M1,
+                                interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
                                 from: None,
                                 to: None,
                                 limit: None,
@@ -560,7 +590,39 @@ fn run(privacy: &str, name: &str) {
                 ),
             ),
         ]);
-        native::check_fields(&state, &row["state"], &label);
+        if private && name == "positionsThrottle" && variant == 2 {
+            // P4 explicitly requires a second disposal check after awaiting.
+            // Retain the live source observation of late publication; compare
+            // every other state axis, and assert the chosen native axis directly.
+            assert_eq!(
+                store.positions().to_vec(),
+                initial_positions,
+                "disposed timer retains the prior positions"
+            );
+            let source_positions = row["state"]["values"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|field| field[0] == "positions")
+                .unwrap();
+            assert_eq!(
+                source_positions[1]["values"].as_array().unwrap().len(),
+                4,
+                "source timer still publishes four late positions"
+            );
+            let J::Object(mut native_fields) = state else {
+                panic!()
+            };
+            native_fields.retain(|(name, _)| name != "positions");
+            let mut expected = row["state"].clone();
+            expected["values"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|field| field[0] != "positions");
+            native::check_fields(&J::Object(native_fields), &expected, &label);
+        } else {
+            native::check_fields(&state, &row["state"], &label);
+        }
         assert_eq!(
             host.timers.borrow().len(),
             row["timers"].as_u64().unwrap() as usize,
@@ -631,7 +693,7 @@ fn ws_public_candle_string_boundary() {
         .listen_ohlcv(
             OHLCVOptions {
                 symbol: "BTCUSDC".into(),
-                interval: Timeframe::M1,
+                interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
                 from: None,
                 to: None,
                 limit: None,
@@ -770,6 +832,7 @@ fn canceled_prefix_effects_precede_later_order_faults() {
         let host = SocketHost::new(runtime.clone(), true, 0, "order-boundaries");
         host.date_offset.set(row["dateOffset"].as_f64().unwrap());
         let socket = ApexOmniPrivateWebsocket::new(parent.clone(), host.clone()).unwrap();
+        *host.ping_socket.borrow_mut() = Some(Rc::downgrade(&socket));
         socket
             .last_connect_time
             .set(row["lastConnect"].as_f64().unwrap());
@@ -807,8 +870,8 @@ fn canceled_prefix_effects_precede_later_order_faults() {
         }
         assert_eq!(
             runtime.now_calls.get(),
-            parent_clocks,
-            "{marker} native parent virtual clocks"
+            0,
+            "{marker} parent virtual clock must not read the raw runtime"
         );
         assert_eq!(
             host.virtual_calls.get(),
@@ -888,6 +951,16 @@ fn frame_units(value: &Value) -> Vec<u16> {
 #[test]
 fn socket_frame_units_are_observed_before_wire() {
     use safe_cex_num::numeric_ingress::js_from_str;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    fn property<'a>(value: &'a Input, name: &str) -> Option<&'a Input> {
+        let Input::Object(entries) = value else {
+            return None;
+        };
+        entries
+            .iter()
+            .find(|(key, _)| key.iter().copied().eq(name.encode_utf16()))
+            .map(|(_, value)| value)
+    }
     let output = Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -933,17 +1006,46 @@ fn socket_frame_units_are_observed_before_wire() {
         );
         let raw = row["raw"].as_str().unwrap();
         let decoded = safe_cex_transport::how::json_parse(raw);
+        assert!(
+            !matches!(
+                decoded,
+                safe_cex_types::retained_json::RetainedJsonInput::Null
+            ),
+            "{marker} native parser retains the complete source frame"
+        );
+        // Observe retained units before the explicitly fallible UTF-8 frame view.
+        let values = property(&decoded, if private { "args" } else { "data" }).unwrap();
+        let Input::Array(values) = values else {
+            panic!("{marker} native frame array");
+        };
+        let value = if private {
+            &values[0]
+        } else {
+            property(&values[0], "s").unwrap()
+        };
+        assert!(
+            matches!(value, Input::Text(actual) if actual == units),
+            "{marker} retained native input units"
+        );
+        if label == "unused-extra" {
+            assert!(
+                matches!(property(&decoded, "ignored"), Some(Input::Text(actual)) if actual == &[0xd800]),
+                "{marker} unrelated native lone unit retained"
+            );
+        }
+        let decoded = decoded.into_value();
         if refused {
             assert!(
                 raw.is_ascii(),
                 "{marker} refused source frame is valid ASCII transport"
             );
             assert!(
-                decoded.is_null(),
-                "{marker} native parser refuses whole frame"
+                decoded.is_err(),
+                "{marker} explicit typed frame view refuses whole frame"
             );
             native_refusals += 1;
         } else {
+            let decoded = decoded.unwrap();
             let value = if private {
                 &decoded["args"][0]
             } else {
@@ -1001,16 +1103,22 @@ fn socket_frame_units_are_observed_before_wire() {
         .unwrap();
         let host = SocketHost::new(runtime.clone(), private, 0, "frame-units");
         runtime.operations.borrow_mut().clear();
-        if private {
+        let result = if private {
             ApexOmniPrivateWebsocket::new(parent, host.clone())
                 .unwrap()
                 .on_message(raw)
-                .unwrap();
         } else {
             ApexOmniPublicWebsocket::new(parent, host.clone())
                 .unwrap()
                 .on_message(raw)
-                .unwrap();
+        };
+        if refused {
+            assert!(
+                result.unwrap_err().message.contains("invalid utf-16"),
+                "{marker} typed frame refusal is visible"
+            );
+        } else {
+            result.unwrap();
         }
         let sent = host.raw_frames.borrow().clone();
         assert_eq!(

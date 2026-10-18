@@ -1,22 +1,20 @@
 use safe_cex_types::store_model::TwapStatus;
 use safe_cex_types::{
-    ActiveChaser, ActiveTWAP, DisplayedPosition, ExchangeName, ExchangeOptions, Market, Order,
-    OrderSide, OrderStatus, OrderType, Position, PositionSide, StoreData, Ticker,
+    ActiveChaser, ActiveTWAP, DisplayedPosition, ExchangeName, ExchangeOptions, Market, ModelField,
+    Order, OrderSide, OrderStatus, OrderType, Position, PositionSide, StoreData, Ticker,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
 fn truthy(value: f64) -> bool {
     value != 0.0 && !value.is_nan()
 }
-fn position_key(symbol: &str, side: PositionSide) -> String {
-    format!(
-        "{symbol}:{}",
-        if side == PositionSide::Long {
-            "long"
-        } else {
-            "short"
-        }
-    )
+fn position_key(symbol: &str, side: ModelField<PositionSide>) -> String {
+    let side = match side {
+        ModelField::Value(PositionSide::Long) => "long",
+        ModelField::Value(PositionSide::Short) => "short",
+        ModelField::Absent | ModelField::Undefined => "undefined",
+    };
+    format!("{symbol}:{side}")
 }
 #[derive(Default)]
 struct StopTpCoverage {
@@ -123,14 +121,19 @@ impl DisplayedPositionsPostprocessor {
         chasers
             .iter()
             .filter(|c| !c.is_stopped)
-            .map(|c| position_key(&c.symbol, Self::get_chaser_position_side(c)))
+            .map(|c| position_key(&c.symbol, Self::get_chaser_position_side(c).into()))
             .collect()
     }
     fn build_active_twap_keys(twaps: &[ActiveTWAP]) -> HashSet<String> {
         twaps
             .iter()
             .filter(|t| t.status == TwapStatus::Running)
-            .map(|t| position_key(&t.active_market.symbol, Self::get_twap_position_side(t)))
+            .map(|t| {
+                position_key(
+                    &t.active_market.symbol,
+                    Self::get_twap_position_side(t).into(),
+                )
+            })
             .collect()
     }
     fn build_stop_tp_coverage(orders: &[Order]) -> HashMap<String, StopTpCoverage> {
@@ -146,14 +149,17 @@ impl DisplayedPositionsPostprocessor {
             };
             let is_stop = matches!(
                 order.r#type,
-                OrderType::StopLoss | OrderType::TrailingStopLoss
+                ModelField::Value(OrderType::StopLoss | OrderType::TrailingStopLoss)
             );
-            let is_tp = matches!(order.r#type, OrderType::TakeProfit | OrderType::Limit);
+            let is_tp = matches!(
+                order.r#type,
+                ModelField::Value(OrderType::TakeProfit | OrderType::Limit)
+            );
             if !is_stop && !is_tp {
                 continue;
             }
             let entry = coverage
-                .entry(position_key(&order.symbol, side))
+                .entry(position_key(&order.symbol, side.into()))
                 .or_default();
             let amount = if truthy(order.amount) {
                 order.amount
@@ -308,7 +314,7 @@ impl DisplayedPositionsPostprocessor {
                 continue;
             }
             let side = Self::get_chaser_position_side(chaser);
-            if real_keys.contains(&position_key(&chaser.symbol, side)) {
+            if real_keys.contains(&position_key(&chaser.symbol, side.into())) {
                 continue;
             }
             // Own entries shadow Object.prototype. The empty-table fallback delegates
@@ -341,7 +347,7 @@ impl DisplayedPositionsPostprocessor {
                 position: Position {
                     id: format!("fake-chaser-{}", chaser.id),
                     symbol: chaser.symbol.clone(),
-                    side,
+                    side: side.into(),
                     entry_price: if truthy(ticker.last) {
                         ticker.last
                     } else {
@@ -353,14 +359,14 @@ impl DisplayedPositionsPostprocessor {
                     unrealized_pnl: 0.0,
                     contracts: 0.0,
                     liquidation_price: 0.0,
-                    realized_pnl: Some(0.0),
-                    margin_type: None,
-                    position_mode: None,
-                    margin_size: None,
-                    info: None,
-                    extra: None,
-                    last_update: None,
-                    option: None,
+                    realized_pnl: ModelField::Value(0.0),
+                    margin_type: ModelField::Absent,
+                    position_mode: ModelField::Absent,
+                    margin_size: ModelField::Absent,
+                    info: ModelField::Absent,
+                    extra: ModelField::Absent,
+                    last_update: ModelField::Absent,
+                    option: ModelField::Absent,
                 },
                 key: None,
                 account: self.account_name.clone(),

@@ -48,7 +48,9 @@ impl WsSocket for Socket {
         if self.fail.get() {
             let mut e = ExchangeError::new("fixture send");
             e.name = "RangeError".into();
-            e.metadata.code = Some(json!("send-code"));
+            e.metadata.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "send-code"
+            )));
             Err(e)
         } else {
             Ok(())
@@ -81,7 +83,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -91,7 +93,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -469,7 +475,9 @@ fn catch_emitter_failure_escapes_unchanged_and_skips_force_close() {
             let (socket, trace, parent) = connected_fixture();
             let mut sentinel = ExchangeError::new("original emitter failure");
             sentinel.name = "SyntaxError".into();
-            sentinel.code = Some(json!("emitter-code"));
+            sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "emitter-code"
+            )));
             sentinel.response = Some(json!({"data":{"msg":"emitter-response"}}));
             if emitter_throws {
                 *parent.emit_failure.borrow_mut() = Some(sentinel.clone());

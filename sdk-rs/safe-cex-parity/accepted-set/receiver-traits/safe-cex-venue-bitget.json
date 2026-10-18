@@ -1,0 +1,356 @@
+{
+  "safe_cex_venue_bitget::inverse_positions::InversePositionsHost::sync_call for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/positions.rs",
+    "reason": "Individually reviewed inverse_positions::InversePositionsHost::sync_call: Invokes an existing inverse-position executable selected by internal path and forwards its original result.",
+    "itemSha256": "5ab148b686194745353f789de0db660c5fc0f54d24877650b76b4d5beb12f4fe"
+  },
+  "safe_cex_venue_bitget::cancellation::CancellationHost::post for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed cancellation::CancellationHost::post: Encodes the already typed CancelArgument variants into an outgoing object, invokes unlimitedXHR.post and discards its settled result. It admits no cancellation response schema.",
+    "itemSha256": "18d872ebe419932d2687f91cdeedf05b3aef8d5af85e281b4764b4f4d781ec74"
+  },
+  "safe_cex_venue_bitget::stream_timers::StreamTimerHost::string_literal for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
+    "reason": "Individually reviewed stream_timers::StreamTimerHost::string_literal: Constructs VM text from an already supplied static UTF-8 literal; there is no raw text grammar.",
+    "itemSha256": "8df7cc00930c532c4e2e4f0a8fa8453801cc508e78e882cbe180ded73ae5d2b7"
+  },
+  "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::property: Forwards existing private-topic VM handles through shared property lookup. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
+  },
+  "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::receiver: Selects the existing private-topic receiver path by internal name. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
+  },
+  "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::set_receiver: Updates the selected private-topic receiver field with an already carried VM handle. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
+  },
+  "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::call for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::call: Invokes the named existing topic/runtime capability with original arguments. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
+  },
+  "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::object: Constructs an outgoing private-topic object from existing VM field values. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
+  },
+  "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::define: Defines an own property on an existing private-topic object without data normalization. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
+  },
+  "safe_cex_venue_bitget::public_data::PublicDataHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed public_data::PublicDataHost::receiver: Selects an existing public-data scope path using an internal receiver selector.",
+    "itemSha256": "85627d2346c24db6ae6d19797ff471571dead03cbd90386aaae6fb70538a9334"
+  },
+  "safe_cex_venue_bitget::public_data::PublicDataHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed public_data::PublicDataHost::set_receiver: Writes an existing VM value to the selected public-data scope path.",
+    "itemSha256": "85627d2346c24db6ae6d19797ff471571dead03cbd90386aaae6fb70538a9334"
+  },
+  "safe_cex_venue_bitget::public_data::PublicDataHost::capture for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed public_data::PublicDataHost::capture: Delegates receiver-preserving capture to the separately reviewed capture_path factory.",
+    "itemSha256": "85627d2346c24db6ae6d19797ff471571dead03cbd90386aaae6fb70538a9334"
+  },
+  "safe_cex_venue_bitget::public_data::PublicDataHost::capture_member for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed public_data::PublicDataHost::capture_member: Delegates existing member capture to capture_member_of, preserving its original receiver.",
+    "itemSha256": "85627d2346c24db6ae6d19797ff471571dead03cbd90386aaae6fb70538a9334"
+  },
+  "safe_cex_venue_bitget::public_data::PublicDataHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed public_data::PublicDataHost::property: Forwards shared VM property access using the existing value handle.",
+    "itemSha256": "85627d2346c24db6ae6d19797ff471571dead03cbd90386aaae6fb70538a9334"
+  },
+  "safe_cex_venue_bitget::public_data::PublicDataHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed public_data::PublicDataHost::object: Builds an outgoing public-data object from supplied field handles.",
+    "itemSha256": "85627d2346c24db6ae6d19797ff471571dead03cbd90386aaae6fb70538a9334"
+  },
+  "safe_cex_venue_bitget::public_data::PublicDataHost::operation for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed public_data::PublicDataHost::operation: Delegates internal operation dispatch to binding::hosts::public::operation. That separately inventoried decoder has actual native parseFloat, arithmetic and signed-zero observations; no scope-wide parser exemption.",
+    "itemSha256": "85627d2346c24db6ae6d19797ff471571dead03cbd90386aaae6fb70538a9334"
+  },
+  "safe_cex_venue_bitget::public_data::PublicDataHost::read for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed public_data::PublicDataHost::read: Selects an existing compiled endpoint, invokes the supplied client with outgoing params and awaits response.data; it defines no independent HTTP response decoder.",
+    "itemSha256": "85627d2346c24db6ae6d19797ff471571dead03cbd90386aaae6fb70538a9334"
+  },
+  "safe_cex_venue_bitget::assembly::AssemblyHost::string for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+    "reason": "Individually reviewed assembly::AssemblyHost::string: Constructs a VM string handle from already typed text for assembly.",
+    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+  },
+  "safe_cex_venue_bitget::assembly::AssemblyHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+    "reason": "Individually reviewed assembly::AssemblyHost::object: Constructs an outgoing assembly VM object from supplied field/value handles.",
+    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+  },
+  "safe_cex_venue_bitget::assembly::AssemblyHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+    "reason": "Individually reviewed assembly::AssemblyHost::property: Reads an existing assembly property through shared Js::get.",
+    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+  },
+  "safe_cex_venue_bitget::assembly::AssemblyHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+    "reason": "Individually reviewed assembly::AssemblyHost::define: Defines an own assembly property using an existing field handle.",
+    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+  },
+  "safe_cex_venue_bitget::assembly::AssemblyHost::assign for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+    "reason": "Individually reviewed assembly::AssemblyHost::assign: Performs ordinary assignment on an existing assembly receiver.",
+    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+  },
+  "safe_cex_venue_bitget::assembly::AssemblyHost::global for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+    "reason": "Individually reviewed assembly::AssemblyHost::global: Delegates internal module-global selection to shared Scope::global.",
+    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+  },
+  "safe_cex_venue_bitget::assembly::AssemblyHost::member for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+    "reason": "Individually reviewed assembly::AssemblyHost::member: Delegates capture of an existing member to bound_member, retaining its original receiver.",
+    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+  },
+  "safe_cex_venue_bitget::assembly::AssemblyHost::bind_mapped for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+    "reason": "Individually reviewed assembly::AssemblyHost::bind_mapped: Creates a receiver-scoped capability through the separately reviewed binding::targets::bind factory; returned executable consumers retain their own decoder obligations.",
+    "itemSha256": "845d2edd0d79197e5aea87926b33db5d79eb0727129196874df6bbdae171ed1f"
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed socket_runtime::SocketRuntimeHost::receiver: Selects an existing socket receiver scope path by internal name.",
+    "itemSha256": "67924f37f20f9864e29873cc2037016cf9c495c2cceb4dc9a428a845f0261d44"
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed socket_runtime::SocketRuntimeHost::set_receiver: Writes an already carried VM value at a selected socket receiver path.",
+    "itemSha256": "67924f37f20f9864e29873cc2037016cf9c495c2cceb4dc9a428a845f0261d44"
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::capture for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed socket_runtime::SocketRuntimeHost::capture: Captures the existing socket executable with its original owner through capture_path.",
+    "itemSha256": "67924f37f20f9864e29873cc2037016cf9c495c2cceb4dc9a428a845f0261d44"
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::capture_member for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed socket_runtime::SocketRuntimeHost::capture_member: Captures an existing member handle with receiver retention through capture_member_of.",
+    "itemSha256": "67924f37f20f9864e29873cc2037016cf9c495c2cceb4dc9a428a845f0261d44"
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed socket_runtime::SocketRuntimeHost::property: Forwards existing socket VM property lookup without parsing its value.",
+    "itemSha256": "67924f37f20f9864e29873cc2037016cf9c495c2cceb4dc9a428a845f0261d44"
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed socket_runtime::SocketRuntimeHost::object: Builds an outgoing socket object from existing field handles.",
+    "itemSha256": "67924f37f20f9864e29873cc2037016cf9c495c2cceb4dc9a428a845f0261d44"
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed socket_runtime::SocketRuntimeHost::define: Defines an own property on an existing VM object; no incoming schema is admitted.",
+    "itemSha256": "67924f37f20f9864e29873cc2037016cf9c495c2cceb4dc9a428a845f0261d44"
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketRuntimeHost::operation for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/public.rs",
+    "reason": "Individually reviewed socket_runtime::SocketRuntimeHost::operation: Delegates socket operation dispatch to the separately inventoried binding::hosts::public::operation; actual native numeric/global parser receipts remain attached to that decoder.",
+    "itemSha256": "67924f37f20f9864e29873cc2037016cf9c495c2cceb4dc9a428a845f0261d44"
+  },
+  "safe_cex_venue_bitget::account_positions::AccountPositionsHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/positions.rs",
+    "reason": "Individually reviewed account_positions::AccountPositionsHost::receiver: Reads an existing scope path selected by an internal receiver name; no wire owner is decoded.",
+    "itemSha256": "9f19086be42cb6dd9034ac3875d3b06f4174eea0493cf2a47f9d559959256daa"
+  },
+  "safe_cex_venue_bitget::account_positions::AccountPositionsHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/positions.rs",
+    "reason": "Individually reviewed account_positions::AccountPositionsHost::property: Forwards an existing VM value and typed field selector to shared Js::get without normalizing its result.",
+    "itemSha256": "9f19086be42cb6dd9034ac3875d3b06f4174eea0493cf2a47f9d559959256daa"
+  },
+  "safe_cex_venue_bitget::account_positions::AccountPositionsHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/positions.rs",
+    "reason": "Individually reviewed account_positions::AccountPositionsHost::object: Constructs an outgoing VM object from already carried named value handles.",
+    "itemSha256": "9f19086be42cb6dd9034ac3875d3b06f4174eea0493cf2a47f9d559959256daa"
+  },
+  "safe_cex_venue_bitget::account_positions::AccountPositionsHost::call for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/positions.rs",
+    "reason": "Individually reviewed account_positions::AccountPositionsHost::call: Invokes the existing named receiver executable and awaits its VM result; data admission belongs to that executable.",
+    "itemSha256": "9f19086be42cb6dd9034ac3875d3b06f4174eea0493cf2a47f9d559959256daa"
+  },
+  "safe_cex_venue_bitget::account_positions::AccountPositionsHost::read for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/positions.rs",
+    "reason": "Individually reviewed account_positions::AccountPositionsHost::read: Selects a compiled endpoint and outgoing optional params, then delegates request/response.data forwarding to get_data; shared HTTP decoding remains separate.",
+    "itemSha256": "9f19086be42cb6dd9034ac3875d3b06f4174eea0493cf2a47f9d559959256daa"
+  },
+  "safe_cex_venue_bitget::account_positions::AccountPositionsHost::error_message for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/positions.rs",
+    "reason": "Individually reviewed account_positions::AccountPositionsHost::error_message: Selects an already carried truthy msg property or constructs supplied typed fallback text, without parsing a message grammar.",
+    "itemSha256": "9f19086be42cb6dd9034ac3875d3b06f4174eea0493cf2a47f9d559959256daa"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::receiver: Selects an existing REST-action receiver path by its internal name.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::set_receiver: Assigns an already carried value handle at the selected REST-action path.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::capture for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::capture: Captures owner/member from the existing scope path and uses bind_callable to retain its original receiver.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::capture_member for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::capture_member: Captures an existing member, including the reviewed Promise.finally wrapper when absent, without invoking a payload decoder.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::property: Forwards lookup on an existing REST-action VM value using a typed field selector.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::has for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::has: Delegates Boolean prototype-aware membership recognition to the separately reviewed has_property operation; no data owner is constructed.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::assign for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::assign: Performs ordinary VM assignment of the supplied value handle.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::define: Performs own-property definition of the supplied value handle.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::object: Constructs an outgoing REST-action VM object from existing named handles.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionsHost::operation for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/actions.rs",
+    "reason": "Individually reviewed rest_actions::RestActionsHost::operation: Delegates the internal selector and original values to binding::hosts::actions::operation, whose actual numeric coercion branches have separate executed native receipts.",
+    "itemSha256": "348282a23f7b015adb4756a0abe6898554511e2b3ef913f22137e21155bd3098"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::receiver: Delegates internal named receiver-path selection to the existing scope.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::set_receiver: Assigns an existing value handle to a selected receiver path; this is state mutation, not data admission.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::property: Reads an existing VM property by typed selector and forwards the handle unchanged.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::object: Builds an outgoing object from supplied field/value handles.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::assign for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::assign: Delegates ordinary VM assignment of an existing field handle.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::define: Delegates own-property definition using the already carried name/value.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::call for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::call: Forwards an internal executable path and existing arguments through the separately reviewed call_now capability.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::call_sync for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::call_sync: Invokes the existing named executable and discards success; no raw owner construction occurs.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::read for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::read: Builds outgoing client.get params using the compiled endpoint, awaits the existing response and forwards its data handle; wire response decoding stays shared-client owned.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadsHost::error_message for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-bitget/src/binding/hosts/orders.rs",
+    "reason": "Individually reviewed order_reads::OrderReadsHost::error_message: Invokes the separately supplied getBitgetApiErrorMessage executable with the original value handle and typed fallback; no independent codec is introduced.",
+    "itemSha256": "5ba35de5d1adffd4e705b7af1282903e809d593df65b580a97fd584fb17d8ec8"
+  }
+}

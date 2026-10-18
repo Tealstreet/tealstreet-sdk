@@ -165,3 +165,48 @@ fn contract_bounds_are_explicit_errors_before_signing() {
         assert!(ContractSigner::from_signature(seed).is_err());
     }
 }
+
+#[test]
+fn contract_named_fields_reject_complete_positional_abi_arrays() {
+    use serde::Deserialize;
+    let raw = r#"{"accountId":16909060,"subAccountId":5,"slotId":1543,"nonce":526602,"pairId":11,"size":"1","price":"2","direction":true,"feeRates":[12,13],"hasSubsidy":false}"#;
+    let text: Contract = serde_json::from_str(raw).unwrap();
+    let qualified = Contract::deserialize(serde_json::from_str::<Value>(raw).unwrap()).unwrap();
+    for value in [text, qualified] {
+        assert_eq!(value.account_id, 16_909_060);
+        assert_eq!(value.sub_account_id, 5);
+        assert_eq!(value.slot_id, 1543);
+        assert_eq!(value.nonce, 526_602);
+        assert_eq!(value.pair_id, 11);
+        assert_eq!(value.size, "1");
+        assert_eq!(value.price, "2");
+        assert!(value.direction);
+        assert_eq!(value.fee_rates, [12, 13]);
+        assert!(!value.has_subsidy);
+        assert_eq!(
+            value.signing_bytes().unwrap(),
+            [
+                254, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 1, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 2, 12, 13, 0
+            ]
+        );
+    }
+    for raw in [
+        r#"[16909060,5,1543,526602,11,"1","2",true,[12,13],false]"#,
+        "[]",
+        "null",
+        "3",
+        "true",
+        "\"x\"",
+    ] {
+        assert!(
+            serde_json::from_str::<Contract>(raw).is_err(),
+            "raw contract shape {raw}"
+        );
+        let value: Value = serde_json::from_str(raw).unwrap();
+        assert!(
+            Contract::deserialize(value).is_err(),
+            "qualified contract shape {raw}"
+        );
+    }
+}

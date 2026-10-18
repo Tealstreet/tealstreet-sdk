@@ -318,7 +318,7 @@ fn assert_position(v: &ReadPosition, e: &Value, label: &str) {
             && p.realized_pnl.is_none(),
         "{label}: absent native optional position fields"
     );
-    if let Some(extra) = &p.extra {
+    if let Some(extra) = p.extra.as_ref() {
         assert_number(
             extra.contracts_native.unwrap(),
             &e["extra"]["contractsNative"],

@@ -205,8 +205,9 @@ impl TickHost for Rt {
         )))
     }
     fn promise_all(&self, tasks: Vec<Js>) -> Result<ExchangeFuture<'static, ()>, ExchangeError> {
+        let promise = all(&self.exchange_runtime(), tasks);
         Ok(Box::pin(async move {
-            all(tasks).await.map_err(ex)?;
+            promise.wait().await.map_err(ex)?;
             Ok(())
         }))
     }
@@ -252,23 +253,60 @@ impl TickHost for Rt {
     }
 }
 
-fn map_values(map: &Js, method: &str) -> Result<Vec<Result<Rc<Js>, ExchangeError>>, ExchangeError> {
+pub(crate) struct MapValues {
+    iterator: Js,
+    next: Js,
+    done: bool,
+}
+impl Iterator for MapValues {
+    type Item = Result<Rc<Js>, ExchangeError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        let result = (|| {
+            let step = self.next.call(self.iterator.clone(), vec![])?;
+            if !step.is_object() {
+                return Err(Thrown::type_error("Iterator result is not an object"));
+            }
+            if step.get("done")?.truthy() {
+                Ok(None)
+            } else {
+                step.get("value").map(|value| Some(Rc::new(value)))
+            }
+        })();
+        match result {
+            Ok(Some(value)) => Some(Ok(value)),
+            Ok(None) => {
+                self.done = true;
+                None
+            }
+            Err(error) => {
+                self.done = true;
+                Some(Err(ex(error)))
+            }
+        }
+    }
+}
+fn map_values(map: &Js, method: &str) -> Result<MapValues, ExchangeError> {
     let iterator = map.call_method(method, vec![]).map_err(ex)?;
-    let items = iterator
-        .array_values()
-        .ok_or_else(|| ExchangeError::new(format!("Map.{method}() did not return a list")))?;
-    Ok(items.into_iter().map(|v| Ok(Rc::new(v))).collect())
+    let next = iterator.get("next").map_err(ex)?;
+    Ok(MapValues {
+        iterator,
+        next,
+        done: false,
+    })
 }
 
 impl DisposalHost for Rt {
     type Timeout = Js;
     type Key = Js;
-    type Timeouts = std::vec::IntoIter<Result<Rc<Js>, ExchangeError>>;
-    type Keys = std::vec::IntoIter<Result<Rc<Js>, ExchangeError>>;
+    type Timeouts = MapValues;
+    type Keys = MapValues;
     // ts: `for (const [, timeoutId] of this.ohlcvPollingTimeouts)`.
     fn polling_timeouts(&self) -> Result<Self::Timeouts, ExchangeError> {
         let map = self.this.get("ohlcvPollingTimeouts").map_err(ex)?;
-        Ok(map_values(&map, "values")?.into_iter())
+        map_values(&map, "values")
     }
     fn clear_timeout(&self, timeout: &Rc<Js>) -> Result<(), ExchangeError> {
         Rt::clear_timeout(self, timeout);
@@ -276,7 +314,7 @@ impl DisposalHost for Rt {
     }
     fn active_keys(&self) -> Result<Self::Keys, ExchangeError> {
         let map = self.this.get("ohlcvPollingActive").map_err(ex)?;
-        Ok(map_values(&map, "keys")?.into_iter())
+        map_values(&map, "keys")
     }
     fn set_inactive(&self, key: &Rc<Js>) -> Result<(), ExchangeError> {
         self.this
@@ -369,5 +407,28 @@ impl SpotCancelHost for Rt {
             .call_method("emitAndLogError", vec![Js::str(message), Js::str(context)])
             .map_err(ex)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod collection_iterator_tests {
+    use super::*;
+    #[test]
+    fn disposal_map_values_keep_live_iterator_updates() {
+        let map = Js::new_map();
+        map.call_method("set", vec![Js::str("first"), Js::Number(11.)])
+            .unwrap();
+        map.call_method("set", vec![Js::str("second"), Js::Number(22.)])
+            .unwrap();
+        let mut values = map_values(&map, "values").unwrap();
+        assert_eq!(values.next().unwrap().unwrap().as_f64(), Some(11.));
+        map.call_method("delete", vec![Js::str("second")]).unwrap();
+        map.call_method("set", vec![Js::str("late"), Js::Number(33.)])
+            .unwrap();
+        assert_eq!(values.next().unwrap().unwrap().as_f64(), Some(33.));
+        assert!(values.next().is_none());
+        map.call_method("set", vec![Js::str("after-done"), Js::Number(44.)])
+            .unwrap();
+        assert!(values.next().is_none());
     }
 }

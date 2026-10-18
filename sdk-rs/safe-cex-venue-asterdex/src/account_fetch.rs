@@ -1,9 +1,14 @@
 //! Stateful account reads/configuration from AsterDEXExchange. Configured REST
 //! instances are supplied by the host; API construction and exchange startup
 //! remain separate rows. Futures must be polled by the caller.
-use crate::{exchange_helpers as helpers, types::*};
+use crate::{
+    exchange_helpers as helpers,
+    types::{
+        AsterDEXAPIVersion, AsterDEXMarketResponse, AsterDEXOrderResponse, AsterDEXTickerResponse,
+    },
+};
 use safe_cex_exchange::{exchange::BaseExchange, runtime::ExchangeError};
-use safe_cex_num::{js_number_string, parse_float};
+use safe_cex_num::{js_number_string, js_string, js_truthy, parse_float};
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::{RestAdapter, RestBody, RestRequest};
 use safe_cex_types::{MarginType, Market, Order, Position, PositionSide, Ticker};
@@ -57,24 +62,35 @@ impl AccountFetch {
         url: String,
         body: Option<Value>,
     ) -> Result<Value, ExchangeError> {
-        let response = adapter.execute(RestRequest { method: method.into(), url, body: body.map(RestBody::Untransformed), ..Default::default() }).await.map_err(|failure| {
-            // Preserve the available shared REST failure metadata, rather than
-            // inventing a JS Error object identity at the native boundary.
-            let mut error = ExchangeError::new(failure.message);
-            error.is_axios_error = true;
-            error.code = failure.code.map(Value::String);
-            error.context = failure.context.map(|context| *context);
-            error.method = Some(failure.request.method);
-            error.url = Some(failure.request.url);
-            if let Some(response) = failure.response {
-                error.response = Some(json!({"status": response.status, "data": response.body.into_data(), "headers": response.headers}));
-            }
-            error
-        })?;
-        Ok(response
+        let response = adapter
+            .execute(RestRequest {
+                method: method.into(),
+                url,
+                body: body
+                    .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                    .transpose()
+                    .map_err(|error| ExchangeError::new(error.to_string()))?
+                    .map(RestBody::Untransformed),
+                ..Default::default()
+            })
+            .await
+            .map_err(|failure| {
+                // Preserve the available shared REST failure metadata, rather than
+                // inventing a JS Error object identity at the native boundary.
+                let method = failure.request.method.clone();
+                let url = failure.request.url.clone();
+                let mut error: ExchangeError = failure.into();
+                error.is_axios_error = true;
+                error.method = Some(method);
+                error.url = Some(url);
+                error
+            })?;
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     fn finish<T>(
         &self,
@@ -182,29 +198,49 @@ impl AccountFetch {
                     None,
                 )
                 .await?;
-            let positions: Vec<AsterDEXPositionResponse> = decode(data)?;
+            // The source consumes raw rows, not the full declared wire record.
+            let positions = data.as_array().ok_or_else(|| {
+                mapper_error(("TypeError", "positions.forEach is not a function".into()))
+            })?;
             let mode = helpers::get_account_position_mode(self.owner.store.options().is_hedged);
             let mut leverage_by_symbol = BTreeMap::new();
-            for pos in &positions {
-                let leverage = parse_float(if pos.leverage.is_empty() {
-                    "0"
+            for pos in positions {
+                if pos.is_null() {
+                    return Err(mapper_error((
+                        "TypeError",
+                        "Cannot read properties of null (reading 'leverage')".into(),
+                    )));
+                }
+                let raw = pos.get("leverage");
+                let text = if js_truthy(raw) {
+                    js_string(raw).map_err(|e| mapper_error((e.name, e.to_string())))?
                 } else {
-                    &pos.leverage
-                })
-                .abs();
+                    "0".into()
+                };
+                let leverage = parse_float(&text).abs();
                 if leverage.is_finite() && leverage > 0.0 {
-                    leverage_by_symbol.insert(pos.symbol.clone(), leverage);
+                    if let Some(symbol) = pos.get("symbol").and_then(Value::as_str) {
+                        leverage_by_symbol.insert(symbol.to_owned(), leverage);
+                    }
                 }
             }
             let selected = |symbol: &String| symbols.is_none_or(|symbols| symbols.contains(symbol));
             let mut result = Vec::new();
-            for pos in positions
-                .iter()
-                .filter(|pos| selected(&pos.symbol))
-                .filter(|pos| parse_float(&pos.position_amt) != 0.0)
-            {
+            for pos in positions {
+                if symbols.is_some_and(|symbols| {
+                    !symbols
+                        .iter()
+                        .any(|symbol| pos.get("symbol") == Some(&Value::String(symbol.clone())))
+                }) {
+                    continue;
+                }
+                let amount = js_string(pos.get("positionAmt"))
+                    .map_err(|e| mapper_error((e.name, e.to_string())))?;
+                if parse_float(&amount) == 0.0 {
+                    continue;
+                }
                 let position = helpers::transform_position(pos, &self.owner.store.positions())
-                    .map_err(|e| ExchangeError::new(e.to_string()))?;
+                    .map_err(mapper_error)?;
                 // uniqBy keeps the first real position, before all placeholders.
                 if !result.iter().any(|old: &Position| old.id == position.id) {
                     result.push(position);
@@ -229,7 +265,7 @@ impl AccountFetch {
                     result.push(Position {
                         id,
                         symbol: market.symbol.clone(),
-                        side,
+                        side: side.into(),
                         entry_price: 0.0,
                         notional: 0.0,
                         leverage: leverage_by_symbol
@@ -239,14 +275,14 @@ impl AccountFetch {
                         unrealized_pnl: 0.0,
                         contracts: 0.0,
                         liquidation_price: 0.0,
-                        margin_type: Some(MarginType::Cross),
-                        position_mode: Some(mode),
-                        info: Some(json!({})),
-                        realized_pnl: None,
-                        margin_size: None,
-                        last_update: None,
-                        extra: None,
-                        option: None,
+                        margin_type: (Some(MarginType::Cross)).into(),
+                        position_mode: (Some(mode)).into(),
+                        info: (Some(json!({}))).into(),
+                        realized_pnl: (None).into(),
+                        margin_size: (None).into(),
+                        last_update: (None).into(),
+                        extra: (None).into(),
+                        option: (None).into(),
                     });
                 }
             }
@@ -354,18 +390,14 @@ impl AccountFetch {
             self.owner.log(&message, severity.as_str())?;
             let mut brackets = BTreeMap::new();
             for (key, value) in entries {
-                let key = key.as_ref().and_then(Value::as_str).ok_or_else(|| {
-                    mapper_error((
-                        "RepresentationError",
-                        "Leverage bracket symbol must be a string".into(),
-                    ))
-                })?;
-                let value = value.as_ref().and_then(Value::as_f64).ok_or_else(|| {
-                    mapper_error((
-                        "RepresentationError",
-                        "Leverage bracket initialLeverage must be a number".into(),
-                    ))
-                })?;
+                // A non-string Map key cannot match the source market.symbol string.
+                let Some(key) = key.as_ref().and_then(Value::as_str) else {
+                    continue;
+                };
+                let value = value
+                    .as_ref()
+                    .map(safe_cex_exchange::js_runtime::value::from_json)
+                    .unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined);
                 brackets.insert(key.to_owned(), value);
             }
             let items =

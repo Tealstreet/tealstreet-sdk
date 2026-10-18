@@ -8,6 +8,7 @@ import { CommandCategory, type CommandContext, type CommandResult } from '../Com
 import { getExchangeInfo } from '../../exchanges';
 import type { AccountConfig, ExchangeName } from '../../types';
 import { getConnectionStatus, type ConnectionHealth } from '../../utils/ConnectionMonitor';
+import { getCliBrand } from '../../brand';
 
 /**
  * Web account export format - the JSON structure from web's account export
@@ -54,7 +55,7 @@ export class AccountsCommand extends BaseCommand {
     'accounts',
     'accounts enabled',
     'accounts add -n mybybit -e bybit -k KEY -s SECRET',
-    'accounts add -n mybybit -e bybit -k KEY -s SECRET --tealstreet-proxy',
+    'accounts add -n mybybit -e bybit -k KEY -s SECRET --proxy',
     'accounts import {"exchange":"bybit","name":"my-acc",...}',
     'accounts remove mybybit',
     'accounts remove --all',
@@ -205,9 +206,10 @@ export class AccountsCommand extends BaseCommand {
     const grvtTradingAccountId = this.getOption(ctx, 'grvt-trading-account-id');
     const proxyRegion = this.getOption(ctx, 'proxy-region');
     const testnet = this.hasFlag(ctx, 't', 'testnet');
-    const tealstreetProxy = this.hasFlag(ctx, 'tealstreet-proxy', 'use-tealstreet-ips');
-    const tealstreetTunnel = this.hasFlag(ctx, 'tealstreet-tunnel');
-    const tealstreetWsRoute = this.hasFlag(ctx, 'tealstreet-ws-route');
+    // Both spellings on every brand; help shows the brand's own (see brand.ts).
+    const tealstreetProxy = this.hasFlag(ctx, 'proxy', 'tealstreet-proxy', 'use-tealstreet-ips');
+    const tealstreetTunnel = this.hasFlag(ctx, 'tunnel', 'tealstreet-tunnel');
+    const tealstreetWsRoute = this.hasFlag(ctx, 'ws-route', 'tealstreet-ws-route');
     const enableSpotMarkets = this.hasFlag(ctx, 'enable-spot-markets');
 
     // Validate required fields
@@ -296,7 +298,7 @@ export class AccountsCommand extends BaseCommand {
   private importAccountFromJson(ctx: CommandContext, jsonStr: string): CommandResult {
     if (!jsonStr || !jsonStr.trim()) {
       this.printWarning(ctx, 'Usage: accounts import <json>');
-      this.printInfo(ctx, 'Paste the JSON export from Tealstreet web');
+      this.printInfo(ctx, `Paste the JSON export from ${getCliBrand().displayName} web`);
       this.printInfo(
         ctx,
         'Example: accounts import {"exchange":"bybit","name":"my-acc","apiKey":"...","apiSecret":"..."}',
@@ -582,6 +584,7 @@ export class AccountsCommand extends BaseCommand {
   }
 
   private showHelp(ctx: CommandContext): CommandResult {
+    const brand = getCliBrand();
     this.print(ctx, [
       '',
       'Account Commands:',
@@ -589,7 +592,7 @@ export class AccountsCommand extends BaseCommand {
       '  accounts              List all configured accounts',
       '  accounts enabled      List only enabled/streaming accounts',
       '  accounts add          Add a new account manually',
-      '  accounts import <json> Import from Tealstreet web export',
+      `  accounts import <json> Import from ${brand.displayName} web export`,
       '  accounts remove <n>   Remove an account',
       '  accounts remove --all Remove all accounts',
       '  accounts enable <n>   Enable account streaming',
@@ -605,14 +608,14 @@ export class AccountsCommand extends BaseCommand {
       '  Enabled accounts show data in watch modes (watch account, etc.).',
       '',
       'Importing from web (recommended):',
-      '  1. In Tealstreet web, go to Settings > Accounts',
+      `  1. In ${brand.displayName} web, go to Settings > Accounts`,
       '  2. Click the export button on an account',
       '  3. Paste the JSON here: accounts import {"exchange":"bybit",...}',
       '',
       'Adding accounts manually:',
       '  accounts add -n <name> -e <exchange> -k <api-key> -s <api-secret> [-p <passphrase>] [-t]',
       '  accounts add -n <name> -e paradex -k <subkey-private-key> --paradex-address <addr> --subkey-address <addr>',
-      '  Add --tealstreet-proxy [--proxy-region <region>] to match web "Use Tealstreet IPs".',
+      `  Add ${brand.flags.proxy} [--proxy-region <region>] to match the web app's proxy routing option.`,
       '',
       'Options:',
       '  -n, --name           Account name (your choice)',
@@ -630,9 +633,9 @@ export class AccountsCommand extends BaseCommand {
       '  --subaccount         Exchange subaccount/account ID',
       '  --vault              Optional vault address/name',
       '  -t, --testnet        Use testnet',
-      '  --tealstreet-proxy   Route like web "Use Tealstreet IPs"',
-      '  --tealstreet-tunnel  Route REST through the Tealstreet tradetunnel',
-      '  --tealstreet-ws-route Route private WebSockets through Tealstreet',
+      `  ${brand.flags.proxy.padEnd(20)} Route REST through the ${brand.displayName} proxy (IP-whitelisted keys)`,
+      `  ${brand.flags.tunnel.padEnd(20)} Route REST through the ${brand.displayName} tradetunnel`,
+      `  ${brand.flags.wsRoute.padEnd(20)} Route private WebSockets through ${brand.displayName}`,
       '  --proxy-region       Proxy region to use when proxy routing is enabled',
       '',
     ]);

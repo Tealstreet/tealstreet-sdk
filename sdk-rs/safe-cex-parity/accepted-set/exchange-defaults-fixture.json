@@ -7,7 +7,7 @@
       1
     ],
     "end": [
-      503,
+      519,
       2
     ]
   },
@@ -505,6 +505,67 @@
                       "resolved_path": {
                         "path": "safe_cex_exchange::runtime::ExchangeError",
                         "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    {
+      "name": "fetch_account_greeks",
+      "signature": {
+        "inputs": [
+          [
+            "self",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "Self"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeFuture",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "lifetime": "'_"
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::AccountGreeks",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
                       }
                     }
                   }
@@ -1322,6 +1383,143 @@
                                     "path": "safe_cex_types::Candle",
                                     "args": null
                                   }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    {
+      "name": "fetch_option_chain",
+      "signature": {
+        "inputs": [
+          [
+            "self",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "Self"
+                }
+              }
+            }
+          ],
+          [
+            "_query",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::OptionChainQuery",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeFuture",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "lifetime": "'_"
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::OptionChainRow",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    {
+      "name": "fetch_option_expiries",
+      "signature": {
+        "inputs": [
+          [
+            "self",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "Self"
+                }
+              }
+            }
+          ],
+          [
+            "_underlying",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeFuture",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "lifetime": "'_"
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "f64"
                                 }
                               }
                             ],

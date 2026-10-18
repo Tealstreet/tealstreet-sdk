@@ -1,7 +1,10 @@
 //! @tealstreet/ccxt-compat precision helpers (functions/number.ts,
 //! functions/ccxt_exchange.ts, functions/type.ts safeString), ported for the
 //! realm: the ported venue bodies call them as imports.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{Thrown, Value},
+};
 
 pub(crate) const TRUNCATE: f64 = 0.0;
 pub(crate) const ROUND: f64 = 1.0;

@@ -11,7 +11,7 @@ import test from 'node:test';
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));
 const runner = path.join(scripts, 'accepted-set.mjs');
-const policy = path.join(scripts, '../accepted-set/construction.json');
+const policy = path.join(scripts, '../accepted-set/construction/safe-cex-types.json');
 const marker = 'TYPES_CONSTRUCTION_COMPLETE ';
 const typesOwners = [
   'safe_cex_types::gateway::GatewayCandleUpdate',

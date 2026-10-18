@@ -76,3 +76,7 @@ fn start_impl<H: HelperTaskHost<V, E>, V: Clone + 'static, E: Clone + 'static>(
     }));
     HelperObserver { state }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/accepted_helper_clone.rs"]
+mod accepted_clone;

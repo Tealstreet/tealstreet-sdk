@@ -24,6 +24,50 @@ const KLINE_HISTORY: &str = "https://api-pub.woox.io/v1/hist/kline";
 const PUBLIC_URL: &str = "wss://wss.woox.io/ws/stream/fixture-app";
 const PRIVATE_URL: &str = "wss://wss.woox.io/v2/ws/private/stream/fixture-app";
 
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let corpus = ticker_coercion::source("woo");
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 72);
+    ticker_coercion::assert_case_counts(cases, 72, 54);
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    for case in cases {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("woo")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        h.runtime.reports.borrow_mut().clear();
+        for frame in case["frames"].as_array().unwrap() {
+            public
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+        let reports = h.runtime.reports.borrow().join("\n");
+        ticker_coercion::assert_refusals(&reports, case);
+        assert_eq!(
+            reports.matches("Refused WOO ticker row").count(),
+            case["refusals"].as_array().unwrap().len(),
+            "native ticker {case}: {reports}"
+        );
+    }
+    h.venue().dispose().unwrap();
+}
+
 fn with(extra: Value) -> ExchangeOptions {
     let mut base = serde_json::to_value(options()).unwrap();
     for (k, v) in extra.as_object().unwrap() {
@@ -115,10 +159,7 @@ fn listen(h: &Harness, event: &str) -> Rc<RefCell<Vec<Value>>> {
         event,
         Rc::new(move |_, data| {
             sink.borrow_mut().push(
-                data.as_array()
-                    .and_then(|a| a.first())
-                    .cloned()
-                    .unwrap_or(data.clone()),
+                safe_cex_exchange::js_runtime::value::to_json(data).expect("finite fixture event"),
             );
             Ok(())
         }),
@@ -360,6 +401,61 @@ fn execution_reports_update_store_orders_and_emit_fills() {
     );
     assert_eq!(order(&h, "11").unwrap()["status"], "closed");
     assert_eq!(order(&h, "77").unwrap()["status"], "closed");
+}
+
+// No mapper override: reports pass through the real socket -> fill host -> mapper.
+fn terminal_market_report(kind: &str, price: f64) {
+    let (h, private) = authed("HEDGE_MODE", |http| {
+        http.ok("GET", LEVERAGE, json!({"details":[{"leverage":"10"}]}));
+    });
+    let fills = listen(&h, "fill");
+    let errors = listen(&h, "error");
+    let base = json!({"symbol":"PERP_BTC_USDT","orderId":811,"side":"BUY",
+        "type":"LIMIT","status":"NEW","quantity":2,"price":100,
+        "reduceOnly":false,"executedQuantity":0,"executedPrice":0});
+    push(&h, &private, json!({"topic":"executionreport","data":base}));
+    assert_eq!(order(&h, "811").unwrap()["status"], "open");
+    let terminal = json!({"symbol":"PERP_BTC_USDT","orderId":811,"side":"BUY",
+        "type":kind,"status":"FILLED","quantity":2,"price":price,
+        "reduceOnly":false,"executedQuantity":0.1,"executedPrice":100.5,
+        "executedTimestamp":1700000001234.0});
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":terminal}),
+    );
+    assert_eq!(
+        fills.borrow().len(),
+        1,
+        "{kind}: terminal report must emit fill through the real mapper; errors={:?}",
+        errors.borrow()
+    );
+    assert_eq!(
+        fills.borrow()[0],
+        json!({"id":"811","orderId":"811","side":"buy",
+        "symbol":"BTCUSDT","price":100.5,"amount":0.1,"timestamp":1700000001.0})
+    );
+    assert_eq!(
+        order(&h, "811").unwrap()["status"],
+        "closed",
+        "{kind}: terminal status must survive mapping"
+    );
+    assert!(errors.borrow().is_empty(), "{kind}: {:?}", errors.borrow());
+}
+
+#[test]
+fn ioc_execution_report_emits_fill_and_closes_order_through_real_mapper() {
+    terminal_market_report("IOC", 101.0);
+}
+
+#[test]
+fn fok_execution_report_emits_fill_and_closes_order_through_real_mapper() {
+    terminal_market_report("FOK", 101.0);
+}
+
+#[test]
+fn zero_price_market_execution_report_emits_fill_and_closes_order_through_real_mapper() {
+    terminal_market_report("MARKET", 0.0);
 }
 
 fn position_rows(h: &Harness) -> Vec<Value> {
@@ -765,4 +861,412 @@ fn listen_ohlcv_streams_kline_candles_and_ignores_older_ones() {
             json!({"event": "unsubscribe", "topic": "PERP_BTC_USDT@trades"}),
         ]
     );
+}
+
+#[test]
+fn shared_order_boundary_new_ioc_must_be_stored() {
+    let (h, private) = authed("HEDGE_MODE", |http| {
+        http.ok("GET", LEVERAGE, json!({"details":[{"leverage":"10"}]}));
+    });
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":991,"side":"BUY","type":"IOC","status":"NEW","quantity":2,"price":101,"reduceOnly":false}}),
+    );
+    assert!(
+        order(&h, "991").is_some(),
+        "NEW IOC must reach store through actual mapper"
+    );
+}
+#[test]
+fn shared_order_boundary_new_zero_price_market_must_be_stored() {
+    let (h, private) = authed("HEDGE_MODE", |http| {
+        http.ok("GET", LEVERAGE, json!({"details":[{"leverage":"10"}]}));
+    });
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":992,"side":"BUY","type":"MARKET","status":"NEW","quantity":2,"price":0,"reduceOnly":false}}),
+    );
+    assert!(
+        order(&h, "992").is_some(),
+        "NEW MARKET undefined price must reach store through actual mapper"
+    );
+}
+#[test]
+fn shared_order_boundary_partial_ioc_must_emit_fill() {
+    let (h, private) = authed("HEDGE_MODE", |http| {
+        http.ok("GET", LEVERAGE, json!({"details":[{"leverage":"10"}]}));
+    });
+    let fills = listen(&h, "fill");
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":993,"side":"BUY","type":"IOC","status":"PARTIAL_FILLED","quantity":2,"price":101,"reduceOnly":false,"executedQuantity":0.1,"executedPrice":100.5}}),
+    );
+    assert_eq!(
+        fills.borrow().len(),
+        1,
+        "PARTIAL IOC must pass shared Store before emitting fill"
+    );
+}
+
+fn journal_order(id: &str, side: &str, at: f64, pnl: Option<f64>) -> Value {
+    let mut row = json!({"order_id":id,"symbol":"PERP_BTC_USDT","side":side,
+        "type":"MARKET","status":"FILLED","quantity":"2","executed":"2",
+        "average_executed_price":if side=="BUY" {"100"} else {"110"},
+        "created_time":at,"updated_time":at,"total_fee":"0.1","fee_asset":"USDT"});
+    if let Some(pnl) = pnl {
+        row["realized_pnl"] = json!(pnl);
+    }
+    row
+}
+
+fn historical_positions(rows: Value, from: f64) -> (Harness, Vec<Value>) {
+    let h = harness(ExchangeName::Woo, options(), |http| {
+        public_routes(http);
+        http.route(
+            "GET",
+            ORDERS,
+            200.0,
+            json!({"success":true,"rows":rows,"meta":{"total":2,"records_per_page":100}}),
+        );
+    });
+    h.drive(h.venue().refresh_markets()).unwrap();
+    let result = h
+        .drive(h.venue().fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "journal-fixture".into(),
+                from: Some(from),
+                to: Some(1_700_000_100_000.0),
+            },
+        ))
+        .expect("WOO journal must read historical orders through the production binding");
+    (h, result)
+}
+
+#[test]
+fn real_journal_folds_historical_orders_with_reported_pnl() {
+    let (h, records) = historical_positions(
+        json!([
+            journal_order("entry", "BUY", 1_699_999_900.0, Some(0.0)),
+            journal_order("exit", "SELL", 1_700_000_000.0, Some(20.0)),
+        ]),
+        1_699_999_800_000.0,
+    );
+    assert_eq!(
+        records.len(),
+        1,
+        "real WOO order history must produce the closed round trip"
+    );
+    let r = &records[0];
+    assert_eq!(r["account"], "journal-fixture");
+    assert_eq!(r["symbol"], "BTCUSDT");
+    assert_eq!(r["settleCurrency"], "USDT");
+    assert_eq!(r["openedAt"], 1_699_999_900_000.0);
+    assert_eq!(r["closedAt"], 1_700_000_000_000.0);
+    assert_eq!(r["realizedPnl"], 20.0);
+    assert_eq!(r["fees"], 0.2);
+    assert_eq!(r["avgEntryPrice"], 100.0);
+    assert_eq!(r["avgExitPrice"], 110.0);
+    assert_eq!(r["provenance"], "derived");
+    let calls = h.http.calls(ORDERS);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["start_t"], "1699999800000");
+    assert_eq!(calls[0].params["end_t"], "1700000100000");
+    assert_eq!(calls[0].params["realized_pnl"], "true");
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_journal_refuses_missing_close_pnl_and_filters_older_closes() {
+    for (pnl, from) in [
+        (None, 1_699_999_800_000.0),
+        (Some(20.0), 1_700_000_001_000.0),
+    ] {
+        let (h, records) = historical_positions(
+            json!([
+                journal_order("entry", "BUY", 1_699_999_900.0, Some(0.0)),
+                journal_order("exit", "SELL", 1_700_000_000.0, pnl),
+            ]),
+            from,
+        );
+        assert!(
+            records.is_empty(),
+            "missing close PnL and closes before the requested window do not produce journal records"
+        );
+        assert_eq!(h.http.calls(ORDERS).len(), 1);
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn real_journal_does_not_report_an_open_interval() {
+    let (h, records) = historical_positions(
+        json!([journal_order("entry", "BUY", 1_699_999_900.0, Some(0.0))]),
+        1_699_999_800_000.0,
+    );
+    assert!(
+        records.is_empty(),
+        "an open interval is not a closed journal record"
+    );
+    assert_eq!(h.http.calls(ORDERS).len(), 1);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_journal_default_window_uses_the_runtime_clock() {
+    let h = harness(ExchangeName::Woo, options(), |http| {
+        http.route("GET", ORDERS, 200.0, json!({"success":true,"rows":[]}));
+    });
+    let now = h.runtime.now.get();
+    let records = h
+        .drive(h.venue().fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "journal-fixture".into(),
+                from: None,
+                to: None,
+            },
+        ))
+        .expect("default WOO journal window must reach the production order reader");
+    assert!(records.is_empty());
+    let calls = h.http.calls(ORDERS);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].params["end_t"],
+        safe_cex_num::js_number_string(now)
+    );
+    assert_eq!(
+        calls[0].params["start_t"],
+        safe_cex_num::js_number_string(now - 30.0 * 24.0 * 60.0 * 60.0 * 1000.0)
+    );
+    h.venue().dispose().unwrap();
+}
+
+fn assert_unsupported_private_topics_preserve_store(topics: &[&str], data: Value) {
+    let (h, private) = authed("HEDGE_MODE", |_| {});
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{
+        "symbol":"PERP_BTC_USDT","orderId":777,"side":"BUY","type":"LIMIT",
+        "quantity":2,"price":100,"reduceOnly":false,"status":"NEW",
+        "executedQuantity":0,"executedPrice":0}}),
+    );
+    assert!(
+        order(&h, "777").is_some(),
+        "known private order makes preservation non-vacuous"
+    );
+    let orders = h.store.orders().to_vec();
+    let positions = h.store.positions().to_vec();
+    let balance = h.store.balance().clone();
+    assert!(balance.total > 0.0);
+    let fills = Rc::new(std::cell::Cell::new(0usize));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
+    for topic in topics {
+        push(&h, &private, json!({"topic":topic,"data":data}));
+        assert_eq!(
+            h.store.orders().to_vec(),
+            orders,
+            "{topic} cannot change source orders"
+        );
+        assert_eq!(
+            h.store.positions().to_vec(),
+            positions,
+            "{topic} has no source position handler"
+        );
+        assert_eq!(
+            *h.store.balance(),
+            balance,
+            "{topic} has no source balance handler"
+        );
+        assert_eq!(fills.get(), 0, "unsupported {topic} cannot invent a fill");
+    }
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn private_position_topics_preserve_the_rest_owned_store() {
+    assert_unsupported_private_topics_preserve_store(
+        &["position", "positions"],
+        json!({
+        "symbol":"PERP_BTC_USDT","holding":99,"averageOpenPrice":999,
+        "positions":[{"symbol":"PERP_BTC_USDT","holding":99,"averageOpenPrice":999}]}),
+    );
+}
+#[test]
+fn private_balance_topics_preserve_the_rest_owned_store() {
+    assert_unsupported_private_topics_preserve_store(
+        &["balance", "account"],
+        json!({
+        "totalAccountValue":999999,"freeCollateral":888888,"totalCollateral":777777}),
+    );
+}
+
+fn ticker_row_refusals(topic: &str, source: &str, target: &str, surrogate: bool) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let template = h.store.tickers()[0].clone();
+    let mut tickers = vec![];
+    for symbol in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "LTCUSDT"] {
+        let mut row = template.clone();
+        row.id = symbol.into();
+        row.symbol = symbol.into();
+        tickers.push(row);
+    }
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let public = socket(&h, PUBLIC_URL);
+    let frame_row = |asset: &str, value: Value| {
+        let mut row = json!({"symbol":format!("PERP_{asset}_USDT"),"close":10,"amount":20,
+            "volume":30,"bid":40,"ask":50,"price":60});
+        row[source] = value;
+        row
+    };
+    let frame = json!({"topic":topic,"data":[
+        frame_row("BTC",Value::Null),frame_row("ETH",json!(123)),
+        frame_row("SOL",json!("unparsed")),frame_row("LTC",json!(456))
+    ]});
+    if surrogate {
+        let text = frame.to_string().replace("\"unparsed\"", r#""\ud800""#);
+        public
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(text)));
+        h.runtime.pump();
+    } else {
+        push(&h, &public, frame);
+    }
+    let rows = json_of(&*h.store.tickers());
+    let field = |symbol: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["symbol"] == symbol)
+            .unwrap()[target]
+            .clone()
+    };
+    assert_eq!(field("ETHUSDT"), 123.);
+    assert_eq!(field("LTCUSDT"), 456.);
+    let original = serde_json::to_value(&template).unwrap()[target].clone();
+    assert_eq!(field("BTCUSDT"), original);
+    assert_eq!(field("SOLUSDT"), original);
+    let reports = h.runtime.reports.borrow().join("\n");
+    for (symbol, value) in [
+        ("BTCUSDT", "null"),
+        ("SOLUSDT", if surrogate { r"\ud800" } else { "unparsed" }),
+    ] {
+        assert!(
+            reports.contains(symbol),
+            "missing refused row identity: {reports}"
+        );
+        assert!(reports.contains(target), "missing refused field: {reports}");
+        assert!(
+            reports.contains(value),
+            "missing original refused value: {reports}"
+        );
+    }
+    assert_eq!(
+        reports.matches("Refused WOO ticker row").count(),
+        2,
+        "{reports}"
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn ticker_row_refusals_keep_valid_ticker_siblings_and_report_each_value() {
+    ticker_row_refusals("tickers", "close", "last", false);
+}
+#[test]
+fn ticker_row_refusals_keep_valid_bbo_siblings_and_report_each_value() {
+    ticker_row_refusals("bbos", "bid", "bid", false);
+}
+#[test]
+fn ticker_row_refusals_keep_valid_mark_siblings_and_report_each_value() {
+    ticker_row_refusals("markprices", "price", "mark", false);
+}
+
+#[test]
+fn retained_ticker_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("tickers", "close", "last", true);
+}
+#[test]
+fn retained_bbo_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("bbos", "bid", "bid", true);
+}
+#[test]
+fn retained_mark_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("markprices", "price", "mark", true);
+}
+
+#[test]
+fn retained_ticker_frame_ignores_unread_surrogate_metadata() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":123,"amount":20,"volume":30,"ignored":"\ud800"}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, 123.);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn retained_ticker_frame_preserves_overflow_and_signed_zero_numbers() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":1e400,"amount":20,"volume":-0.0}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, f64::INFINITY);
+    assert_eq!(h.store.tickers()[0].volume.to_bits(), (-0.0f64).to_bits());
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn retained_ticker_frame_normalizes_before_identifier_admission() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT_\ud800","close":999,"amount":999,"volume":999},{"symbol":"PERP_\ud800_USDT","close":123,"amount":20,"volume":30}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, 999.);
+    assert_eq!(h.runtime.reports.borrow().len(), 1);
+    let reports = h.runtime.reports.borrow().join("\n");
+    assert!(
+        reports.contains(r"\ud800") && reports.contains("identifier boundary"),
+        "{reports}"
+    );
+    h.venue().dispose().unwrap();
 }

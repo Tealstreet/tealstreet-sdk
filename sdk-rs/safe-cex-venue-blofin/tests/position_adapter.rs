@@ -125,7 +125,6 @@ fn native_record(actual: &PositionRecord, expected: &Value) {
 }
 
 #[test]
-#[ignore = "requires installed live TypeScript"]
 fn position_adapter_native_source_parity() {
     let output = std::process::Command::new("node")
         .arg(concat!(

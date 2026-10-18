@@ -48,22 +48,9 @@ fn has_property(value: &Js, key: &str) -> Result<bool, Thrown> {
     }
 }
 
-/// `[...value]` over the iterable intrinsics.
+/// `[...value]` consumes the shared iterator protocol and UTF-16 code points.
 fn spread(value: &Js) -> Result<Vec<Js>, Thrown> {
-    match value {
-        Js::Array(_) => Ok(value.array_values().unwrap_or_default()),
-        Js::String(s) => Ok(s.iter().map(|u| Js::utf16(&[*u])).collect()),
-        Js::Set(items) => Ok(items.borrow().clone()),
-        Js::Map(entries) => Ok(entries
-            .borrow()
-            .iter()
-            .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-            .collect()),
-        other => Err(Thrown::type_error(&format!(
-            "{} is not iterable",
-            other.type_of()
-        ))),
-    }
+    value.iterable_values()
 }
 
 pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
@@ -115,7 +102,13 @@ pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
             }
             out
         }),
-        tuple_two: Rc::new(|v| Ok((v.get("0")?, v.get("1")?))),
+        tuple_two: Rc::new(|value| {
+            let record = iterator_record(value.clone())?;
+            let first = iterator_next(&record)?.unwrap_or(Js::Undefined);
+            let second = iterator_next(&record)?.unwrap_or(Js::Undefined);
+            iterator_close(record)?;
+            Ok((first, second))
+        }),
         await_value: Rc::new(|v| Box::pin(await_js(v))),
     })
 }
@@ -172,27 +165,58 @@ pub(crate) fn construct(weak: &Weak<Shared>, f: Js, args: Vec<Js>) -> Result<Js,
     f.call(Js::Undefined, args)
 }
 
+// Retain the actual IteratorRecord: GetIterator and Get(next) happen once,
+// while each next call remains interleaved with the source loop body.
 fn iterator_record(value: Js) -> Result<Js, Thrown> {
-    // Arrays iterate live by index; the other intrinsics snapshot their entries.
-    let source = match &value {
-        Js::Array(_) => value.clone(),
-        other => Js::array(spread(other)?),
-    };
+    let iterator = value.iterator()?;
+    let next = iterator.get("next")?;
     Ok(Js::object(vec![
-        ("source", source),
-        ("index", Js::Number(0.0)),
+        ("iterator", iterator),
+        ("next", next),
+        ("done", Js::Bool(false)),
     ]))
 }
 
 fn iterator_next(record: &Js) -> Result<Option<Js>, Thrown> {
-    let source = record.get("source")?;
-    let index = record.get("index")?.to_number()? as usize;
-    let length = source.get("length")?.to_number()? as usize;
-    if index >= length {
+    if record.get("done")?.truthy() {
         return Ok(None);
     }
-    record.set("index", Js::Number((index + 1) as f64))?;
-    Ok(Some(source.get(&index.to_string())?))
+    let result = (|| {
+        let iterator = record.get("iterator")?;
+        let step = record.get("next")?.call(iterator, vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
+        }
+        if step.get("done")?.truthy() {
+            Ok(None)
+        } else {
+            step.get("value").map(Some)
+        }
+    })();
+    // IteratorStepValue marks the record done on any abrupt completion.
+    if !matches!(result, Ok(Some(_))) {
+        record.set("done", Js::Bool(true))?;
+    }
+    result
+}
+
+fn iterator_close(record: Js) -> Result<(), Thrown> {
+    if record.get("done")?.truthy() {
+        return Ok(());
+    }
+    record.set("done", Js::Bool(true))?;
+    let iterator = record.get("iterator")?;
+    let method = iterator.get("return")?;
+    if method.is_nullish() {
+        return Ok(());
+    }
+    let returned = method.call(iterator, vec![])?;
+    if !returned.is_object() {
+        return Err(Thrown::type_error(
+            "Iterator return result is not an object",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn binding_ops(weak: Weak<Shared>) -> Rc<BindingOps<Js, Thrown>> {
@@ -211,8 +235,11 @@ pub(crate) fn binding_ops(weak: Weak<Shared>) -> Rc<BindingOps<Js, Thrown>> {
         }),
         iterator: Rc::new(iterator_record),
         next: Rc::new(iterator_next),
-        close: Rc::new(|_| Ok(())),
-        close_throw: Rc::new(|_, e| e),
+        close: Rc::new(iterator_close),
+        close_throw: Rc::new(|record, error| {
+            let _ = iterator_close(record);
+            error
+        }),
     })
 }
 
@@ -243,7 +270,7 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
             }
             Box::new(Never)
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             String::new()
         }
@@ -259,7 +286,12 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
             _: &serde_json::Value,
         ) {
         }
-        fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {}
+        fn report_raw_exception(
+            &self,
+            _: &safe_cex_exchange::js_runtime::value::Js,
+            _: &serde_json::Value,
+        ) {
+        }
         fn execute_worker_request(
             &self,
             _: serde_json::Value,

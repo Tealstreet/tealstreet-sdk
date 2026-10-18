@@ -12,11 +12,30 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 struct Options {
     symbol: String,
     interval: String,
     from: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "Options")]
+struct SpotOptionsWire {
+    symbol: String,
+    interval: String,
+    from: Option<f64>,
+}
+
+impl<'de> Deserialize<'de> for Options {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let input = <JsNumberInput as Deserialize<'de>>::deserialize(d)?;
+        input
+            .decode_with(|decoder| {
+                SpotOptionsWire::deserialize(safe_cex_types::strict_decode::object(decoder))
+            })
+            .map_err(serde::de::Error::custom)
+    }
 }
 impl JsNumberOutput for Options {
     fn check_number_output(&self) {
@@ -151,5 +170,41 @@ where
             console_error("[KrakenSpot] fetchOHLCV error:", &error.message)?;
             Ok(Vec::new())
         }
+    }
+}
+
+#[cfg(test)]
+mod accepted_shape {
+    use super::Options;
+    use crate::accepted_record_shapes_support as support;
+    #[test]
+    fn spot_options_rejects_complete_positional_array() {
+        support::positive::<Options>(
+            r#"{"symbol":"XBT/USD","interval":"15m","from":-0,"ignored":true}"#,
+            |d| {
+                assert_eq!(d.symbol, "XBT/USD");
+                assert_eq!(d.interval, "15m");
+                assert_eq!(d.from.unwrap().to_bits(), (-0.0_f64).to_bits());
+            },
+        );
+        for raw in [
+            r#"{"symbol":"ETH/USD","interval":"5m"}"#,
+            r#"{"symbol":"ETH/USD","interval":"5m","from":null}"#,
+        ] {
+            support::positive::<Options>(raw, |d| {
+                assert_eq!(d.symbol, "ETH/USD");
+                assert_eq!(d.interval, "5m");
+                assert!(d.from.is_none());
+            });
+        }
+        support::positive::<Options>(r#"{"symbol":"NUM","interval":"1m","from":1e400}"#, |d| {
+            assert_eq!(d.symbol, "NUM");
+            assert_eq!(d.interval, "1m");
+            assert_eq!(d.from.unwrap().to_bits(), f64::INFINITY.to_bits());
+        });
+        support::rejects::<Options>(
+            r#"["XBT/USD","15m",47.25]"#,
+            &["{}", r#"{"symbol":"x","interval":"1m","from":true}"#],
+        );
     }
 }

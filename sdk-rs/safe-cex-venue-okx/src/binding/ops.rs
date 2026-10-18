@@ -21,7 +21,7 @@ use safe_cex_exchange::{
     exchange::ExchangeSettings,
     js_runtime::{
         base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory},
-        promise::await_js,
+        promise::{all, await_js},
         scope::{Scope, ScopeShared, bound_member, scope_of},
         value::{Js, Thrown, arg, from_typed, to_json},
     },
@@ -100,8 +100,20 @@ fn base_constructor(scope: &OkxScope) -> Js {
             settings: settings(&shared.extra.name, Rc::downgrade(&shared))?,
             external_public_data: shared.extra.external_public_data.clone(),
         };
-        let (this, base) =
-            base_exchange::create(&shared.sockets, parts, arg(&a, 0), arg(&a, 1), arg(&a, 2))?;
+        let (this, base) = base_exchange::create(
+            &shared.sockets,
+            parts,
+            arg(&a, 0),
+            arg(&a, 1),
+            arg(&a, 2),
+            |this| {
+                // Both maintained demo subclasses initialize isDemo = true.
+                if matches!(shared.extra.variant(), Variant::Demo | Variant::EuDemo) {
+                    this.define("isDemo", Js::Bool(true))?;
+                }
+                Ok(())
+            },
+        )?;
         let _ = shared.base.set(base);
         *shared.exchange.borrow_mut() = this.clone();
         Ok(this)
@@ -149,6 +161,22 @@ fn callable(f: &Js) -> Result<(), Thrown> {
 fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
     v.array_values()
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", v.to_display())))
+}
+
+/// Source for-of advances the shared iterator between body callbacks.
+fn for_of(value: &Js, mut body: impl FnMut(Js) -> Result<(), Thrown>) -> Result<(), Thrown> {
+    let iterator = value.iterator()?;
+    let next = iterator.get("next")?;
+    loop {
+        let step = next.call(iterator.clone(), vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
+        }
+        if step.get("done")?.truthy() {
+            return Ok(());
+        }
+        body(step.get("value")?)?;
+    }
 }
 
 /// Resolve a capture name against the scope.
@@ -264,7 +292,7 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
             Ok(Js::array(out))
         }),
         reduce: Rc::new(|v, init, f| items(&v)?.into_iter().try_fold(init, |acc, x| f(acc, x))),
-        for_of: Rc::new(|v, f| items(&v)?.into_iter().try_for_each(|x| f(x))),
+        for_of: Rc::new(|v, f| for_of(&v, |x| f(x))),
         sum_by: Rc::new(|sum, values, mapper| {
             let mut args = vec![values];
             if let Some(m) = mapper {
@@ -272,20 +300,13 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
             }
             call_js(&sum, args)
         }),
-        // p-iteration `map(array, async fn)`: every callback starts, results keep order.
-        parallel_map: Rc::new(move |map, v, f| {
-            let started: Result<Vec<ReadAwait<Js, Thrown>>, Thrown> =
-                items(&v).map(|xs| xs.into_iter().map(|x| f(x)).collect());
-            let _ = map;
-            let rt = rt.clone();
-            Box::pin(async move {
-                let mut out = vec![];
-                for fut in started? {
-                    out.push(fut.await?);
-                }
-                let _ = &rt;
-                Ok(Js::array(out))
-            })
+        // p-iteration starts every async callback before awaiting the group.
+        parallel_map: Rc::new(move |_, v, f| {
+            let started = items(&v).map(|xs| {
+                let values = xs.into_iter().map(|x| rt.spawn(f(x))).collect();
+                Js::Promise(all(&rt.exchange_runtime(), values))
+            });
+            Box::pin(async move { await_js(started?).await })
         }),
         some: Rc::new(|v, f| {
             for x in items(&v)? {
@@ -397,7 +418,7 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
         invoke: inv,
         await_value: Rc::new(|v| Box::pin(await_js(v))),
         intrinsic: intr,
-        for_of: Rc::new(|v, f| items(&v)?.into_iter().try_for_each(|x| f(x))),
+        for_of: Rc::new(|v, f| for_of(&v, |x| f(x))),
         truthy: m.truthy.clone(),
         nullish: m.nullish.clone(),
         equal: m.equal.clone(),
@@ -423,17 +444,7 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
                 optional(v, "message")
             }
         }),
-        parallel_map: Rc::new(|_, v, f| {
-            let started: Result<Vec<_>, Thrown> =
-                items(&v).map(|xs| xs.into_iter().map(|x| f(x)).collect());
-            Box::pin(async move {
-                let mut out = vec![];
-                for fut in started? {
-                    out.push(fut.await?);
-                }
-                Ok(Js::array(out))
-            })
-        }),
+        parallel_map: m.parallel_map.clone(),
         // mapOkxPositionHistory(row, { account, toBase, resolveSymbol, resolveSettleCurrency })
         map_position: Rc::new(move |mapper, row, market, account| {
             let this = to_base.this.clone();

@@ -861,16 +861,8 @@ impl SpotAccountHost for Host {
     }
     fn imported(&mut self, k: &str) -> Result<N, N> {
         Ok(match k {
-            "ENDPOINTS" | "spot.ENDPOINTS" => self.endpoints.clone(),
-            "spot.BASE_URLS" => object(vec![
-                ("PRODUCTION", s("https://api.hyperliquid.xyz")),
-                ("TESTNET", s("https://api.hyperliquid-testnet.xyz")),
-            ]),
+            "ENDPOINTS" => self.endpoints.clone(),
             "spot.GRAFANA_ENDPOINTS_EVERY" | "spot.GRAFANA_ENDPOINTS_PERIODIC" => arr(vec![]),
-            "hyperliquidRestRateLimiter" => {
-                object(vec![("waitForToken", N::Builtin("shared-wait".into()))])
-            }
-            "qs" => object(vec![("stringify", N::Builtin("qs".into()))]),
             "MarginType" | "OrderType" | "OrderSide" | "OrderTimeInForce" => get(&self.enums, k),
             "PositionSide" | "PositionMode" | "LogSeverity" => get(&self.enums, k),
             "hyperliquidClientOrderIdRule" => object(vec![("rule", s("hyperliquid"))]),
@@ -1822,12 +1814,13 @@ impl Host {
             }
             "omitUndefined" => {
                 let N::A(a) = first else { panic!("ids") };
-                return Ok(arr(a
-                    .borrow()
-                    .iter()
-                    .filter(|v| !matches!(v, N::U))
-                    .cloned()
-                    .collect()));
+                let result = object(vec![]);
+                for (index, value) in a.borrow().iter().enumerate() {
+                    if !matches!(value, N::U) {
+                        self.set(&result, &index.to_string(), value)?;
+                    }
+                }
+                return Ok(result);
             }
             "price-precision" => return Ok(N::Num(cache::num(&args[1]))),
             "v" => return self.get(&first, &String::from_utf16_lossy(&string(&args[1]).0)),
@@ -1852,50 +1845,6 @@ impl Host {
                     .push((id.into(), args.to_vec()));
                 return Ok(first);
             }
-            "safeCexAxiosCreate" => {
-                self.inner
-                    .borrow_mut()
-                    .originals
-                    .push((id.into(), args.to_vec()));
-                let xhr = object(vec![(
-                    "interceptors",
-                    object(vec![
-                        (
-                            "request",
-                            object(vec![("use", N::Builtin("request-use".into()))]),
-                        ),
-                        (
-                            "response",
-                            object(vec![("use", N::Builtin("response-use".into()))]),
-                        ),
-                    ]),
-                )]);
-                self.inner
-                    .borrow_mut()
-                    .originals
-                    .push(("allocated-xhr".into(), vec![xhr.clone()]));
-                return Ok(xhr);
-            }
-            "request-use"
-            | "response-use"
-            | "retry"
-            | "installTransportAdapter"
-            | "markSkipRemoteSigning"
-            | "shared-wait" => {
-                self.inner
-                    .borrow_mut()
-                    .originals
-                    .push((id.into(), args.to_vec()));
-                return Ok(if id == "shared-wait" {
-                    self.ready(Ok(N::U))
-                } else {
-                    N::U
-                });
-            }
-            "networkErrorOnRead" => return Ok(s("condition")),
-            "isSigningCaptureRequest" => return Ok(N::B(truthy(&get(&first, "capture")))),
-            "getHyperliquidRestRequestWeight" => return Ok(N::Num(7.)),
-            "qs" => return Ok(s("query")),
             _ => return Err(N::Builtin("unhandled".into())),
         })();
         if matches!(&result,Err(N::Builtin(id)) if id=="unhandled") {

@@ -76,6 +76,28 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     let this = rt.this.clone();
     let typed = venue(rt)?;
 
+    if matches!(
+        typed.base.name,
+        safe_cex_types::ExchangeName::Bybit
+            | safe_cex_types::ExchangeName::Bybitdemo
+            | safe_cex_types::ExchangeName::Hyrotrader
+    ) {
+        method(&this, rt, "fetchClosedPositionRows", |r, a| {
+            Ok(crate::ledger_history::fetch_closed_position_rows(
+                h(r),
+                r.this.clone(),
+                arg(&a, 0),
+            ))
+        });
+        method(&this, rt, "fetchHistoricalPositions", |r, a| {
+            Ok(crate::ledger_history::fetch_historical_positions(
+                h(r),
+                r.this.clone(),
+                arg(&a, 0),
+            ))
+        });
+    }
+
     // Constructor fields: the signed clients and the three sockets.
     let runtime = rt.exchange_runtime();
     this.define(
@@ -100,6 +122,12 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     )?;
     this.define("publicWebsocket", socket(rt, SocketSlot::Public)?)?;
     this.define("privateWebsocket", socket(rt, SocketSlot::Private)?)?;
+    if typed.base.name == safe_cex_types::ExchangeName::Bybitinverse {
+        this.define(
+            "publicInverseWebsocket",
+            socket(rt, SocketSlot::PublicSecondary)?,
+        )?;
+    }
     // ts: BybitExchange.get inversePublicWebsocket — the secondary public slot.
     this.define(
         "inversePublicWebsocket",
@@ -221,11 +249,20 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let coins = venue(rt)?.get_settle_coins_for_category(&text(&arg(&a, 0))?)?;
         Ok(Js::array(coins.into_iter().map(Js::str).collect()))
     });
+    method(&this, rt, "validateCandleInterval", |rt, a| {
+        venue(rt)?
+            .validate_candle_interval(&arg(&a, 0))
+            .map_err(Thrown::from)?;
+        Ok(Js::Undefined)
+    });
     // ts: BybitExchange.getCategoryForSymbol
     method(&this, rt, "getCategoryForSymbol", |rt, a| {
         Ok(Js::str(
             venue(rt)?.get_category_for_symbol(&text(&arg(&a, 0))?),
         ))
+    });
+    method(&this, rt, "tradesCategoryOf", |rt, a| {
+        crate::ws_private::messages::trades_category_of(rt, arg(&a, 0))
     });
     method(&this, rt, "inverseEnabled", |rt, _| {
         Ok(Js::Bool(venue(rt)?.inverse_enabled()))
@@ -321,6 +358,76 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         members::controls::change_margin_type(rt, arg(&a, 0), arg(&a, 1))
     });
 
+    this.define(
+        "DEFAULT_EXECUTIONS_LOOKBACK_MS",
+        Js::Number(typed.default_executions_lookback_ms),
+    )?;
+    method(
+        &this,
+        rt,
+        "getExecutionQueryWindows",
+        members::history::query_windows,
+    );
+    method(
+        &this,
+        rt,
+        "refuseOptionSymbol",
+        members::history::refuse_option_symbol,
+    );
+    let contexts_rt = rt.clone();
+    this.define_accessor(
+        "incomeContexts",
+        Some(Rc::new(move |_| {
+            crate::ledger_history::income_contexts(&contexts_rt, &contexts_rt.this)
+        })),
+        None,
+    );
+    let context_rt = rt.clone();
+    this.define_accessor(
+        "incomeContext",
+        Some(Rc::new(move |_| {
+            crate::inverse_read_surface::income_context(&context_rt, &context_rt.this)
+        })),
+        None,
+    );
+    method(&this, rt, "fetchIncomeHistory", |rt, a| {
+        members::history::fetch_income_history(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchIncomeHistoryRange", |rt, a| {
+        members::history::fetch_income_history_range(rt, arg(&a, 0), arg(&a, 1), arg(&a, 2))
+    });
+    method(&this, rt, "fetchHistoricalFills", |rt, a| {
+        if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitspot {
+            return Ok(Js::array(vec![]));
+        }
+        crate::rest_fills::fetch_historical_fills(rt, arg(&a, 0))
+    });
+    method(
+        &this,
+        rt,
+        "fetchExecutionsFallbackFromOrderHistory",
+        |rt, a| {
+            let inner = rt.clone();
+            Ok(rt.spawn(Box::pin(async move {
+                crate::rest_fills::fetch_executions_fallback_from_order_history(
+                    &inner,
+                    arg(&a, 0),
+                    arg(&a, 1),
+                )
+                .await
+            })))
+        },
+    );
+    method(&this, rt, "fetchHistoricalOrders", |rt, a| {
+        members::history::fetch_historical_orders(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchClosedPnl", |rt, a| {
+        members::history::fetch_closed_pnl(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchOHLCV", |rt, a| {
+        members::ohlcv::fetch_ohlcv(rt, arg(&a, 0))
+    });
+
     // Public data (members/markets.rs).
     method(&this, rt, "fetchFees", |rt, a| {
         members::markets::fetch_fees(rt, arg(&a, 0))
@@ -334,6 +441,25 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(&this, rt, "fetchOptionMarkets", |rt, _| {
         members::markets::fetch_option_markets(rt)
     });
+    if matches!(
+        venue(rt)?.base.name,
+        safe_cex_types::ExchangeName::Bybit
+            | safe_cex_types::ExchangeName::Bybitdemo
+            | safe_cex_types::ExchangeName::Hyrotrader
+    ) {
+        method(&this, rt, "assertOptionsEnabled", |rt, _| {
+            members::options::assert_options_enabled(rt)
+        });
+        method(&this, rt, "fetchOptionChain", |rt, a| {
+            members::options::fetch_option_chain(rt, arg(&a, 0))
+        });
+        method(&this, rt, "fetchOptionExpiries", |rt, a| {
+            members::options::fetch_option_expiries(rt, arg(&a, 0))
+        });
+        method(&this, rt, "fetchAccountGreeks", |rt, _| {
+            members::options::fetch_account_greeks(rt)
+        });
+    }
     method(&this, rt, "fetchMarkets", |rt, _| {
         members::markets::fetch_markets(rt)
     });
@@ -354,6 +480,18 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     });
 
     // Order placement and the local order lifecycle (members/orders.rs, lifecycle.rs).
+    method(&this, rt, "submitCreateOrders", |rt, a| {
+        let rt = rt.clone();
+        let payloads = arg(&a, 0)
+            .array_values()
+            .ok_or_else(|| Thrown::type_error("payloads is not an array"))?;
+        let opts = arg(&a, 1);
+        Ok(rt.clone().spawn(Box::pin(async move {
+            members::orders::submit_create_orders_body(&rt, payloads, &opts)
+                .await
+                .map(Js::array)
+        })))
+    });
     method(&this, rt, "placeOrder", |rt, a| {
         members::orders::place_order(rt, arg(&a, 0))
     });
@@ -432,6 +570,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(&this, rt, "cancelOrders", |rt, a| {
         members::cancel::cancel_orders(rt, arg(&a, 0))
     });
+    method(&this, rt, "cancelSymbolOrders", |rt, a| {
+        members::cancel::cancel_symbol_orders(rt, arg(&a, 0), arg(&a, 1))
+    });
     method(
         &this,
         rt,
@@ -498,8 +639,15 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(snapshot::fetch_and_set_private_snapshot_helper(
             h(rt),
             rt.this.clone(),
-            arg(&a, 0).truthy(),
+            arg(&a, 0).is_undefined() || arg(&a, 0).truthy(),
         ))
+    });
+    method(&this, rt, "waitForRemoteSigner", |rt, _| {
+        let rt = rt.clone();
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let venue = venue(&rt)?;
+            Ok(Js::Bool(venue.base.wait_for_remote_signer().await?))
+        })))
     });
     method(&this, rt, "tick", |rt, _| {
         Ok(snapshot::tick(h(rt), rt.this.clone()))
@@ -511,5 +659,15 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         snapshot::sync_balance_upnl_from_positions(rt, &rt.this)?;
         Ok(Js::Undefined)
     });
+    members::batch::install(rt)?;
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitspot {
+        members::spot::install(rt)?;
+    }
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitinverse {
+        members::inverse::install(rt)?;
+    }
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+        members::hyro::install(rt)?;
+    }
     Ok(())
 }

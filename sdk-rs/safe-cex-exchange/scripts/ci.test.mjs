@@ -2,7 +2,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import test from 'node:test';
 
 // See sdk-rs/scripts/rust-ci-wiring.test.mjs: the tier lives on the mirror.
@@ -63,7 +63,7 @@ function audit(source) {
   const matrix = native.match(/^      matrix:\n([\s\S]*?)(?=^    steps:)/m)?.[1];
   assert.ok(matrix, 'native matrix required');
   assert.match(matrix, /^        include:\n(?:          - check: [a-z]+\n            command: [^\n]+\n)+$/, 'native matrix must be literal and have no exclusions');
-  assert.match(matrix, /^          - check: test\n            command: cargo test --locked$/m, 'native test matrix arm must remain reachable');
+  assert.match(matrix, /^          - check: test\n            command: cargo test --locked --no-fail-fast$/m, 'native test matrix arm must remain reachable');
   const setup = step(native, 'Set up Node for differential tests and crypto fixtures', "matrix.check == 'test'");
   assert.match(setup, /^        uses: actions\/setup-node@/m, 'native Node setup required');
   const dependencies = step(native, 'Install isolated TypeScript for routing oracle', "matrix.check == 'test'", '.');
@@ -83,12 +83,12 @@ function audit(source) {
     }
     if (event === 'push') {
       const branches = block.match(/^    branches: \[([^\]]+)\]$/m)?.[1]?.split(',').map(branch => branch.trim());
-      assert.ok(branches?.includes('feat/rust-p4a-core'), 'P4a pushes must trigger the workflow');
+      assert.ok(branches?.includes('master'), 'master pushes must trigger the workflow');
     }
   }
 }
 
-test('P4a CI runs reachable live core gates and both wasm feature sets', () => audit(workflow));
+test('mirror CI runs reachable live core gates and both wasm feature sets', () => audit(workflow));
 for (const command of nativeCommands) {
   test(`removing core command fails: ${command}`, () => {
     assert.throws(() => audit(workflow.replace(`          ${command}\n`, '')), /native core gate must retain fail-fast commands/);
@@ -111,13 +111,14 @@ for (const [label, before, after] of [
 for (const command of wasmCommands) {
   test(`removing wasm command fails: ${command}`, () => assert.throws(() => audit(workflow.replace(`          ${command}\n`, '')), /wasm core gate must retain fail-fast commands/));
 }
-test('removing test matrix arm fails', () => assert.throws(() => audit(workflow.replace('          - check: test\n            command: cargo test --locked\n', '')), /native test matrix arm must remain reachable/));
+test('removing test matrix arm fails', () => assert.throws(() => audit(workflow.replace('          - check: test\n            command: cargo test --locked --no-fail-fast\n', '')), /native test matrix arm must remain reachable/));
+test('dropping the full failure inventory flag fails', () => assert.throws(() => audit(workflow.replace('command: cargo test --locked --no-fail-fast', 'command: cargo test --locked')), /native test matrix arm must remain reachable/));
 test('unreachable core step fails', () => assert.throws(() => audit(workflow.replace('      - name: Check exchange core parity and lifecycle\n        if: matrix.check == \'test\'', '      - name: Check exchange core parity and lifecycle\n        if: false')), /condition must be reachable/));
 test('native job bypass fails', () => assert.throws(() => audit(workflow.replace('  native:\n', '  native:\n    if: false\n')), /native job must remain mandatory/));
 test('step failure suppression fails', () => assert.throws(() => audit(workflow.replace('      - name: Check exchange core parity and lifecycle\n', '      - name: Check exchange core parity and lifecycle\n        continue-on-error: true\n')), /must not bypass execution/));
 test('shell override fails', () => assert.throws(() => audit(workflow.replace('defaults:\n  run:\n', 'defaults:\n  run:\n    shell: bash {0}\n')), /shell override may disable fail-fast execution/));
 test('duplicate run declarations fail', () => assert.throws(() => audit(workflow.replace('          node --test safe-cex-exchange/scripts/ci.test.mjs safe-cex-exchange/scripts/health-features.test.mjs\n', '          node --test safe-cex-exchange/scripts/ci.test.mjs safe-cex-exchange/scripts/health-features.test.mjs\n        run: true\n')), /requires one run declaration/));
-test('removing P4a branch trigger fails', () => assert.throws(() => audit(workflow.replace(', feat/rust-p4a-core', '')), /P4a pushes must trigger/));
+test('removing master branch trigger fails', () => assert.throws(() => audit(workflow.replace('branches: [master, ', 'branches: [')), /master pushes must trigger/));
 for (const event of ['push', 'pull_request']) {
   test(`narrowing ${event} source triggers fails`, () => {
     const start = workflow.indexOf(`  ${event}:\n`);
@@ -141,6 +142,8 @@ test('isolated core dependencies include the real JWT codec under repository fro
       assert.equal(manifest.dependencies.typescript, root.devDependencies.typescript);
       assert.equal(manifest.dependencies.jsonwebtoken, sdk.dependencies.jsonwebtoken, 'real JWT dependency required');
       assert.equal(manifest.dependencies['axios-retry'], sdk.dependencies['axios-retry'], 'live network retry predicate required');
+      assert.equal(manifest.dependencies.lodash, sdk.dependencies.lodash, 'live CrossTrade mapping requires Lodash');
+      assert.equal(manifest.dependencies.qs, sdk.dependencies.qs, 'live query-options oracle requires qs');
     };
     check(projected);
     const missingEmitter = structuredClone(projected);
@@ -159,6 +162,12 @@ test('isolated core dependencies include the real JWT codec under repository fro
     const missingRetry = structuredClone(projected);
     delete missingRetry.dependencies['axios-retry'];
     assert.throws(() => check(missingRetry), /live network retry predicate required/);
+    const missingLodash = structuredClone(projected);
+    delete missingLodash.dependencies.lodash;
+    assert.throws(() => check(missingLodash), /live CrossTrade mapping requires Lodash/);
+    const missingQs = structuredClone(projected);
+    delete missingQs.dependencies.qs;
+    assert.throws(() => check(missingQs), /live query-options oracle requires qs/);
   } finally {
     rmSync(target, { recursive: true, force: true });
   }

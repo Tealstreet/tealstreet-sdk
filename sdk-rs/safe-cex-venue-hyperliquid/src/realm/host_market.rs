@@ -1,6 +1,6 @@
 //! Scalar-market and fast-asset-context host primitives for the imported
 //! market helpers (price precision, volume/OI parsing, fastAssetCtxs decode).
-use super::{Realm, ccxt, value::*};
+use super::{Realm, ccxt, value::Value};
 use crate::{
     market_helpers::{FastAssetCtxHost, MarketScalarHost, PreciseComparison},
     spot_json::JsString,

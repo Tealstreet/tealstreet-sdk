@@ -22,6 +22,70 @@ use tokio::{
 const KEY: &str = "0x0123456789012345678901234567890123456789012345678901234567890123";
 const ADDRESS: &str = "0x14791697260e4c9a71f18484c9f997b308e59325";
 
+#[test]
+fn hyperliquid_registry_folds_journal_records_over_native_http() {
+    support::run_local(async {
+        let h = support::venue_harness(
+            ExchangeName::Hyperliquid,
+            Rc::new(|request| {
+                let body: Value = serde_json::from_str(&request.body).unwrap();
+                assert_eq!(request.path, "/info");
+                assert_eq!(body["user"], ADDRESS);
+                match body["type"].as_str().unwrap() {
+                    "userFillsByTime" => Some(json!([
+                        {"coin":"BTC","tid":1,"oid":10,"time":1699999998000u64,"side":"B","px":"61000","sz":"1","fee":"1","feeToken":"USDC","closedPnl":"0","dir":"Open Long"},
+                        {"coin":"BTC","tid":2,"oid":11,"time":1699999999000u64,"side":"A","px":"62000","sz":"1","fee":"2","feeToken":"USDC","closedPnl":"1000","dir":"Close Long"}
+                    ])),
+                    "userFunding" => Some(json!([])),
+                    other => panic!("unexpected journal request {other}"),
+                }
+            }),
+            json!({"key":ADDRESS, "secret":"", "applicationId":ADDRESS}),
+            None,
+            safe_cex_exchange::native::native_runtime(),
+        ).await;
+        h.store
+            .update(
+                safe_cex_store::StoreUpdate {
+                    markets: Some(vec![serde_json::from_value(json!({
+                "id":"BTC", "symbol":"BTC-PERP", "base":"BTC", "quote":"USDC", "active":true,
+                "precision":{"amount":0.00001,"price":1},
+                "limits":{"amount":{"min":0.00001,"max":100},"leverage":{"min":1,"max":40}}
+            })).unwrap()]),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+        let records = h
+            .exchange
+            .fetch_historical_positions(safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "native-journal".into(),
+                from: Some(1_699_999_000_000.0),
+                to: Some(1_700_000_000_000.0),
+            })
+            .await
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        let record: safe_cex_types::PositionRecord =
+            serde_json::from_value(records[0].clone()).unwrap();
+        assert_eq!(record.account, "native-journal");
+        assert_eq!(record.symbol, "BTC-PERP");
+        assert_eq!(record.settle_currency, "USDC");
+        assert_eq!(record.realized_pnl, 1000.0);
+        assert_eq!(record.fees, 3.0);
+        assert!(
+            h.seen.borrow().len() >= 3,
+            "real income and execution reads reached HTTP"
+        );
+        assert!(
+            h.peers.borrow().is_empty(),
+            "pure journal reads do not start sockets"
+        );
+        h.exchange.dispose().unwrap();
+    });
+}
+
 fn sign(body: &Value, mainnet: bool) -> Value {
     serde_json::to_value(
         safe_cex_venue_hyperliquid::signing::sign_l1_action(
@@ -48,7 +112,15 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserSigner {
         let RemoteSignerRequest::Http(request) = request else {
             panic!("HTTP relay only")
         };
-        let mut body = match request.config.data.as_ref().unwrap() {
+        let mut body = match &request
+            .config
+            .data
+            .as_ref()
+            .unwrap()
+            .clone()
+            .into_value()
+            .unwrap()
+        {
             Value::String(text) => serde_json::from_str::<Value>(text).unwrap(),
             body => body.clone(),
         };
@@ -65,7 +137,9 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserSigner {
                     url: None,
                     headers: request.config.headers,
                     params: request.config.params,
-                    data: Some(Value::String(body.to_string())),
+                    data: Some(safe_cex_types::retained_json::RetainedJsonInput::Text(
+                        body.to_string().encode_utf16().collect(),
+                    )),
                 }),
             }))
         })
@@ -196,10 +270,43 @@ fn hyperliquid_registry_uses_real_http_and_hosted_signing_without_a_secret() {
                     "overrideProxyUrl": proxy
                 }))
                 .unwrap();
-                let deps = host.hyperliquid(&options).unwrap();
+                let deps = host
+                    .hyperliquid(ExchangeName::Hyperliquid, &options)
+                    .unwrap();
                 assert!(Rc::ptr_eq(&deps.limiter, &limiter));
+                let spot_deps = host
+                    .hyperliquid(ExchangeName::Hyperliquidspot, &options)
+                    .unwrap();
                 assert!(
-                    Rc::ptr_eq(&other.hyperliquid(&options).unwrap().limiter, &limiter),
+                    Rc::ptr_eq(&spot_deps.limiter, &limiter),
+                    "Spot and perpetual accounts share one weight budget"
+                );
+                spot_deps
+                    .http
+                    .execute(RestRequest {
+                        method: "POST".into(),
+                        url: "/exchange".into(),
+                        base_url: Some(
+                            if testnet {
+                                "https://api.hyperliquid-testnet.xyz"
+                            } else {
+                                "https://api.hyperliquid.xyz"
+                            }
+                            .into(),
+                        ),
+                        body: Some(safe_cex_transport::RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"action":{"type":"scheduleCancel"},"nonce":1700000000000_u64})).unwrap())),
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+                assert!(
+                    Rc::ptr_eq(
+                        &other
+                            .hyperliquid(ExchangeName::Hyperliquid, &options)
+                            .unwrap()
+                            .limiter,
+                        &limiter
+                    ),
                     "distinct account hosts share one weight budget"
                 );
                 let exchange = rust_constructor(&ExchangeName::Hyperliquid, host.clone())
@@ -223,9 +330,7 @@ fn hyperliquid_registry_uses_real_http_and_hosted_signing_without_a_secret() {
                         base_url: Some("https://api.hyperliquid.xyz".into()),
                         skip_remote_signing: true,
                         params: Some(json!({"coin":["BTC","ETH"]})),
-                        body: Some(safe_cex_transport::RestBody::Untransformed(
-                            json!({"type":"allMids"}),
-                        )),
+                        body: Some(safe_cex_transport::RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"type":"allMids"})).unwrap())),
                         ..Default::default()
                     })
                     .await
@@ -238,9 +343,20 @@ fn hyperliquid_registry_uses_real_http_and_hosted_signing_without_a_secret() {
                 exchange.dispose().unwrap();
             }
             let calls = signer.calls.borrow();
-            assert_eq!(calls.len(), 2, "only trading calls go to the remote signer");
+            assert_eq!(calls.len(), 4, "only trading calls go to the remote signer");
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|call| call["exchangeName"] == "hyperliquidspot")
+                    .count(),
+                2,
+                "Spot host adapter preserves the selected registry name"
+            );
             for call in calls.iter() {
-                assert_eq!(call["exchangeName"], "hyperliquid");
+                assert!(
+                    call["exchangeName"] == "hyperliquid"
+                        || call["exchangeName"] == "hyperliquidspot"
+                );
                 assert_eq!(call["accountName"], "hl-account");
                 assert_eq!(call["config"]["url"], "/exchange");
             }

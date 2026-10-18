@@ -1,6 +1,6 @@
 //! Production wiring: JSON is not the in-memory numeric patch representation.
 use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch, store::DefaultStore};
-use safe_cex_types::{PositionExtra, StoreData};
+use safe_cex_types::{ModelField, PositionExtra, StoreData};
 use serde_json::json;
 use std::rc::Rc;
 fn seed() -> StoreData {
@@ -21,7 +21,7 @@ fn unrelated_position_patch_preserves_every_existing_nonfinite_field() {
         let mut position = seed().positions.remove(0);
         position.id = "p".into();
         position.entry_price = price;
-        position.extra = Some(PositionExtra {
+        position.extra = ModelField::Value(PositionExtra {
             contracts_native: Some(f64::NAN),
             unrealized_pnl_native: Some(f64::NEG_INFINITY),
         });
@@ -59,7 +59,7 @@ fn unrelated_position_patch_preserves_every_existing_nonfinite_field() {
                 unrealized_pnl_native: Some(f64::NAN),
             },
         );
-        host.update_positions(&[("p".into(), patch)]).unwrap();
+        host.update_positions(&[(Some("p".into()), patch)]).unwrap();
         same_number(host.positions()[0].entry_price, price);
         assert!(
             host.positions()[0]
@@ -197,12 +197,12 @@ fn order_market_and_balance_do_not_roundtrip_existing_nonfinite_values() {
         let real = DefaultStore::new();
         let mut order = seed().orders.remove(0);
         order.id = "o".into();
-        order.price = value;
+        order.price = value.into();
         real.add_or_update_order(order)
             .expect("fixture Store mutation must succeed");
         real.update_order("o", json!({"amount":2}).as_object().unwrap())
             .unwrap();
-        same_number(real.orders()[0].price, value);
+        same_number(real.orders()[0].price.to_number(), value);
         let mut market = seed().markets.remove(0);
         market.id = "m".into();
         market.precision.price = value;
@@ -270,7 +270,7 @@ fn invalid_later_fields_commit_no_state_aliases_counters_or_notifications() {
     data.tickers[0].symbol = "BTC".into();
     data.tickers[0].last = 100.0;
     data.orders[0].id = "o".into();
-    data.orders[0].price = 100.0;
+    data.orders[0].price = 100.0.into();
     data.markets[0].id = "m".into();
     data.markets[0].quote = "USDT".into();
     let mut position = data.positions[0].clone();
@@ -325,11 +325,11 @@ fn invalid_later_fields_commit_no_state_aliases_counters_or_notifications() {
     assert!(
         real.update_positions(&[
             (
-                "p1".into(),
+                Some("p1".into()),
                 json!({"contracts":7}).as_object().unwrap().clone().into()
             ),
             (
-                "p2".into(),
+                Some("p2".into()),
                 json!({"entryPrice":null})
                     .as_object()
                     .unwrap()

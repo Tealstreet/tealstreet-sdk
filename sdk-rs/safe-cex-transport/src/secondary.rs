@@ -32,7 +32,7 @@ pub fn create_api_with_secondary_key(
             primary,
         });
     }
-    let secondary_options = apply_secondary_options(options, proxy)?;
+    let secondary_options = apply_secondary_options(options, proxy);
     let secondary = create(&secondary_options)?;
     let secondary =
         secondary_rate_limit.map_or_else(|| secondary.clone(), |limit| limit(secondary.clone()));
@@ -59,30 +59,22 @@ fn secondary_proxy(
         .or_else(|| provider.public_cors_proxy())
 }
 
-fn apply_secondary_options(
-    options: &ExchangeOptions,
-    proxy: Option<String>,
-) -> Result<ExchangeOptions, TransportError> {
-    // TS copies every secondary_* property, including explicitly present empty strings.
-    let mut value =
-        serde_json::to_value(options).map_err(|error| TransportError::Host(error.to_string()))?;
-    let object = value.as_object_mut().ok_or_else(|| {
-        TransportError::Host("ExchangeOptions must serialize as an object".into())
-    })?;
-    let overrides: Vec<_> = object
-        .iter()
-        .filter_map(|(key, value)| {
-            key.strip_prefix("secondary_")
-                .map(|key| (key.to_owned(), value.clone()))
-        })
-        .collect();
-    object.extend(overrides);
-    if let Some(proxy) = proxy {
-        object.insert("overrideProxyUrl".into(), proxy.into());
-    } else {
-        object.remove("overrideProxyUrl");
+fn apply_secondary_options(options: &ExchangeOptions, proxy: Option<String>) -> ExchangeOptions {
+    // TS spreads the original options, preserving native numbers and nested data.
+    // These are the complete secondary_* fields in the typed options carrier;
+    // None means absent, while an explicitly present empty string still overrides.
+    let mut secondary = options.clone();
+    if let Some(key) = &options.secondary_key {
+        secondary.key.clone_from(key);
     }
-    serde_json::from_value(value).map_err(|error| TransportError::Host(error.to_string()))
+    if let Some(secret) = &options.secondary_secret {
+        secondary.secret.clone_from(secret);
+    }
+    if let Some(passphrase) = &options.secondary_passphrase {
+        secondary.passphrase = Some(passphrase.clone());
+    }
+    secondary.override_proxy_url = proxy;
+    secondary
 }
 
 impl SecondaryKeyClients {
@@ -93,6 +85,19 @@ impl SecondaryKeyClients {
     pub fn get(&self, mut request: RestRequest) -> crate::RestFuture<'_, RestResponse> {
         request.method = "get".into();
         self.secondary.execute(request)
+    }
+    pub fn get_with_receipt(
+        &self,
+        mut request: RestRequest,
+    ) -> crate::RestFuture<'_, crate::RestExecution> {
+        request.method = "get".into();
+        self.secondary.execute_with_receipt(request)
+    }
+    pub fn request_with_receipt(
+        &self,
+        request: RestRequest,
+    ) -> crate::RestFuture<'_, crate::RestExecution> {
+        self.primary.execute_with_receipt(request)
     }
     // Generic request calls, HEAD, and writes remain primary, matching the TS get-only Proxy.
     pub fn request(&self, request: RestRequest) -> crate::RestFuture<'_, RestResponse> {

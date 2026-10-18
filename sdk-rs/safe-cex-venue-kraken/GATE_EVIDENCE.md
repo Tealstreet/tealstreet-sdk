@@ -186,9 +186,11 @@ corpus floors, not an exhaustive runtime enumeration.
 
 Sub-agent review explicitly inspected the committed implementation SHA using
 `git show` and cleared the slice. Its sole finding was mixed NaN/non-NaN sorting:
-the source sorts `[3,2,NaN,1]` as `[1,2,3,NaN]`, while Rust differed. The declared
-CHOSEN boundary now refuses that input with a diagnostic and emission; its paired
-actual-source/native witness passed. Other declared host, UTF-8 and owned-fallback
+the source sorts `[3,2,NaN,1]` as `[1,2,3,NaN]`, while Rust differed. The historical
+CHOSEN whole-batch refusal was superseded by decision 3's per-row rule: each NaN
+timestamp is diagnosed and refused, while good rows remain sorted and returned.
+The original source corpus is unchanged; native admission now has 73 rows and
+438 field comparisons, with the refused row observed separately. Other declared host, UTF-8 and owned-fallback
 boundaries remain in `parity/MANIFEST-SPEC.md`.
 
 Not run: workspace compilation, host Clippy, wasm Clippy, full test suite,
@@ -1418,3 +1420,351 @@ SDK dependencies, Cargo/lock, extractor/Yarn/package scripts and relevant
 TypeScript) has no changed paths. Scoped Cargo/mutation exits therefore stand.
 Other venue manifests changed; extractor check at merge SHA returned **0**,
 7341/512, would update 0, added 0, orphaned 0. This is evidence-only.
+
+## Native hosted signer integration (2026-10-17)
+
+`safe-cex-registry/tests/native_host_kraken_signer.rs` runs three local native
+HTTP/WS witnesses. Both Kraken names construct with empty local secrets and
+validate accounts through the shared hosted signer, preserving account/name,
+returned signed wire headers and Spot form bytes, exact balance and read purity.
+The Futures socket asks for a challenge before subscribing; after remote signing
+all four private feeds retain the key, original challenge and returned signature.
+The request pins hosted account, toSign and kraken-challenge output format.
+
+With only the HTTP-host wiring fixed, the WS witness failed101: accountName was
+null instead of hosted-kraken-account. `AuthHost::read(remote)` now reads the live
+parent options injected by shared #151, under its existing capability guard.
+The three native witnesses pass after that fix.
+
+`python3 safe-cex-registry/scripts/kraken-hosted-controls.py` runs two permanent
+compiling controls from sdk-rs. Omitting the native signer fails the HTTP tests;
+reading a missing live signer property fails the WS witness. Each restored tree
+passes all three native witnesses. The controls ran sequentially with one Cargo
+job. Read-only sub-agent review reported no blocking findings.
+
+
+## Accepted base-URL string union (2026-10-17)
+
+Source `kraken.types.ts::KrakenBaseUrl` declares exactly `derivatives | history`
+as strings. The original derived Rust decoder compiled and passed its valid
+native-variant witness, but failed the new named tagged-shape test by admitting
+`{"derivatives":null}`. The production fix uses existing `String::deserialize`
+and a private remote Serde schema. Serialize spellings and numeric-output
+registration remain unchanged.
+
+The two new native tests pass alongside all four existing actual-source `types`
+tests, with zero ignored. Both hardcoded native variants are checked before
+Serialize through five ingress paths. Each of the two valid tagged-null maps,
+five other non-string shapes and four invalid tags is refused through the same
+five paths (55 refusal assertions). Existing `types` independently checks the
+complete two-literal source union, as well as tables and normalization.
+
+`scripts/base-url-string-control.py` ran successfully: baseline six tests pass;
+remove only String admission and the compiled named
+`tagged_base_url_shapes_are_rejected_on_every_ingress_path` fails on the native
+owned tagged-map assertion; restore exact source bytes and all six pass again.
+A compiler error cannot satisfy this control.
+
+`scripts/base-url-contracts.mjs` ran fresh native/default private/hidden rustdoc,
+then the maintained selected-owner production probe: **one actual runtime
+result, zero classification-only receipts, zero failed owners**. Its hand-authored
+observation matches actual native enum variants without serializing the enum,
+and records all 11 refusals independently. Compiler identity confirms the private
+remote schema has no independent Deserialize or public inherent API. The new
+per-crate contract contains this owner only; no shared policy row is exempted.
+
+The full inventory attempt still refused **25 unsupported Kraken receiver
+methods**. This is open review work, not a passing gate. The selected owner does
+not discharge other owners, aliases, local functions, construction or feature/
+wasm accepted coverage. The old seven-file `types-parity-check.py` wrapper crashed on list-valued
+mappings before indexing. It now preserves complete split targets and notes,
+uses every committed Kraken manifest, and intersects only existing provenance
+declarations. All Kraken declarations, including unused ones that must fail,
+remain present. A mixed-crate split retains its already-declared external file;
+a missing declaration is never manufactured.
+
+The maintained checker builds the complete workspace index for canonical shared
+reexport resolution. Its explicit `--invention-crate` scope narrows only public
+invention obligations, with explicit manifest/exemption inputs and every target
+resolution record intact. Global/default behavior is unchanged; report/progress
+refuse this scope. **73 existing Rust gates and three new CLI regressions pass**,
+with zero ignored. The new fixture proves list-valued cross-crate resolution,
+shared reexports, default global rejection, scoped unmapped-item rejection,
+missing-provenance rejection, exact restoration and invalid-scope refusal.
+
+Two Python regressions pass. Reverting only scalar/list selection reproduces the
+original AttributeError in the named split regression; exact restoration passes
+both again. `scripts/manifest-controls.py` also ran against the actual Kraken API
+manifest: baseline passes, removing its committed rust_files declaration fails
+the named source-provenance gate, and exact restoration passes. No permanent
+manifest mapping or exemption changed.
+
+The maintained global gate previously passed **7459 rows / 17204 public Rust
+items**; the seven-file source extractor independently passed **83 symbols**.
+After integrating master f3691e05a6, the repaired Kraken wrapper passes
+**134 rows / 539 public Rust items** with no exemptions, and the freshly built
+global checker passes **7459 rows / 17204 public Rust items**. These gates
+validate metadata claims, not behavioral parity.
+
+Read-only independent review found no actionable issue in the production fix,
+native fixture, selected probe, contract or mutation/restoration controller.
+
+
+Full scoped Kraken Cargo tests passed **141 tests, zero failures and zero ignored**
+across 28 target receipts including the empty doctest target. Separate native and
+wasm32-unknown-unknown all-targets Clippy runs passed with warnings denied. The
+changed parity tooling also passed native all-targets Clippy with warnings denied.
+These compile checks do not extend the one-owner native/default accepted proof
+to wasm behavior or other accepted owners.
+
+
+Integration `354acaa8b28435d975b2051303581a21198dc9cc` preserves the exact
+validated Kraken source/tests, parity CLI source/tests, Cargo manifests/lock,
+shared native dependencies and Kraken TypeScript oracle inputs. The full native
+and host/wasm Clippy receipts therefore remain applicable without repeating
+unchanged tests. Frozen installation and all-workspace formatting pass after
+integration; the selected production probe is rerun independently.
+
+
+### Master conflict refresh
+
+Master `f9b0ba6ec662c5c2ae084305751ec91a2c702ae3` integrated in
+`7e4ca5c5490fea969a872576653fdefac13f731d`. The sole conflict joined two appended
+parity-tool documentation sections: the complete master GRVT borrowed-map recipe
+and the scoped-checker guidance are both retained. The latter now sits beside
+structural-gate documentation, preserving the master append point. The CLI Rust
+source and its test fixture are byte-identical to the reviewed `2333c92883`.
+
+Master also changed the candle-cache dependency. Fresh full scoped Kraken tests
+pass **141/0 failures/0 ignored**, and fresh native plus wasm all-targets Clippy
+pass with warnings denied. Fresh scoped/global structural checks pass
+**134/539** and **7459/17204** respectively. Frozen installation and all-workspace
+formatting pass. The base-URL decoder, witness and guard-removal control remain
+unchanged; their source/dependency inputs for string admission are preserved.
+
+The fresh integrated production enum probe also passes: one actual runtime
+result, zero classification-only receipts, zero failed owners.
+
+## Four accepted module-helper bodies (2026-10-17)
+
+Each complete body was reviewed against the actual TS declarations and the
+existing module-utility host profile in MANIFEST-SPEC. `parse_trigger_signal`
+decodes JSON-domain values to native trigger variants/absence or a coercion error.
+The other three functions have distinct non-decoder roles: typed literal string
+comparison through the shared root collator; shared Error construction with
+literal message and separate optional metadata snapshots; and a module-owned ID
+generator factory driven by fallible host entropy. The factory's mutable byte
+slice belongs to the host fill callback, rather than an inbound wire schema.
+The binding factory and SpotIds alias remain separately reviewable owners.
+
+Four new direct native witnesses pass with all five existing actual-source helper
+tests: **nine passed, zero failures/ignored**. Observations include all three
+trigger variants and absence/error before Serialize; actual Ordering; literal
+message/name, separate nested response/cause fields, negative-zero bits, explicit
+null versus absence and snapshot behavior; and an entropy failure followed by
+native 32-character IDs and the independent source refill schedule. The installed
+nanoid 6.0.1 source was reviewed directly: growth advances before entropy filling,
+and constant 0xaf maps to hexadecimal f. The existing live source witness compares
+2640 generated results and callback schedules with the pinned dependency.
+
+The selected native/default production gate reports **one runtime result, three
+explicit classifications, zero failed owners**. Its 21 trigger input/output cases
+were authored independently of the Rust decoder. The call observes actual native
+enum variants/absence/error rather than serializing the enum or observing is_ok.
+A classification receipt does not execute the comparator, error constructor or
+factory; their separate native witnesses provide that execution evidence.
+
+`scripts/helper-contract-controls.py` completed four sequential compiled controls:
+reverse comparator operands, swap response/cause metadata, change the hexadecimal
+mask from 15 to 7, and map spot to the wrong trigger variant. The first three each
+fail their named native witness after compilation, then pass that same witness
+after exact source restoration. The trigger mutation fails only its own actual
+production output probe with native output mismatches; restored production1 plus
+classifications3 pass again. Exact final helpers.rs bytes match the original,
+and all nine native/source tests pass again with zero ignored. Compiler failures
+cannot count as control success. No production code or protocol boundary changed.
+
+These four contracts leave other Kraken owners, aliases, local functions,
+construction, the 25 receiver refusals and feature/wasm accepted coverage open.
+
+
+Helper readiness at integration `44c962414960992337f5c745f762edf35281686a`:
+full scoped Kraken tests passed **143**, with zero failures or ignored tests;
+separate native and wasm32 all-targets Clippy passed with warnings denied.
+Fresh production helper verification passed **one runtime result, three explicit
+classifications, zero failed owners**. Global structural verification passed
+**7459 rows / 17206 public Rust items**; the maintained TS extractor checked
+**83 symbols across seven slice files**. Workspace format and frozen install
+passed. Independent read-only review found no actionable issues; CodeRabbit's
+manual review was rate-limited. No unresolved review conversations were present
+at this checkpoint.
+
+The final master integration changed only other packages' accepted contracts and
+their review docs. Kraken source/tests/controls/contracts, all Cargo inputs and
+the maintained probe/indexer sources are byte-identical to the tested checkpoint.
+At this original checkpoint the base-URL/scoped-wrapper repair was separate in
+PR #327. The later master integration below includes it without duplicating its
+implementation. These are selected native/default accepted-contract
+receipts; the successful wasm Clippy check does not establish wasm behavioral
+coverage or clear any remaining accepted-set obligation.
+
+
+Helper master refresh at `63f666e668` integrates master `cda5584612`, including
+#327 and the shared cancellation review from #342. The three merge conflicts
+were resolved by retaining every master contract/documentation section, then
+appending only the four unchanged helper contracts and their guidance/evidence.
+All five Kraken rows equal their original branch/master values exactly.
+Fresh full scoped Kraken tests pass **145 / zero failures / zero ignored**;
+separate native and wasm32 all-targets Clippy, frozen install and format pass.
+The checker was rebuilt from this integrated source. The repaired scoped wrapper
+passes **134 rows / 539 public items / zero exemptions**, and the global checker
+passes **7459 rows / 17206 public items**. Fresh production helper verification
+passes **one runtime result / three explicit classifications / zero failed owners**.
+Helper production bodies, native fixtures, controller and runner are byte-identical
+to the checkpoint that executed all four compiled controls and exact restorations.
+Independent merge-preservation review is clean; the obsolete #327-pending wording
+has been corrected. Other accepted-set obligations remain open as listed above.
+
+
+## Six accepted scalar helper bodies (2026-10-17)
+
+The complete fills/income helper bodies were reviewed individually against the
+actual TS source and MANIFEST-SPEC#kraken-utility-wire-domain. All six are decoders:
+`fills::num`, `fills::optional_num`, `fills::to_seconds`, `income::num`,
+`income::to_ms` and `income::is_position_size_leg`. The last function reads and
+coerces raw asset/contract fields before comparison, rather than comparing two
+already typed literal strings. The two optional-number functions remain separate
+owners with independently executed calls.
+
+Six new native witnesses plus all six existing utility source/boundary tests pass
+**12 / zero failures / zero ignored**. Native observations retain finite f64 bits
+including negative zero, missing/null/empty versus present zero, coercion errors,
+pre-epoch mathematical floor, milliseconds versus seconds and explicit local-host
+callback value/count. UTC inputs must not consult that callback. Raw predicate
+cases include numeric/Boolean/array/object fields, no trimming, null/missing keys
+and actual coercion errors. The maintained actual-source corpus independently
+checks 164 cases across utility scalars, dates, mappers and boundary supplements;
+it does not replace the new independently authored expected values.
+
+Fresh native/default production probes execute all six actual APIs over **103
+independently authored cases**, reporting **six runtime results / zero explicit
+classifications / zero failed owners**. Numeric output uses native `to_bits`,
+optional output observes actual Some/None, and Boolean/error-name results are
+read before serialization. Production date probes use an explicit UTC identity
+host; local UTC+02 behavior and missing scalar inputs have separate native tests.
+
+`scripts/scalar-helper-contract-controls.py` completed all six compiled controls:
+finite numeric result plus one, each optional decoder's missing result changed
+to Some(0), date floor changed to ceil, milliseconds divided by 1000, and the position-leg
+nonempty test changed to empty. Every mutation fails its own named native test
+and only its own actual production output probe. Each exact restoration passes
+that native witness and all six production probes. The final source bytes equal
+the original fills.rs/income.rs and all 12 native/source tests pass again with
+zero ignored. Compiler failures and tooling refusals cannot count as controls.
+
+Master `9be4149af3` integrates as `ca3629d8ca`, including the four helper rows from
+#345. All five existing master Kraken contracts are preserved exactly; only the
+six new scalar rows are added. No production helper or protocol boundary changed.
+The remaining owners, aliases, construction, local functions, 25 receiver refusals
+and feature/wasm accepted behavior remain independent obligations.
+
+
+Scalar readiness at integration `ca3629d8ca`: fresh full scoped Kraken tests pass
+**151 / zero failures / zero ignored** across 30 target receipts including docs.
+Separate native and wasm32 all-targets Clippy pass with warnings denied; frozen
+install and workspace format pass. The scoped structural gate passes **134 rows /
+539 public items / zero exemptions**, and global verification passes **7459 rows /
+17206 public items**. Those checker executions reuse the compiled maintained
+indexer after comparison confirmed unchanged Rust/Cargo/lock inputs. The maintained
+TS extractor checks **83 symbols across seven slice files**. Fresh post-integration
+production verification passes **six actual runtime results / zero classifications
+/ zero failed owners**. Independent draft review is clean; CodeRabbit's requested
+manual review returned a rate limit. The paginated review audit contains zero
+inline conversations and zero substantive review summaries at this checkpoint.
+This is six native/default owners, not complete venue or wasm behavioral coverage.
+
+## Four private request-record object boundaries (2026-10-17)
+
+The Futures/Spot candle Options, AccountLogParams and HistoricalOptions were each
+reviewed against their actual TS object declarations and existing host profiles.
+All four original derived decoders compiled and accepted independently authored
+complete valid positional arrays in declaration order. Their named native tests
+failed only the array rejection assertions, after valid object fields/presence
+had passed through all seven ordinary/qualified/shared numeric routes. This was
+an actual runtime baseline, rather than a compile error or invalid-array sample.
+
+The concrete owner now captures through the maintained shared numeric backend,
+then calls a private Serde remote schema through `strict_decode::object`.
+Serialize, camelCase AccountLog keys, original field order, optional/null rules,
+ignored unknown fields and JsNumberOutput registration are retained. No public
+mapper method body, transport, signer, Store or callback boundary changed.
+
+All four native owner tests pass through seven decoder routes. Native assertions
+read every actual field, Option presence and f64 bits before Serialize, including
+negative zero, 9007199254740993 rounding to binary64 2^53, the smallest subnormal,
+and positive/negative infinity from overflowing numeric tokens. Missing required
+fields, wrong typed values and the non-admitted snake_case AccountLog key fail.
+The complete arrays and scalar/null/empty-array shapes are rejected independently
+of generic map-sample ordering. The initial numeric supplement command launched
+from the repository root was stopped and is excluded from evidence; the successful
+receipt used sdk-rs and its pinned toolchain.
+
+The native controller completed four sequential guard-only removals, each
+requiring a compiled named failure containing that owner's exact valid array.
+Every exact restoration passed all four native tests. The controller was repeated
+successfully after extending the numeric witnesses, with the same four named
+array-admission failures, four restored passes and final exact guarded source bytes.
+No compiler failure or tooling refusal counts as a negative control.
+
+Fresh native/default private/hidden compiler inspection and actual production
+probes pass **four runtime results / zero classifications / zero failed owners**.
+Each remote companion is private and has no independent Deserialize/conversion
+trait or extra inherent API. Its sole generated helper takes the actual generic
+Serde deserializer and returns the exact reviewed owner identity and source span.
+Independent review caught a runner mistake requesting non-decoder companions as
+required decoder owners; only the four actual owners are now requested, and the
+complete companion compiler implementations are inspected separately. The first
+runner refusal happened before runtime probes and is excluded from passing proof.
+
+These are four concrete native/default record contracts. Other owners, aliases,
+local functions, construction, 25 receiver refusals and feature/wasm accepted
+behavior remain independent obligations under the maintained host profiles.
+
+
+Private-record readiness after integrating master `51015dc5f9` as `858950c865`:
+all eleven existing master Kraken contracts remain exactly preserved, with only
+the four reviewed record rows added. The test-only fixture module is loaded once
+at the crate root and shared by the three native unit modules; this fixes
+all-target Clippy's duplicate-module finding without changing the production
+schemas, guards, observations or control anchors.
+
+Fresh full scoped Kraken tests pass **155 / zero failures / zero ignored** across
+30 target receipts including docs. Separate native and wasm32 all-targets Clippy
+pass with warnings denied. Frozen install and workspace format pass. The scoped
+structural gate passes **134 rows / 539 public items / zero exemptions**; the global
+gate passes **7459 rows / 17206 public items**. Both reuse the maintained compiled
+indexer after comparing its actual Rust/Cargo/lock/config inputs. The maintained
+TS extractor checks **83 symbols across seven slice files**. Fresh production
+verification after the test-wiring fix again passes **four actual runtime results /
+zero classifications / zero failed owners**. Guard-removal/restoration controls
+remain the independently executed four-owner receipts described above.
+
+The additional shared cancellation inventory audit passes with CI's required
+`--all-features` profile: **one passed / zero failed / zero ignored** for
+`production_cancellable_future_classifications_are_current`. An earlier
+no-features invocation could not see its feature-gated health witness and is
+excluded from proof; no cancellation source or classification was changed.
+Independent review of the test-wiring fix is clean. CodeRabbit's manual request
+returned a rate limit, rather than an executed review.
+
+## Per-row Futures candle timestamp admission
+
+The constructed `futures_candles_refuse_only_nan_timestamp_rows` test compiled
+against unchanged production and failed because three valid candles were lost
+with the bad row (zero returned). It now passes mixed, multiple-refusal and
+all-refused responses, checks each visible `timestamp=NaN` diagnostic, and keeps
+NaN/infinities/signed zero in other candle fields. The two existing Futures
+candle source tests pass with the explicit admission distinction; source bytes
+and source cardinality remain unchanged. Scoped strict Clippy, formatting,
+required all-features cancellation inventory, global parity and extractor check
+pass. Receipts: `/tmp/kraken-candle-row-{before,after,read-corpus,clippy,cancellation,parity,extract}.log`.

@@ -93,22 +93,29 @@ fn value_error(error: Thrown) -> Rc<Value> {
 // ts: BybitExchange.validateAccount
 pub(crate) fn validate_account(rt: &Rt) -> Result<Js, Thrown> {
     let (get_rt, balance_rt, emit_rt) = (rt.clone(), rt.clone(), rt.clone());
+    let derived = matches!(
+        venue(rt)?.base.name,
+        safe_cex_types::ExchangeName::Bybitspot | safe_cex_types::ExchangeName::Bybitinverse
+    );
     let body = async move {
-        api_validation::validate_account(
-            move |endpoint| {
-                let request = get_data(get_rt, endpoint.into());
-                async move { request.await.map_err(value_error) }
-            },
-            move || {
-                let pending = balance_rt
-                    .this
-                    .call_method("fetchBalance", vec![])
-                    .map_err(value_error)?;
-                Ok(async move { await_js(pending).await.map_err(value_error) })
-            },
-            move |message| emit(&emit_rt, message.as_ref()).map_err(value_error),
-        )
-        .await
+        let get = move |endpoint: &str| {
+            let request = get_data(get_rt, endpoint.into());
+            async move { request.await.map_err(value_error) }
+        };
+        let balance = move || {
+            let pending = balance_rt
+                .this
+                .call_method("fetchBalance", vec![])
+                .map_err(value_error)?;
+            Ok(async move { await_js(pending).await.map_err(value_error) })
+        };
+        let emit =
+            move |message: Option<Value>| emit(&emit_rt, message.as_ref()).map_err(value_error);
+        if derived {
+            api_validation::validate_derived_account(get, balance, emit).await
+        } else {
+            api_validation::validate_account(get, balance, emit).await
+        }
     };
     Ok(rt.spawn(Box::pin(async move {
         let (error, balance) = body.await.map_err(|value| Thrown::new(from_json(&value)))?;

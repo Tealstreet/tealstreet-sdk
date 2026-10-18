@@ -1,0 +1,12 @@
+{
+  "safe-cex-venue-woo/src/v3_public.rs::LOCAL_FUNCTION:sorted": {
+    "category": "non-decoder",
+    "reason": "Inside map_woo_v3_candles: stable top-down merge sort of already typed Candle rows by timestamp, preserving source comparator semantics. No raw input.",
+    "sourceSha256": "494198f2fe7078a7ee0125c671ff9b1048f2efd49bba40b2bc228d015209a748"
+  },
+  "safe-cex-venue-woo/src/binding/hosts/order_writes.rs::LOCAL_FUNCTION:has_in": {
+    "category": "non-decoder",
+    "reason": "Inside the native order-write host in-operator: checks existing own/prototype properties and array length presence. It returns a bool and does not map raw order fields into a typed order.",
+    "sourceSha256": "5cf66bcbd9e415e3479a4ce9cc1e60dd255358dc5a310e9dc390a35e522e190c"
+  }
+}

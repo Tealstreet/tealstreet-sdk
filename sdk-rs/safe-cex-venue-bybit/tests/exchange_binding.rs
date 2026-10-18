@@ -1288,3 +1288,503 @@ fn demo_fill_reconciliation_pages_to_exhaustion_and_fails_closed() {
         }
     }
 }
+
+#[test]
+fn source_identity_flags_survive_demo_facade_construction() {
+    use safe_cex_types::ExchangeName;
+    for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        let h = support::harness_as(name.clone(), options(), |_| {});
+        assert_eq!(
+            h.venue().base().is_demo,
+            name == ExchangeName::Bybitdemo,
+            "Bybit source isDemo flag reaches typed base"
+        );
+        assert!(!h.venue().base().is_spot);
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn primary_batch_uses_source_batch_endpoint_regression() {
+    let h = harness(options(), |w| {
+        w.ok(
+            "GET",
+            "/v5/position/list",
+            json!({"list": [], "nextPageCursor":""}),
+        );
+        w.ok(
+            "POST",
+            "/v5/order/create-batch",
+            json!({"list":[{"orderId":"batch-1"}]}),
+        );
+    });
+    seed_market(&h);
+    let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+        "symbol":"BTCUSDT", "type":"limit", "side":"buy", "amount":0.01, "price":25000
+    }))
+    .unwrap();
+    let venue = h.venue();
+    let ids = h
+        .drive(Box::pin(venue.base().place_orders(venue, vec![opts])))
+        .expect("primary batch source path");
+    assert_eq!(ids, ["batch-1"]);
+    assert_eq!(h.wire.calls("/v5/order/create-batch").len(), 1);
+}
+
+#[test]
+fn current_nan_leverage_still_sends_the_source_update() {
+    let h = harness(options(), |w| {
+        w.ok("GET", "/v5/position/list", position_list("NaN"));
+        w.ok("POST", "/v5/position/set-leverage", json!({}));
+    });
+    seed_market(&h);
+    let positions = h.drive(h.venue().fetch_positions(None)).unwrap();
+    assert!(
+        positions[0].leverage.is_nan(),
+        "native ingress retains current leverage NaN"
+    );
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            positions: Some(positions),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    h.drive(h.venue().set_leverage("BTCUSDT".into(), 1., None))
+        .unwrap();
+    assert_eq!(
+        h.wire.calls("/v5/position/set-leverage").len(),
+        1,
+        "source NaN current leverage differs from requested one; JSON null must not become the current fallback one"
+    );
+}
+
+#[test]
+fn position_mode_publication_retains_native_nan_and_negative_zero() {
+    for leverage in ["NaN", "-0"] {
+        let h = harness(options(), |w| {
+            w.ok("GET", "/v5/position/list", position_list(leverage));
+            w.ok("POST", "/v5/order/create", json!({"orderId":"native-mode"}));
+        });
+        seed_market(&h);
+        let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+            "symbol":"BTCUSDT", "type":"limit", "side":"buy", "amount":0.01, "price":25000
+        }))
+        .unwrap();
+        let venue = h.venue();
+        h.drive(Box::pin(venue.base().place_order(venue, opts)))
+            .expect("position mode maps and publishes native positions before placement");
+        let positions = h.store.positions();
+        assert_eq!(
+            positions.len(),
+            1,
+            "position mode publishes fetched position"
+        );
+        let actual = positions[0].leverage;
+        if leverage == "NaN" {
+            assert!(
+                actual.is_nan(),
+                "position mode publication retains NaN leverage"
+            );
+        } else {
+            assert_eq!(
+                actual.to_bits(),
+                (-0.0f64).to_bits(),
+                "position mode publication retains negative zero leverage"
+            );
+        }
+        assert_eq!(h.wire.calls("/v5/order/create")[0].body["positionIdx"], 0);
+    }
+}
+
+#[test]
+#[ignore = "requires installed live TypeScript; mandatory venue-oracle:bybit"]
+fn native_position_controls_match_thirty_two_source_compositions() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_types::{ExchangeName, PositionMode};
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let mut cases = vec![];
+    for kind in ["leverage", "mode"] {
+        for variant in ["bybit", "bybitdemo"] {
+            for cached in [false, true] {
+                for leverage in ["NaN", "Infinity", "-0", "1"] {
+                    cases.push(json!({"kind":kind,"variant":variant,"cached":cached,
+                        "row":position_list(leverage)["list"][0],
+                        "market": {"symbol":"BTCUSDT","limits":{"leverage":{"min":1,"max":100}}}}));
+                }
+            }
+        }
+    }
+    assert_eq!(cases.len(), 32, "independent native control corpus floor");
+    let mut child = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/native-position-controls-oracle.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&cases).unwrap().as_bytes())
+        .unwrap();
+    let source = child.wait_with_output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Vec<serde_json::Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(source.len(), 32, "source control outputs");
+    for (index, (case, expected)) in cases.iter().zip(source).enumerate() {
+        let name = if case["variant"] == "bybit" {
+            ExchangeName::Bybit
+        } else {
+            ExchangeName::Bybitdemo
+        };
+        let h = support::harness_as(name, options(), |wire| {
+            wire.ok(
+                "GET",
+                "/v5/position/list",
+                json!({"list":[case["row"]],"nextPageCursor":""}),
+            );
+            wire.ok("POST", "/v5/position/set-leverage", json!({}));
+            wire.ok("POST", "/v5/order/create", json!({"orderId":"mode"}));
+        });
+        seed_market(&h);
+        if case["cached"] == true {
+            let mut positions = h
+                .drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into()])))
+                .unwrap();
+            positions.truncate(1);
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    positions: Some(positions),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            h.wire.requests.borrow_mut().clear();
+        }
+        let mode = if case["kind"] == "leverage" {
+            h.drive(h.venue().set_leverage("BTCUSDT".into(), 1., None))
+                .unwrap();
+            serde_json::Value::Null
+        } else {
+            let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
+                json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":25000}),
+            )
+            .unwrap();
+            let venue = h.venue();
+            h.drive(Box::pin(venue.base().place_order(venue, opts)))
+                .unwrap();
+            assert_eq!(
+                h.wire.calls("/v5/order/create")[0].body["positionIdx"],
+                0,
+                "native source mode index case {index}"
+            );
+            assert_eq!(
+                h.wire.calls("/v5/position/list").len(),
+                usize::from(case["cached"] != true),
+                "native cached mode bypass case {index}"
+            );
+            json!("oneway")
+        };
+        let positions: Vec<_> = h.store.positions().iter().map(|p| {
+            let leverage = if p.leverage.is_nan() { "NaN".into() } else if p.leverage.to_bits() == (-0.0f64).to_bits() { "-0".into() } else {safe_cex_num::js_number_string(p.leverage)};
+            json!({"symbol":p.symbol,"mode":match p.position_mode.into_value() {Some(PositionMode::OneWay)=>"oneway",Some(PositionMode::Hedged)=>"hedged",None=>"undefined"},"leverage":leverage})
+        }).collect();
+        let posts: Vec<_> = h
+            .wire
+            .calls("/v5/position/set-leverage")
+            .iter()
+            .map(|call| json!({"endpoint":call.url,"payload":call.body}))
+            .collect();
+        assert_eq!(
+            json!({"positions":positions,"posts":posts,"errors":[],"mode":mode}),
+            expected,
+            "native retained controls source case {index}: {case}"
+        );
+    }
+}
+
+#[test]
+fn native_leverage_keeps_option_refusal_and_not_modified_policy() {
+    for (response, accepted) in [
+        (json!({"retCode":110043,"retMsg":"unchanged"}), true),
+        (
+            json!({"retCode":10001,"retMsg":"Leverage not modified"}),
+            true,
+        ),
+        (json!({"retCode":10001,"retMsg":"bad leverage"}), false),
+    ] {
+        let h = harness(options(), |wire| {
+            wire.ok("GET", "/v5/position/list", position_list("NaN"));
+            wire.route("POST", "/v5/position/set-leverage", 200, response.clone());
+        });
+        seed_market(&h);
+        let result = h.drive(h.venue().set_leverage("BTCUSDT".into(), 1., None));
+        assert_eq!(
+            result.is_ok(),
+            accepted,
+            "source primary not-modified policy: {response}"
+        );
+        if accepted {
+            assert!(
+                h.store.positions()[0].leverage.is_nan(),
+                "native refresh retains NaN"
+            );
+            assert_eq!(
+                h.wire.calls("/v5/position/list").len(),
+                2,
+                "initial and post-success refresh"
+            );
+        } else {
+            assert_eq!(result.unwrap_err().message, "bad leverage");
+            assert_eq!(
+                h.wire.calls("/v5/position/list").len(),
+                1,
+                "no refresh after failed write"
+            );
+        }
+    }
+    let h = harness(options(), |_| {});
+    assert_eq!(
+        h.drive(
+            h.venue()
+                .set_leverage("BTC-29MAR24-70000-C".into(), 1., None)
+        )
+        .unwrap_err()
+        .message,
+        "Bybit has no leverage for options (BTC-29MAR24-70000-C)"
+    );
+    assert!(
+        h.wire.requests.borrow().is_empty(),
+        "options refuse before market lookup or reads"
+    );
+}
+
+#[test]
+fn native_position_mode_keeps_proxy_status_and_nonempty_failure_override() {
+    for (response, publishes, diagnostic) in [
+        (json!({"retCode":0,"result":{"list":[]}}), false, false),
+        (
+            json!({"raw_response":"{\"retCode\":0}","result":{"list":[]}}),
+            false,
+            false,
+        ),
+        (
+            json!({"retCode":" 0 ","retMsg":"ignored","result":{"list":"bad"}}),
+            false,
+            false,
+        ),
+        (json!({"result":{"list":[]}}), false, true),
+        (
+            json!({"ret_code":10001,"ret_msg":" venue failure ","result":{"list":[]}}),
+            false,
+            true,
+        ),
+        (
+            json!({"rawResponse":{"code":10001},"result":{"list":[]}}),
+            false,
+            true,
+        ),
+        (
+            json!({"retCode":10001,"retMsg":"partial snapshot","result":position_list("NaN")}),
+            true,
+            false,
+        ),
+        (json!({"result":position_list("-0")}), true, false),
+    ] {
+        let h = harness(options(), |wire| {
+            wire.route("GET", "/v5/position/list", 200, response.clone());
+            wire.ok("POST", "/v5/order/create", json!({"orderId":"mode-status"}));
+        });
+        seed_market(&h);
+        let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":25000}),
+        )
+        .unwrap();
+        let venue = h.venue();
+        h.drive(Box::pin(venue.base().place_order(venue, opts)))
+            .expect("source position-mode fallback still places");
+        assert_eq!(
+            h.store.positions().len(),
+            usize::from(publishes),
+            "array-only/nonempty-list policy: {response}"
+        );
+        assert_eq!(
+            h.runtime
+                .logs
+                .borrow()
+                .iter()
+                .any(|message| message.starts_with("error: exchange error ")),
+            diagnostic,
+            "source position-mode diagnostic: {response}; {:?}",
+            h.runtime.logs.borrow()
+        );
+        if publishes {
+            let actual = h.store.positions()[0].leverage;
+            if response["result"]["list"][0]["leverage"] == "NaN" {
+                assert!(actual.is_nan());
+            } else {
+                assert_eq!(actual.to_bits(), (-0.0f64).to_bits());
+            }
+        }
+        assert_eq!(h.wire.calls("/v5/order/create")[0].body["positionIdx"], 0);
+    }
+}
+
+fn periodic_private_tick(name: safe_cex_types::ExchangeName) {
+    let mut opts = options();
+    opts.extra = Some(serde_json::from_value(json!({"tickInterval":100})).unwrap());
+    let h = support::harness_as(name, opts, |w| {
+        w.ok(
+            "GET",
+            "/v5/account/info",
+            json!({"marginMode":"REGULAR_MARGIN","unifiedMarginStatus":6}),
+        );
+        w.ok("GET", "/v5/user/query-api", json!({"vipLevel":"No VIP"}));
+        w.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+        w.ok(
+            "GET",
+            "/v5/market/instruments-info",
+            json!({"list":[instrument("BTCUSDT","Trading")]}),
+        );
+        w.route_when(
+            "GET",
+            "/v5/market/instruments-info",
+            "status",
+            "PreLaunch",
+            json!({"retCode":0,"retMsg":"OK","result":{"list":[]}}),
+        );
+        w.ok("GET", "/v5/market/tickers", json!({"list":[]}));
+        w.ok(
+            "GET",
+            "/v5/order/realtime",
+            json!({"list":[],"nextPageCursor":""}),
+        );
+        w.ok("GET", "/v5/position/list", position_list("10"));
+        w.ok("GET", "/v5/account/wallet-balance", wallet());
+    });
+    h.drive(h.venue().start()).unwrap();
+    h.advance(500.0);
+    let before = h.wire.calls("/v5/position/list").len();
+    h.advance(1500.0);
+    assert!(
+        h.wire.calls("/v5/position/list").len() > before,
+        "periodic tick must fetch real positions after startup: reports={:?}, logs={:?}",
+        h.runtime.reports.borrow(),
+        h.runtime.logs.borrow()
+    );
+    assert!(
+        !h.runtime
+            .reports
+            .borrow()
+            .iter()
+            .any(|e| e.contains("waitForRemoteSigner")),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn primary_periodic_private_tick_reaches_real_signer_gate() {
+    periodic_private_tick(safe_cex_types::ExchangeName::Bybit);
+}
+
+#[test]
+fn demo_periodic_private_tick_reaches_real_signer_gate() {
+    periodic_private_tick(safe_cex_types::ExchangeName::Bybitdemo);
+}
+
+fn control_switch_keeps_native_position_numbers(margin: bool) {
+    use safe_cex_types::{ExchangeName, MarginType};
+    for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        for leverage in ["", "Infinity", "-0"] {
+            let h =
+                support::harness_as(name.clone(), options(), |wire| {
+                    let mut rows = position_list(leverage);
+                    rows["list"][0]["size"] = json!("-0");
+                    rows["list"][0]["unrealisedPnl"] = json!("NaN");
+                    wire.ok("GET", "/v5/position/list", rows);
+                    wire.route("POST", "/v5/position/switch-mode", 200,
+                    json!({"retCode":0,"retMsg":"All symbols switched successfully.","result":{}}));
+                    wire.route(
+                        "POST",
+                        "/v5/account/set-margin-mode",
+                        200,
+                        json!({"retCode":0,"retMsg":"Request accepted","result":{"reasons":[]}}),
+                    );
+                });
+            let before = h.drive(h.venue().fetch_positions(None)).unwrap();
+            assert!(
+                before[0].unrealized_pnl.is_nan(),
+                "real mapper returned native NaN"
+            );
+            if margin {
+                h.drive(h.venue().change_margin_type(true, None))
+                    .expect("successful margin switch must publish native fetched positions");
+            } else {
+                h.drive(h.venue().change_position_mode(true, None)).expect(
+                    "successful position mode switch must publish native fetched positions",
+                );
+            }
+            let positions = h.store.positions();
+            assert_eq!(
+                positions.len(),
+                1,
+                "Store deduplicates the two settled reads for {name:?}"
+            );
+            for p in positions.iter() {
+                assert!(
+                    p.unrealized_pnl.is_nan(),
+                    "NaN survives {name:?} margin={margin}"
+                );
+                assert_eq!(p.contracts.to_bits(), (-0.0f64).to_bits());
+                match leverage {
+                    "" => assert!(p.leverage.is_nan()),
+                    "Infinity" => assert_eq!(p.leverage, f64::INFINITY),
+                    "-0" => assert_eq!(p.leverage.to_bits(), (-0.0f64).to_bits()),
+                    _ => unreachable!(),
+                }
+                if margin {
+                    assert_eq!(p.margin_type, Some(MarginType::Isolated));
+                }
+            }
+            let endpoint = if margin {
+                "/v5/account/set-margin-mode"
+            } else {
+                "/v5/position/switch-mode"
+            };
+            assert_eq!(
+                h.wire.calls(endpoint).len(),
+                1,
+                "one successful venue switch"
+            );
+            assert_eq!(h.wire.calls("/v5/position/list").len(), 4);
+        }
+    }
+}
+
+#[test]
+fn margin_control_switch_publishes_native_position_numbers() {
+    control_switch_keeps_native_position_numbers(true);
+}
+
+#[test]
+fn position_control_switch_publishes_native_position_numbers() {
+    control_switch_keeps_native_position_numbers(false);
+}

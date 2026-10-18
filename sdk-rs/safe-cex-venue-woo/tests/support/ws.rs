@@ -136,7 +136,7 @@ impl ExchangeRuntime for Runtime {
             .push((slot.clone(), cancelled.clone()));
         Box::new(Task { slot, cancelled })
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -146,7 +146,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -287,7 +291,7 @@ fn parent_hooks_retain_injected_failure_identity() {
     let parent = Parent::new();
     let mut cause = ExchangeError::new("subscriber failure");
     cause.name = "SubscriberError".into();
-    cause.code = Some(serde_json::json!(731));
+    cause.code = Some(safe_cex_exchange::js_runtime::value::Js::Number(731.0));
     for hook in ["log", "emit", "health", "latency", "reconnected", "error"] {
         *parent.hook_failure.borrow_mut() = Some((hook, cause.clone()));
         let result = match hook {

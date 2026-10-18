@@ -2,6 +2,14 @@
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/apexomni/CLAUDE.md).
 
+The production binding host names its shared type imports explicitly. A wildcard
+can import macros and make its unqualified expression macros ambiguous to the
+accepted-set scanner; keep that scope check enforced without a policy waiver.
+
+`Iso8601` has a union contract with direct native variant/payload observations
+for its real timestamp visitor. The source alias accepts every string, including
+malformed-date text; only non-string/non-number shapes and malformed JSON refuse.
+
 Protocol constants are ordered own-property tables; consumer lookup behavior is
 not implied by the representation. Shared normalized order enums retain shared
 identity. Venue wire enums use String-first deserializers and have no permissive
@@ -252,3 +260,240 @@ network calls, with ten-request lots and a one-second delay between lots.
 `pure.cjs`, `signing.cjs` and `exchange.cjs` execute actual source declarations.
 Their compiled controls are scoped to those new bodies; caller and helper
 mutations run separately to prevent a helper failure masking caller evidence.
+
+## Shared runtime binding (October2026)
+
+The root `ApexOmniExchange` now assembles the existing typed bodies through
+`binding` on shared ScopeShared, Axios, Store, globals, timers and BaseWebSocket.
+The host owns both socket bodies; they retain their parent whose HostLink is
+weak, avoiding a parent/socket/host cycle. API interceptors retain Weak<ApexApi>.
+Callbacks release field borrows before reentrant disposal. Dispose cancels owned
+timers/tasks; dropping the host cancels them too.
+
+All16 required trait methods are wired. The source inherits exact
+`Not implemented` rejections for fetchTickers, max leverage, position mode,
+margin type, scheduled cancellation and public trades (base.ts759/799/832/836/989/1138);
+those hooks make no HTTP calls. Both public listeners are also bound. The caller
+client-ID guard is the first placement statement. Client IDs are preserved in
+both wire fields and the contract nonce. The actual TypeScript placeOrder body,
+its real signContract helper and the pinned npm SDK match the complete native
+URL-encoded placement body, including its128-hex signature, fee and expiration.
+
+The native zkLink host uses safe-cex-crypto's proven ContractBuilder/seed-only
+signer. It performs WASM ToInt32/unsigned narrowing before building the contract.
+No wallet provider or other transaction signing is supplied; unused capability
+kinds return explicit errors. Missing/invalid seeds are visible to account
+validation. Hosted HTTP/private WS signing uses the supplied remote capability;
+L2 contracts still require the source Omni key seed. External
+public data requires an injected factory.
+
+The shared HTTP factory owns default timeout, headers, tunnel routing and adapter
+selection. Signing preserves callable adapter/serializer values and unchanged
+config-field identity; the typed legacy response bridge restores those client-default
+capabilities before resend.
+
+Network failures retry reads only. Apex's signature code20016/401/message
+rejection in an HTTP200 envelope resends once through the existing legacy
+signing body. HTTP failures do not enter that resend. Native errors retain HTTP
+status, response envelope and config. Private login is awaited before subscribe;
+both public/private callbacks use shared socket lifecycle and diagnostics.
+Buffer text conversion is explicit at this venue's typed protocol boundary;
+public browser Blob input preserves the source data.includes TypeError.
+
+P4 disposal guards intentionally stop fetched positions/orders after the HTTP
+await and stop the private position timer before publishing after disposal.
+The source continues in these cases; the row notes price this difference.
+Position reads retain the source's zkLinkConfig initialization while leaving
+Store positions untouched. Order-book callbacks own snapshots; retaining the
+callback result after cleanup differs from source's cleared shared object and
+is declared in the row note.
+
+`tests/binding.rs` has27 assembled tests, including all16 methods, both listeners,
+legacy replay limits, HTTP metadata, write non-replay and disposal. Run
+`scripts/binding-controls.py`, `binding-precision-controls.py`,
+`binding-capability-controls.py` and `registry-control.py` serially: they temporarily mutate production bodies and
+restore in finally. The18 method/listener controls and two independent precision
+swaps compile/fail their named assertion; missing registry membership fails the
+real native-host test and restores to pass. Two capability controls independently
+remove callable preservation before initial signing and legacy resend; each
+compiles and fails the custom-adapter witness before restoration passes.
+
+Hosted native accounts now pass the shared account capability to HTTP, core
+canSign and private WS auth. The browser keeps the API secret; the server keeps
+the source-required Omni key seed for L2 contracts. Account-name absence remains
+undefined without falling back to local HMAC. The WS bridge preserves the typed
+request envelope and awaits its response before login/subscription. Relay refusal
+and transport errors reconnect without private frames or an auth-invalid message.
+The open callback runs eagerly to its first suspension, then the host owns its
+continuation so disposal/drop cancels pending signing. This extends the declared
+P4 native cancellation choice to a source Promise that would keep running.
+
+`native_host_apexomni` covers local and hosted HTTP/WS, remote-secret wire HMAC,
+request account/metadata, delayed login, relay failure and pending-auth disposal.
+`scripts/hosted-signing-controls.py` independently removes capability edges and
+callback ownership; each must compile and fail its named native test, then restore.
+
+
+Placement follows lodash `times` for out-of-range lot counts, including an empty
+submission when the market maximum is zero. It still schedules order refresh.
+Trigger-price fallback preserves an adjusted zero in the final `price` operand.
+All split payloads are submitted before response IDs are read and projected;
+a numeric ID cannot interrupt the remaining submissions or reconciliation.
+The approved placement-result policy applies JS String to every provided ID
+after all submissions; missing IDs remain visible errors. Reconciliation is
+scheduled before ID conversion, so a result error cannot hide submitted orders.
+`tests/support/placement_parity.rs` drives all three cases through the real
+constructed binding and L2 signer, observing the signed HTTP requests.
+
+## Accepted-set map records
+
+`public_records`, `private_records` and `config_records` use 26 private Serde
+remote schemas at their existing concrete `Deserialize` boundaries. Preserve
+all original field/rename/default/presence/custom-passthrough attributes, numeric
+ingress, Serialize and exhaustive JsNumberOutput registrations. The previous
+ordinary local derived Fields decoders have independent obligations; their
+parent guards do not exempt them. A remote companion must remain private and
+must not acquire independent trait/conversion implementations or extra APIs.
+
+`tests/accepted_map_records.rs` independently observes every native field,
+Option presence, nested collection and f64 bit pattern before owner serialization.
+The authored fixture bases and explicit deltas preserve raw numeric tokens,
+including -0 and overflow, and contain one complete valid literal positional
+array per owner in reviewed Serde declaration order. Expected values come from
+the TS declarations, never from owner Serialize. All seven ordinary, qualified
+and shared numeric paths run for each case. Existing live-source record tests
+remain required; these selected contracts do not replace them.
+
+Run the selected test and `scripts/accepted-map-record-controls.py` serially from
+sdk-rs with its pinned toolchain and one Cargo job. Each control removes only one
+owner's object guard, requires the named compiled complete-array admission
+failure, restores all source bytes exactly and reruns all 26 native tests. `scripts/accepted-map-record-controls-test.py` checks exact-span
+isolation for similarly named owners and wrapped calls without compiling or
+mutating production.
+`scripts/accepted-map-record-contracts.mjs` performs fresh native/default compiler
+inventory and actual runtime probes for the selected 26 owners; it separately
+inspects every actual nonblanket companion implementation and the exact returned
+owner identity. New traits/conversions/inherent APIs must refuse. Other records,
+functions, aliases, receiver policies, feature and wasm behavior remain separate
+accepted-set obligations. Follow ../safe-cex-parity/accepted-set/MAP-ONLY-INGRESS.md and
+MANIFEST-SPEC#numeric-ingress-defect rather than adding a new primitive.
+
+
+The transaction/order/signer map cohort contains all19 transaction structs,
+CreateOrderOptionsObject, OrderResponseObject and TxEthSignature. Their private
+remote schemas preserve numeric0|1 flag validation, the exact two-number fee
+rate tuple, optional/nullable distinctions, native enum/union/timestamp variants
+and all existing numeric ingress/output behavior. Signing/packing/range checks
+remain separate APIs. WithPrice and OrderWithClientId still have independent
+undefined-only admission obligations; invalid null array slots are not evidence
+of a complete valid positional array.
+
+`tests/accepted_transaction_records.rs` uses independent raw-token fixture bases
+and deltas, actual native fields/variants/presence/bits and fixed per-owner case
+and route counts. Its complete array literals follow each original Serde field
+order. Run `scripts/accepted-transaction-record-controls.py` serially; it reuses
+the reviewed exact-span `guard_removed` selector, requires one isolated compiled
+named array-admission failure per owner and restores all source bytes with all22
+native tests passing after each control. The fresh production runner is
+`scripts/accepted-transaction-record-contracts.mjs`. ChangePubKeyOnchain has one
+actual field; its maintained ordinary observation directly matches that native
+variant before the wire audit. Do not invent a second native field or exempt it.
+
+
+## Accepted-set scalar and validation helpers
+
+The selected23 helper bodies in signer_utils, exchange_utils and utils::drop_prefix
+are reviewed individually. Prepared-value admission/projection, numeric string
+parsing and fee coercion use actual native decoder output contracts. Typed Boolean
+assertion, ignored subaccount arguments, literal byte indexing, injected random-ID
+generation/formatting, typed TP/SL arithmetic and literal prefix stripping each
+have their own non-decoder reason; those classification receipts do not execute
+decoder coverage. All23 still require direct named native behavior witnesses.
+
+The cfg(test) modules use tests/support/accepted_scalar_helper_fixtures.json and
+accepted_scalar_helper_support.rs. Expected outcomes come from reviewed source
+contracts and literal known answers, not production serialization or proposal
+reports. Fixed per-owner case counts and actual execution counters cover634 cases;
+callbacks expose argument bits, consumption count and ordering/error behavior.
+Prefix stripping additionally checks the exact borrowed pointer offset.
+
+Run scripts/accepted-scalar-helper-contracts.mjs for fresh native/default compiler
+discovery and16 actual decoder outputs plus7 explicit classifications. Run
+scripts/accepted-scalar-helper-controls.py serially:23 isolated reviewed full-body
+mutants must each compile/fail their own named native test; the16 decoder mutants
+also require the selected production function's output mismatch. Exact restoration
+passes all23 native tests each time; restored decoder runs repeat all16 outputs
+and7 classifications. Literal whole-function uniqueness is checked before any
+mutation; new source drift must refuse. Other functions, aliases, receivers,
+construction, feature and wasm accepted behavior remain separate obligations.
+
+Private position frames preserve the source mapper's socket receiver: unlike the
+exchange receiver, the socket has no `log` method. An unknown market therefore
+raises TypeError after the mapper's earlier reads, before any position updates,
+refresh timestamp/timer or later same-frame pong. The shared mapping body accepts
+its receiver's logging capability so REST mappings retain exchange warning logs.
+The production binding tests cover mixed valid/unknown rows, unchanged Store and
+skipped pong, plus a known-market socket-frame control that updates Store.
+
+
+The binding dispatches private snapshot refresh through the Apex lifecycle override,
+so reopen commits positions and orders before balance, retaining the WebSocket
+grace merge. Private keepalive schedules into the core Ping slot shared with pong,
+close and disposal; there is no separate shadow timeout. Real binding regressions
+stagger pong deadlines and hold replacement dialing after close. Private order,
+fill, position and wallet frames cover Store, fill notification and execution
+history behavior; wallet-only frames leave balance owned by REST, as in source.
+The socket oracle supplies no invented `log` method: unknown-market position rows
+compare the source TypeError and unchanged state.
+
+Missing order type/status/side table entries retain own undefined via ModelField.
+They cannot reject an entire REST snapshot or stop later rows in a private frame.
+Unknown private statuses still follow the source’s ignore branch after mapping;
+unknown type/side with an OPEN status reach Store. Inherited callable/object
+lookup results retain their separately documented closed-field refusal.
+The unmapped_order_enums target exercises both production entry paths.
+
+Native HTTP auth, socket URLs/login and fallback pong, mapped model timestamps,
+private snapshot grace and order expiration read the shared synchronized clock.
+Raw Date.now remains separate for cancellation caches, fill freshness, client IDs
+and zkLink transaction timestamps; ping timing remains monotonic. The isolated
+native_clock target syncs the actual singleton and covers signed REST/placement,
+socket authentication and a terminal private order frame after a clock advance.
+
+
+## Retired oracle-only transaction helpers
+
+The exemption reachability audit keeps the live `signContract`/`initSdk` route.
+The SDK index has no export for standalone order, transfer, withdrawal or
+changePubKey helpers, and repository production TS/Rust callers do not use them.
+Their Rust executable counterparts and withdrawal-only precision helper were
+removed, together with eight unused SDK host operations and four selector variants.
+The TypeScript source modules are test/oracle-only and remain tealstreet-next owned.
+Payload declarations retain their independent schema/accepted-set obligations.
+
+The maintained signing oracle keeps all six Contract cases, seven exchange
+signOrder wrapper cases and initialization; the retained outputs match the
+pre-deletion corpus. Twenty-four fake transaction orchestration cases and one
+hundred withdrawal-only precision cases were retired. Existing native placement,
+private frames, hosted signing, lifecycle, packing and signature proofs remain.
+
+Truthy non-boolean Order.reduceOnly is a maintainer-approved per-row refusal.
+The mapper warns with its field and original value, returning no orders for that
+row so valid surrounding REST/private rows continue; it never coerces the flag.
+
+
+Market batches retain the source config update, filter and complete numeric map
+before strict output admission. A refused id/symbol/base/quote/active/info row
+warns with its index, field and original value; valid siblings remain available
+to fetch and Store refresh. Source evaluation and reporting failures propagate.
+
+
+`binding::production_ticker_coercion_matches_constructed_typescript` adds
+64 field-independent cases through the constructed production socket/Store:
+three-row instrumentInfo frames, truthy guards and mark/index fallback. Each case resets both native and
+maintained TS Stores to finite baselines, then checks all eleven native numeric
+fields after malformed and good rows. Null, numeric/prefix/NaN strings, objects,
+overflow, signed zero and false follow the actual TS exchange and DefaultStore.
+The shared ticker census records the witness. The compiling
+`parity/scripts/ticker-native-controls.py apexomni` fault must fail that test and
+pass after exact source restoration.

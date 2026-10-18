@@ -5,7 +5,6 @@ mod host;
 mod members;
 mod signing;
 mod socket;
-mod throttle;
 use safe_cex_exchange::js_runtime::{
     scope::{Scope, ScopeShared},
     value::{Js, Thrown},
@@ -29,38 +28,22 @@ pub(crate) fn text(value: &Js) -> Result<String, Thrown> {
         .map_err(|_| error("Unsupported lone UTF-16 surrogate"))
 }
 pub(crate) struct Iter {
-    value: Js,
-    index: usize,
+    iterator: Js,
+    next: Js,
 }
 impl Iter {
     fn new(value: Js) -> Result<Self, Thrown> {
-        let value = match value {
-            Js::Array(_) => value,
-            Js::Set(ref set) => Js::array(set.borrow().clone()),
-            Js::Map(ref map) => Js::array(
-                map.borrow()
-                    .iter()
-                    .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-                    .collect(),
-            ),
-            Js::String(ref s) => Js::array(
-                String::from_utf16_lossy(s)
-                    .chars()
-                    .map(|c| Js::str(&c.to_string()))
-                    .collect(),
-            ),
-            _ => return Err(Thrown::type_error("value is not iterable")),
-        };
-        Ok(Self { value, index: 0 })
+        let iterator = value.iterator()?;
+        let next = iterator.get("next")?;
+        Ok(Self { iterator, next })
     }
     fn next(&mut self) -> Result<Option<Js>, Thrown> {
-        let length = self.value.get("length")?.to_number()? as usize;
-        if self.index >= length {
-            return Ok(None);
+        let step = self.next.call(self.iterator.clone(), vec![])?;
+        if step.get("done")?.truthy() {
+            Ok(None)
+        } else {
+            step.get("value").map(Some)
         }
-        let value = self.value.get(&self.index.to_string())?;
-        self.index += 1;
-        Ok(Some(value))
     }
 }
 

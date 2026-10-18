@@ -1,0 +1,8 @@
+{
+  "safe_cex_venue_backpack::public_control::Subscriptions": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed public_control.rs::Subscriptions: Clone copies the owned Vec<Vec<u16>> subscription-name values, preserving ordered deduplication and full UTF-16 code units. Later insert/remove on the cloned value has separate storage. The separate SubscriptionState Rc wrapper may share a Subscriptions owner, but that is not what this value Clone does. No live socket or one-use subscription authorization is duplicated See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
+  }
+}

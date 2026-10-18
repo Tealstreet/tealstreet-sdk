@@ -1006,3 +1006,174 @@ are byte-unchanged from the previously recorded merge (standalone diffs 0).
 Compiler/native/control/indexer exits stand. Extractor freshness rerun on this
 merge returns **0, 0 manifests would change, 0 added/orphaned symbols**.
 Tomllib again measures **66 / 13 / 0** with all 79 rows off pending.
+
+## Production Exchange binding and owned finding repairs (2026-10-16)
+
+`binding/exchange.rs::PhemexExchange::new` assembles the existing venue bodies
+with the shared Js runtime, base exchange, Store and socket facades. The typed
+Exchange entry points execute signed HTTP, order formatting/cancellation,
+settings changes and public/private startup. Tests use distinct amount/price
+steps, caller IDs, suspension across disposal, public-only mode, delayed remote
+signing, failed signing and auth acknowledgement before subscription.
+
+The 23 `tests/exchange_binding.rs` E2E tests passed through production construction.
+The four `tests/binding_values.rs` tests passed, including actual TypeScript
+observations for every one of the 2048 lone-surrogate units. Raw ticker output
+retains the response object and D800USDT symbol; formatSymbolOut retains raw
+info.symbol D800. The nine private transport tests passed, including the actual
+source oracle and a new account-read/timer/queue observation before future polling.
+
+`scripts/binding-controls.py` passed all 23 compiling production controls:
+19 Exchange method/disposal controls and four helper controls. Each mutation
+failed its named runtime test with exit101, then the exact restored bytes passed
+with exit0. The four repaired findings are formatSymbolIn, formatSymbolOut,
+fetchTickersRaw and eager private reconciliation. Moving begin_sync back behind
+the native future boundary is the eager-start negative control.
+
+Five typed-edge FINDING rows remain, as assigned by the overseer to shared
+string-model task ddi2il-10: PhemexApiResponse.msg, POSITIONS_RESPONSE.account.currency,
+getAccount.userId, validateAccount.error, and parseTickers' symbol/Store key.
+They are Rust representation losses, not TS-carried defects, and remain marked
+as findings. The source's missing ticker-error emit(undefined)/null-return behavior
+is carried by the production reader; no fixture silently fixes it.
+
+Readiness checkpoint before the Crypto.com registry follow-up: full scoped
+all-targets suite passed 91 tests across 17 targets, zero ignored. Strict host
+all-targets and wasm library Clippy passed. Canonical workspace parity passed
+(7459 rows / 17060 public Rust items) after adding exact binding split targets
+and detached AccountRead mapping; those mapping edits did not change Rust code.
+Registry integration remains to be added in the Phemex PR.
+
+## Registry and source-super disposal integration
+
+Phemex is now in the Rust registry, with native Js HTTP, hosted signing, the
+external-data factory and the shared limiter host API. The native HTTP witness
+checks distinct0.003 amount/0.25 price steps, read purity, user123 and HMAC over
+the actual currency=USDT account query. Its compiling wrong-factory mutation
+fails101 and the exact restored table passes0.
+
+The source Phemex dispose calls super.dispose, unlike Crypto.com. The wrapper
+now delegates once through the bound source body, with no extra early base call.
+The new E2E observes the disposed flag and removed inherited listener; skipping
+SessionHost::base_dispose compiles and fails that regression, then restores green.
+The original source-dispose-call suppression control also fails/restores.
+
+Full scoped suite:92 tests across17 targets, zero ignored;24 binding E2E tests.
+After master185/164 integration,37 binding/helper/private-transport tests and14
+native construction/table tests passed. The shared production dispatch guard
+passed after reviewing21 new Phemex call/reference records; its sole base cleanup
+call is the source-super adapter with explicit source/native evidence.
+The original23 method/helper control checkpoint remains valid; the added skip-super
+control makes24 and the registry factory control is separate.
+
+Final integrated static gates passed for Phemex plus registry: strict host
+all-target and wasm library Clippy; canonical parity7459 rows /17114 public
+items; layers88/88; live source registry48 ordered names. Read-only extractor
+freshness reports0 changed manifests,0 added and0 orphaned symbols after taking
+the author's formatting-only #190. Five shared typed-edge findings stay marked
+under ddi2il-10; these gates do not reclassify them as ported.
+
+## Native tunnel transport provider (2026-10-17)
+
+The production native host supplies Phemex's requested installer through shared
+`js_runtime::client::factory::install_transport_adapter` using the same HTTP host,
+runtime transport provider, options/name, and source default adapter variant.
+`safe-cex-registry/tests/native_host_tunnel.rs` reads markets and a signed account
+query over a real local tradetunnel. It verifies rpc.auth token, two rpc.http
+requests, independent SHA256 HMAC over observed query/expiry bytes, distinct
+amount/price steps, Store read purity and zero direct-origin HTTP.
+
+Before the fix, the new witness failed101 at construction with the exact missing
+installTransportAdapter-provider error. The restored implementation passes that
+witness and the existing Binance tunnel test. Permanent compiling absent/no-op
+provider controls live in registry/scripts/phemex-tunnel-controls.py.
+
+## Direct flattened-envelope numeric decoding (2026-10-17)
+
+The complete-record witness initially passed Account, Position and PositionsResponse
+but failed PhemexApiResponse<PositionsResponse> at direct text decoding with
+`invalid type: map, expected f64`. Serde flatten had buffered lexical numeric
+payload fields through Content. The replacement streams metadata and payload
+fields from the original map without adding payload trait bounds or a dependency.
+
+Seven native witnesses now pass: all 49 declared account/position fields and their
+numeric bits, complete valid Serde-order arrays, text/owned/borrowed/qualified and
+numeric-ingress paths, borrowed payloads, metadata presence/duplicates/order and
+custom payload early completion. The existing live-source type corpus also passes
+its 450 native comparisons. Host all-target and wasm library Clippy pass. The
+permanent envelope-controls.py restores the former derive: it compiles and fails
+the named numeric witness with exit101, then exact restoration passes. Canonical
+parity passes (7459 rows,17183 public Rust items). These observations do not clear
+the existing surrogate FINDING rows or classify private helper decoders.
+
+## Original accepted-contract census
+
+The original native/default census selects exactly 44 owners. The reviewed
+per-crate shard produces 30 native decoder results and 14 individual
+classifications, with zero failed selected owners. Four record observations
+cover all 49 account/position fields, numeric bits, metadata and cardinality via
+six decoder paths; 26 function owners execute 136 independently authored cases.
+Object observations use recursive native Js fields/kinds/number bits rather
+than serialized numeric lexemes. The shared-Js host fixture panics on unrelated
+capabilities and its mapped-key corpus is explicitly limited to exact keys.
+
+Twelve non-decoder helpers have direct native unit witnesses and twelve
+compiling named-failure/exact-restoration controls, including three new outbound
+controls in scripts/outbound-contract-controls.py. Three guard-only record
+controls compile after widening, fail the named complete-array rejection
+assertion, and pass after exact restoration. The direct-envelope old-derive numeric control remains in #280.
+Two typed initializer classifications have separately executed source/native
+constructor witnesses. The Api construction record reviews only shared-handle
+Clone capability and makes no executed clone or method-decoding claim.
+
+Reproduce selected compiler/native checks with
+`node safe-cex-venue-phemex/scripts/accepted-census-contracts.mjs` from sdk-rs;
+see safe-cex-parity/accepted-set/PHEMEX-REVIEW.md for individual proof commands.
+This does not assert full current discovery: ten post-census owners, one public
+alias, local scopes, feature combinations and WASM remain separate obligations.
+
+
+## Post-merge #418: real snapshot failure warnings
+
+At master b07c56cb67, test-only62ccac890c/c075109733 constructs the actual Phemex
+Exchange public book and rejects terminal HTTP. The real shared client, socket,
+snapshot continuation and warning path run unchanged. The maintained TS class
+and ENDPOINTS declaration run independently in snapshot-warning-source.cjs.
+
+Compiled RED1: the parent-dispatch bug produces zero warnings instead of one
+(`/tmp/port-txflow-phemex-warning-parent-red.log`). WsHost routes log to the
+socket's nonexistent member instead of parent.log. With only that dispatch
+repaired, compiled RED2 fails the named PHEMEX-SNAPSHOT-WARNING assertion:
+`Error: unscripted request ...` instead of the original Error.message
+(`/tmp/port-txflow-phemex-warning-message-red.log`). Both compilation failures
+are excluded: these are executed test failures, each exit101.
+
+The complete fix dispatches log to parent and selects Error.message for native
+Error/AxiosError instances, retaining String(value) for other thrown values.
+The real regression passes next-delta retries, one warning inside the30-second
+window, reopening after30seconds, exact severity/text, no escaped runtime error,
+and recovery to a valid snapshot merged with its initial delta. The actual read
+limiter remains enabled; the fixture advances its clock between retry attempts.
+The source supplement separately asserts Error, ordinary-object and string
+rejections. All36 constructed binding tests pass, including the original three
+#418 chart history/candle/book regressions. No original oracle corpus changed.
+
+Reproduce from root:
+
+```sh
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-phemex --jobs 1 --test exchange_binding
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" node sdk-rs/safe-cex-venue-phemex/tests/snapshot-warning-source.cjs
+```
+
+Review scope also traced source symbol formatting, parent timeframe/xhr selection,
+REST field mapping and the snapshot await/delta boundary from #418. The daily UTC
+normalization gap is already owned by #825; this PR makes no date changes.
+
+Final gates: native and wasm all-target Clippy -D warnings and fmt pass. The
+unchanged REST and WS actual-source suites each pass8 (16 total). Scoped parity
+passes7459 rows/547 public items with zero Phemex exemptions, and extractor
+changes zero manifests. All-features cancellation inventory6PASS/1exportignore;
+override contracts7PASS/1live-sourceignore. Both changed bodies are synchronous
+and neither has a cancellation/override body pin; the inventories pass unchanged.
+Logs: `/tmp/port-txflow-phemex-warning-{green,oracles,source,clippy-native,clippy-wasm,parity,extract,inventory}.log`
+(source output is `.json`). No shared body/transport API changed.

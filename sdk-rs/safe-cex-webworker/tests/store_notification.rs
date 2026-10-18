@@ -1,3 +1,7 @@
+#[path = "support/data_trace.rs"]
+mod data_trace;
+#[path = "support/error_post.rs"]
+mod error_post_support;
 use serde_json::Value;
 
 #[test]
@@ -127,7 +131,7 @@ fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
     // BBO still has an infallible core callback; its source throw is separate.
 }
 
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
@@ -220,7 +224,7 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                 });
                 let mut error = ExchangeError::new("subscriber failed");
                 error.name = name.into();
-                error.code = Some(json!(197));
+                error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(197)));
                 error.stack = Some("native-stack".into());
                 error.context = Some(json!({"origin":"first listener"}));
                 error.store_subscriber_ids = vec![401];
@@ -275,7 +279,11 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                         }
                     }
                     "remove" => {
-                        let handler = CallMethodHandler::new(venue.clone(), post);
+                        let handler = CallMethodHandler::new(
+                            venue.clone(),
+                            data_trace::post(post),
+                            error_post_support::unexpected(),
+                        );
                         ready(handler.handle_call_method(
                             "r".into(),
                             "removeOrders".into(),
@@ -312,7 +320,7 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                                 "NOTIFICATION native error name"
                             );
                             assert_eq!(
-                                recovered.code, error.code,
+                                recovered.metadata, error.metadata,
                                 "NOTIFICATION native error code"
                             );
                             assert_eq!(

@@ -41,10 +41,6 @@ pub(crate) enum PublicCategory {
     Linear,
     Inverse,
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired as the remaining receiver members land")
-)]
 impl PublicCategory {
     fn key(self) -> &'static str {
         match self {
@@ -66,6 +62,9 @@ pub struct BybitExchange {
     pub(crate) snapshot_refresh: std::cell::OnceCell<
         Rc<crate::private_snapshot_refresh::PrivateSnapshotRefresh<crate::binding::rt::Rt>>,
     >,
+    stream_topics: RefCell<std::collections::HashMap<String, crate::ws_public::streams::Topics>>,
+    candle_recoveries:
+        RefCell<std::collections::HashMap<String, Rc<crate::ws_public::candle_recovery::Recovery>>>,
     // fetchMarginAccountInfos assigns this wire field without coercion. Keep
     // absence and nonnumeric values: only the numeric value 1 means CONTRACT.
     pub(crate) unified_margin_status: RefCell<Option<serde_json::Value>>,
@@ -78,15 +77,7 @@ pub struct BybitExchange {
     pub(crate) api_key_info: RefCell<Option<crate::types::BybitApiKeyInfo>>,
     pub(crate) batch_limit: Cell<f64>,
     pub(crate) force_unified_balance: Cell<bool>,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired as the remaining receiver members land")
-    )]
     pub(crate) execution_query_max_range_ms: f64,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired as the remaining receiver members land")
-    )]
     pub(crate) default_executions_lookback_ms: f64,
 }
 
@@ -95,6 +86,30 @@ pub struct BybitExchange {
     expect(dead_code, reason = "wired as the remaining receiver members land")
 )]
 impl BybitExchange {
+    pub(crate) fn candle_recovery(
+        &self,
+        socket: &Rc<safe_cex_exchange::websocket::BaseWebSocket>,
+        category: &str,
+    ) -> Rc<crate::ws_public::candle_recovery::Recovery> {
+        self.candle_recoveries
+            .borrow_mut()
+            .entry(category.into())
+            .or_insert_with(|| {
+                crate::ws_public::candle_recovery::Recovery::new(
+                    socket,
+                    &self.base,
+                    self.subscription_topics(category),
+                )
+            })
+            .clone()
+    }
+    pub(crate) fn subscription_topics(&self, category: &str) -> crate::ws_public::streams::Topics {
+        self.stream_topics
+            .borrow_mut()
+            .entry(category.into())
+            .or_default()
+            .clone()
+    }
     pub(crate) fn xhr(&self) -> &Rc<SecondaryKeyClients> {
         self.xhr
             .get()
@@ -140,12 +155,17 @@ impl BybitExchange {
 
     /// Options join this connection only when the account opted in.
     pub(crate) fn options_enabled(&self) -> bool {
-        self.base.options().enable_option_markets == Some(true)
+        self.base.name != safe_cex_types::ExchangeName::Hyrotrader
+            && self.base.options().enable_option_markets == Some(true)
     }
     /// A shared public data source has no inverse markets, so it cannot size inverse positions.
     pub(crate) fn inverse_enabled(&self) -> bool {
         let options = self.base.options();
-        options.enable_inverse_markets == Some(true) && options.external_public_data.is_none()
+        !matches!(
+            self.base.name,
+            safe_cex_types::ExchangeName::Bybitspot | safe_cex_types::ExchangeName::Hyrotrader
+        ) && options.enable_inverse_markets == Some(true)
+            && options.external_public_data.is_none()
     }
 
     // ts: BybitExchange.getCategoryForSymbol — routed by symbol so a row routes before its market loads.
@@ -248,22 +268,45 @@ impl BybitExchange {
     }
 
     pub(crate) fn requires_order_link_id(&self) -> bool {
-        false
+        self.base.name == safe_cex_types::ExchangeName::Hyrotrader
     }
 
-    pub(crate) fn generated_order_link_id(&self) -> Option<String> {
-        // The concrete linear hook never requires an ID; derived hooks have
-        // their own dispatch and generation contract.
-        None
+    pub(crate) fn generated_order_link_id(
+        &self,
+    ) -> Result<Option<String>, safe_cex_exchange::runtime::ExchangeError> {
+        if !self.requires_order_link_id() {
+            return Ok(None);
+        }
+        let rt = self.js.get().ok_or_else(|| {
+            safe_cex_exchange::runtime::ExchangeError::new("Bybit receiver is unavailable")
+        })?;
+        let value = rt
+            .shared
+            .globals
+            .get("nanoid")
+            .and_then(|factory| factory.call(crate::binding::value::Js::Undefined, vec![]))
+            .map_err(|error| error.to_exchange_error())?;
+        crate::binding::value::to_typed(&value)
+            .map(Some)
+            .map_err(|error| error.to_exchange_error())
     }
 
     pub(crate) fn validate_order_capabilities(
         &self,
-        _options: &crate::order_params::BybitPlaceOrderOpts,
+        options: &crate::order_params::BybitPlaceOrderOpts,
     ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
-        // The linear source hook is intentionally empty; basic validation and
-        // derived venue restrictions belong to their own preflight operations.
-        Ok(())
+        if self.base.name != safe_cex_types::ExchangeName::Hyrotrader {
+            return Ok(());
+        }
+        let rt = self.js.get().ok_or_else(|| {
+            safe_cex_exchange::runtime::ExchangeError::new("Bybit receiver is unavailable")
+        })?;
+        let options = crate::binding::value::from_typed(options)
+            .map_err(|error| error.to_exchange_error())?;
+        rt.this
+            .call_method("validateOrderCapabilities", vec![options])
+            .map(|_| ())
+            .map_err(|error| error.to_exchange_error())
     }
 
     pub(crate) fn get_execution_query_windows(
@@ -311,9 +354,9 @@ impl BybitExchange {
         }
     }
 
-    pub(crate) fn validate_candle_interval(
+    pub(crate) fn validate_candle_interval<T: ?Sized>(
         &self,
-        _interval: &serde_json::Value,
+        _interval: &T,
     ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
         // Concrete linear Bybit always supports trade-derived candles. Its
         // source short-circuit does not inspect interval; subclass hooks differ.
@@ -321,7 +364,7 @@ impl BybitExchange {
     }
 
     pub(crate) fn supports_trade_derived_candles(&self) -> bool {
-        true
+        self.base.name != safe_cex_types::ExchangeName::Hyrotrader
     }
 
     pub(crate) fn uses_bybit_demo_environment(&self) -> bool {
@@ -341,20 +384,50 @@ impl BybitExchange {
         &self,
         category: PublicCategory,
         network: Network,
-    ) -> &'static str {
-        crate::types::BASE_WS_URL["public"][category.key()][network.key()]
-            .as_str()
-            .expect("static Bybit public WS URL")
+    ) -> Result<&'static str, safe_cex_exchange::runtime::ExchangeError> {
+        if self.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+            if !matches!(category, PublicCategory::Linear) {
+                return Err(safe_cex_exchange::runtime::ExchangeError::new(
+                    "HyroTrader simulator only supports linear public WebSocket data",
+                ));
+            }
+            return crate::types::HYROTRADER_SIMULATOR_WS_URL["public"]["linear"][network.key()]
+                .as_str()
+                .filter(|url| !url.is_empty())
+                .ok_or_else(|| {
+                    safe_cex_exchange::runtime::ExchangeError::new(
+                        "HyroTrader simulator public WebSocket URL is not configured",
+                    )
+                });
+        }
+        Ok(
+            crate::types::BASE_WS_URL["public"][category.key()][network.key()]
+                .as_str()
+                .expect("static Bybit public WS URL"),
+        )
     }
-    pub(crate) fn get_bybit_private_ws_url(&self, network: Network) -> &'static str {
+    pub(crate) fn get_bybit_private_ws_url(
+        &self,
+        network: Network,
+    ) -> Result<&'static str, safe_cex_exchange::runtime::ExchangeError> {
+        if self.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+            return crate::types::HYROTRADER_SIMULATOR_WS_URL["private"][network.key()]
+                .as_str()
+                .filter(|url| !url.is_empty())
+                .ok_or_else(|| {
+                    safe_cex_exchange::runtime::ExchangeError::new(
+                        "HyroTrader simulator private WebSocket URL is not configured",
+                    )
+                });
+        }
         let table = if self.uses_bybit_demo_environment() {
             &crate::types::DEMO_WS_URL
         } else {
             &crate::types::BASE_WS_URL
         };
-        table["private"][network.key()]
+        Ok(table["private"][network.key()]
             .as_str()
-            .expect("static Bybit private WS URL")
+            .expect("static Bybit private WS URL"))
     }
 
     /// Mirrors the constructor's client/socket composition. Factories are
@@ -378,14 +451,26 @@ impl BybitExchange {
         let limit = |adapter| -> Arc<dyn RestAdapter> {
             Arc::new(RateLimitedAdapter::new(adapter, clock.clone(), 5, 1000))
         };
+        let default_executions_lookback_ms =
+            if base.name == safe_cex_types::ExchangeName::Bybitinverse {
+                30.
+            } else {
+                7.
+            } * 24.
+                * 60.
+                * 60.
+                * 1000.;
+        let capabilities = crate::binding::exchange::capabilities(&base.name);
         let venue = Rc::new(Self {
             base,
-            capabilities: crate::binding::exchange::capabilities(),
+            capabilities,
             xhr: std::cell::OnceCell::new(),
             unlimited_xhr: std::cell::OnceCell::new(),
             js: std::cell::OnceCell::new(),
             order_state: Default::default(),
             snapshot_refresh: std::cell::OnceCell::new(),
+            stream_topics: RefCell::new(Default::default()),
+            candle_recoveries: RefCell::new(Default::default()),
             unified_margin_status: RefCell::new(Some(serde_json::json!(6))),
             margin_type: Cell::new(safe_cex_types::MarginType::Cross),
             needs_reinit: Cell::new(false),
@@ -397,7 +482,7 @@ impl BybitExchange {
             batch_limit: Cell::new(10.),
             force_unified_balance: Cell::new(false),
             execution_query_max_range_ms: 7. * 24. * 60. * 60. * 1000. - 1.,
-            default_executions_lookback_ms: 7. * 24. * 60. * 60. * 1000.,
+            default_executions_lookback_ms,
         });
         let erased: Rc<dyn Exchange> = venue.clone();
         let owner = Rc::downgrade(&erased);
@@ -414,14 +499,24 @@ impl BybitExchange {
         let _ = venue.xhr.set(xhr);
         let _ = venue.unlimited_xhr.set(unlimited_xhr);
         let parent = WsExchangeParent::new(&erased);
-        let public = BaseWebSocket::new(
-            1,
-            parent.clone(),
-            runtime.clone(),
-            public_protocol(Rc::downgrade(&venue), "linear"),
-        );
-        venue.base.set_socket(SocketSlot::Public, Some(public));
-        if venue.inverse_enabled() {
+        let dedicated_inverse = venue.base.name == safe_cex_types::ExchangeName::Bybitinverse;
+        if !dedicated_inverse {
+            let public = BaseWebSocket::new(
+                1,
+                parent.clone(),
+                runtime.clone(),
+                public_protocol(
+                    Rc::downgrade(&venue),
+                    if venue.base.name == safe_cex_types::ExchangeName::Bybitspot {
+                        "spot"
+                    } else {
+                        "linear"
+                    },
+                ),
+            );
+            venue.base.set_socket(SocketSlot::Public, Some(public));
+        }
+        if dedicated_inverse || venue.inverse_enabled() {
             let inverse = BaseWebSocket::new(
                 1,
                 parent.clone(),
@@ -460,11 +555,11 @@ impl BybitExchange {
             create_api,
             public_protocol,
             move |parent| {
-                Rc::new(crate::ws_private::protocol::PrivateProtocol {
+                Rc::new(crate::ws_private::protocol::PrivateProtocol::new(
                     parent,
-                    runtime: private_runtime,
-                    config: private,
-                })
+                    private_runtime,
+                    private,
+                ))
             },
         )
     }
@@ -478,16 +573,21 @@ impl BybitExchange {
     ) -> Result<Vec<(RestResponse, serde_json::Value)>, E> {
         crate::submission::submit_create_orders(
             payloads,
-            |payload| {
-                self.xhr().request(RestRequest {
+            |payload| async move {
+                let mut request = RestRequest {
                     method: "post".into(),
                     url: crate::types::ENDPOINTS["CREATE_ORDER"]
                         .as_str()
                         .expect("static endpoint")
                         .into(),
-                    body: Some(RestBody::Untransformed(payload)),
                     ..Default::default()
-                })
+                };
+                let data = safe_cex_types::retained_json::RetainedJsonInput::from_value(payload)
+                    .map_err(|error| {
+                        RestFailure::pre_transmit(error.to_string(), request.clone())
+                    })?;
+                request.body = Some(RestBody::Untransformed(data));
+                self.xhr().request(request).await
             },
             report_failure,
         )

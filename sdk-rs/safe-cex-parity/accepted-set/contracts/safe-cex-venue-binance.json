@@ -1,0 +1,3066 @@
+{
+  "safe_cex_venue_binance::binance_types::BinanceIncomeHistoryOptions": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "symbol": "XRPUSDT",
+      "incomeType": "COMMISSION",
+      "startTime": 0,
+      "endTime": 123.5,
+      "limit": 17.25
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.types.ts::BinanceIncomeHistoryOptions is an object record. The concrete numeric ingress calls its private remote schema through strict_decode::object. tests/accepted_record_shapes.rs independently observes every native field, presence and numeric bits over seven routes; its complete valid positional array is authored in declaration order and guard removal must fail the named owner test. sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect and #closed-typed-output-boundary.",
+    "entrypoints": [],
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "incomeType",
+        "startTimeBits",
+        "endTimeBits",
+        "limitBits"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independently authored raw JSON\")) { Ok(d) => serde_json::json!({\"ok\":true, \"symbol\":d.symbol, \"incomeType\":d.income_type.map(|v| match v { super::BinanceIncomeType::COMMISSION => \"commission-native-variant\", _ => panic!(\"unexpected native income variant\") }), \"startTimeBits\":d.start_time.map(|n| format!(\"{:016x}\", n.to_bits())), \"endTimeBits\":d.end_time.map(|n| format!(\"{:016x}\", n.to_bits())), \"limitBits\":d.limit.map(|n| format!(\"{:016x}\", n.to_bits())) }), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"XRPUSDT\",\"incomeType\":\"COMMISSION\",\"startTime\":-0,\"endTime\":123.5,\"limit\":17.25}",
+          "output": {
+            "ok": true,
+            "symbol": "XRPUSDT",
+            "incomeType": "commission-native-variant",
+            "startTimeBits": "8000000000000000",
+            "endTimeBits": "405ee00000000000",
+            "limitBits": "4031400000000000"
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": true,
+            "symbol": null,
+            "incomeType": null,
+            "startTimeBits": null,
+            "endTimeBits": null,
+            "limitBits": null
+          }
+        },
+        {
+          "input": "[\"XRPUSDT\",\"COMMISSION\",-0,123.5,17.25]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::binance_types::BinanceIncomeRecord": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "symbol": "SOLUSDT",
+      "incomeType": "FUNDING_FEE",
+      "income": "-1.5",
+      "asset": "USDT",
+      "info": "note",
+      "time": 0,
+      "tranId": "9007199254740993",
+      "tradeId": "trade-8"
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.types.ts::BinanceIncomeRecord is an object record. The concrete numeric ingress calls its private remote schema through strict_decode::object. tests/accepted_record_shapes.rs independently observes every native field, presence and numeric bits over seven routes; its complete valid positional array is authored in declaration order and guard removal must fail the named owner test. sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect and #closed-typed-output-boundary.",
+    "entrypoints": [],
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "incomeType",
+        "income",
+        "asset",
+        "info",
+        "timeBits",
+        "tranId",
+        "tradeId"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independently authored raw JSON\")) { Ok(d) => serde_json::json!({\"ok\":true, \"symbol\":d.symbol, \"incomeType\":match d.income_type { super::BinanceIncomeType::FundingFee => \"funding-native-variant\", super::BinanceIncomeType::COMMISSION => \"commission-native-variant\", _ => panic!(\"unexpected native income variant\") }, \"income\":d.income, \"asset\":d.asset, \"info\":d.info, \"timeBits\":format!(\"{:016x}\", d.time.to_bits()), \"tranId\":d.tran_id, \"tradeId\":d.trade_id }), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"SOLUSDT\",\"incomeType\":\"FUNDING_FEE\",\"income\":\"-1.5\",\"asset\":\"USDT\",\"info\":\"note\",\"time\":-0,\"tranId\":\"9007199254740993\",\"tradeId\":\"trade-8\"}",
+          "output": {
+            "ok": true,
+            "symbol": "SOLUSDT",
+            "incomeType": "funding-native-variant",
+            "income": "-1.5",
+            "asset": "USDT",
+            "info": "note",
+            "timeBits": "8000000000000000",
+            "tranId": "9007199254740993",
+            "tradeId": "trade-8"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"DOGEUSDT\",\"incomeType\":\"COMMISSION\",\"income\":\"-0.25\",\"asset\":\"BNB\",\"time\":11,\"tranId\":\"second-tx\"}",
+          "output": {
+            "ok": true,
+            "symbol": "DOGEUSDT",
+            "incomeType": "commission-native-variant",
+            "income": "-0.25",
+            "asset": "BNB",
+            "info": null,
+            "timeBits": "4026000000000000",
+            "tranId": "second-tx",
+            "tradeId": null
+          }
+        },
+        {
+          "input": "[\"SOLUSDT\",\"FUNDING_FEE\",\"-1.5\",\"USDT\",\"note\",-0,\"9007199254740993\",\"trade-8\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::binance_types::GetPositionRiskResponseRow": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "symbol": "BTCUSDT",
+      "positionAmt": "2",
+      "entryPrice": "3",
+      "markPrice": "4",
+      "unRealizedProfit": "5",
+      "liquidationPrice": "6",
+      "leverage": "7",
+      "maxNotionalValue": "8",
+      "marginType": "cross",
+      "isolatedMargin": "10",
+      "isAutoAddMargin": "false",
+      "positionSide": "LONG",
+      "notional": "13",
+      "isolatedWallet": "14",
+      "updateTime": 0,
+      "isolated": false,
+      "adl": 0,
+      "adlQuantile": 18.5,
+      "initialMargin": "19",
+      "positionInitialMargin": "20",
+      "openOrderInitialMargin": "21"
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.types.ts::GET_POSITION_RISK_RESPONSE is an object record. The concrete numeric ingress calls its private remote schema through strict_decode::object. tests/accepted_record_shapes.rs independently observes every native field, presence and numeric bits over seven routes; its complete valid positional array is authored in declaration order and guard removal must fail the named owner test. sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect and #closed-typed-output-boundary.",
+    "entrypoints": [],
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "positionAmt",
+        "entryPrice",
+        "markPrice",
+        "unRealizedProfit",
+        "liquidationPrice",
+        "leverage",
+        "maxNotionalValue",
+        "marginType",
+        "isolatedMargin",
+        "isAutoAddMargin",
+        "positionSide",
+        "notional",
+        "isolatedWallet",
+        "updateTimeBits",
+        "isolated",
+        "adlBits",
+        "adlQuantileBits",
+        "initialMargin",
+        "positionInitialMargin",
+        "openOrderInitialMargin"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independently authored raw JSON\")) { Ok(d) => serde_json::json!({\"ok\":true, \"symbol\":d.symbol, \"positionAmt\":d.position_amt, \"entryPrice\":d.entry_price, \"markPrice\":d.mark_price, \"unRealizedProfit\":d.un_realized_profit, \"liquidationPrice\":d.liquidation_price, \"leverage\":d.leverage, \"maxNotionalValue\":d.max_notional_value, \"marginType\":d.margin_type, \"isolatedMargin\":d.isolated_margin, \"isAutoAddMargin\":d.is_auto_add_margin, \"positionSide\":d.position_side, \"notional\":d.notional, \"isolatedWallet\":d.isolated_wallet, \"updateTimeBits\":format!(\"{:016x}\", d.update_time.to_bits()), \"isolated\":d.isolated, \"adlBits\":d.adl.map(|n| format!(\"{:016x}\", n.to_bits())), \"adlQuantileBits\":d.adl_quantile.map(|n| format!(\"{:016x}\", n.to_bits())), \"initialMargin\":d.initial_margin, \"positionInitialMargin\":d.position_initial_margin, \"openOrderInitialMargin\":d.open_order_initial_margin }), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"BTCUSDT\",\"positionAmt\":\"2\",\"entryPrice\":\"3\",\"markPrice\":\"4\",\"unRealizedProfit\":\"5\",\"liquidationPrice\":\"6\",\"leverage\":\"7\",\"maxNotionalValue\":\"8\",\"marginType\":\"cross\",\"isolatedMargin\":\"10\",\"isAutoAddMargin\":\"false\",\"positionSide\":\"LONG\",\"notional\":\"13\",\"isolatedWallet\":\"14\",\"updateTime\":-0,\"isolated\":false,\"adl\":-0,\"adlQuantile\":18.5,\"initialMargin\":\"19\",\"positionInitialMargin\":\"20\",\"openOrderInitialMargin\":\"21\"}",
+          "output": {
+            "ok": true,
+            "symbol": "BTCUSDT",
+            "positionAmt": "2",
+            "entryPrice": "3",
+            "markPrice": "4",
+            "unRealizedProfit": "5",
+            "liquidationPrice": "6",
+            "leverage": "7",
+            "maxNotionalValue": "8",
+            "marginType": "cross",
+            "isolatedMargin": "10",
+            "isAutoAddMargin": "false",
+            "positionSide": "LONG",
+            "notional": "13",
+            "isolatedWallet": "14",
+            "updateTimeBits": "8000000000000000",
+            "isolated": false,
+            "adlBits": "8000000000000000",
+            "adlQuantileBits": "4032800000000000",
+            "initialMargin": "19",
+            "positionInitialMargin": "20",
+            "openOrderInitialMargin": "21"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ADAUSDT\",\"positionAmt\":\"-22\",\"entryPrice\":\"23\",\"markPrice\":\"24\",\"unRealizedProfit\":\"25\",\"liquidationPrice\":\"26\",\"isolatedMargin\":\"30\",\"positionSide\":\"SHORT\",\"notional\":\"33\",\"isolatedWallet\":\"34\",\"updateTime\":2}",
+          "output": {
+            "ok": true,
+            "symbol": "ADAUSDT",
+            "positionAmt": "-22",
+            "entryPrice": "23",
+            "markPrice": "24",
+            "unRealizedProfit": "25",
+            "liquidationPrice": "26",
+            "leverage": null,
+            "maxNotionalValue": null,
+            "marginType": null,
+            "isolatedMargin": "30",
+            "isAutoAddMargin": null,
+            "positionSide": "SHORT",
+            "notional": "33",
+            "isolatedWallet": "34",
+            "updateTimeBits": "4000000000000000",
+            "isolated": null,
+            "adlBits": null,
+            "adlQuantileBits": null,
+            "initialMargin": null,
+            "positionInitialMargin": null,
+            "openOrderInitialMargin": null
+          }
+        },
+        {
+          "input": "[\"BTCUSDT\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"cross\",\"10\",\"false\",\"LONG\",\"13\",\"14\",-0,false,-0,18.5,\"19\",\"20\",\"21\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::binancepm_types::GetPositionRiskResponseRow": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "symbol": "ETHUSDT",
+      "positionAmt": "22",
+      "entryPrice": "23",
+      "markPrice": "24",
+      "unRealizedProfit": "25",
+      "liquidationPrice": "26",
+      "leverage": "27",
+      "maxNotionalValue": "28",
+      "marginType": "isolated",
+      "isolatedMargin": "30",
+      "isAutoAddMargin": "true",
+      "positionSide": "SHORT",
+      "notional": "33",
+      "isolatedWallet": "34",
+      "updateTime": 0,
+      "isolated": true,
+      "adlQuantile": 0
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binancepm.types.ts::GET_POSITION_RISK_RESPONSE is an object record. The concrete numeric ingress calls its private remote schema through strict_decode::object. tests/accepted_record_shapes.rs independently observes every native field, presence and numeric bits over seven routes; its complete valid positional array is authored in declaration order and guard removal must fail the named owner test. sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect and #closed-typed-output-boundary.",
+    "entrypoints": [],
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "positionAmt",
+        "entryPrice",
+        "markPrice",
+        "unRealizedProfit",
+        "liquidationPrice",
+        "leverage",
+        "maxNotionalValue",
+        "marginType",
+        "isolatedMargin",
+        "isAutoAddMargin",
+        "positionSide",
+        "notional",
+        "isolatedWallet",
+        "updateTimeBits",
+        "isolated",
+        "adlQuantileBits"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independently authored raw JSON\")) { Ok(d) => serde_json::json!({\"ok\":true, \"symbol\":d.symbol, \"positionAmt\":d.position_amt, \"entryPrice\":d.entry_price, \"markPrice\":d.mark_price, \"unRealizedProfit\":d.un_realized_profit, \"liquidationPrice\":d.liquidation_price, \"leverage\":d.leverage, \"maxNotionalValue\":d.max_notional_value, \"marginType\":d.margin_type, \"isolatedMargin\":d.isolated_margin, \"isAutoAddMargin\":d.is_auto_add_margin, \"positionSide\":d.position_side, \"notional\":d.notional, \"isolatedWallet\":d.isolated_wallet, \"updateTimeBits\":format!(\"{:016x}\", d.update_time.to_bits()), \"isolated\":d.isolated, \"adlQuantileBits\":format!(\"{:016x}\", d.adl_quantile.to_bits()) }), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"ETHUSDT\",\"positionAmt\":\"22\",\"entryPrice\":\"23\",\"markPrice\":\"24\",\"unRealizedProfit\":\"25\",\"liquidationPrice\":\"26\",\"leverage\":\"27\",\"maxNotionalValue\":\"28\",\"marginType\":\"isolated\",\"isolatedMargin\":\"30\",\"isAutoAddMargin\":\"true\",\"positionSide\":\"SHORT\",\"notional\":\"33\",\"isolatedWallet\":\"34\",\"updateTime\":-0,\"isolated\":true,\"adlQuantile\":-0}",
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSDT",
+            "positionAmt": "22",
+            "entryPrice": "23",
+            "markPrice": "24",
+            "unRealizedProfit": "25",
+            "liquidationPrice": "26",
+            "leverage": "27",
+            "maxNotionalValue": "28",
+            "marginType": "isolated",
+            "isolatedMargin": "30",
+            "isAutoAddMargin": "true",
+            "positionSide": "SHORT",
+            "notional": "33",
+            "isolatedWallet": "34",
+            "updateTimeBits": "8000000000000000",
+            "isolated": true,
+            "adlQuantileBits": "8000000000000000"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"BNBUSDT\",\"positionAmt\":\"42\",\"entryPrice\":\"43\",\"markPrice\":\"44\",\"unRealizedProfit\":\"45\",\"liquidationPrice\":\"46\",\"leverage\":\"47\",\"maxNotionalValue\":\"48\",\"marginType\":\"cross\",\"isolatedMargin\":\"50\",\"isAutoAddMargin\":\"false\",\"positionSide\":\"LONG\",\"notional\":\"53\",\"isolatedWallet\":\"54\",\"updateTime\":7,\"isolated\":false,\"adlQuantile\":8}",
+          "output": {
+            "ok": true,
+            "symbol": "BNBUSDT",
+            "positionAmt": "42",
+            "entryPrice": "43",
+            "markPrice": "44",
+            "unRealizedProfit": "45",
+            "liquidationPrice": "46",
+            "leverage": "47",
+            "maxNotionalValue": "48",
+            "marginType": "cross",
+            "isolatedMargin": "50",
+            "isAutoAddMargin": "false",
+            "positionSide": "LONG",
+            "notional": "53",
+            "isolatedWallet": "54",
+            "updateTimeBits": "401c000000000000",
+            "isolated": false,
+            "adlQuantileBits": "4020000000000000"
+          }
+        },
+        {
+          "input": "[\"ETHUSDT\",\"22\",\"23\",\"24\",\"25\",\"26\",\"27\",\"28\",\"isolated\",\"30\",\"true\",\"SHORT\",\"33\",\"34\",-0,true,-0]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::binance_types::BinanceIncomeType": {
+    "category": "decoder",
+    "shape": "string",
+    "literals": [
+      "TRANSFER",
+      "WELCOME_BONUS",
+      "REALIZED_PNL",
+      "FUNDING_FEE",
+      "COMMISSION",
+      "INSURANCE_CLEAR",
+      "REFERRAL_KICKBACK",
+      "COMMISSION_REBATE",
+      "API_REBATE",
+      "CONTEST_REWARD",
+      "CROSS_COLLATERAL_TRANSFER",
+      "OPTIONS_PREMIUM_FEE",
+      "OPTIONS_SETTLE_PROFIT",
+      "INTERNAL_TRANSFER",
+      "AUTO_EXCHANGE",
+      "DELIVERED_SETTELMENT",
+      "COIN_SWAP_DEPOSIT",
+      "COIN_SWAP_WITHDRAW",
+      "POSITION_LIMIT_INCREASE_FEE"
+    ],
+    "entrypoints": [],
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.types.ts::BinanceIncomeType declares these exact unit string literals. String::deserialize admits only text before the private serde(remote) schema; existing Serialize spellings are retained. tests/accepted_string_shapes.rs observes every actual native variant independently, inventories the real Serde rename/alias set, and rejects each valid tagged-null object over owned/borrowed/qualified/text paths. Per-owner compiled removal of only the String frontdoor must fail its named tagged-shape assertion and restore/pass. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok($type::TRANSFER) => serde_json::json!(\"native-TRANSFER\"), Ok($type::WelcomeBonus) => serde_json::json!(\"native-WelcomeBonus\"), Ok($type::RealizedPnl) => serde_json::json!(\"native-RealizedPnl\"), Ok($type::FundingFee) => serde_json::json!(\"native-FundingFee\"), Ok($type::COMMISSION) => serde_json::json!(\"native-COMMISSION\"), Ok($type::InsuranceClear) => serde_json::json!(\"native-InsuranceClear\"), Ok($type::ReferralKickback) => serde_json::json!(\"native-ReferralKickback\"), Ok($type::CommissionRebate) => serde_json::json!(\"native-CommissionRebate\"), Ok($type::ApiRebate) => serde_json::json!(\"native-ApiRebate\"), Ok($type::ContestReward) => serde_json::json!(\"native-ContestReward\"), Ok($type::CrossCollateralTransfer) => serde_json::json!(\"native-CrossCollateralTransfer\"), Ok($type::OptionsPremiumFee) => serde_json::json!(\"native-OptionsPremiumFee\"), Ok($type::OptionsSettleProfit) => serde_json::json!(\"native-OptionsSettleProfit\"), Ok($type::InternalTransfer) => serde_json::json!(\"native-InternalTransfer\"), Ok($type::AutoExchange) => serde_json::json!(\"native-AutoExchange\"), Ok($type::DeliveredSettelment) => serde_json::json!(\"native-DeliveredSettelment\"), Ok($type::CoinSwapDeposit) => serde_json::json!(\"native-CoinSwapDeposit\"), Ok($type::CoinSwapWithdraw) => serde_json::json!(\"native-CoinSwapWithdraw\"), Ok($type::PositionLimitIncreaseFee) => serde_json::json!(\"native-PositionLimitIncreaseFee\"), Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": "TRANSFER",
+          "output": "native-TRANSFER"
+        },
+        {
+          "input": "WELCOME_BONUS",
+          "output": "native-WelcomeBonus"
+        },
+        {
+          "input": "REALIZED_PNL",
+          "output": "native-RealizedPnl"
+        },
+        {
+          "input": "FUNDING_FEE",
+          "output": "native-FundingFee"
+        },
+        {
+          "input": "COMMISSION",
+          "output": "native-COMMISSION"
+        },
+        {
+          "input": "INSURANCE_CLEAR",
+          "output": "native-InsuranceClear"
+        },
+        {
+          "input": "REFERRAL_KICKBACK",
+          "output": "native-ReferralKickback"
+        },
+        {
+          "input": "COMMISSION_REBATE",
+          "output": "native-CommissionRebate"
+        },
+        {
+          "input": "API_REBATE",
+          "output": "native-ApiRebate"
+        },
+        {
+          "input": "CONTEST_REWARD",
+          "output": "native-ContestReward"
+        },
+        {
+          "input": "CROSS_COLLATERAL_TRANSFER",
+          "output": "native-CrossCollateralTransfer"
+        },
+        {
+          "input": "OPTIONS_PREMIUM_FEE",
+          "output": "native-OptionsPremiumFee"
+        },
+        {
+          "input": "OPTIONS_SETTLE_PROFIT",
+          "output": "native-OptionsSettleProfit"
+        },
+        {
+          "input": "INTERNAL_TRANSFER",
+          "output": "native-InternalTransfer"
+        },
+        {
+          "input": "AUTO_EXCHANGE",
+          "output": "native-AutoExchange"
+        },
+        {
+          "input": "DELIVERED_SETTELMENT",
+          "output": "native-DeliveredSettelment"
+        },
+        {
+          "input": "COIN_SWAP_DEPOSIT",
+          "output": "native-CoinSwapDeposit"
+        },
+        {
+          "input": "COIN_SWAP_WITHDRAW",
+          "output": "native-CoinSwapWithdraw"
+        },
+        {
+          "input": "POSITION_LIMIT_INCREASE_FEE",
+          "output": "native-PositionLimitIncreaseFee"
+        },
+        {
+          "input": {
+            "TRANSFER": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "WELCOME_BONUS": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "REALIZED_PNL": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "FUNDING_FEE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "COMMISSION": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "INSURANCE_CLEAR": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "REFERRAL_KICKBACK": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "COMMISSION_REBATE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "API_REBATE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "CONTEST_REWARD": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "CROSS_COLLATERAL_TRANSFER": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "OPTIONS_PREMIUM_FEE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "OPTIONS_SETTLE_PROFIT": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "INTERNAL_TRANSFER": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "AUTO_EXCHANGE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "DELIVERED_SETTELMENT": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "COIN_SWAP_DEPOSIT": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "COIN_SWAP_WITHDRAW": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "POSITION_LIMIT_INCREASE_FEE": null
+          },
+          "output": null
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 17,
+          "output": null
+        },
+        {
+          "input": [],
+          "output": null
+        },
+        {
+          "input": [
+            "tag"
+          ],
+          "output": null
+        },
+        {
+          "input": "",
+          "output": null
+        },
+        {
+          "input": "UNKNOWN",
+          "output": null
+        },
+        {
+          "input": "transfer",
+          "output": null
+        },
+        {
+          "input": " TRANSFER",
+          "output": null
+        },
+        {
+          "input": "TRANSFER ",
+          "output": null
+        },
+        {
+          "input": "\ufeffTRANSFER",
+          "output": null
+        },
+        {
+          "input": "welcome_bonus",
+          "output": null
+        },
+        {
+          "input": " WELCOME_BONUS",
+          "output": null
+        },
+        {
+          "input": "WELCOME_BONUS ",
+          "output": null
+        },
+        {
+          "input": "\ufeffWELCOME_BONUS",
+          "output": null
+        },
+        {
+          "input": "realized_pnl",
+          "output": null
+        },
+        {
+          "input": " REALIZED_PNL",
+          "output": null
+        },
+        {
+          "input": "REALIZED_PNL ",
+          "output": null
+        },
+        {
+          "input": "\ufeffREALIZED_PNL",
+          "output": null
+        },
+        {
+          "input": "funding_fee",
+          "output": null
+        },
+        {
+          "input": " FUNDING_FEE",
+          "output": null
+        },
+        {
+          "input": "FUNDING_FEE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffFUNDING_FEE",
+          "output": null
+        },
+        {
+          "input": "commission",
+          "output": null
+        },
+        {
+          "input": " COMMISSION",
+          "output": null
+        },
+        {
+          "input": "COMMISSION ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCOMMISSION",
+          "output": null
+        },
+        {
+          "input": "insurance_clear",
+          "output": null
+        },
+        {
+          "input": " INSURANCE_CLEAR",
+          "output": null
+        },
+        {
+          "input": "INSURANCE_CLEAR ",
+          "output": null
+        },
+        {
+          "input": "\ufeffINSURANCE_CLEAR",
+          "output": null
+        },
+        {
+          "input": "referral_kickback",
+          "output": null
+        },
+        {
+          "input": " REFERRAL_KICKBACK",
+          "output": null
+        },
+        {
+          "input": "REFERRAL_KICKBACK ",
+          "output": null
+        },
+        {
+          "input": "\ufeffREFERRAL_KICKBACK",
+          "output": null
+        },
+        {
+          "input": "commission_rebate",
+          "output": null
+        },
+        {
+          "input": " COMMISSION_REBATE",
+          "output": null
+        },
+        {
+          "input": "COMMISSION_REBATE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCOMMISSION_REBATE",
+          "output": null
+        },
+        {
+          "input": "api_rebate",
+          "output": null
+        },
+        {
+          "input": " API_REBATE",
+          "output": null
+        },
+        {
+          "input": "API_REBATE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffAPI_REBATE",
+          "output": null
+        },
+        {
+          "input": "contest_reward",
+          "output": null
+        },
+        {
+          "input": " CONTEST_REWARD",
+          "output": null
+        },
+        {
+          "input": "CONTEST_REWARD ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCONTEST_REWARD",
+          "output": null
+        },
+        {
+          "input": "cross_collateral_transfer",
+          "output": null
+        },
+        {
+          "input": " CROSS_COLLATERAL_TRANSFER",
+          "output": null
+        },
+        {
+          "input": "CROSS_COLLATERAL_TRANSFER ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCROSS_COLLATERAL_TRANSFER",
+          "output": null
+        },
+        {
+          "input": "options_premium_fee",
+          "output": null
+        },
+        {
+          "input": " OPTIONS_PREMIUM_FEE",
+          "output": null
+        },
+        {
+          "input": "OPTIONS_PREMIUM_FEE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffOPTIONS_PREMIUM_FEE",
+          "output": null
+        },
+        {
+          "input": "options_settle_profit",
+          "output": null
+        },
+        {
+          "input": " OPTIONS_SETTLE_PROFIT",
+          "output": null
+        },
+        {
+          "input": "OPTIONS_SETTLE_PROFIT ",
+          "output": null
+        },
+        {
+          "input": "\ufeffOPTIONS_SETTLE_PROFIT",
+          "output": null
+        },
+        {
+          "input": "internal_transfer",
+          "output": null
+        },
+        {
+          "input": " INTERNAL_TRANSFER",
+          "output": null
+        },
+        {
+          "input": "INTERNAL_TRANSFER ",
+          "output": null
+        },
+        {
+          "input": "\ufeffINTERNAL_TRANSFER",
+          "output": null
+        },
+        {
+          "input": "auto_exchange",
+          "output": null
+        },
+        {
+          "input": " AUTO_EXCHANGE",
+          "output": null
+        },
+        {
+          "input": "AUTO_EXCHANGE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffAUTO_EXCHANGE",
+          "output": null
+        },
+        {
+          "input": "delivered_settelment",
+          "output": null
+        },
+        {
+          "input": " DELIVERED_SETTELMENT",
+          "output": null
+        },
+        {
+          "input": "DELIVERED_SETTELMENT ",
+          "output": null
+        },
+        {
+          "input": "\ufeffDELIVERED_SETTELMENT",
+          "output": null
+        },
+        {
+          "input": "coin_swap_deposit",
+          "output": null
+        },
+        {
+          "input": " COIN_SWAP_DEPOSIT",
+          "output": null
+        },
+        {
+          "input": "COIN_SWAP_DEPOSIT ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCOIN_SWAP_DEPOSIT",
+          "output": null
+        },
+        {
+          "input": "coin_swap_withdraw",
+          "output": null
+        },
+        {
+          "input": " COIN_SWAP_WITHDRAW",
+          "output": null
+        },
+        {
+          "input": "COIN_SWAP_WITHDRAW ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCOIN_SWAP_WITHDRAW",
+          "output": null
+        },
+        {
+          "input": "position_limit_increase_fee",
+          "output": null
+        },
+        {
+          "input": " POSITION_LIMIT_INCREASE_FEE",
+          "output": null
+        },
+        {
+          "input": "POSITION_LIMIT_INCREASE_FEE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffPOSITION_LIMIT_INCREASE_FEE",
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::protocol_types::ApiType": {
+    "category": "decoder",
+    "shape": "string",
+    "literals": [
+      "papi",
+      "fapi"
+    ],
+    "entrypoints": [],
+    "evidence": "packages/safe-cex/src/exchanges/binance/binancepm.api.ts::ApiType declares these exact unit string literals. String::deserialize admits only text before the private serde(remote) schema; existing Serialize spellings are retained. tests/accepted_string_shapes.rs observes every actual native variant independently, inventories the real Serde rename/alias set, and rejects each valid tagged-null object over owned/borrowed/qualified/text paths. Per-owner compiled removal of only the String frontdoor must fail its named tagged-shape assertion and restore/pass. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok($type::Papi) => serde_json::json!(\"native-Papi\"), Ok($type::Fapi) => serde_json::json!(\"native-Fapi\"), Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": "papi",
+          "output": "native-Papi"
+        },
+        {
+          "input": "fapi",
+          "output": "native-Fapi"
+        },
+        {
+          "input": {
+            "papi": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "fapi": null
+          },
+          "output": null
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 17,
+          "output": null
+        },
+        {
+          "input": [],
+          "output": null
+        },
+        {
+          "input": [
+            "tag"
+          ],
+          "output": null
+        },
+        {
+          "input": "",
+          "output": null
+        },
+        {
+          "input": "UNKNOWN",
+          "output": null
+        },
+        {
+          "input": "PAPI",
+          "output": null
+        },
+        {
+          "input": " papi",
+          "output": null
+        },
+        {
+          "input": "papi ",
+          "output": null
+        },
+        {
+          "input": "\ufeffpapi",
+          "output": null
+        },
+        {
+          "input": "FAPI",
+          "output": null
+        },
+        {
+          "input": " fapi",
+          "output": null
+        },
+        {
+          "input": "fapi ",
+          "output": null
+        },
+        {
+          "input": "\ufefffapi",
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::protocol_types::BinanceOrderBookApplyResult": {
+    "category": "decoder",
+    "shape": "string",
+    "literals": [
+      "applied",
+      "ignored",
+      "gap"
+    ],
+    "entrypoints": [],
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.orderbook.ts::BinanceOrderBookApplyResult declares these exact unit string literals. String::deserialize admits only text before the private serde(remote) schema; existing Serialize spellings are retained. tests/accepted_string_shapes.rs observes every actual native variant independently, inventories the real Serde rename/alias set, and rejects each valid tagged-null object over owned/borrowed/qualified/text paths. Per-owner compiled removal of only the String frontdoor must fail its named tagged-shape assertion and restore/pass. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok($type::Applied) => serde_json::json!(\"native-Applied\"), Ok($type::Ignored) => serde_json::json!(\"native-Ignored\"), Ok($type::Gap) => serde_json::json!(\"native-Gap\"), Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": "applied",
+          "output": "native-Applied"
+        },
+        {
+          "input": "ignored",
+          "output": "native-Ignored"
+        },
+        {
+          "input": "gap",
+          "output": "native-Gap"
+        },
+        {
+          "input": {
+            "applied": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "ignored": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "gap": null
+          },
+          "output": null
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 17,
+          "output": null
+        },
+        {
+          "input": [],
+          "output": null
+        },
+        {
+          "input": [
+            "tag"
+          ],
+          "output": null
+        },
+        {
+          "input": "",
+          "output": null
+        },
+        {
+          "input": "UNKNOWN",
+          "output": null
+        },
+        {
+          "input": "APPLIED",
+          "output": null
+        },
+        {
+          "input": " applied",
+          "output": null
+        },
+        {
+          "input": "applied ",
+          "output": null
+        },
+        {
+          "input": "\ufeffapplied",
+          "output": null
+        },
+        {
+          "input": "IGNORED",
+          "output": null
+        },
+        {
+          "input": " ignored",
+          "output": null
+        },
+        {
+          "input": "ignored ",
+          "output": null
+        },
+        {
+          "input": "\ufeffignored",
+          "output": null
+        },
+        {
+          "input": "GAP",
+          "output": null
+        },
+        {
+          "input": " gap",
+          "output": null
+        },
+        {
+          "input": "gap ",
+          "output": null
+        },
+        {
+          "input": "\ufeffgap",
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::order_logic::is_binance_position_mode_already_set_error": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_binance_position_mode_already_set_error",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean recognizer for an existing exchange error: reads response.data.code and compares it strictly with numeric/string -4059. Returns a predicate rather than constructing or admitting a decoded owner.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::isBinancePositionModeAlreadySetError. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::position_mode_error_is_a_strict_boolean_recognizer executes independent native Boolean/error witnesses; tests/order_logic.rs (217 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
+  },
+  "safe_cex_venue_binance::order_logic::detect_balance_issue": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "detect_balance_issue",
+      "signature": {
+        "inputs": [
+          [
+            "_account_data",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Deprecated source-compatible account predicate. Deliberately ignores the supplied account value and always returns false; it admits no representation and constructs no decoded output.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::BinanceExchange.detectBalanceIssue. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::deprecated_balance_predicate_ignores_account_data executes independent native Boolean/error witnesses; tests/order_logic.rs (217 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
+  },
+  "safe_cex_venue_binance::order_logic::is_post_only_rejection_error": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_post_only_rejection_error",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean classifier for an existing exchange error: nullish code precedence, numeric -5022 check, then source-truthy message selection and shared fallible String coercion before substring checks. It produces a predicate or coercion error, not a decoded owner.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::BinanceExchange.isPostOnlyRejectionError. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::post_only_predicate_preserves_code_and_message_precedence executes independent native Boolean/error witnesses; tests/rejection.rs (5,471 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
+  },
+  "safe_cex_venue_binance::response_message::get_binance_response_message": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_binance_response_message",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::getBinanceResponseMessage: non-object and array payloads return empty text; object code presence and truthy msg/message/error selection feed String coercion and a space join. This is an observed output adapter, not string-only/map-only input rejection. tests/accepted_error_outputs.rs observes native String/error-name outputs; the 11,828-case live response-message oracle passes. Each public function and the private shared helper has a separate actual production call. Per-owner compiled wrong-empty-string controls fail the named native output assertions, and exact source restorations pass all four output probes; the private owner is not discharged by its public callers. Stock JSON/UTF-8 input scope; no arbitrary getters, prototype mutation, full Error identity or feature/wasm claim.",
+    "call": "{ match $type(Some($value)) { Ok(native) => serde_json::json!({\"native\": native}), Err(error) => serde_json::json!({\"error\": error.name}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": 17,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": "message",
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": [
+          "message"
+        ],
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "code": 0
+        },
+        "output": {
+          "native": "code=0"
+        }
+      },
+      {
+        "input": {
+          "code": null
+        },
+        "output": {
+          "native": "code=null"
+        }
+      },
+      {
+        "input": {
+          "code": false
+        },
+        "output": {
+          "native": "code=false"
+        }
+      },
+      {
+        "input": {
+          "code": ""
+        },
+        "output": {
+          "native": "code="
+        }
+      },
+      {
+        "input": {
+          "code": []
+        },
+        "output": {
+          "native": "code="
+        }
+      },
+      {
+        "input": {
+          "code": [
+            1,
+            null,
+            2
+          ]
+        },
+        "output": {
+          "native": "code=1,,2"
+        }
+      },
+      {
+        "input": {
+          "code": {
+            "k": 1
+          }
+        },
+        "output": {
+          "native": "code=[object Object]"
+        }
+      },
+      {
+        "input": {
+          "msg": "first",
+          "message": "second",
+          "error": "third"
+        },
+        "output": {
+          "native": "first"
+        }
+      },
+      {
+        "input": {
+          "msg": 0,
+          "message": false,
+          "error": "third"
+        },
+        "output": {
+          "native": "third"
+        }
+      },
+      {
+        "input": {
+          "msg": [],
+          "message": "later"
+        },
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "msg": {},
+          "message": "later"
+        },
+        "output": {
+          "native": "[object Object]"
+        }
+      },
+      {
+        "input": {
+          "code": 0,
+          "msg": "detail"
+        },
+        "output": {
+          "native": "code=0 detail"
+        }
+      },
+      {
+        "input": {
+          "code": "B",
+          "msg": [
+            "one",
+            "two"
+          ]
+        },
+        "output": {
+          "native": "code=B one,two"
+        }
+      },
+      {
+        "input": {
+          "msg": false,
+          "message": 0,
+          "error": ""
+        },
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "msg": {
+            "toString": null
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "code": {
+            "toString": null
+          },
+          "msg": "detail"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_message::get_binance_pm_response_message": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_binance_pm_response_message",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binancepm.exchange.ts::getBinancePMResponseMessage: non-object and array payloads return empty text; object code presence and truthy msg/message/error selection feed String coercion and a space join. This is an observed output adapter, not string-only/map-only input rejection. tests/accepted_error_outputs.rs observes native String/error-name outputs; the 11,828-case live response-message oracle passes. Each public function and the private shared helper has a separate actual production call. Per-owner compiled wrong-empty-string controls fail the named native output assertions, and exact source restorations pass all four output probes; the private owner is not discharged by its public callers. Stock JSON/UTF-8 input scope; no arbitrary getters, prototype mutation, full Error identity or feature/wasm claim.",
+    "call": "{ match $type(Some($value)) { Ok(native) => serde_json::json!({\"native\": native}), Err(error) => serde_json::json!({\"error\": error.name}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": 17,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": "message",
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": [
+          "message"
+        ],
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "code": 0
+        },
+        "output": {
+          "native": "code=0"
+        }
+      },
+      {
+        "input": {
+          "code": null
+        },
+        "output": {
+          "native": "code=null"
+        }
+      },
+      {
+        "input": {
+          "code": false
+        },
+        "output": {
+          "native": "code=false"
+        }
+      },
+      {
+        "input": {
+          "code": ""
+        },
+        "output": {
+          "native": "code="
+        }
+      },
+      {
+        "input": {
+          "code": []
+        },
+        "output": {
+          "native": "code="
+        }
+      },
+      {
+        "input": {
+          "code": [
+            1,
+            null,
+            2
+          ]
+        },
+        "output": {
+          "native": "code=1,,2"
+        }
+      },
+      {
+        "input": {
+          "code": {
+            "k": 1
+          }
+        },
+        "output": {
+          "native": "code=[object Object]"
+        }
+      },
+      {
+        "input": {
+          "msg": "first",
+          "message": "second",
+          "error": "third"
+        },
+        "output": {
+          "native": "first"
+        }
+      },
+      {
+        "input": {
+          "msg": 0,
+          "message": false,
+          "error": "third"
+        },
+        "output": {
+          "native": "third"
+        }
+      },
+      {
+        "input": {
+          "msg": [],
+          "message": "later"
+        },
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "msg": {},
+          "message": "later"
+        },
+        "output": {
+          "native": "[object Object]"
+        }
+      },
+      {
+        "input": {
+          "code": 0,
+          "msg": "detail"
+        },
+        "output": {
+          "native": "code=0 detail"
+        }
+      },
+      {
+        "input": {
+          "code": "B",
+          "msg": [
+            "one",
+            "two"
+          ]
+        },
+        "output": {
+          "native": "code=B one,two"
+        }
+      },
+      {
+        "input": {
+          "msg": false,
+          "message": 0,
+          "error": ""
+        },
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "msg": {
+            "toString": null
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "code": {
+            "toString": null
+          },
+          "msg": "detail"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_message::response_message": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "response_message",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::getBinanceResponseMessage and binancepm.exchange.ts::getBinancePMResponseMessage (shared private Rust body): non-object and array payloads return empty text; object code presence and truthy msg/message/error selection feed String coercion and a space join. This is an observed output adapter, not string-only/map-only input rejection. tests/accepted_error_outputs.rs observes native String/error-name outputs; the 11,828-case live response-message oracle passes. Each public function and the private shared helper has a separate actual production call. Per-owner compiled wrong-empty-string controls fail the named native output assertions, and exact source restorations pass all four output probes; the private owner is not discharged by its public callers. Stock JSON/UTF-8 input scope; no arbitrary getters, prototype mutation, full Error identity or feature/wasm claim.",
+    "call": "{ match $type(Some($value)) { Ok(native) => serde_json::json!({\"native\": native}), Err(error) => serde_json::json!({\"error\": error.name}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": 17,
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": "message",
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": [
+          "message"
+        ],
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "code": 0
+        },
+        "output": {
+          "native": "code=0"
+        }
+      },
+      {
+        "input": {
+          "code": null
+        },
+        "output": {
+          "native": "code=null"
+        }
+      },
+      {
+        "input": {
+          "code": false
+        },
+        "output": {
+          "native": "code=false"
+        }
+      },
+      {
+        "input": {
+          "code": ""
+        },
+        "output": {
+          "native": "code="
+        }
+      },
+      {
+        "input": {
+          "code": []
+        },
+        "output": {
+          "native": "code="
+        }
+      },
+      {
+        "input": {
+          "code": [
+            1,
+            null,
+            2
+          ]
+        },
+        "output": {
+          "native": "code=1,,2"
+        }
+      },
+      {
+        "input": {
+          "code": {
+            "k": 1
+          }
+        },
+        "output": {
+          "native": "code=[object Object]"
+        }
+      },
+      {
+        "input": {
+          "msg": "first",
+          "message": "second",
+          "error": "third"
+        },
+        "output": {
+          "native": "first"
+        }
+      },
+      {
+        "input": {
+          "msg": 0,
+          "message": false,
+          "error": "third"
+        },
+        "output": {
+          "native": "third"
+        }
+      },
+      {
+        "input": {
+          "msg": [],
+          "message": "later"
+        },
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "msg": {},
+          "message": "later"
+        },
+        "output": {
+          "native": "[object Object]"
+        }
+      },
+      {
+        "input": {
+          "code": 0,
+          "msg": "detail"
+        },
+        "output": {
+          "native": "code=0 detail"
+        }
+      },
+      {
+        "input": {
+          "code": "B",
+          "msg": [
+            "one",
+            "two"
+          ]
+        },
+        "output": {
+          "native": "code=B one,two"
+        }
+      },
+      {
+        "input": {
+          "msg": false,
+          "message": 0,
+          "error": ""
+        },
+        "output": {
+          "native": ""
+        }
+      },
+      {
+        "input": {
+          "msg": {
+            "toString": null
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "code": {
+            "toString": null
+          },
+          "msg": "detail"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_shape::describe_binance_response_shape": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "describe_binance_response_shape",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Inspects an existing optional JSON value only to render its diagnostic typeof/array-length/first-six-own-key shape label; it does not decode a representation into a record or admit/refuse wire shapes.",
+    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native accepted_response_shapes::futures_response_descriptor_has_source_key_order_and_cutoff executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
+  },
+  "safe_cex_venue_binance::response_shape::describe_binance_pm_response_shape": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "describe_binance_pm_response_shape",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Inspects an existing optional JSON value only to render its diagnostic typeof/array-length/first-six-own-key shape label; it does not decode a representation into a record or admit/refuse wire shapes.",
+    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native accepted_response_shapes::pm_response_descriptor_has_source_key_order_and_cutoff executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
+  },
+  "safe_cex_venue_binance::response_shape::describe": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "describe",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Inspects an existing optional JSON value only to render its diagnostic typeof/array-length/first-six-own-key shape label; it does not decode a representation into a record or admit/refuse wire shapes.",
+    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native response_shape::accepted_contract_tests::private_descriptor_preserves_source_shape executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
+  },
+  "safe_cex_venue_binance::response_shape::require_binance_array_response": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "require_binance_array_response",
+      "signature": {
+        "inputs": [
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "slice": {
+                            "resolved_path": {
+                              "path": "serde_json::value::Value",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::response_shape::BinanceResponseError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "require_binance_array_response admits arrays by returning their original borrowed rows, without cloning or projecting elements. Native fixtures inspect nonempty pointer identity, length, fields and signed-zero bits before serialization. Other JSON shapes produce the exact Binance endpoint/shape/message diagnostic; fallible source String coercion errors retain their name and message. The native tests and maintained live response_shape target pass eight tests with zero ignored, including 1,188 source comparisons. scripts/response-shape-contracts.mjs executes its actual production call. scripts/response-shape-controls.py compiled its wrong output, required this owner's own production result to fail with native output mismatches, then restored exact source and passed all three production outputs. Stock JSON/UTF-8 only; empty-slice data addresses do not prove source array identity, and no arbitrary getter/prototype or full Error-identity claim.",
+    "call": "{match $type($value[\"endpoint\"].as_str().unwrap(),$value.get(\"payload\")){Ok(rows)=>{let original=$value[\"payload\"].as_array().unwrap();assert_eq!(rows.len(),original.len());if !rows.is_empty(){assert!(std::ptr::eq(rows.as_ptr(),original.as_ptr()));}serde_json::json!({\"value\":rows})},Err(e)=>serde_json::json!({\"error\":{\"name\":e.name,\"message\":e.message}})}}",
+    "cases": [
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": []
+        },
+        "output": {
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": [
+            "first",
+            17,
+            {
+              "code": "tail"
+            }
+          ]
+        },
+        "output": {
+          "value": [
+            "first",
+            17,
+            {
+              "code": "tail"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/other",
+          "payload": [
+            null,
+            false
+          ]
+        },
+        "output": {
+          "value": [
+            null,
+            false
+          ]
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path"
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received undefined"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": null
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received null"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": false
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received boolean"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": 17
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received number"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": "x"
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received string"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {}
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received object"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "code": 0,
+            "msg": "bad"
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received object(code,msg) (code=0 bad)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "msg": [],
+            "message": "later"
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received object(msg,message)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "code": null
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received object(code) (code=null)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "msg": {
+              "toString": null
+            }
+          }
+        },
+        "output": {
+          "error": {
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_shape::require_binance_pm_array_response": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "require_binance_pm_array_response",
+      "signature": {
+        "inputs": [
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "slice": {
+                            "resolved_path": {
+                              "path": "serde_json::value::Value",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::response_shape::BinanceResponseError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "require_binance_pm_array_response admits arrays by returning their original borrowed rows, without cloning or projecting elements. Native fixtures inspect nonempty pointer identity, length, fields and signed-zero bits before serialization. Other JSON shapes produce the exact Binance PM endpoint/shape/message diagnostic; fallible source String coercion errors retain their name and message. The native tests and maintained live response_shape target pass eight tests with zero ignored, including 1,188 source comparisons. scripts/response-shape-contracts.mjs executes its actual production call. scripts/response-shape-controls.py compiled its wrong output, required this owner's own production result to fail with native output mismatches, then restored exact source and passed all three production outputs. Stock JSON/UTF-8 only; empty-slice data addresses do not prove source array identity, and no arbitrary getter/prototype or full Error-identity claim.",
+    "call": "{match $type($value[\"endpoint\"].as_str().unwrap(),$value.get(\"payload\")){Ok(rows)=>{let original=$value[\"payload\"].as_array().unwrap();assert_eq!(rows.len(),original.len());if !rows.is_empty(){assert!(std::ptr::eq(rows.as_ptr(),original.as_ptr()));}serde_json::json!({\"value\":rows})},Err(e)=>serde_json::json!({\"error\":{\"name\":e.name,\"message\":e.message}})}}",
+    "cases": [
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": []
+        },
+        "output": {
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": [
+            "first",
+            17,
+            {
+              "code": "tail"
+            }
+          ]
+        },
+        "output": {
+          "value": [
+            "first",
+            17,
+            {
+              "code": "tail"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/other",
+          "payload": [
+            null,
+            false
+          ]
+        },
+        "output": {
+          "value": [
+            null,
+            false
+          ]
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path"
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received undefined"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": null
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received null"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": false
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received boolean"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": 17
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received number"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": "x"
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received string"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {}
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received object"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "code": 0,
+            "msg": "bad"
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received object(code,msg) (code=0 bad)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "msg": [],
+            "message": "later"
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received object(msg,message)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "code": null
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received object(code) (code=null)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "msg": {
+              "toString": null
+            }
+          }
+        },
+        "output": {
+          "error": {
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_shape::malformed": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "malformed",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "shape",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_binance::response_shape::BinanceResponseError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs an Error diagnostic from the already typed venue, endpoint, shape and message strings; it formats those arguments without interpreting an input representation or validating a wire schema.",
+    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native response_shape::accepted_contract_tests::private_malformed_constructor_preserves_error_fields executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
+  },
+  "safe_cex_venue_binance::response_shape::BinanceResponseError": {
+    "shape": "observed",
+    "category": "decoder",
+    "evidence": "The specific From<JsCoercionError> implementation preserves the actual native error class and message; Display writes the message. There is no Deserialize or raw wire constructor. Observe two independent static typed coercion errors through the actual qualified conversion, not through a parent Array validator or serialized owner. The native From fixture passes both static cases and Display before serialization. scripts/response-shape-contracts.mjs executes its direct qualified production conversion. scripts/response-shape-controls.py compiled a changed class field, required this owner and both actual array-guard coercion results to fail with native output mismatches, then restored exact source and passed all three production outputs. No full source Error identity or arbitrary error properties claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::js_coercion::JsCoercionError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual native typed From conversion and inspect both result fields and Display."
+      }
+    ],
+    "call": "{let (name,message)=if $value[\"range\"]==true{(\"RangeError\",\"outside range\")}else{(\"TypeError\",\"wrong type\")};let e=<$type as From<safe_cex_types::js_coercion::JsCoercionError>>::from(safe_cex_types::js_coercion::JsCoercionError{name,message});assert_eq!(e.to_string(),e.message);serde_json::json!({\"name\":e.name,\"message\":e.message})}",
+    "cases": [
+      {
+        "input": {
+          "range": false
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "wrong type"
+        }
+      },
+      {
+        "input": {
+          "range": true
+        },
+        "output": {
+          "name": "RangeError",
+          "message": "outside range"
+        }
+      }
+    ]
+  }
+}

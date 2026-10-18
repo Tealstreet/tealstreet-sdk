@@ -406,7 +406,7 @@ fn order(root: &SyncedOrderRoot<Frame>, e: &Value) {
         }
     );
     for (v, key) in [
-        (o.price, "price"),
+        (o.price.to_number(), "price"),
         (o.amount, "amount"),
         (o.filled, "filled"),
         (o.remaining, "remaining"),
@@ -419,7 +419,7 @@ fn order(root: &SyncedOrderRoot<Frame>, e: &Value) {
         &e["extra"]["remainingNative"],
         "class native placement units",
     );
-    assert!(!o.reduce_only);
+    assert_eq!(o.reduce_only, false);
     assert!(o.info.is_none(), "raw info lives in retained native handle");
     frame(&native.info, &e["info"]);
 }
@@ -689,7 +689,12 @@ fn private_class_dispatch_owns_keyed_snapshots_and_resets_before_reentrant_store
             "class native appended info retains original array item"
         );
         assert_eq!(
-            committed.borrow()[1].borrow().fields.price.to_bits(),
+            committed.borrow()[1]
+                .borrow()
+                .fields
+                .price
+                .to_number()
+                .to_bits(),
             4_f64.to_bits(),
             "class native parseFloat preserves prefix before surrogate"
         );

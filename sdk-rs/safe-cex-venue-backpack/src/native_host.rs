@@ -7,12 +7,12 @@ use crate::{
 };
 use safe_cex_exchange::{
     http::{HttpClientOptions, install_transport_adapter, safe_cex_axios_create},
-    native::{NativeHttpHost, nanoid},
+    native::{NativeHttpEvents, NativeHttpHost, nanoid},
     runtime::{ExchangeError, ExchangeRuntime},
     websocket::WsRuntime,
 };
 use safe_cex_transport::{RestAdapter, RestAdapterVariant, RestRequest, TransportRegistry};
-use safe_cex_types::{ExchangeName, ExchangeOptions};
+use safe_cex_types::ExchangeName;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 pub struct NativeBackpackInputs {
@@ -22,20 +22,21 @@ pub struct NativeBackpackInputs {
     pub date_parse: DateParser,
 }
 
-fn account_options(options: &Options) -> ExchangeOptions {
-    serde_json::from_value(serde_json::json!({
-        "key": options.key,
-        "secret": options.secret,
-        "testnet": options.testnet,
-        "tealstreetTunnel": options.tunnel,
-    }))
-    .expect("account options from key/secret/testnet/tunnel")
-}
-
 /// Fresh inputs for one construction; `adapter` is the terminal HTTP adapter.
 pub fn native_inputs(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
+) -> NativeBackpackInputs {
+    native_inputs_signed(runtime, adapter, None, NativeHttpEvents::default())
+}
+
+/// Native inputs retaining one account's common HTTP signing capability.
+/// Private websocket authentication keeps the source's local-secret requirement.
+pub fn native_inputs_signed(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: Arc<dyn RestAdapter>,
+    remote: Option<safe_cex_exchange::js_runtime::base_exchange::HostedSigner>,
+    events: NativeHttpEvents,
 ) -> NativeBackpackInputs {
     let registry = Rc::new(TransportRegistry::default());
     let (build_runtime, build_registry) = (runtime.clone(), registry.clone());
@@ -60,13 +61,17 @@ pub fn native_inputs(
                 params_serializer: Some(params_serializer),
                 response_transform: None,
                 exchange: ExchangeName::Backpack,
-                options: account_options(&options.borrow()),
+                options: options.borrow().clone(),
                 request,
                 provider: Some(build_runtime.transport()),
-                signer: None,
-                account_name: None,
-                adapter,
-                host: Rc::new(NativeHttpHost),
+                signer: remote.as_ref().map(|(signer, _)| {
+                    safe_cex_exchange::js_runtime::client::transport_signer(signer.clone())
+                }),
+                account_name: remote.as_ref().and_then(|(_, name)| name.clone()),
+                adapter: adapter.clone(),
+                host: Rc::new(NativeHttpHost {
+                    events: events.clone(),
+                }),
                 runtime: exchange_runtime,
                 store: None,
                 stats: None,
@@ -86,7 +91,7 @@ pub fn native_inputs(
         install_transport_adapter(
             client,
             &registry,
-            &account_options(&options.borrow()),
+            &options.borrow(),
             Some(&transport),
             RestAdapterVariant::Default,
         );

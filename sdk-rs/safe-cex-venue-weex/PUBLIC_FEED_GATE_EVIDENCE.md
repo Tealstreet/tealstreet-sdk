@@ -87,3 +87,25 @@ The changed global inputs warranted these two merge measurements:
 The census compares the actual merged integration parent `a739087a0791b49fb0d6d34a5ac0d631f3ce6130`, rather than a stale merge-base. Integration remains 97 ported / 30 divergent / 29 pending; this branch is **104 / 31 / 21**, across the same 156 rows in six manifests. Enumeration stops at that venue census.
 
 Scoped cargo check, the native test and mutation controls were **not rerun at the merge SHA**. Their measured exits remain bound to `fd0b92f53a86e3d56dc7cc10bc3f60363115b735`; source/tests and their primitive implementation/dependency inputs are byte-unchanged. The subsequent commit edits only this evidence sheet.
+
+## Wave-1 gap recovery correction
+
+This supersedes the historical gap-warning divergence above. Gap snapshot
+rejections and routed-callback throws now use the source's silent catch callback;
+initial listenOrderBook snapshot failures keep their warning callback. The
+handleDepth manifest row is now ported. Observer ownership remains unchanged.
+
+Test-only commit1ed3bccc40 compiles against master and fails through real native
+HTTP and the public socket: after a sequence gap and HTTP400, the log emitter
+receives an unexpected snapshot warning. The fixed regression observes no log,
+no failed replacement delivery, then a valid contiguous update to the retained
+book. All38 binding tests and the71-fixture actual-source public-feed corpus pass.
+The corpus no longer substitutes native warning/read values into source results
+or filters warning trace events. Its existing initial-snapshot warning cases
+continue to compare directly with source.
+
+The updated gap-silence mutation reinstates the old reporting callback, compiles
+and fails public_feed::depth_native depth_gap_reject with101; exact restoration
+passes the source corpus with0. Other historical mutation controls were not
+rerun. Measured fixed worktree public_feed.rs SHA256 before implementation commit:
+`28fcb99fd35864bd21ab2c5bb42832f0b5fa32c817513c5c2b161e9d97d1f565`.

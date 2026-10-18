@@ -93,10 +93,18 @@ pub struct PreparedWebSocket {
 pub trait WsProtocol {
     fn dispose(&self) {}
 
+    fn reconnect(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        socket.reconnect_base()
+    }
+
     fn recovers_after_offline(&self) -> bool {
         true
     }
 
+    /// Source receive timers dispatch the instance's checkLastReceived override.
+    fn check_last_received(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        socket.check_last_received()
+    }
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         Err(ExchangeError::new("Not implemented"))
     }
@@ -584,6 +592,22 @@ struct SocketState {
     next_task: u64,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SocketTimeout {
+    Ping,
+    PongMiss,
+    Receive,
+}
+impl From<SocketTimeout> for Timer {
+    fn from(timer: SocketTimeout) -> Self {
+        match timer {
+            SocketTimeout::Ping => Self::Ping,
+            SocketTimeout::PongMiss => Self::PongMiss,
+            SocketTimeout::Receive => Self::Receive,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Timer {
     Ping,
     PongMiss,
@@ -668,6 +692,7 @@ pub struct BaseWebSocket {
     pub treat_any_message_as_pong: Cell<bool>,
     pub direct_fallback: RefCell<WsDirectFallback>,
     connect_disabled: Cell<bool>,
+    grouped_listener_dispatch: Cell<bool>,
     before_close: RefCell<Option<Rc<dyn Fn()>>>,
 }
 impl BaseWebSocket {
@@ -693,6 +718,7 @@ impl BaseWebSocket {
             treat_any_message_as_pong: Cell::new(false),
             direct_fallback: RefCell::new(WsDirectFallback::new(2)),
             connect_disabled: Cell::new(false),
+            grouped_listener_dispatch: Cell::new(false),
             before_close: RefCell::new(None),
         })
     }
@@ -710,6 +736,9 @@ impl BaseWebSocket {
     }
     pub fn is_disposed(&self) -> bool {
         self.parent.is_disposed()
+    }
+    pub(crate) fn grouped_listener_dispatch(&self) -> bool {
+        self.grouped_listener_dispatch.get()
     }
     pub fn is_recovery_complete(&self) -> bool {
         self.protocol.recovery_complete()
@@ -746,6 +775,20 @@ impl BaseWebSocket {
     /// Writes the ping time a venue recorded itself (`this.pingAt = performance.now()`).
     pub fn set_ping_at(&self, at: f64) {
         self.state.borrow_mut().ping_at = at;
+    }
+    /// Replaces the heartbeat deadline shared with pong and close handling.
+    pub fn schedule_ping(self: &Rc<Self>, delay_ms: u64) {
+        self.schedule(Timer::Ping, delay_ms as f64);
+    }
+    /// Identity of the currently owned timeout, shared with source field handles.
+    pub(crate) fn timeout_id(&self, timer: SocketTimeout) -> Option<u64> {
+        self.state.borrow().timer_ids.get(&timer.into()).copied()
+    }
+    /// A stale source handle cannot cancel a replacement in the same slot.
+    pub(crate) fn cancel_timeout(&self, timer: SocketTimeout, id: u64) {
+        if self.timeout_id(timer) == Some(id) {
+            self.cancel(timer.into());
+        }
     }
     pub fn handle_pong_event(self: &Rc<Self>, next_ping_time: u64) -> Result<(), ExchangeError> {
         self.record_message_handler_stats("pong")?;
@@ -1268,6 +1311,7 @@ impl BaseWebSocket {
             relay,
             reconnecting,
         } = connection;
+        self.grouped_listener_dispatch.set(reconnecting);
         // The core has already activated a dormant wrapper; do not nest another one.
         if reconnecting && descriptor.options.start_closed == Some(true) {
             descriptor.options.start_closed = Some(false);
@@ -1312,7 +1356,7 @@ impl BaseWebSocket {
                     }
                     match event {
                         Ok(WsEvent::Open) => {
-                            owner.dispatch_open(generation);
+                            owner.dispatch_open(generation).await;
                         }
                         Ok(WsEvent::Message(frame)) => {
                             owner.direct_fallback.borrow_mut().on_message();
@@ -1489,7 +1533,7 @@ impl BaseWebSocket {
                             Some(Ok(RelayEvent::Open)) => {
                                 opened_at = Some(socket.now());
                                 socket.state.borrow_mut().relay_open = true;
-                                socket.dispatch_open(generation);
+                                socket.dispatch_open(generation).await;
                             }
                             Some(Ok(RelayEvent::Message(frame))) => {
                                 socket.direct_fallback.borrow_mut().on_message();
@@ -1670,6 +1714,14 @@ impl BaseWebSocket {
                 < self
                     .get_watchdog_stale_threshold_ms()
                     .unwrap_or(WS_RECONNECT_THRESHOLD_MS)
+    }
+    /// Raw source `lastReceived` field, including zero and non-finite values.
+    pub fn last_received(&self) -> f64 {
+        self.state.borrow().last_received
+    }
+    /// Assign only source `lastReceived`; callers own health synchronization.
+    pub fn set_last_received(&self, value: f64) {
+        self.state.borrow_mut().last_received = value;
     }
     pub fn last_message_timestamp(&self) -> Option<f64> {
         let received = self.state.borrow().last_received;
@@ -2092,6 +2144,9 @@ impl BaseWebSocket {
         }
     }
     pub fn reconnect(self: &Rc<Self>) -> Result<(), ExchangeError> {
+        self.protocol.reconnect(self)
+    }
+    pub(crate) fn reconnect_base(self: &Rc<Self>) -> Result<(), ExchangeError> {
         self.parent.log(
             "Explicit reconnect call from ping pong miss or online status change",
             LogSeverity::Info,
@@ -2154,6 +2209,20 @@ impl BaseWebSocket {
             self.on_close(None, "")?;
         }
         Ok(())
+    }
+    /// Source `if (this.ws) this.ws.close()`: close the current transport only.
+    /// Keep superclass timers, listeners, generation and retained handles intact.
+    pub fn close_current_websocket(&self) {
+        let (native, relay) = {
+            let state = self.state.borrow();
+            (state.native.clone(), state.relay.clone())
+        };
+        if let Some(socket) = native {
+            socket.close();
+        }
+        if let Some(socket) = relay {
+            socket.close(1000, "");
+        }
     }
     pub fn is_force_closed(&self) -> bool {
         self.state.borrow().force_closed
@@ -2233,7 +2302,7 @@ impl BaseWebSocket {
             (s.last_received, s.ping_sent)
         };
         let diff = now - received;
-        let received_at = iso_timestamp(received);
+        let received_at = iso_timestamp(received)?;
         let stale = self
             .get_watchdog_stale_threshold_ms()
             .unwrap_or(WS_RECONNECT_THRESHOLD_MS);
@@ -2376,10 +2445,10 @@ impl BaseWebSocket {
         }
         operation
     }
-    fn dispatch_open(self: &Rc<Self>, generation: u64) {
+    async fn dispatch_open(self: &Rc<Self>, generation: u64) {
         self.track_connected();
         let weak = Rc::downgrade(self);
-        self.spawn_owned(Box::pin(async move {
+        let mut opening = Box::pin(async move {
             let Some(socket) = weak.upgrade() else {
                 return;
             };
@@ -2413,7 +2482,13 @@ impl BaseWebSocket {
             {
                 socket.report_callback_result(socket.handle_web_socket_error(&error.to_string()));
             }
-        }));
+        });
+        let completed =
+            std::future::poll_fn(|cx| std::task::Poll::Ready(opening.as_mut().poll(cx).is_ready()))
+                .await;
+        if !completed {
+            self.spawn_owned(opening);
+        }
     }
     fn cancel(&self, timer: Timer) {
         let task = {
@@ -2473,7 +2548,7 @@ impl BaseWebSocket {
                             }
                             Timer::Receive => {
                                 if socket.state.borrow().last_received != 0.0 {
-                                    socket.check_last_received()?;
+                                    socket.protocol.check_last_received(&socket)?;
                                     socket.parent.sync_socket_health_to_store()?;
                                     socket.schedule(Timer::Receive, 1000.0);
                                 }
@@ -2515,33 +2590,12 @@ pub struct WsHealth {
     pub reconnect_count: usize,
 }
 
-fn iso_timestamp(milliseconds: f64) -> String {
-    let milliseconds = milliseconds.trunc() as i64;
-    let days = milliseconds.div_euclid(86_400_000);
-    let time = milliseconds.rem_euclid(86_400_000);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let mut year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_offset = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_offset + 2) / 5 + 1;
-    let month = month_offset + if month_offset < 10 { 3 } else { -9 };
-    year += i64::from(month <= 2);
-    let year = if (0..=9999).contains(&year) {
-        format!("{year:04}")
-    } else {
-        format!("{year:+07}")
-    };
-    format!(
-        "{year}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        time / 3_600_000,
-        time / 60_000 % 60,
-        time / 1000 % 60,
-        time % 1000
-    )
+fn iso_timestamp(milliseconds: f64) -> Result<String, ExchangeError> {
+    safe_cex_num::js_date_to_iso_string(milliseconds).map_err(|error| {
+        let mut value = ExchangeError::new(error.message);
+        value.name = error.name.into();
+        value
+    })
 }
 fn stringify(data: &Value) -> String {
     match data {
@@ -2890,7 +2944,7 @@ mod tests {
             self.jobs.borrow_mut().push((future, cancelled.clone()));
             Box::new(Task(cancelled, self.task_drop.clone()))
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[crate::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             "id".into()
         }
@@ -2900,7 +2954,7 @@ mod tests {
         fn random(&self) -> f64 {
             0.0
         }
-        fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+        fn report_raw_exception(&self, _: &crate::js_runtime::value::Js, _: &serde_json::Value) {
             panic!("unexpected raw exception report in this test runtime");
         }
         fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -3733,7 +3787,7 @@ mod tests {
         let weak = Rc::downgrade(&socket);
         protocol.pending_open.set(true);
         let generation = socket.state.borrow().generation;
-        socket.dispatch_open(generation);
+        run(socket.dispatch_open(generation));
         runtime.pump();
         assert_eq!(socket.owned_tasks.len(), 1);
         socket.dispose();
@@ -3790,6 +3844,129 @@ mod tests {
             Poll::Ready(result) => result,
             Poll::Pending => panic!("future unexpectedly pending"),
         }
+    }
+
+    #[test]
+    fn raw_last_received_preserves_native_bits() {
+        let (socket, parent, runtime, _) = fixture();
+        assert_eq!(socket.last_received().to_bits(), 0);
+        // Fixed IEEE-754 witnesses: both zeros, NaN payloads, infinities,
+        // a negative finite value, a subnormal and a fractional timestamp.
+        let cases = [
+            0x8000_0000_0000_0000,
+            0x7ff8_0000_0000_0042,
+            0xfff8_0000_0000_1234,
+            0x7ff0_0000_0000_0000,
+            0xfff0_0000_0000_0000,
+            0xbff0_0000_0000_0000,
+            0x0000_0000_0000_0001,
+            0x412e_8480_8000_0000,
+            0x0000_0000_0000_0000,
+        ];
+        for bits in cases {
+            socket.set_last_received(f64::from_bits(bits));
+            assert_eq!(
+                socket.last_received().to_bits(),
+                bits,
+                "raw lastReceived bits"
+            );
+        }
+        assert_eq!(
+            parent.sync.get(),
+            0,
+            "assignment must not synchronize health"
+        );
+        assert!(
+            parent.events.borrow().is_empty(),
+            "assignment must not emit"
+        );
+        assert!(
+            runtime.jobs.borrow().is_empty(),
+            "assignment must not schedule"
+        );
+    }
+
+    #[test]
+    fn raw_last_received_drives_health_timestamp_and_reset() {
+        let (socket, _, runtime, _) = fixture();
+        runtime.socket.ready.set(1);
+        run(socket.create_websocket("wss://fixture".into(), vec![], None)).unwrap();
+        runtime.now.set(1_000_000.5);
+        // Expected normalized timestamps are independent of the raw getter.
+        let cases = [
+            (1_000_000.25_f64, Some(1_000_000.25_f64), true),
+            (0.0, None, false),
+            (-0.0, None, false),
+            (-1.0, None, false),
+            (f64::NAN, None, false),
+            (f64::NEG_INFINITY, None, false),
+            (f64::INFINITY, Some(f64::INFINITY), true),
+            (999_999.75, Some(999_999.75), true),
+            (0.0, None, false),
+        ];
+        for (raw, expected, healthy) in cases {
+            socket.set_last_received(raw);
+            let expected_bits = expected.map(f64::to_bits);
+            assert_eq!(
+                socket.last_message_timestamp().map(f64::to_bits),
+                expected_bits,
+                "lastMessageTimestamp must observe source lastReceived"
+            );
+            assert_eq!(
+                socket
+                    .diagnostics()
+                    .last_message_timestamp
+                    .map(f64::to_bits),
+                expected_bits,
+                "health timestamp must observe source lastReceived"
+            );
+            assert_eq!(socket.is_healthy(), healthy, "health must observe reset");
+        }
+        socket.dispose();
+    }
+
+    #[test]
+    fn close_current_websocket_retains_native_superclass_state() {
+        let (socket, _, runtime, _) = fixture();
+        socket.close_current_websocket();
+        run(socket.create_websocket("wss://fixture".into(), vec![], None)).unwrap();
+        let generation = socket.state.borrow().generation;
+        let owned = socket.owned_tasks.len();
+        assert!(owned > 0);
+        socket.state.borrow_mut().timer_ids.insert(Timer::Ping, 42);
+        socket.close_current_websocket();
+        assert_eq!(runtime.socket.closed.get(), 1);
+        assert_eq!(socket.state.borrow().generation, generation);
+        assert_eq!(socket.state.borrow().timer_ids.get(&Timer::Ping), Some(&42));
+        assert_eq!(socket.owned_tasks.len(), owned);
+        assert!(socket.has_websocket());
+        assert!(!socket.is_force_closed());
+        assert!(Rc::ptr_eq(
+            socket.state.borrow().native.as_ref().unwrap(),
+            &(runtime.socket.clone() as Rc<dyn WsSocket>)
+        ));
+    }
+
+    #[test]
+    fn close_current_websocket_retains_relay_superclass_state() {
+        let (socket, runtime, host) = managed_relay_fixture();
+        runtime.pump();
+        let relay = socket.state.borrow().relay.clone().unwrap();
+        let generation = socket.state.borrow().generation;
+        let owned = socket.owned_tasks.len();
+        let receiver = socket.state.borrow().relay_task;
+        let io = host.sockets.borrow().last().unwrap().clone();
+        let closed = io.closed.get();
+        socket.close_current_websocket();
+        assert!(io.closed.get() > closed);
+        assert_eq!(socket.state.borrow().generation, generation);
+        assert_eq!(socket.state.borrow().relay_task, receiver);
+        assert_eq!(socket.owned_tasks.len(), owned);
+        assert!(!socket.is_force_closed());
+        assert!(Rc::ptr_eq(
+            socket.state.borrow().relay.as_ref().unwrap(),
+            &relay
+        ));
     }
 
     #[test]
@@ -4185,7 +4362,7 @@ mod tests {
             let (socket, parent, runtime, _) = fixture();
             let mut expected = ExchangeError::new("resync log listener failed");
             expected.name = "TypeError".into();
-            expected.code = Some(json!("E_LISTENER"));
+            expected.code = Some(crate::js_runtime::value::Js::str("E_LISTENER"));
             *parent.log_error.borrow_mut() = Some(expected.clone());
             parent.snapshot_failure.set(true);
             parent.snapshot_gate.set(false);
@@ -5109,9 +5286,12 @@ mod tests {
     }
     #[test]
     fn watchdog_log_timestamp_matches_js_iso_dates() {
-        assert_eq!(iso_timestamp(0.0), "1970-01-01T00:00:00.000Z");
-        assert_eq!(iso_timestamp(-1.0), "1969-12-31T23:59:59.999Z");
-        assert_eq!(iso_timestamp(951782400123.0), "2000-02-29T00:00:00.123Z");
+        assert_eq!(iso_timestamp(0.0).unwrap(), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso_timestamp(-1.0).unwrap(), "1969-12-31T23:59:59.999Z");
+        assert_eq!(
+            iso_timestamp(951782400123.0).unwrap(),
+            "2000-02-29T00:00:00.123Z"
+        );
     }
     #[test]
     fn review_managed_reconnect_can_synchronously_dispose() {

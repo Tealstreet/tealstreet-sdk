@@ -740,3 +740,15 @@ pub async fn format_create_trailing_stop_loss_order<H: OrderHost>(
     ]);
     Ok(h.array(vec![payload]))
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn utf16_encoder_preserves_native_units() {
+        assert_eq!(u(""), Vec::<u16>::new());
+        assert_eq!(u("A🚀\0"), vec![65, 55357, 56960, 0]);
+        assert_eq!(u("é雪"), vec![233, 38634]);
+    }
+}

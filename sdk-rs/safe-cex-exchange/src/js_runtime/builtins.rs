@@ -15,13 +15,18 @@ fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
 }
 
-fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+fn require_callback(callback: &Js) -> Result<(), Thrown> {
     if !callback.is_callable() {
         return Err(Thrown::type_error(&format!(
             "{} is not a function",
             callback.to_display()
         )));
     }
+    Ok(())
+}
+
+fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+    require_callback(callback)?;
     callback.call(Js::Undefined, args)
 }
 
@@ -58,20 +63,52 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
         Js::Number(n) => {
             let n = *n;
             match name.as_str() {
-                "toString" => Some(method("toString", move |_| {
-                    Ok(Js::str(&safe_cex_num::js_number_string(n)))
+                "toString" => Some(method("toString", move |args| {
+                    let requested = arg(&args, 0);
+                    let radix = if requested.is_undefined() {
+                        10.0
+                    } else {
+                        requested.to_number()?.trunc()
+                    };
+                    if !(2.0..=36.0).contains(&radix) {
+                        return Err(Thrown::error(
+                            "RangeError",
+                            "toString() radix argument must be between 2 and 36",
+                        ));
+                    }
+                    Ok(Js::str(&super::number_radix::format(n, radix as u32)))
                 })),
                 "toFixed" => Some(method("toFixed", move |a| {
-                    let digits = arg(&a, 0).to_number()?.max(0.0) as usize;
-                    Ok(Js::str(&format!("{n:.digits$}")))
+                    let digits = arg(&a, 0).to_number()?;
+                    safe_cex_num::js_to_fixed(n, digits)
+                        .map(|text| Js::str(&text))
+                        .map_err(|message| Thrown::error("RangeError", message))
                 })),
                 _ => None,
             }
         }
-        Js::BigInt(n) => {
-            let n = n.clone();
-            (name == "toString").then(|| method("toString", move |_| Ok(Js::str(&n.to_string()))))
-        }
+        Js::BigInt(_) => (name == "toString").then(|| {
+            Js::function("toString", |this, args| {
+                let Js::BigInt(n) = this else {
+                    return Err(Thrown::type_error(
+                        "BigInt.prototype.toString requires that 'this' be a BigInt",
+                    ));
+                };
+                let requested = arg(&args, 0);
+                let radix = if requested.is_undefined() {
+                    10.0
+                } else {
+                    requested.to_number()?.trunc()
+                };
+                if !(2.0..=36.0).contains(&radix) {
+                    return Err(Thrown::error(
+                        "RangeError",
+                        "toString() radix argument must be between 2 and 36",
+                    ));
+                }
+                Ok(Js::str(&n.to_str_radix(radix as u32)))
+            })
+        }),
         Js::Bool(b) => {
             let b = *b;
             (name == "toString").then(|| {
@@ -119,29 +156,88 @@ fn string_member(s: Str, name: &str) -> Option<Js> {
     }))
 }
 
+fn case_utf16(source: &[u16], uppercase: bool) -> Js {
+    let mut result = Vec::with_capacity(source.len());
+    let mut text = String::new();
+    let flush = |text: &mut String, result: &mut Vec<u16>| {
+        let mapped = if uppercase {
+            text.to_uppercase()
+        } else {
+            text.to_lowercase()
+        };
+        result.extend(mapped.encode_utf16());
+        text.clear();
+    };
+    // Keep whole valid runs for contextual mappings such as Greek sigma.
+    for character in char::decode_utf16(source.iter().copied()) {
+        match character {
+            Ok(character) => text.push(character),
+            Err(error) => {
+                flush(&mut text, &mut result);
+                result.push(error.unpaired_surrogate());
+            }
+        }
+    }
+    flush(&mut text, &mut result);
+    Js::utf16(&result)
+}
+
 fn plain_string_member(s: Str, name: &str) -> Option<Js> {
-    let st = String::from_utf16_lossy(&s);
     Some(match name {
-        "toUpperCase" => method(name, move |_| Ok(Js::str(&st.to_uppercase()))),
-        "toLowerCase" => method(name, move |_| Ok(Js::str(&st.to_lowercase()))),
-        "trim" => method(name, move |_| Ok(Js::str(safe_cex_num::js_trim(&st)))),
+        "toUpperCase" => method(name, move |_| Ok(case_utf16(&s, true))),
+        "toLowerCase" => method(name, move |_| Ok(case_utf16(&s, false))),
+        "trim" => method(name, move |_| {
+            let start = s
+                .iter()
+                .position(|unit| !super::regexp::is_space(*unit))
+                .unwrap_or(s.len());
+            let end = s
+                .iter()
+                .rposition(|unit| !super::regexp::is_space(*unit))
+                .map_or(start, |index| index + 1);
+            Ok(Js::utf16(&s[start..end]))
+        }),
         "toString" | "valueOf" => method(name, move |_| Ok(Js::String(s.clone()))),
-        "includes" => method(name, move |a| {
-            Ok(Js::Bool(st.contains(&text(&arg(&a, 0))?)))
+        "localeCompare" => method(name, move |a| {
+            let st = String::from_utf16_lossy(&s);
+            let right = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
+            let collator = safe_cex_num::JsRootCollator::try_new()
+                .map_err(|error| Thrown::error(error.name, error.message))?;
+            Ok(Js::Number(collator.compare(&st, &right) as i8 as f64))
         }),
-        "startsWith" => method(name, move |a| {
-            Ok(Js::Bool(st.starts_with(&text(&arg(&a, 0))?)))
-        }),
-        "endsWith" => method(name, move |a| {
-            Ok(Js::Bool(st.ends_with(&text(&arg(&a, 0))?)))
-        }),
-        "indexOf" => method(name, move |a| {
-            let needle = text(&arg(&a, 0))?;
-            Ok(Js::Number(
-                st.find(&needle)
-                    .map_or(-1.0, |i| st[..i].encode_utf16().count() as f64),
-            ))
-        }),
+        "indexOf" | "lastIndexOf" | "includes" | "startsWith" | "endsWith" => {
+            let operation = name.to_owned();
+            method(name, move |a| {
+                let needle = arg(&a, 0).to_js_string()?;
+                let position = arg(&a, 1);
+                let number = position.to_number()?;
+                let position = if (operation == "endsWith" && position.is_undefined())
+                    || (operation == "lastIndexOf" && number.is_nan())
+                {
+                    s.len()
+                } else {
+                    string_position(number, s.len())
+                };
+                Ok(match operation.as_str() {
+                    "includes" => Js::Bool(find_utf16(&s[position..], &needle).is_some()),
+                    "startsWith" => Js::Bool(s[position..].starts_with(&needle)),
+                    "endsWith" => Js::Bool(s[..position].ends_with(&needle)),
+                    "lastIndexOf" => {
+                        let found = if needle.len() > s.len() {
+                            None
+                        } else {
+                            let last = position.min(s.len() - needle.len());
+                            (0..=last).rev().find(|at| s[*at..].starts_with(&needle))
+                        };
+                        Js::Number(found.map_or(-1.0, |at| at as f64))
+                    }
+                    _ => Js::Number(
+                        find_utf16(&s[position..], &needle)
+                            .map_or(-1.0, |at| (position + at) as f64),
+                    ),
+                })
+            })
+        }
         "replace" => method(name, move |a| {
             let needle: Vec<u16> = arg(&a, 0).to_js_string()?.to_vec();
             let replacement = arg(&a, 1);
@@ -165,16 +261,33 @@ fn plain_string_member(s: Str, name: &str) -> Option<Js> {
             Ok(Js::utf16(&out))
         }),
         "split" => method(name, move |a| {
-            let sep = arg(&a, 0);
-            if sep.is_undefined() {
+            let separator = arg(&a, 0);
+            let limit = super::regexp::split_limit(&arg(&a, 1))?;
+            // Source coercion order is limit, then separator, even at limit 0.
+            let sep = separator.to_js_string()?;
+            if limit == 0 {
+                return Ok(Js::array(vec![]));
+            }
+            if separator.is_undefined() {
                 return Ok(Js::array(vec![Js::String(s.clone())]));
             }
-            let sep = text(&sep)?;
-            Ok(Js::array(if sep.is_empty() {
-                s.iter().map(|c| Js::utf16(&[*c])).collect()
-            } else {
-                st.split(&sep).map(Js::str).collect()
-            }))
+            if sep.is_empty() {
+                return Ok(Js::array(
+                    s.iter().take(limit).map(|c| Js::utf16(&[*c])).collect(),
+                ));
+            }
+            let mut out = vec![];
+            let mut start = 0;
+            while let Some(offset) = find_utf16(&s[start..], &sep) {
+                let end = start + offset;
+                out.push(Js::utf16(&s[start..end]));
+                if out.len() == limit {
+                    return Ok(Js::array(out));
+                }
+                start = end + sep.len();
+            }
+            out.push(Js::utf16(&s[start..]));
+            Ok(Js::array(out))
         }),
         "slice" | "substring" => {
             let sub = name == "substring";
@@ -224,6 +337,14 @@ fn find_utf16(haystack: &[u16], needle: &[u16]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
+fn string_position(value: f64, length: usize) -> usize {
+    if value.is_nan() {
+        0
+    } else {
+        value.clamp(0.0, length as f64) as usize
+    }
+}
+
 fn items(this: &Js) -> Vec<Option<Js>> {
     this.array_items().unwrap_or_default()
 }
@@ -235,6 +356,19 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
                 this.push(v)?;
             }
             Ok(Js::Number(items(&this).len() as f64))
+        }),
+        "pop" => method(name, move |_| {
+            let Js::Array(cells) = &this else {
+                return Ok(Js::Undefined);
+            };
+            Ok(cells.borrow_mut().pop().flatten().unwrap_or(Js::Undefined))
+        }),
+        // Holes stay holes at their mirrored index, as the spec's HasProperty swaps do.
+        "reverse" => method(name, move |_| {
+            if let Js::Array(cells) = &this {
+                cells.borrow_mut().reverse();
+            }
+            Ok(this.clone())
         }),
         "includes" => method(name, move |a| {
             let needle = arg(&a, 0);
@@ -275,6 +409,7 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
                     return Ok(d as usize);
                 }
                 let n = v.to_number()?.trunc();
+                let n = if n.is_nan() { 0.0 } else { n };
                 Ok(if n < 0.0 {
                     (len + n).max(0.0)
                 } else {
@@ -414,39 +549,24 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
             };
             let mut values: Vec<Js> = cells.borrow().iter().flatten().cloned().collect();
             let holes = cells.borrow().len() - values.len();
-            let mut failure = None;
-            values.sort_by(|x, y| {
-                if failure.is_some() {
-                    return std::cmp::Ordering::Equal;
-                }
-                let order = if x.is_undefined() || y.is_undefined() {
-                    Ok(f64::from(u8::from(x.is_undefined()))
-                        - f64::from(u8::from(y.is_undefined())))
-                } else if f.is_callable() {
-                    f.call(Js::Undefined, vec![x.clone(), y.clone()])
-                        .and_then(|v| v.to_number())
-                } else {
-                    (|| {
-                        Ok(match text(x)?.encode_utf16().cmp(text(y)?.encode_utf16()) {
-                            std::cmp::Ordering::Less => -1.0,
-                            std::cmp::Ordering::Equal => 0.0,
-                            std::cmp::Ordering::Greater => 1.0,
-                        })
-                    })()
-                };
-                match order {
-                    Ok(n) if n < 0.0 => std::cmp::Ordering::Less,
-                    Ok(n) if n > 0.0 => std::cmp::Ordering::Greater,
-                    Ok(_) => std::cmp::Ordering::Equal,
-                    Err(e) => {
-                        failure = Some(e);
-                        std::cmp::Ordering::Equal
-                    }
-                }
-            });
-            if let Some(e) = failure {
-                return Err(e);
+            if !f.is_undefined() && !f.is_callable() {
+                return Err(Thrown::type_error(
+                    "The comparison function must be either a function or undefined",
+                ));
             }
+            super::sorting::stable_sort(&mut values, |x, y| {
+                if x.is_undefined() || y.is_undefined() {
+                    return Ok(x.is_undefined().cmp(&y.is_undefined()));
+                }
+                if f.is_callable() {
+                    let n = f
+                        .call(Js::Undefined, vec![x.clone(), y.clone()])?
+                        .to_number()?;
+                    Ok(n.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal))
+                } else {
+                    Ok(x.to_js_string()?.cmp(&y.to_js_string()?))
+                }
+            })?;
             let mut sorted: Vec<Option<Js>> = values.into_iter().map(Some).collect();
             sorted.extend(std::iter::repeat_n(None, holes));
             *cells.borrow_mut() = sorted;
@@ -466,11 +586,52 @@ fn flatten_into(source: &[Option<Js>], depth: f64, out: &mut Vec<Js>) {
     }
 }
 
-fn map_entries(this: &Js) -> Rc<RefCell<Vec<(Js, Js)>>> {
+fn map_entries(this: &Js) -> Rc<RefCell<super::collections::Collection<(Js, Js)>>> {
     match this {
         Js::Map(m) => m.clone(),
         _ => Rc::default(),
     }
+}
+
+fn cached_iterator_member(this: &Js, key: &'static str, member: Js) -> Js {
+    let cached = match this {
+        Js::Map(entries) => entries
+            .borrow()
+            .iterator_methods
+            .borrow()
+            .get(key)
+            .and_then(std::rc::Weak::upgrade),
+        Js::Set(entries) => entries
+            .borrow()
+            .iterator_methods
+            .borrow()
+            .get(key)
+            .and_then(std::rc::Weak::upgrade),
+        _ => None,
+    };
+    if let Some(function) = cached {
+        return Js::Function(function);
+    }
+    if let Js::Function(function) = &member {
+        match this {
+            Js::Map(entries) => {
+                entries
+                    .borrow()
+                    .iterator_methods
+                    .borrow_mut()
+                    .insert(key, Rc::downgrade(function));
+            }
+            Js::Set(entries) => {
+                entries
+                    .borrow()
+                    .iterator_methods
+                    .borrow_mut()
+                    .insert(key, Rc::downgrade(function));
+            }
+            _ => {}
+        }
+    }
+    member
 }
 
 fn map_member(this: Js, name: &str) -> Option<Js> {
@@ -492,6 +653,11 @@ fn map_member(this: Js, name: &str) -> Option<Js> {
         }),
         "set" => method(name, move |a| {
             let k = arg(&a, 0);
+            let k = if k.as_f64() == Some(0.0) {
+                Js::Number(0.0)
+            } else {
+                k
+            };
             let v = arg(&a, 1);
             let mut entries = m.borrow_mut();
             match entries.iter_mut().find(|(x, _)| x.same_value_zero(&k)) {
@@ -512,29 +678,45 @@ fn map_member(this: Js, name: &str) -> Option<Js> {
             m.borrow_mut().clear();
             Ok(Js::Undefined)
         }),
-        "keys" => method(name, move |_| {
-            Ok(Js::array(
-                m.borrow().iter().map(|(k, _)| k.clone()).collect(),
-            ))
-        }),
-        "values" => method(name, move |_| {
-            Ok(Js::array(
-                m.borrow().iter().map(|(_, v)| v.clone()).collect(),
-            ))
-        }),
-        "entries" => method(name, move |_| {
-            Ok(Js::array(
-                m.borrow()
-                    .iter()
-                    .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-                    .collect(),
-            ))
-        }),
+        "keys" | "values" | "entries" => {
+            let kind = match name {
+                "keys" => super::collections::Kind::Key,
+                "values" => super::collections::Kind::Value,
+                _ => super::collections::Kind::Entry,
+            };
+            let key = match name {
+                "keys" => "keys",
+                "values" => "values",
+                _ => "entries",
+            };
+            cached_iterator_member(
+                &this,
+                key,
+                Js::function(name, move |receiver, _| {
+                    if !matches!(receiver, Js::Map(_)) {
+                        return Err(Thrown::type_error(
+                            "Map iterator method called on incompatible receiver",
+                        ));
+                    }
+                    Ok(super::collections::collection_iterator(receiver, kind))
+                }),
+            )
+        }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
-            let snapshot = m.borrow().clone();
-            for (k, v) in snapshot {
-                callback_call(&f, vec![v, k, this.clone()])?;
+            require_callback(&f)?;
+            let receiver = arg(&a, 1);
+            let mut position = 0;
+            loop {
+                let item = m
+                    .borrow()
+                    .following(position)
+                    .map(|(at, entry)| (at, entry.clone()));
+                let Some((at, (key, value))) = item else {
+                    break;
+                };
+                position = at + 1;
+                f.call(receiver.clone(), vec![value, key, this.clone()])?;
             }
             Ok(Js::Undefined)
         }),
@@ -552,6 +734,11 @@ fn set_member(this: Js, name: &str) -> Option<Js> {
         }),
         "add" => method(name, move |a| {
             let k = arg(&a, 0);
+            let k = if k.as_f64() == Some(0.0) {
+                Js::Number(0.0)
+            } else {
+                k
+            };
             if !s.borrow().iter().any(|x| x.same_value_zero(&k)) {
                 s.borrow_mut().push(k);
             }
@@ -568,11 +755,46 @@ fn set_member(this: Js, name: &str) -> Option<Js> {
             s.borrow_mut().clear();
             Ok(Js::Undefined)
         }),
-        "values" | "keys" => method(name, move |_| Ok(Js::array(s.borrow().clone()))),
+        "values" | "keys" | "entries" => {
+            let kind = if name == "entries" {
+                super::collections::Kind::Entry
+            } else {
+                super::collections::Kind::Value
+            };
+            let key = if name == "entries" {
+                "entries"
+            } else {
+                "values"
+            };
+            cached_iterator_member(
+                &this,
+                key,
+                Js::function(
+                    if name == "keys" { "values" } else { name },
+                    move |receiver, _| {
+                        if !matches!(receiver, Js::Set(_)) {
+                            return Err(Thrown::type_error(
+                                "Set iterator method called on incompatible receiver",
+                            ));
+                        }
+                        Ok(super::collections::collection_iterator(receiver, kind))
+                    },
+                ),
+            )
+        }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
-            for v in s.borrow().clone() {
-                callback_call(&f, vec![v.clone(), v, this.clone()])?;
+            require_callback(&f)?;
+            let receiver = arg(&a, 1);
+            let mut position = 0;
+            loop {
+                let item = s
+                    .borrow()
+                    .following(position)
+                    .map(|(at, value)| (at, value.clone()));
+                let Some((at, value)) = item else { break };
+                position = at + 1;
+                f.call(receiver.clone(), vec![value.clone(), value, this.clone()])?;
             }
             Ok(Js::Undefined)
         }),
@@ -589,13 +811,9 @@ fn promise_member(p: Promise, name: &str) -> Option<Js> {
             &rt,
             Box::pin(async move {
                 match p.wait().await {
-                    Ok(v) if on_ok.is_callable() => {
-                        await_js(on_ok.call(Js::Undefined, vec![v])?).await
-                    }
+                    Ok(v) if on_ok.is_callable() => on_ok.call(Js::Undefined, vec![v]),
                     Ok(v) => Ok(v),
-                    Err(e) if on_err.is_callable() => {
-                        await_js(on_err.call(Js::Undefined, vec![e.value])?).await
-                    }
+                    Err(e) if on_err.is_callable() => on_err.call(Js::Undefined, vec![e.value]),
                     Err(e) => Err(e),
                 }
             }),
@@ -640,3 +858,7 @@ fn chain_value(rt: &Rc<dyn ExchangeRuntime>, p: Js, outcome: Result<Js, Thrown>)
         }),
     ))
 }
+
+#[cfg(test)]
+#[path = "builtin_iterator_contract_tests.rs"]
+mod accepted_contract_tests;

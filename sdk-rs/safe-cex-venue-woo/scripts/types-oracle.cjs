@@ -1,4 +1,4 @@
-// Field-identity supplements are post-audit evidence; original fixture bytes stay intact.
+// Field-identity supplements are independent evidence for the retained DTO families.
 const identity = process.argv.includes('--field-identity');
 // Read the real declarations rather than a second hand-maintained response schema.
 const fs = require('node:fs');
@@ -26,6 +26,8 @@ function fixture(type) {
 }
 const cases = [];
 for (const [name, type] of declarations) {
+  // Erased declarations with no production Rust DTO: real order reads consume raw rows.
+  if (name === 'WOOX_ORDER' || name === 'FETCH_ORDER_RESPONSE') continue;
   const base = fixture(type);
   cases.push({name, label:'valid declaration', input:base, accepted:true});
   function visit(t, segments) {
@@ -57,4 +59,4 @@ const bytes=JSON.stringify(cases,null,2)+'\n';
 if(identity) process.stdout.write(JSON.stringify({capture:{label:"field-identity supplement",platform:process.platform,architecture:process.arch,node:process.version},fixture:cases}));
 else if(process.argv.includes('--check')) assert.equal(fs.readFileSync(target,'utf8'),bytes,'WOO type oracle drift');
 else fs.writeFileSync(target,bytes);
-if(!identity) console.log(`WOO live declaration oracle: ${declarations.size} types, ${cases.length} cases`);
+if(!identity) console.log(`WOO live declaration oracle: ${new Set(cases.map(c => c.name)).size} retained types, ${cases.length} cases`);

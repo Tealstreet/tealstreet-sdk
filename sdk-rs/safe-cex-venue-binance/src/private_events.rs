@@ -7,6 +7,22 @@ use crate::{
 };
 use safe_cex_types::{MarginType, OrderStatus, OrderType, PositionMode, PositionSide};
 use std::{cell::Cell, rc::Rc};
+/// The production private socket rejection classifier over native values.
+pub fn get_order_reject_reason(data: &EventValue) -> Result<EventValue, Failure> {
+    let code = fallback(data.read("r")?, string("")).text()?.to_uppercase();
+    Ok(
+        if ["POST_ONLY", "GTX", "MAKER"]
+            .iter()
+            .any(|s| code.contains(s))
+        {
+            EventValue::enum_value(PrivateEnum::Reject(
+                safe_cex_types::OrderRejectReason::PostOnly,
+            ))
+        } else {
+            EventValue::Undefined
+        },
+    )
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrivateOperation {
     Fill,
@@ -40,11 +56,11 @@ enum OrderVenue {
 }
 fn id(data: &EventValue, venue: OrderVenue) -> Result<EventValue, Failure> {
     if venue == OrderVenue::Futures {
-        data.get("i")?.optional_id("data.i")
+        data.read("i")?.optional_id("data.i")
     } else if venue == OrderVenue::Algo {
-        data.get("aid")?.optional_id("data.aid")
+        data.read("aid")?.optional_id("data.aid")
     } else {
-        data.get("c")
+        data.read("c")
     }
 }
 fn order_type(data: &EventValue, venue: OrderVenue) -> Result<EventValue, Failure> {
@@ -57,7 +73,10 @@ fn order_type(data: &EventValue, venue: OrderVenue) -> Result<EventValue, Failur
     };
     let value = table(entries, data.get(key)?, PrivateEnum::Type)?;
     Ok(if venue == OrderVenue::Spot {
-        fallback(value, EventValue::Enum(PrivateEnum::Type(OrderType::Limit)))
+        fallback(
+            value,
+            EventValue::enum_value(PrivateEnum::Type(OrderType::Limit)),
+        )
     } else {
         value
     })
@@ -71,7 +90,7 @@ fn side(data: &EventValue, venue: OrderVenue) -> Result<EventValue, Failure> {
         } else {
             crate::binance_types::ORDER_SIDE
         },
-        data.get("S")?,
+        data.read("S")?,
         PrivateEnum::Side,
     )
 }
@@ -82,7 +101,7 @@ fn trigger(data: &EventValue, venue: OrderVenue) -> Result<EventValue, Failure> 
         } else {
             crate::binance_types::ORDER_TRIGGER_TYPE
         },
-        data.get("wt")?,
+        data.read("wt")?,
         PrivateEnum::Trigger,
     )
 }
@@ -105,7 +124,7 @@ fn order_status(
     let call = b.capture(PrivateOperation::OrderStatus)?;
     call(vec![
         record([("id", id)]),
-        EventValue::Enum(PrivateEnum::Status(status)),
+        EventValue::enum_value(PrivateEnum::Status(status)),
     ])
 }
 fn fill(
@@ -117,7 +136,7 @@ fn fill(
     let payload = record([
         ("id", id(data, venue)?),
         ("side", side(data, venue)?),
-        ("symbol", data.get("s")?),
+        ("symbol", data.read("s")?),
         (
             "price",
             number(
@@ -125,7 +144,7 @@ fn fill(
                     .float()?,
             ),
         ),
-        ("amount", number(data.get("l")?.float()?)),
+        ("amount", number(data.read("l")?.float()?)),
     ]);
     call(vec![payload])
 }
@@ -139,8 +158,8 @@ fn regular_update(
     } else {
         Some(id(data, venue)?)
     };
-    let filled = data.get("z")?.float()?;
-    let amount = data.get("q")?.float()?;
+    let filled = data.read("z")?.float()?;
+    let amount = data.read("q")?.float()?;
     let call = b.capture(PrivateOperation::UpdateOrder)?;
     let order_id = if let Some(id) = early_id {
         id
@@ -175,9 +194,9 @@ fn add_order(
         ),
         (
             "status",
-            EventValue::Enum(PrivateEnum::Status(OrderStatus::Open)),
+            EventValue::enum_value(PrivateEnum::Status(OrderStatus::Open)),
         ),
-        ("symbol", data.get("s")?),
+        ("symbol", data.read("s")?),
         (
             "type",
             if let Some(t) = algo_type {
@@ -189,17 +208,17 @@ fn add_order(
         ("side", side(data, venue)?),
     ];
     let price = if venue == OrderVenue::Algo {
-        fallback(number(data.get("tp")?.float()?), number(0.0))
+        fallback(number(data.read("tp")?.float()?), number(0.0))
     } else {
-        let price = data.get("p")?.float()?;
+        let price = data.read("p")?.float()?;
         if price != 0.0 && !price.is_nan() {
             number(price)
         } else {
-            number(data.get("sp")?.float()?)
+            number(data.read("sp")?.float()?)
         }
     };
     fields.push(("price", price));
-    let amount = number(data.get("q")?.float()?);
+    let amount = number(data.read("q")?.float()?);
     fields.push((
         "amount",
         if venue == OrderVenue::Algo {
@@ -211,7 +230,7 @@ fn add_order(
     let filled = if venue == OrderVenue::Algo {
         number(0.0)
     } else {
-        number(data.get("z")?.float()?)
+        number(data.read("z")?.float()?)
     };
     fields.push((
         "filled",
@@ -223,9 +242,9 @@ fn add_order(
     ));
     fields.push(("lastUpdate", number(b.now()?)));
     let remaining = if venue == OrderVenue::Algo {
-        fallback(number(data.get("q")?.float()?), number(0.0))
+        fallback(number(data.read("q")?.float()?), number(0.0))
     } else {
-        let r = number(data.get("q")?.float()? - data.get("z")?.float()?);
+        let r = number(data.read("q")?.float()? - data.read("z")?.float()?);
         if venue == OrderVenue::Conditional {
             fallback(r, number(0.0))
         } else {
@@ -238,20 +257,20 @@ fn add_order(
         if venue == OrderVenue::Spot {
             EventValue::Bool(false)
         } else {
-            fallback(data.get("R")?, EventValue::Bool(false))
+            fallback(data.read("R")?, EventValue::Bool(false))
         },
     ));
     if venue == OrderVenue::Algo {
-        fields.push(("close", fallback(data.get("cp")?, EventValue::Bool(false))))
+        fields.push(("close", fallback(data.read("cp")?, EventValue::Bool(false))))
     }
     let info = if venue == OrderVenue::Futures {
-        let info = EventValue::object(data.spread());
-        info.define("orderId", id(data, venue)?);
+        let info = EventValue::record_object(data.spread());
+        info.write("orderId", id(data, venue)?);
         info
     } else if venue == OrderVenue::Algo {
-        let info = record([("algoId", data.get("aid")?)]);
+        let info = record([("algoId", data.read("aid")?)]);
         for (k, v) in data.spread() {
-            info.define(&k, v)
+            info.write(&k, v)
         }
         info
     } else {
@@ -264,7 +283,9 @@ fn add_order(
         } else {
             order_type(data, venue)?
         };
-        if current_type.same(&EventValue::Enum(PrivateEnum::Type(OrderType::TakeProfit))) {
+        if current_type.same(&EventValue::enum_value(PrivateEnum::Type(
+            OrderType::TakeProfit,
+        ))) {
             fields.push(("tpTriggerType", trigger(data, venue)?))
         }
         let current_type = if venue == OrderVenue::Algo {
@@ -272,7 +293,9 @@ fn add_order(
         } else {
             order_type(data, venue)?
         };
-        if current_type.same(&EventValue::Enum(PrivateEnum::Type(OrderType::StopLoss))) {
+        if current_type.same(&EventValue::enum_value(PrivateEnum::Type(
+            OrderType::StopLoss,
+        ))) {
             fields.push(("slTriggerType", trigger(data, venue)?))
         }
     }
@@ -310,7 +333,7 @@ fn regular_events(
             event.get(key)?
         };
         let is_fill = if venue == OrderVenue::Spot {
-            data.get("x")?.same(&string("TRADE"))
+            data.read("x")?.same(&string("TRADE"))
         } else {
             status(&data, venue, &["PARTIALLY_FILLED", "FILLED"])?
         };
@@ -343,22 +366,22 @@ fn regular_events(
                 let order_id = id(&data, venue)?;
                 call(vec![
                     record([("id", order_id.clone())]),
-                    EventValue::Enum(PrivateEnum::Status(OrderStatus::Canceled)),
+                    EventValue::enum_value(PrivateEnum::Status(OrderStatus::Canceled)),
                 ])?;
                 order_id
             };
             if venue == OrderVenue::Futures {
                 let reject = b.reject_reason(&data)?;
                 if reject.truthy() {
-                    let existing = find(&b.orders()?, |o| Ok(o.get("id")?.same(&order_id)))?;
+                    let existing = find(&b.orders()?, |o| Ok(o.read("id")?.same(&order_id)))?;
                     let call = b.capture(PrivateOperation::UpdateOrder)?;
                     let extra = if existing.nullish() {
                         EventValue::Undefined
                     } else {
-                        existing.get("extra")?
+                        existing.read("extra")?
                     };
-                    let extra = EventValue::object(extra.spread());
-                    extra.define("rejectReason", reject);
+                    let extra = EventValue::record_object(extra.spread());
+                    extra.write("rejectReason", reject);
                     call(vec![record([("id", order_id)]), record([("extra", extra)])])?;
                 }
             }
@@ -367,7 +390,7 @@ fn regular_events(
             let call = b.capture(PrivateOperation::OrderStatus)?;
             call(vec![
                 record([("id", id(&data, venue)?)]),
-                EventValue::Enum(PrivateEnum::Status(OrderStatus::Closed)),
+                EventValue::enum_value(PrivateEnum::Status(OrderStatus::Closed)),
             ])?
         }
         Ok(())
@@ -411,12 +434,12 @@ pub fn handle_futures_algo_order_events(
     b: &mut impl PrivateEventBindings,
 ) -> Result<(), Failure> {
     for_each(events, |event| {
-        let data = event.get("o")?;
+        let data = event.read("o")?;
         if !data.truthy() {
             return Ok(());
         }
         let order_id = id(&data, OrderVenue::Algo)?;
-        let algo_status = data.get("X")?;
+        let algo_status = data.read("X")?;
         let order_type = order_type(&data, OrderVenue::Algo)?;
         let matches = |values: &[&str]| values.iter().any(|v| algo_status.same(&string(*v)));
         if matches(&["TRIGGERED", "TRIGGERING"]) {
@@ -449,12 +472,12 @@ fn position_id(
     if mode == PositionMode::OneWay || !side.truthy() {
         return Ok(symbol);
     }
-    if let (EventValue::String(symbol), EventValue::Enum(PrivateEnum::PositionSide(side))) =
-        (&symbol, side)
+    if matches!(symbol, EventValue::String(_))
+        && let Ok(side) = crate::class_decode::decode::<PositionSide>(side.clone())
     {
         return Ok(string(safe_cex_types::model_utils::create_position_id(
-            symbol,
-            Some(*side),
+            &symbol.text()?,
+            Some(side),
             Some(mode),
         )));
     }
@@ -467,27 +490,27 @@ pub fn handle_futures_account_events(
     b: &mut impl PrivateEventBindings,
 ) -> Result<(), Failure> {
     for_each(events, |event| {
-        let a = event.get("a")?;
+        let a = event.read("a")?;
         let p = if a.nullish() {
             EventValue::Undefined
         } else {
-            a.get("P")?
+            a.read("P")?
         };
         let length = if p.nullish() {
             EventValue::Undefined
         } else {
-            p.get("length")?
+            p.read("length")?
         };
         if length.truthy() {
             b.capture(PrivateOperation::MarkPosition)?(vec![])?;
             state.set(true);
             b.capture(PrivateOperation::ThrottlePositions)?(vec![])?;
         }
-        let p = event.get("a")?.get("P")?;
+        let p = event.read("a")?.read("P")?;
         array_for_each(p, "event.a.P?.forEach", |p| {
-            let symbol = p.get("s")?;
-            let signed = p.get("pa")?.float()?;
-            let mode = if p.get("ps")?.same(&string("BOTH")) {
+            let symbol = p.read("s")?;
+            let signed = p.read("pa")?.float()?;
+            let mode = if p.read("ps")?.same(&string("BOTH")) {
                 PositionMode::OneWay
             } else {
                 PositionMode::Hedged
@@ -495,46 +518,46 @@ pub fn handle_futures_account_events(
             let side = fallback(
                 table(
                     crate::binance_types::POSITION_SIDE,
-                    p.get("ps")?,
+                    p.read("ps")?,
                     PrivateEnum::PositionSide,
                 )?,
-                EventValue::Enum(PrivateEnum::PositionSide(if signed >= 0.0 {
+                EventValue::enum_value(PrivateEnum::PositionSide(if signed >= 0.0 {
                     PositionSide::Long
                 } else {
                     PositionSide::Short
                 })),
             );
             let id = position_id(symbol.clone(), &side, mode)?;
-            let position = find(&b.positions()?, |c| Ok(c.get("id")?.same(&id)))?;
+            let position = find(&b.positions()?, |c| Ok(c.read("id")?.same(&id)))?;
             let side = if signed == 0.0 && position.truthy() {
-                position.get("side")?
+                position.read("side")?
             } else {
                 side
             };
             if !position.truthy() && signed == 0.0 {
                 return Ok(());
             }
-            let entry = p.get("ep")?.float()?;
+            let entry = p.read("ep")?.float()?;
             let contracts = signed.abs();
-            let upnl = p.get("up")?.float()?;
+            let upnl = p.read("up")?.float()?;
             let call = b.capture(PrivateOperation::AddPosition)?;
-            let out = EventValue::object(position.spread());
-            out.define("id", id);
-            out.define("symbol", symbol);
-            out.define("side", side);
-            out.define("entryPrice", number(entry));
-            out.define("contracts", number(contracts));
-            out.define("notional", number((signed * entry + upnl).abs()));
-            out.define("unrealizedPnl", number(upnl));
+            let out = EventValue::record_object(position.spread());
+            out.write("id", id);
+            out.write("symbol", symbol);
+            out.write("side", side);
+            out.write("entryPrice", number(entry));
+            out.write("contracts", number(contracts));
+            out.write("notional", number((signed * entry + upnl).abs()));
+            out.write("unrealizedPnl", number(upnl));
             for (key, default) in [
                 ("leverage", number(0.0)),
                 ("liquidationPrice", number(0.0)),
                 (
                     "marginType",
-                    EventValue::Enum(PrivateEnum::Margin(MarginType::Cross)),
+                    EventValue::enum_value(PrivateEnum::Margin(MarginType::Cross)),
                 ),
             ] {
-                out.define(
+                out.write(
                     key,
                     nullish(
                         if position.nullish() {
@@ -546,20 +569,20 @@ pub fn handle_futures_account_events(
                     ),
                 );
             }
-            out.define(
+            out.write(
                 "positionMode",
-                EventValue::Enum(PrivateEnum::PositionMode(mode)),
+                EventValue::enum_value(PrivateEnum::PositionMode(mode)),
             );
             let old_info = if position.nullish() {
                 EventValue::Undefined
             } else {
-                position.get("info")?
+                position.read("info")?
             };
-            let info = EventValue::object(old_info.spread());
+            let info = EventValue::record_object(old_info.spread());
             for (k, v) in p.spread() {
-                info.define(&k, v)
+                info.write(&k, v)
             }
-            out.define("info", info);
+            out.write("info", info);
             call(vec![out])
         })
     })
@@ -571,38 +594,39 @@ pub fn handle_pm_account_events(
     b: &mut impl PrivateEventBindings,
 ) -> Result<(), Failure> {
     for_each(events, |event| {
-        let a = event.get("a")?;
+        let a = event.read("a")?;
         let p = if a.nullish() {
             EventValue::Undefined
         } else {
-            a.get("P")?
+            a.read("P")?
         };
         if p.truthy() {
             state.set(true);
             b.capture(PrivateOperation::ThrottlePositions)?(vec![])?;
         }
-        let a = event.get("a")?;
+        let a = event.read("a")?;
         let p = if a.nullish() {
             EventValue::Undefined
         } else {
-            a.get("P")?
+            a.read("P")?
         };
         array_for_each(p, "event.a?.P?.forEach", |p| {
-            let symbol = p.get("s")?;
-            let side =
-                EventValue::Enum(PrivateEnum::PositionSide(if p.get("pa")?.number()? > 0.0 {
+            let symbol = p.read("s")?;
+            let side = EventValue::enum_value(PrivateEnum::PositionSide(
+                if p.read("pa")?.number()? > 0.0 {
                     PositionSide::Long
                 } else {
                     PositionSide::Short
-                }));
-            let one_way = p.get("ps")?.same(&string("BOTH"));
+                },
+            ));
+            let one_way = p.read("ps")?.same(&string("BOTH"));
             let position = find(&b.positions()?, |c| {
-                Ok(c.get("symbol")?.same(&symbol) && (one_way || c.get("side")?.same(&side)))
+                Ok(c.read("symbol")?.same(&symbol) && (one_way || c.read("side")?.same(&side)))
             })?;
             if position.truthy() {
-                let entry = p.get("ep")?.float()?;
-                let contracts = p.get("pa")?.float()?.abs();
-                let upnl = p.get("up")?.float()?;
+                let entry = p.read("ep")?.float()?;
+                let contracts = p.read("pa")?.float()?.abs();
+                let upnl = p.read("up")?.float()?;
                 let call = b.capture(PrivateOperation::UpdatePosition)?;
                 let patch = record([
                     ("entryPrice", number(entry)),
@@ -612,7 +636,7 @@ pub fn handle_pm_account_events(
                     ("info", position.clone()),
                 ]);
                 if one_way {
-                    patch.define("side", side)
+                    patch.write("side", side)
                 }
                 call(vec![position, patch])?;
             }
@@ -626,17 +650,23 @@ pub fn handle_spot_account_events(
     b: &mut impl PrivateEventBindings,
 ) -> Result<(), Failure> {
     for_each(events, |event| {
-        let currencies =
-            EventValue::object(fallback(b.balance()?.get("currencies")?, record([])).spread());
-        let coins = EventValue::object(fallback(b.balance()?.get("coins")?, record([])).spread());
+        let currencies = EventValue::record_object(
+            fallback(b.balance()?.read("currencies")?, record([])).spread(),
+        );
+        let coins =
+            EventValue::record_object(fallback(b.balance()?.read("coins")?, record([])).spread());
         let balances = fallback(
-            event.get("B")?,
+            event.read("B")?,
             EventValue::Array(Rc::new(std::cell::RefCell::new(vec![]))),
         );
         let balances = match balances {
             EventValue::Array(a) => a,
             EventValue::String(s) => Rc::new(std::cell::RefCell::new(
-                s.chars().map(|c| string(c.to_string())).collect(),
+                EventValue::String(s.clone())
+                    .text()?
+                    .chars()
+                    .map(|c| Some(string(c.to_string())))
+                    .collect(),
             )),
             _ => {
                 return Err(type_error(
@@ -646,10 +676,12 @@ pub fn handle_spot_account_events(
         };
         let mut i = 0;
         while i < balances.borrow().len() {
-            let asset_balance = balances.borrow()[i].clone();
-            let asset = asset_balance.get("a")?;
-            let free = fallback(asset_balance.get("f")?, string("0")).float()?;
-            let used = fallback(asset_balance.get("l")?, string("0")).float()?;
+            let asset_balance = balances.borrow()[i]
+                .clone()
+                .unwrap_or(EventValue::Undefined);
+            let asset = asset_balance.read("a")?;
+            let free = fallback(asset_balance.read("f")?, string("0")).float()?;
+            let used = fallback(asset_balance.read("l")?, string("0")).float()?;
             let total = free + used;
             let price = b.asset_price(&asset)?;
             let key = asset.text()?;
@@ -678,9 +710,9 @@ pub fn handle_spot_account_events(
         let entries = currencies.spread();
         for (asset, balance) in entries {
             let price = b.asset_price(&string(asset))?;
-            free += balance.get("free")?.number()? * price;
-            used += balance.get("used")?.number()? * price;
-            total += balance.get("total")?.number()? * price;
+            free += balance.read("free")?.number()? * price;
+            used += balance.read("used")?.number()? * price;
+            total += balance.read("total")?.number()? * price;
         }
         let call = b.capture(PrivateOperation::UpdateStore)?;
         let balance = record([

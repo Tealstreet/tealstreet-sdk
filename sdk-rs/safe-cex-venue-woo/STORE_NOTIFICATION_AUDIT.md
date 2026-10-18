@@ -62,9 +62,9 @@ this slice; existing conversions concern coercion, Serde and transport failures.
 Future StorePatchError conversions must explicitly bind that error type so the
 notification ABI cutover cannot silently pass through an inferred closure.
 
-Callee-based follow-up (not only map_err spelling): the production Store receiver
-in orders.rs is passed through map_limit_order/map_algo_order to symbol, whose
-only Store callee is markets_by_symbol (read). The other store-crate calls are
+Callee-based follow-up (not only map_err spelling): live limit/algo mapping in
+binding/hosts/order_mapping.rs reads the real Store facade marketsBySymbol.
+The old typed orders.rs mapper functions have been removed. The other store-crate calls are
 sort_order_book and calc_order_book_total on a local book. No Store mutation
 result exists to stringify, discard, infer through From/Into, or forward with ?.
 The new fixed heartbeat sends terminate before reconnect and health publication

@@ -66,7 +66,7 @@ pub fn read_hyperliquid_cloid(value: Option<&Value>) -> Option<String> {
 
 /// What was signed under one cloid. `price` is the trigger price for TP/SL and
 /// the limit price otherwise (a market order is a Gtc limit at the slippage cap).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HyperliquidPlacementRecord {
     pub r#type: OrderType,
@@ -78,6 +78,41 @@ pub struct HyperliquidPlacementRecord {
     pub time_in_force: Option<OrderTimeInForce>,
     pub symbol: String,
     pub placed_at: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "HyperliquidPlacementRecord", rename_all = "camelCase")]
+struct HyperliquidPlacementRecordWire {
+    r#type: OrderType,
+    price: f64,
+    side: OrderSide,
+    amount: f64,
+    reduce_only: bool,
+    #[serde(default, deserialize_with = "crate::spot_json::present")]
+    time_in_force: Option<OrderTimeInForce>,
+    symbol: String,
+    placed_at: f64,
+}
+
+impl<'de> Deserialize<'de> for HyperliquidPlacementRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?;
+        input
+            .decode_with(|decoder| {
+                HyperliquidPlacementRecordWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
+            })
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl safe_cex_num::numeric_ingress::JsNumberOutput for HyperliquidPlacementRecord {
+    fn check_number_output(&self) {
+        safe_cex_num::js_number_output!(self, struct {
+            r#type, price, side, amount, reduce_only, time_in_force, symbol, placed_at
+        });
+    }
 }
 
 fn number(value: Option<&Value>) -> Result<f64, String> {
