@@ -127,7 +127,8 @@ pub fn loaded(input: &Value, f: impl FnOnce(&mut Loaded, &[&str]) -> Result<Js, 
                 .own_keys()
                 .into_iter()
                 .map(|key| {
-                    let v = out.get(&key).unwrap();
+                    let v = out.get_key(&key).unwrap();
+                    let name = String::from_utf16(&key).expect("ASCII fixture key");
                     let observed = match v {
                         Js::Undefined => json!("undefined"),
                         Js::Bool(v) => json!({"bool":v}),
@@ -139,7 +140,7 @@ pub fn loaded(input: &Value, f: impl FnOnce(&mut Loaded, &[&str]) -> Result<Js, 
                             json!("same-nested")
                         }
                     };
-                    json!([key, observed])
+                    json!([name, observed])
                 })
                 .collect::<Vec<_>>();
             if input["kind"] == "object" {
@@ -291,7 +292,7 @@ impl Reader {
     pub fn observe(&self, result: Result<Vec<ClosedPnlEntry>, ExchangeError>) -> Value {
         let result = match result {
             Err(e) => {
-                assert!(e.code.unwrap().strict_equals(&self.token));
+                assert!(e.code.as_ref().unwrap().strict_equals(&self.token));
                 json!({"error":"original-emitter"})
             }
             Ok(rows) => {
