@@ -44,6 +44,24 @@ impl ExchangeTask for Task {
     }
 }
 impl Runtime {
+    /// Drain scheduled work at the current clock; a real rate wait stays pending.
+    #[allow(dead_code)] // Some targets share only the socket/runtime fixture.
+    pub fn poll_checkpoint<F: Future + ?Sized>(&self, mut future: Pin<&mut F>) -> Poll<F::Output> {
+        let signal = Arc::new(virtual_time::WakeSignal::default());
+        let waker = signal.waker();
+        let mut context = Context::from_waker(&waker);
+        for _ in 0..64 {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
+                return Poll::Ready(value);
+            }
+            self.pump();
+            if !signal.take() {
+                return Poll::Pending;
+            }
+        }
+        panic!("fixture failed to reach a runtime checkpoint");
+    }
+
     pub fn pump(&self) {
         self.sleep_wakers.wake_due(self.now.get());
         for _ in 0..64 {
@@ -72,6 +90,15 @@ impl Runtime {
                 return;
             }
         }
+    }
+}
+
+#[allow(dead_code)] // Some targets share only the socket/runtime fixture.
+pub fn ready<F: Future>(runtime: &Runtime, future: F) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    match runtime.poll_checkpoint(future.as_mut()) {
+        Poll::Ready(value) => value,
+        Poll::Pending => panic!("fixture must resolve after a runtime checkpoint"),
     }
 }
 impl ExchangeRuntime for Runtime {
