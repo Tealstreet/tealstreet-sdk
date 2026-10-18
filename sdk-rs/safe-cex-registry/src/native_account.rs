@@ -314,10 +314,11 @@ const NATIVE_ACCOUNT_ARGS_EVENTS: &[&str] = &[
 ];
 /// Packages one event for the native worker boundary.
 pub fn native_account_event(event: &str, data: &NativeValue) -> NativeValue {
-    NativeValue::object([
-        ("event", NativeValue::string(event)),
-        ("data", data.clone()),
-    ])
+    let mut fields = vec![("event", NativeValue::string(event))];
+    if event != "ws-reconnected" {
+        fields.push(("data", data.clone()));
+    }
+    NativeValue::object(fields)
 }
 
 /// Forwards emitter events and worker Store payloads until cleanup runs.
