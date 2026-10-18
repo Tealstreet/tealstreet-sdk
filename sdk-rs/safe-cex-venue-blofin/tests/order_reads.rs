@@ -469,6 +469,11 @@ fn run(case: &Value, variant: u8) {
     };
     let args = &input["args"];
     let name = case["name"].as_str().unwrap();
+    let families = || -> [safe_cex_venue_blofin::rest_lifecycle::LifecycleFuture<'_, Vec<Order>, String>; 3] {
+        [Box::pin(fetch_normal_orders(&store, &adapter, &host)),
+         Box::pin(fetch_algo_orders(&store, &adapter, &host)),
+         Box::pin(fetch_trigger_orders(&store, &adapter, &host))]
+    };
     let result = match name {
         "fetchNormalOrders" => {
             ready(fetch_normal_orders(&store, &adapter, &host)).map(Output::Orders)
@@ -484,13 +489,13 @@ fn run(case: &Value, variant: u8) {
                 .iter()
                 .map(|v| v.as_str().unwrap().to_owned())
                 .collect();
-            ready(fetch_orders(Some(&symbols), &store, &adapter, &host)).map(Output::Orders)
+            ready(fetch_orders(Some(&symbols), &store, &host, &families)).map(Output::Orders)
         }
         "fetchOrdersWithRetry" => ready(fetch_orders_with_retry(
             args[0].as_f64().unwrap(),
             &store,
-            &adapter,
             &host,
+            &families,
         ))
         .map(Output::Orders),
         "fetchPaginatedOrderRows" => ready(fetch_paginated_order_rows(
