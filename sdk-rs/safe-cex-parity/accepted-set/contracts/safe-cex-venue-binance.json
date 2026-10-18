@@ -14025,6 +14025,330 @@
     "evidence": "Source-role review: safe-cex-venue-binance/src/rest_history.rs::SeedFuture; actual consumers are exchange_classes.rs/native_host.rs. Native compiler Deserialize and conversion detectors execute on the exact authenticated production alias. Independently, tests/private_classes.rs::lifecycle_aliases::native_candle_aliases_seed_stream_and_cleanup_without_late_publication uses native_dependencies, actual owner/HTTP or socket/signing bindings and native field/effect assertions; scripts/lifecycle-alias-controls.py disconnects the reachable production dataflow with a named compiled refusal then exact restoration. This finite scope does not grant arbitrary callback implementations or a feature-matrix exemption.",
     "reason": "Owned detached then/catch continuation of an already-started OHLCV fetch. It checks local/owner disposal before publishing and logs a failed seed; the unit-result future is not data ingress."
   },
+  "safe_cex_venue_binance::private_rest::SnapshotFuture": {
+    "category": "non-decoder",
+    "evidence": "Maintained BinancePMExchange.fetchOrders awaits and spreads fetchRegularOrders before invoking fetchConditionalOrders; both member bodies await the actual configured request. tests/private_classes.rs::snapshot_future_binding constructs actual native_dependencies/ExchangeOwner and holds each signed terminal HTTP response independently. It requires the first request alone while regular is pending, no aggregate settlement before conditional release, ordered native result fields/negative-zero/NaN/own-undefined after both completions, no resend, and a real rejected conditional request reaching the Base error emitter and Store fallback rather than partial rows. scripts/snapshot-future-controls.py independently corrupts member order and request-result forwarding, requires compiled named native failures, restores exact source bytes and requires GREEN. scripts/snapshot-future-alias-contracts.mjs authenticates fresh compiler declarations/artifacts and separately checks the two native alias classifications; those receipts do not execute continuations.",
+    "reason": "Pinned executable native PM member continuation resolving to an existing EventValue or Failure. It is the live sequential regular/conditional member handle used by fetch_pm_orders, not a raw-input decoder or a contract on arbitrary resolved values.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_venue_binance::request_weight::Failure",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "resolved_path": {
+                                                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                                              "args": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_binance::private_rest::SnapshotRequestFuture": {
+    "category": "non-decoder",
+    "evidence": "Maintained BinancePMExchange.fetchOrders awaits and spreads fetchRegularOrders before invoking fetchConditionalOrders; both member bodies await the actual configured request. tests/private_classes.rs::snapshot_future_binding constructs actual native_dependencies/ExchangeOwner and holds each signed terminal HTTP response independently. It requires the first request alone while regular is pending, no aggregate settlement before conditional release, ordered native result fields/negative-zero/NaN/own-undefined after both completions, no resend, and a real rejected conditional request reaching the Base error emitter and Store fallback rather than partial rows. scripts/snapshot-future-controls.py independently corrupts member order and request-result forwarding, requires compiled named native failures, restores exact source bytes and requires GREEN. scripts/snapshot-future-alias-contracts.mjs authenticates fresh compiler declarations/artifacts and separately checks the two native alias classifications; those receipts do not execute continuations.",
+    "reason": "Pinned executable configured HTTP continuation returning SnapshotCompletion (reaction order and native result/failure). NativeImports launches and owns the actual request independently; the alias is a settlement handle, not a decoder of the response payload.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_binance::private_rest::SnapshotCompletion",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_binance::private_rest::SnapshotCompletion",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
   "safe_cex_venue_binance::public_listeners::Action": {
     "category": "non-decoder",
     "target": {
@@ -16374,5 +16698,683 @@
     "reason": "The Rc<dyn Fn(MessageHandler,EventValue)> is an executable adapter captured from the actual public socket, not a decoded payload. Native trait probes must continue to reject Deserialize.",
     "evidence": "public_classes.rs installs Handler::CoreList and invokes its captured core handler. The three production_ticker_coercion_ tests dispatch real socket frames into the constructed venue Store.",
     "entrypoints": []
+  },
+  "safe_cex_venue_binance::public_subscriptions::subscribe_binance_public": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "subscribe_binance_public",
+      "signature": {
+        "inputs": [
+          [
+            "keys",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::iter::traits::collect::IntoIterator",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Item",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "alloc::string::String",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "count",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::option::Option",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "primitive": "f64"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "send",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl IntoIterator<Item = String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::iter::traits::collect::IntoIterator",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [],
+                            "constraints": [
+                              {
+                                "name": "Item",
+                                "args": null,
+                                "binding": {
+                                  "equality": {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Option<f64>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "primitive": "f64"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Forwards the already typed topic-key iterator, native count reader and fallible send capability to the shared outgoing subscription encoder. It returns only Result<(), E>; it neither decodes wire input nor constructs a decoded owner. PublicState::subscribe uses this exact wrapper for all five public/market socket kinds.",
+    "evidence": "Individually reviewed actual production function and all five live TS subscribe bodies (binance, binancepm and binancespot ws-public.ts). tests/private_classes.rs -> support/public_subscription_receipts.rs::production_native_subscription_frames_order_counts_reentry_and_send_failure constructs native_dependencies and actual ExchangeOwner/PublicSocket, observes host frame bytes for all five kinds, finite/NaN/infinity count filtering, key snapshot/fresh count reentry, error name/message and abort, plus empty topics. scripts/public-subscription-controls.py compiles a separate semantic fault in this exact owner, requires the named real-binding assertion to fail, restores exact source and requires it to pass. tests/public_subscriptions.rs retains all 5505 live TS comparisons against the common production body, including scalar counter gates, key ordering, activation/removal/append and thrown send. Accepted receipts for this specific outgoing capability are classifications, not claimed decoder execution, arbitrary native getter admission or all generic-host coverage."
+  },
+  "safe_cex_venue_binance::public_subscriptions::subscribe": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "subscribe",
+      "signature": {
+        "inputs": [
+          [
+            "keys",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::iter::traits::collect::IntoIterator",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Item",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "alloc::string::String",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "count",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::option::Option",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "primitive": "f64"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "send",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl IntoIterator<Item = String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::iter::traits::collect::IntoIterator",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [],
+                            "constraints": [
+                              {
+                                "name": "Item",
+                                "args": null,
+                                "binding": {
+                                  "equality": {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Option<f64>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "primitive": "f64"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Snapshots topic keys in JavaScript own-key order, reads native f64 counts lazily, filters finite positive values and writes outgoing SUBSCRIBE frames with sequential numeric IDs through the supplied send capability. String keys are topic names, not serialized inputs; Result<(), E> forwards the host send error and admits no decoded record.",
+    "evidence": "Individually reviewed actual production function and all five live TS subscribe bodies (binance, binancepm and binancespot ws-public.ts). tests/private_classes.rs -> support/public_subscription_receipts.rs::production_native_subscription_frames_order_counts_reentry_and_send_failure constructs native_dependencies and actual ExchangeOwner/PublicSocket, observes host frame bytes for all five kinds, finite/NaN/infinity count filtering, key snapshot/fresh count reentry, error name/message and abort, plus empty topics. scripts/public-subscription-controls.py compiles a separate semantic fault in this exact owner, requires the named real-binding assertion to fail, restores exact source and requires it to pass. tests/public_subscriptions.rs retains all 5505 live TS comparisons against the common production body, including scalar counter gates, key ordering, activation/removal/append and thrown send. Accepted receipts for this specific outgoing capability are classifications, not claimed decoder execution, arbitrary native getter admission or all generic-host coverage."
   }
 }
