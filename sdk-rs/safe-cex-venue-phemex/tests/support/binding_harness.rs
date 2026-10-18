@@ -1,11 +1,10 @@
 //! Scripted transport and runtime for driving the production PhemexExchange.
-mod release {
+pub mod release {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../test-support/release.rs"
     ));
 }
-pub use release::Release;
 mod virtual_time {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),

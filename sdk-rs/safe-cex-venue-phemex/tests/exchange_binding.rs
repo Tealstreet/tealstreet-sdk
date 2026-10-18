@@ -585,7 +585,7 @@ fn disposal_during_start_ignores_late_market_reply() {
 }
 #[derive(Default)]
 struct Signer {
-    released: support::Release,
+    released: support::release::Release,
     fail: std::cell::Cell<bool>,
     requests: std::cell::RefCell<Vec<Value>>,
 }
