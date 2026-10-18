@@ -76,12 +76,13 @@ pub struct FunctionData {
     pub props: RefCell<IndexMap<Str, Prop>>,
     pub proto: RefCell<Option<Js>>,
     construct: Option<Construct>,
+    bound_target: Option<Js>,
     realm: Rc<safe_cex_num::PrototypeRealm>,
 }
 
 enum Construct {
     Native(NativeFn),
-    Bound { target: Js, args: Vec<Js> },
+    Bound { args: Vec<Js> },
 }
 
 #[derive(Clone)]
@@ -643,6 +644,7 @@ impl Js {
                     .map(Js::Builtin),
             ),
             construct: None,
+            bound_target: None,
             realm,
         }))
     }
@@ -677,7 +679,7 @@ impl Js {
             return Ok(false);
         }
         if let Js::Function(function) = self
-            && let Some(Construct::Bound { target, .. }) = &function.construct
+            && let Some(target) = &function.bound_target
         {
             return target.ordinary_has_instance(value);
         }
@@ -726,10 +728,11 @@ impl Js {
         }
         let value = match construct {
             Construct::Native(body) => body(new_target.clone(), args)?,
-            Construct::Bound {
-                target,
-                args: prefix,
-            } => {
+            Construct::Bound { args: prefix } => {
+                let target = function
+                    .bound_target
+                    .as_ref()
+                    .expect("bound constructor target");
                 let mut combined = prefix.clone();
                 combined.extend(args);
                 let new_target = if new_target.same_reference(self) {
@@ -2176,9 +2179,9 @@ impl Js {
                         name.extend_from_slice(&target_name);
                     }
                     let construct = this.is_constructor().then(|| Construct::Bound {
-                        target: this.clone(),
                         args: bound_args.clone(),
                     });
+                    let bound_target = Some(this.clone());
                     let realm = match &this {
                         Js::Function(function) => function.realm.clone(),
                         Js::Builtin(reference) => reference.realm().clone(),
@@ -2216,6 +2219,7 @@ impl Js {
                         props: RefCell::new(props),
                         proto: RefCell::new(proto),
                         construct,
+                        bound_target,
                         realm,
                     })))
                 }

@@ -238,10 +238,23 @@ fn ordinary_has_instance_matches_node_prototypes_bound_functions_and_primitives(
     let bound = error.call_method("bind", vec![Js::Null]).unwrap();
     let twice = bound.call_method("bind", vec![Js::Null]).unwrap();
     bound.define("prototype", Js::Number(7.)).unwrap();
-    inherited.define_accessor("__proto__", Some(Rc::new(|_| panic!("internal prototype walk must not read __proto__"))), None).unwrap();
+    inherited
+        .define_accessor(
+            "__proto__",
+            Some(Rc::new(|_| {
+                panic!("internal prototype walk must not read __proto__")
+            })),
+            None,
+        )
+        .unwrap();
     let ordinary_error = error.construct(vec![], None).unwrap();
     let invalid = Js::function("Invalid", |_, _| Ok(Js::Undefined));
     invalid.define("prototype", Js::Number(7.)).unwrap();
+    let arrow = Js::function("Arrow", |_, _| Ok(Js::Undefined));
+    arrow
+        .define("prototype", error.get("prototype").unwrap())
+        .unwrap();
+    let bound_arrow = arrow.call_method("bind", vec![Js::Null]).unwrap();
     let mut actual = Vec::new();
     for (constructor, value) in [
         (error.clone(), ordinary_error),
@@ -255,7 +268,8 @@ fn ordinary_has_instance_matches_node_prototypes_bound_functions_and_primitives(
         (error.clone(), Js::str("text")),
         (Js::object(vec![]), inherited.clone()),
         (invalid.clone(), Js::Number(1.)),
-        (invalid, inherited),
+        (invalid, inherited.clone()),
+        (bound_arrow, inherited),
     ] {
         actual.push(match constructor.ordinary_has_instance(&value) {
             Ok(value) => json!(value),
@@ -267,10 +281,10 @@ const inherited=Object.create(Error.prototype), detached=new Error('message');
 Object.setPrototypeOf(detached,null);
 const bound=Error.bind(null), twice=bound.bind(null), invalid=function Invalid(){};
 bound.prototype=7;Object.defineProperty(inherited,'__proto__',{get(){throw Error('shadowed');}});
-invalid.prototype=7;
+invalid.prototype=7;const arrow=()=>{};arrow.prototype=Error.prototype;const boundArrow=arrow.bind(null);
 const cases=[[Error,new Error()],[Error,inherited],[bound,inherited],[twice,inherited],
 [Error,detached],[Error,null],[Error,undefined],[Error,1],[Error,'text'],[{},inherited],
-[invalid,1],[invalid,inherited]];
+[invalid,1],[invalid,inherited],[boundArrow,inherited]];
 console.log(JSON.stringify(cases.map(([constructor,value])=>{
 try{return Function.prototype[Symbol.hasInstance].call(constructor,value);}
 catch(error){return {throw:error.name,message:error.message};}})));

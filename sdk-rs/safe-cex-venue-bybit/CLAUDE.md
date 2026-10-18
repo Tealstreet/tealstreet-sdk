@@ -974,3 +974,10 @@ The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
 DIVERGENCE_FIX_AUDIT.md records the seven audited rows and the remaining 30.
+
+Hyro account/configuration FIX-audit rows 22/28/29/30/31 use constructed native
+production/demo receivers and the 21-profile maintained TS account oracle.
+validateAccount uses shared OrdinaryHasInstance, preserving inherited Error
+messages, UTF16 and raw thrown-message identity. Range no-op and disabled
+option/inverse capabilities remain source-equal; disposal suppresses balance
+publication. See DIVERGENCE_FIX_AUDIT.md and hyro-account-controls.py.

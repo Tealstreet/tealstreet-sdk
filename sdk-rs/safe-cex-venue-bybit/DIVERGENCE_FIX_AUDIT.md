@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Eight rows are reconciled below; the other
-29 remain pending individual production-binding audits.
+`divergence-cluster-rulings.md`. Thirteen rows are reconciled below; the other
+24 remain pending individual production-binding audits.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -72,6 +72,32 @@ bytes and requires GREEN. Its existing instruments-info exclusion control stays.
 
 Evidence: `/tmp/bybit-retry-mutating-evidence.json` records the initial three
 source replays; the reproducible maintained oracle is
-`scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is the
-eighth reconciled audit row; 29 rows remain pending. The seven earlier verdicts
+`scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is an accepted safety residual. The seven earlier verdicts
 and their proof are in PR #1182.
+
+
+## Hyro account and configuration: rows 22, 28, 29, 30, 31
+
+| Assignment rows | Source owner | Verdict | Production observation |
+| --- | --- | --- | --- |
+| 22 | `fetchMarginAccountInfos` | ACCEPT | The real receiver starts the balance dependency before polling, retains its original native value and publishes `{balance}` after settlement only while active. |
+| 28 | `validateAccount` | FIX | Error classification now uses the shared `Js::ordinary_has_instance` prototype operation. An ordinary object inheriting Error.prototype must return and emit its original message, without an invented `Error: ` prefix. |
+| 29 | `fetchIncomeHistoryRange` | ACCEPT | The installed method already ignores range arguments and returns fresh Promises and empty arrays without HTTP; the source fallback brand remains. |
+| 30, 31 | `optionsEnabled`, `inverseEnabled` | ACCEPT | Both modes remain disabled for production and demo Hyro even when account options explicitly opt in. |
+
+`receiver_tests::hyro_divergence_account_configuration_receivers` constructs the
+actual native venue with configured test origins and no wire transport. It
+observes held balance settlement, disposal, native identity, UTF16 and negative
+zero. Validation covers synchronous and awaited failures, detached Error
+prototypes, primitive throws, raw message values and original logger rejection.
+The maintained five TS members execute 21 independent profiles in
+`scripts/hyro-account-fixtures.cjs`; the existing validation corpus stays intact.
+
+The shared operation follows the bound target even for call-only functions,
+checks callability before the left operand, and reads the constructor prototype
+only for object operands. Its Node unit compares thirteen cases, including null
+prototypes and bound constructors; native checks retain throwing-getter identity
+and prove that shadowed `__proto__` accessors are not read.
+`scripts/hyro-account-controls.py` mutates each accepted guard/result and the
+Error classification separately, requires compiled named native failures, then
+restores exact source bytes and replays the receiver.

@@ -1012,17 +1012,50 @@ fn hyro_divergence_account_configuration_receivers() {
         let raw_message = Js::object(vec![("zero", Js::Number(-0.0))]);
         let raw_error = rt.global("Error").unwrap().construct(vec![], None).unwrap();
         raw_error.set("message", raw_message.clone()).unwrap();
-        let detached = rt.global("Error").unwrap().construct(vec![Js::str("original")], None).unwrap();
-        rt.global("Object").unwrap().call_method("setPrototypeOf", vec![detached.clone(), Js::Null]).unwrap();
-        detached.define("toString", Js::function("toString", |_, _| Ok(Js::utf16(&[0xd800, 0x62])))).unwrap();
-        for (reason, expected) in [(Js::utf16(&[0xdfff]), Js::utf16(&[0xdfff])), (raw_error, raw_message), (detached, Js::utf16(&[0xd800, 0x62]))] {
+        let detached = rt
+            .global("Error")
+            .unwrap()
+            .construct(vec![Js::str("original")], None)
+            .unwrap();
+        rt.global("Object")
+            .unwrap()
+            .call_method("setPrototypeOf", vec![detached.clone(), Js::Null])
+            .unwrap();
+        detached
+            .define(
+                "toString",
+                Js::function("toString", |_, _| Ok(Js::utf16(&[0xd800, 0x62]))),
+            )
+            .unwrap();
+        let custom = Js::object(vec![(
+            "toString",
+            Js::function("toString", |_, _| Ok(Js::utf16(&[0xd800, 0x63]))),
+        )]);
+        for (reason, expected) in [
+            (custom, Js::utf16(&[0xd800, 0x63])),
+            (Js::utf16(&[0xdfff]), Js::utf16(&[0xdfff])),
+            (raw_error, raw_message),
+            (detached, Js::utf16(&[0xd800, 0x62])),
+        ] {
             for synchronous in [false, true] {
                 let failure = reason.clone();
                 let runtime = exchange.base.runtime.clone();
-                this.define("fetchBalance", Js::function("fetchBalance", move |_, _| {
-                    if synchronous { Err(Thrown::new(failure.clone())) }
-                    else { Ok(Js::Promise(safe_cex_exchange::js_runtime::promise::Promise::settled(&runtime, Err(Thrown::new(failure.clone()))))) }
-                })).unwrap();
+                this.define(
+                    "fetchBalance",
+                    Js::function("fetchBalance", move |_, _| {
+                        if synchronous {
+                            Err(Thrown::new(failure.clone()))
+                        } else {
+                            Ok(Js::Promise(
+                                safe_cex_exchange::js_runtime::promise::Promise::settled(
+                                    &runtime,
+                                    Err(Thrown::new(failure.clone())),
+                                ),
+                            ))
+                        }
+                    }),
+                )
+                .unwrap();
                 let result = this.call_method("validateAccount", vec![]).unwrap();
                 let result = await_js(&exchange.base.runtime, result).await.unwrap();
                 assert!(result.get("error").unwrap().strict_equals(&expected));
@@ -1032,13 +1065,27 @@ fn hyro_divergence_account_configuration_receivers() {
         }
         let logging = Js::object(vec![("opaque", Js::utf16(&[0xd800]))]);
         let thrown = logging.clone();
-        this.define("emitAndLogError", Js::function("emitAndLogError", move |_, _| Err(Thrown::new(thrown.clone())))).unwrap();
+        this.define(
+            "emitAndLogError",
+            Js::function("emitAndLogError", move |_, _| {
+                Err(Thrown::new(thrown.clone()))
+            }),
+        )
+        .unwrap();
         let result = this.call_method("validateAccount", vec![]).unwrap();
-        assert!(await_js(&exchange.base.runtime, result).await.unwrap_err().value.strict_equals(&logging));
-        assert!(safe_cex_exchange::capabilities::is_base_capability_fallback(
-            &super::capabilities(&ExchangeName::Hyrotrader).fetch_income_history_range,
-            safe_cex_exchange::capabilities::BaseCapabilityMethod::FetchIncomeHistoryRange,
-        ));
+        assert!(
+            await_js(&exchange.base.runtime, result)
+                .await
+                .unwrap_err()
+                .value
+                .strict_equals(&logging)
+        );
+        assert!(
+            safe_cex_exchange::capabilities::is_base_capability_fallback(
+                &super::capabilities(&ExchangeName::Hyrotrader).fetch_income_history_range,
+                safe_cex_exchange::capabilities::BaseCapabilityMethod::FetchIncomeHistoryRange,
+            )
+        );
         exchange.base.dispose().unwrap();
     });
 }

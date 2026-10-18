@@ -2042,3 +2042,10 @@ hosts; it does not cover arbitrary external Tokio tasks or transport internals.
 The public probe requires the versioned raw receipt and refuses older addons.
 Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
 the private wake-race witness checks the pre-repoll fence.
+
+Js::ordinary_has_instance implements the shared OrdinaryHasInstance operation
+using the bound target, constructor prototype and internal prototype links.
+Bound call-only functions retain that target independently of constructibility.
+The js_construction Node comparison covers bound constructors, primitive left
+operands, null prototypes and invalid prototypes; native getter checks preserve
+original thrown identity. Hyro validation consumes this operation directly.
