@@ -25,7 +25,7 @@ fn real_native_account_preserves_hosted_signer_rejection_fields() {
             options: json!({"key":"hosted-key","secret":"","overrideProxyUrl":origin}).into(),
             account_name: Some("hosted-account".into()),
             sign: Some(Rc::new(|_| Box::pin(async {
-                Err(json!({"name":"SignerUnavailableError", "message":"Remote signer unavailable", "code":"SIGNER_OFFLINE"}).into())
+                Err(json!({"name":"SignerUnavailableError", "message":"Remote signer unavailable", "code":"SIGNER_OFFLINE", "stack":"device signer original stack"}).into())
             }))),
             proxy_token: None,
         }).unwrap();
@@ -45,6 +45,10 @@ fn real_native_account_preserves_hosted_signer_rejection_fields() {
         );
         assert_eq!(error["name"], NativeValue::string("SignerUnavailableError"));
         assert_eq!(error["code"], NativeValue::string("SIGNER_OFFLINE"));
+        assert_eq!(
+            error["stack"],
+            NativeValue::string("device signer original stack")
+        );
     });
 }
 
@@ -69,6 +73,7 @@ fn real_native_account_preserves_signer_utf16_metadata() {
                 ("name", NativeValue::String(name.clone())),
                 ("message", NativeValue::String(message.clone())),
                 ("code", NativeValue::String(vec![0xd800])),
+                ("stack", NativeValue::String(vec![0xd800, 0, 0xdc00])),
             ]);
             let account = open_native_account(NativeAccountSpec {
                 hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
@@ -95,6 +100,7 @@ fn real_native_account_preserves_signer_utf16_metadata() {
             assert_eq!(error["name"], NativeValue::String(name));
             assert_eq!(error["message"], NativeValue::String(message));
             assert_eq!(error["code"], NativeValue::String(vec![0xd800]));
+            assert_eq!(error["stack"], NativeValue::String(vec![0xd800, 0, 0xdc00]));
         }
     });
 }
