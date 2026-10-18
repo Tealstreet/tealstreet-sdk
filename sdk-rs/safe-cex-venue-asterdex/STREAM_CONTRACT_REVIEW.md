@@ -44,3 +44,9 @@ SAFE_CEX_TYPESCRIPT_PATH=/absolute/path/to/typescript \
 
 Control receipts and exact restoration hashes are written under the worktree's
 `target/asterdex-stream-controls/`. A compiler error is not a successful control.
+
+The recorded native replay passes all nineteen owners after checking all 117
+source expectations. The grouped production mutations compile and fail all
+nineteen owners by name; exact restoration of the three source files returns
+all nineteen native owners to PASS. A failed mutation compilation is rejected
+and is not counted as evidence.

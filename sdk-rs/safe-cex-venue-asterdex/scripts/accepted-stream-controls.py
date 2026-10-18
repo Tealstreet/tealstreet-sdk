@@ -27,10 +27,10 @@ changes = {
   ('subscription_id + 1', 'subscription_id + 2', 2),
  ],
  'src/private_stream.rs': [
-  ('js_string(value).map_err(coercion)', '{ let _ = value; Ok(String::new()) }', 1),
-  ('JsJsonValue::from(value.clone())', 'JsJsonValue::from(Value::Null)', 1),
+  ('js_string(value).map_err(coercion)', 'js_string(value).map_err(coercion).map(|_| String::new())', 1),
+  ('JsJsonValue::from(value.clone())', 'JsJsonValue::from({ let _ = value; Value::Null })', 1),
  ],
- 'src/public_stream.rs': [('js_string(v).map_err(coerce)', '{ let _ = v; Ok(String::new()) }', 1)],
+ 'src/public_stream.rs': [('js_string(v).map_err(coerce)', 'js_string(v).map_err(coerce).map(|_| String::new())', 1)],
 }
 originals = {crate / file: (crate / file).read_bytes() for file in changes}
 receipt = {}
