@@ -163,26 +163,46 @@ ordering differences across channels. Raw output preserves undefined, NaN, -0
 and typed values; nothing is sorted, aligned or coalesced by the probe.
 
 `qualifiedStatus` prevents a changing within-side sequence or incomplete input
-from being attributed as a final cross-side bug. Production clocks and 250ms
-throttles are intentionally retained. Their nondeterminism is reported, including
-exact fields/counts, and blocks full parity even when individual channels repeat.
-A native command barrier can overtake unread socket frames: it is not an
-input-consumption fence. Every stream comparison remains provisional and the
-runner reports `INCOMPLETE_NATIVE_DRAIN` even when command barriers complete.
-A failed barrier leaves diagnostic partial outputs and cannot pass. Empty
-book/candle/ticker channels cannot satisfy coverage. `--capture-ms 1000` is a
-smoke check only, never the live gate.
+from being attributed as a final cross-side bug. Replay clocks and timer deadlines
+are controlled; the real production Store throttle still runs at its 250ms cadence.
+A command barrier alone is not a processing fence. Per-socket application and
+physical transport receipts now gate `nativeDrainVerified`; incomplete receipts
+keep comparisons provisional. Failed playback retains diagnostic partial outputs.
+Empty book/candle/ticker channels cannot satisfy coverage. `--capture-ms 1000`
+is a smoke check only, never the live gate.
 
 To repeat a captured case without new live input, copy the `capture.bundle` path
 from its report and pass `--replay /absolute/path/to.bundle.v8 --venue binance`
 with the addon and source label. Use the same Node major version for V8 artifacts.
 Both sides still instantiate their production transports/parsers/subscriptions.
 TS attaches its exchange instance to the existing ExchangeWorker delivery methods
-rather than starting a second account; venue startup and its clock behavior stay
-intact. Subscription handles in native callback envelopes are stripped only to
+rather than starting a second account; venue startup runs with fixed host clock
+inputs before replay timer control begins. Subscription handles in native callback envelopes are stripped only to
 match the direct TS callback boundary; event and Store data are unmodified.
 
 There is no standalone public trade listener in the SDK. Bybit's production
 candle subscription consumes `publicTrade` frames and emits derived candles;
 other venues' candle channels do not establish standalone trade-event coverage.
 That capability gap stays explicit in every report.
+
+### Controlled replay and native drain receipts
+
+The replay worker now opens the compiled addon with an explicit `replayEpochMs`
+host, using the captured candle bound as its epoch. Both sides receive fixed
+startup Date/performance readings. Replay then advances the clock to each exact
+captured frame time, including timer deadlines along the way. Each application
+frame must reach its per-socket handler completion receipt before the next frame
+is sent. Output data is compared unchanged; timestamps are not stripped.
+
+The final receipt checks consumed/processed application counts per physical URL
+occurrence and native transport counts for messages, ping, pong and close. Only
+matching receipts set `nativeDrainVerified: true`. Ready Promise jobs are included
+in the native checkpoint, and outstanding source Promise jobs keep drain false.
+TS HTTP completion is fenced through the response Promise turn as well. Startup still uses real scheduling, so exact two-run repeatability on
+each side remains mandatory for attribution. The trailing Store delivery runs
+under the replay clock, through the real production throttle.
+
+Missing/extra frames, unfinished handlers, unread control frames and clock
+rollback fail closed. An ack-only instrument tape proves receipt wiring but
+provides no ticker/orderbook/candle coverage or 60-second venue result. Full
+venue comparisons await the shared Store hot-path repair before being rerun.

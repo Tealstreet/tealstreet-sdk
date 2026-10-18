@@ -42,8 +42,8 @@ const report = {
   comparisonsProvisional: true,
   limitations: [
     tradeCapability,
-    'Real production timers and clocks are retained. Repeatability is checked exactly; clock/throttle nondeterminism blocks parity claims.',
-    'The native command barrier can overtake unread socket frames. No input-consumption fence is exposed; all output comparisons remain provisional, including completed barriers.',
+    'Replay timestamps and timer deadlines are explicit inputs. Startup uses fixed clock readings with real scheduling; within-side repeatability still gates attribution.',
+    'Drain receipts verify per-dial application messages after synchronous handlers and ready Promise jobs. TLS ping/pong frames terminate below that parser boundary.',
   ],
   runs: [],
 };
@@ -159,7 +159,7 @@ async function session(implementation, mode, tape, label) {
     },
   };
   sessions.push(result);
-  await call('open', [], { exchange, options });
+  await call('open', [], { exchange, options, ...(mode === 'replay' ? { replayEpoch: candleTo } : {}) });
   await call('start');
   console.log(`${exchange}: ${label} started`);
   return result;
@@ -246,7 +246,11 @@ try {
   await Promise.all(replaySessions.map((s) => s.call('begin')));
   const results = await Promise.all(
     replaySessions.map(async (s) => {
-      const receipt = await s.relay.play();
+      const receipt = await s.relay.playControlled({
+        advance: (at) => s.call('advance', [at]),
+        receipt: () => s.call('receipt'),
+        timeoutMs: timeout,
+      });
       const barrierStart = performance.now();
       let barrier = { label: s.label, status: 'fulfilled' };
       try {
@@ -265,6 +269,12 @@ try {
   const receipts = results.map((r) => r.receipt),
     values = results.map((r) => r.value);
   report.barriers = results.map((r) => r.barrier);
+  report.nativeDrainVerified = results
+    .slice(2)
+    .every((r) => r.receipt.applicationDrainVerified && r.receipt.nativeTransportVerified);
+  report.comparisonsProvisional =
+    !report.nativeDrainVerified || results.some((r) => !r.receipt.applicationDrainVerified);
+  report.clock = { epochMs: candleTo, finalMs: tape.durationMs + 350, mode: 'per-frame-controlled' };
   for (const [i, s] of replaySessions.entries()) {
     const bytes = serialize(values[i]);
     const fixture = join(fixtureDirectory, `${hash(bytes)}.${s.label}.outputs.v8`);
@@ -298,6 +308,7 @@ try {
   const inputDiff = report.runs.some(
     (r) =>
       r.receipt.dropped ||
+      !r.receipt.applicationDrainVerified ||
       r.receipt.inputHash !== r.receipt.expectedInputHash ||
       r.sockets.some((s) => s.failure) ||
       r.requests.some((q) => q.blocked || q.transportError),
@@ -340,7 +351,15 @@ try {
       requests: cleanRecords(s.requests),
       sockets: s.sockets,
       diagnostics: s.diagnostics,
+      progress: s.relay.progress,
     });
+    try {
+      const value = await s.call('drain');
+      const bytes = serialize(value);
+      const fixture = join(fixtureDirectory, `${hash(bytes)}.${s.label}.partial.outputs.v8`);
+      writeFileSync(fixture, bytes, { mode: 0o600 });
+      report.partial.at(-1).fixture = fixture;
+    } catch {}
   }
   await Promise.all(sessions.map((s) => s.close()));
   rmSync(directory, { recursive: true, force: true });

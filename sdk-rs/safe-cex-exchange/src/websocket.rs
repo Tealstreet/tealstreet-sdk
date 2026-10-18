@@ -676,8 +676,23 @@ impl Drop for SocketTaskGuard {
     }
 }
 
+/// A parser-boundary receipt, retained separately for each physical dial.
+/// `processed` includes failed handlers; `errors` makes those failures explicit.
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameDrainReceipt {
+    pub url: String,
+    pub generation: u64,
+    pub consumed: u64,
+    pub processed: u64,
+    pub errors: u64,
+    pub close_consumed: u64,
+    pub close_processed: u64,
+}
+
 pub struct BaseWebSocket {
     pub id: u64,
+    frame_receipts: RefCell<Vec<FrameDrainReceipt>>,
     identity: Rc<()>,
     parent: Rc<dyn WsParent>,
     runtime: Rc<dyn WsRuntime>,
@@ -704,6 +719,7 @@ impl BaseWebSocket {
     ) -> Rc<Self> {
         Rc::new(Self {
             id,
+            frame_receipts: RefCell::default(),
             identity: Rc::new(()),
             parent,
             runtime,
@@ -730,6 +746,24 @@ impl BaseWebSocket {
                 &serde_json::json!({"operation":"websocket callback"}).into(),
             );
         }
+    }
+    fn received_transport_close(
+        self: &Rc<Self>,
+        code: Option<u16>,
+        reason: &str,
+    ) -> Result<(), ExchangeError> {
+        let index = self.frame_receipts.borrow().len().checked_sub(1);
+        if let Some(index) = index {
+            self.frame_receipts.borrow_mut()[index].close_consumed += 1;
+        }
+        let result = self.transport_close(code, reason);
+        if let Some(index) = index {
+            self.frame_receipts.borrow_mut()[index].close_processed += 1;
+        }
+        result
+    }
+    pub fn frame_drain_receipts(&self) -> Vec<FrameDrainReceipt> {
+        self.frame_receipts.borrow().clone()
     }
     fn now(&self) -> f64 {
         self.runtime.now_ms()
@@ -1104,7 +1138,21 @@ impl BaseWebSocket {
         self.protocol.on_open(self.clone()).await
     }
     pub fn on_message(self: &Rc<Self>, frame: &SocketFrame) -> Result<(), ExchangeError> {
-        self.protocol.on_message(self, frame)
+        let index = {
+            let mut receipts = self.frame_receipts.borrow_mut();
+            let index = receipts.len().checked_sub(1);
+            if let Some(index) = index {
+                receipts[index].consumed += 1;
+            }
+            index
+        };
+        let result = self.protocol.on_message(self, frame);
+        if let Some(index) = index {
+            let mut receipts = self.frame_receipts.borrow_mut();
+            receipts[index].processed += 1;
+            receipts[index].errors += u64::from(result.is_err());
+        }
+        result
     }
     pub fn emit_ws_reconnected(&self) -> Result<(), ExchangeError> {
         self.parent.emit_ws_reconnected()?;
@@ -1311,6 +1359,11 @@ impl BaseWebSocket {
             relay,
             reconnecting,
         } = connection;
+        self.frame_receipts.borrow_mut().push(FrameDrainReceipt {
+            url: descriptor.url.clone(),
+            generation,
+            ..FrameDrainReceipt::default()
+        });
         self.grouped_listener_dispatch.set(reconnecting);
         // The core has already activated a dormant wrapper; do not nest another one.
         if reconnecting && descriptor.options.start_closed == Some(true) {
@@ -1370,7 +1423,9 @@ impl BaseWebSocket {
                             owner.report_callback_result(owner.handle_web_socket_error(&error))
                         }
                         Ok(WsEvent::Close { code, reason }) => {
-                            owner.report_callback_result(owner.transport_close(code, &reason));
+                            owner.report_callback_result(
+                                owner.received_transport_close(code, &reason),
+                            );
                             if !socket.is_reconnecting() {
                                 break;
                             }
@@ -1546,7 +1601,7 @@ impl BaseWebSocket {
                             Some(Ok(RelayEvent::Close { code, reason, .. })) => {
                                 socket.state.borrow_mut().relay_open = false;
                                 socket.report_callback_result(
-                                    socket.transport_close(Some(code), &reason),
+                                    socket.received_transport_close(Some(code), &reason),
                                 );
                                 break;
                             }
@@ -3337,6 +3392,7 @@ mod tests {
         connect_error: RefCell<Option<ExchangeError>>,
         dial_before_error: Cell<bool>,
         pending_open: Cell<bool>,
+        message_error: Cell<bool>,
     }
     impl WsProtocol for Protocol {
         fn ping(&self, _: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
@@ -3369,6 +3425,9 @@ mod tests {
             _: &SocketFrame,
         ) -> Result<(), ExchangeError> {
             socket.track_last_received().unwrap();
+            if self.message_error.get() {
+                return Err(ExchangeError::new("fixture handler failed"));
+            }
             Ok(())
         }
     }
@@ -3806,6 +3865,51 @@ mod tests {
             "disposed auth/event task retained socket"
         );
         assert!(runtime.jobs.borrow().is_empty());
+    }
+    #[test]
+    fn frame_receipts_count_processed_messages_separately_for_each_dial() {
+        let (socket, _, runtime, protocol) = fixture();
+        run(socket.create_websocket("wss://first".into(), vec![], None)).unwrap();
+        runtime.pump();
+        socket.on_message(&SocketFrame::Text("one".into())).unwrap();
+        socket.on_message(&SocketFrame::Binary(vec![1, 2])).unwrap();
+        let receipts = socket.frame_drain_receipts();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(
+            (
+                receipts[0].consumed,
+                receipts[0].processed,
+                receipts[0].errors
+            ),
+            (2, 2, 0)
+        );
+        run(socket.create_websocket("wss://second".into(), vec![], None)).unwrap();
+        runtime.pump();
+        socket
+            .on_message(&SocketFrame::Text("three".into()))
+            .unwrap();
+        let receipts = socket.frame_drain_receipts();
+        assert_eq!(receipts.len(), 2);
+        assert_eq!(receipts[0].url, "wss://first");
+        assert_eq!(receipts[0].processed, 2);
+        assert_eq!(receipts[1].url, "wss://second");
+        assert_eq!(receipts[1].processed, 1);
+        protocol.message_error.set(true);
+        assert!(socket.on_message(&SocketFrame::Text("bad".into())).is_err());
+        socket.received_transport_close(Some(1000), "done").unwrap();
+        let receipts = socket.frame_drain_receipts();
+        assert_eq!(
+            (
+                receipts[1].consumed,
+                receipts[1].processed,
+                receipts[1].errors
+            ),
+            (2, 2, 1)
+        );
+        assert_eq!(
+            (receipts[1].close_consumed, receipts[1].close_processed),
+            (1, 1)
+        );
     }
     #[test]
     fn disposal_cancels_native_event_consumer_without_host_wakeup() {

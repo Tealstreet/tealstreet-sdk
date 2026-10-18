@@ -88,6 +88,15 @@ impl Future for HostTask {
 
 /// `ExchangeRuntime` + `WsRuntime` on the current tokio `LocalSet`.
 pub struct NativeRuntime {
+    pub replay_clock: Option<Rc<crate::replay_clock::ReplayClock>>,
+    frame_counts: Rc<
+        RefCell<
+            Vec<(
+                String,
+                Rc<RefCell<safe_cex_transport::native::NativeFrameCounts>>,
+            )>,
+        >,
+    >,
     origin: Instant,
     owner: Weak<NativeRuntime>,
     transport: Arc<dyn TransportProvider>,
@@ -100,7 +109,30 @@ pub fn native_runtime() -> Rc<NativeRuntime> {
     native_runtime_with_transport(Arc::new(DirectTransport))
 }
 pub fn native_runtime_with_transport(transport: Arc<dyn TransportProvider>) -> Rc<NativeRuntime> {
-    runtime_over(transport, Rc::new(NativeTunnelHost))
+    runtime_over(transport, Rc::new(NativeTunnelHost), None)
+}
+/// Isolated diagnostic host: fixed startup timestamps, manually driven replay timers.
+pub fn native_replay_runtime(epoch: f64) -> Rc<NativeRuntime> {
+    safe_cex_store::virtual_clock::set_thread_host_time(Some(epoch));
+    runtime_over(
+        Arc::new(DirectTransport),
+        Rc::new(NativeTunnelHost),
+        Some(crate::replay_clock::new(epoch)),
+    )
+}
+pub fn replay_checkpoint(runtime: &Rc<NativeRuntime>) {
+    crate::js_runtime::jobs::checkpoint(runtime.clone());
+}
+pub fn replay_pending_jobs(runtime: &Rc<NativeRuntime>) -> usize {
+    crate::js_runtime::jobs::pending_non_timer(runtime.clone())
+}
+pub fn native_frame_receipts(runtime: &NativeRuntime) -> Vec<Value> {
+    runtime
+        .frame_counts
+        .borrow()
+        .iter()
+        .map(|(url, counts)| serde_json::json!({"url": url, "counts": counts.borrow().clone()}))
+        .collect()
 }
 /// The account's proxy token (ts: the accessToken facade; exchange-server's per-account provider).
 pub type ProxyTokenSource = Rc<dyn Fn() -> TransportFuture<'static, String>>;
@@ -115,7 +147,7 @@ pub fn native_tealstreet_runtime_with(
     dials: Rc<dyn TunnelHost>,
 ) -> Rc<NativeRuntime> {
     let tunnel: Rc<dyn TunnelHost> = Rc::new(TokenTunnel { dials, token });
-    runtime_over(tealstreet_transport(tunnel.clone()), tunnel)
+    runtime_over(tealstreet_transport(tunnel.clone()), tunnel, None)
 }
 // TealstreetTransport takes an Arc host; this one is local like every native future.
 #[allow(clippy::arc_with_non_send_sync)]
@@ -127,9 +159,12 @@ fn tealstreet_transport(tunnel: Rc<dyn TunnelHost>) -> Arc<dyn TransportProvider
 fn runtime_over(
     transport: Arc<dyn TransportProvider>,
     tunnel: Rc<dyn TunnelHost>,
+    replay_clock: Option<Rc<crate::replay_clock::ReplayClock>>,
 ) -> Rc<NativeRuntime> {
     let random = random_unit();
     Rc::new_cyclic(|owner| NativeRuntime {
+        replay_clock,
+        frame_counts: Rc::default(),
         origin: Instant::now(),
         owner: owner.clone(),
         transport,
@@ -242,14 +277,25 @@ fn random_unit() -> f64 {
 }
 impl ExchangeRuntime for NativeRuntime {
     fn monotonic_now_ms(&self) -> f64 {
-        self.origin.elapsed().as_secs_f64() * 1000.0
+        self.replay_clock.as_ref().map_or_else(
+            || self.origin.elapsed().as_secs_f64() * 1000.0,
+            |clock| crate::replay_clock::elapsed(clock),
+        )
     }
     fn now_ms(&self) -> f64 {
         // JavaScript wall-clock timestamps (Date.now) have integer milliseconds.
         // Keep sub-millisecond precision on monotonic_now_ms for pacing/metrics.
-        wall_clock_ms().floor()
+        self.replay_clock.as_ref().map_or_else(
+            || wall_clock_ms().floor(),
+            |clock| crate::replay_clock::now(clock),
+        )
     }
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()> {
+        if let Some(clock) = &self.replay_clock {
+            if delay_ms > 0 {
+                return crate::replay_clock::sleep(clock, delay_ms);
+            }
+        }
         Box::pin(async move {
             if delay_ms == 0 {
                 tokio::task::yield_now().await;
@@ -329,6 +375,8 @@ impl WsRuntime for NativeRuntime {
         options: WebSocketConnectionOptions,
         reconnecting: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
+        let frame_counts = self.frame_counts.clone();
+        let replay = self.replay_clock.is_some();
         Box::pin(async move {
             // Header-capable source sockets select the wrapper branch even
             // when the native core owns reconnects. Dial that authenticated
@@ -347,6 +395,11 @@ impl WsRuntime for NativeRuntime {
             let socket = connect_websocket(&url, &protocols, &headers)
                 .await
                 .map_err(|e| ExchangeError::new(e.to_string()))?;
+            if replay {
+                frame_counts
+                    .borrow_mut()
+                    .push((url, socket.frame_counts.clone()));
+            }
             Ok(Rc::new(native_ws_socket(socket)) as Rc<dyn WsSocket>)
         })
     }
