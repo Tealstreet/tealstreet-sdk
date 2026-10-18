@@ -29,3 +29,12 @@ of every generic helper accepting arbitrary user futures.
 The journal dependency row is ACCEPT: its real constructed history/Store probe
 observes account identity, quote lookup/fallback, fees and the source's omitted
 funding option. The supplied native resolver has no external executable callback.
+
+The rate-window signing fixture follows `bitunix.exchange.ts::validateAccount`:
+the async arrow awaits `xhr.get` before returning its denial result. Executing
+that unchanged source arrow with ready and held Promise responses observes an
+eager GET and asynchronous completion in both cases. The native fixture therefore
+pumps its owning runtime before checking completion; it still requires five
+requests before the window opens, six afterwards, and a dequeue-time signature
+from the newly synced clock. A synchronous first-poll result is not the source
+contract and must not bypass the native HTTP await fence.

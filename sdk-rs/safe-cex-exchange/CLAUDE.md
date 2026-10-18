@@ -1966,3 +1966,10 @@ the runtime owns continuation after the waiter/source drop. Fetch and resolver
 Promise boundaries share the canonical driver. `closed_position_timing` checks
 six maintained-source profiles with NativeRuntime; the separate typed result
 surrogate/alias boundary remains in CLOSED_POSITIONS_AUDIT.md.
+
+The mapped loop utility requires its owning runtime on LoopHost and starts via
+start_eager. Its sleep Promise preserves the source await fence even for ready
+leaves, and waiter drop leaves the continuation alive. Positive infinity disables
+all loop host effects; remaining_utils compares invocation, continuation and
+callback scheduling with the maintained TypeScript function in Node.
+
