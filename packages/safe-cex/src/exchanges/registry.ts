@@ -34,6 +34,12 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   binance: () =>
     import(/* webpackChunkName: "exchange-binance" */ './binance/binance.exchange').then((m) => m.BinanceExchange),
 
+  // Binance Inverse (COIN-M Futures)
+  binanceinverse: () =>
+    import(/* webpackChunkName: "exchange-binanceinverse" */ './binance/binanceinverse.exchange').then(
+      (m) => m.BinanceInverseExchange,
+    ),
+
   // Binance PM (Portfolio Margin)
   binancepm: () =>
     import(/* webpackChunkName: "exchange-binancepm" */ './binance/binancepm.exchange').then(
