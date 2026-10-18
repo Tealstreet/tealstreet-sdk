@@ -25,3 +25,9 @@ The own-undefined assertions compile RED against the prior production addon
 (source ae2ddb633c). Each of the three source-owned keys is absent in that addon.
 The canonical health carrier and source partial merge preserve them through the
 production notification and worker delivery path.
+
+The health candidate compiles GREEN from `d05c4cf090` (native addon SHA-256
+`829a899fd6ec16f104c09d48127eb39003625713c46e706e777a0e998d3a5b87`):
+all seven reported tests pass, including the three individual presence checks and
+whole-record values/key order. The existing 5/6-request production Store callback
+regression also passes both cases on that same immutable addon.
