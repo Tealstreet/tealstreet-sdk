@@ -301,7 +301,7 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
     input["label"] = json!("before");
     let mut orders = map_order(Some(&input), "usdt-futures", || 1.0).unwrap();
     input["label"] = json!("after-input");
-    assert_eq!(
+    assert!(
         orders[0]
             .info
             .as_ref()
@@ -309,7 +309,6 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
             .get("label")
             .unwrap()
             .text_equals("before"),
-        true,
         "CHOSEN mapOrder owned info does not observe gateway mutation"
     );
     *orders[0].info.as_mut().unwrap().get_mut("label").unwrap() = json!("after-output").into();
@@ -550,7 +549,7 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
     let mut input = json!({"orderId":"x","status":"new","orderType":"limit","side":"buy","symbol":"BTCUSD","size":"3","price":"2","presetStopLossPrice":"2","presetStopSurplusPrice":"3","label":"before"});
     let mut orders = map_inverse_order(Some(&input), "coin-futures", |_| None, || 1.0).unwrap();
     input["label"] = json!("after-input");
-    assert_eq!(
+    assert!(
         orders[0]
             .info
             .as_ref()
@@ -558,7 +557,6 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
             .get("label")
             .unwrap()
             .text_equals("before"),
-        true,
         "CHOSEN inverse mapOrder info snapshot retains old input"
     );
     assert_eq!(
@@ -588,7 +586,7 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         input["label"], "after-input",
         "CHOSEN inverse mapOrder gateway does not share owned leg info"
     );
-    assert_eq!(
+    assert!(
         orders[0]
             .info
             .as_ref()
@@ -596,7 +594,6 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
             .get("label")
             .unwrap()
             .text_equals("before"),
-        true,
         "CHOSEN inverse mapOrder legs do not share info"
     );
 }

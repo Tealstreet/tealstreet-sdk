@@ -169,7 +169,7 @@ impl Host {
         } else if !e.message.is_empty() {
             retained_text(e.message.clone())
         } else {
-            fallback.map_or(retained_text(e.message.clone()), |f| retained_text(f))
+            fallback.map_or(retained_text(e.message.clone()), retained_text)
         }
     }
 }
