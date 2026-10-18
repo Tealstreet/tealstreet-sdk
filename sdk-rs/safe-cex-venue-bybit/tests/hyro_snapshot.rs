@@ -418,9 +418,12 @@ impl Harness {
                     _ => raw("livenet"),
                 };
                 match method {
-                    "getBybitRestBaseUrl" => api::get_bybit_rest_base_url(self, network),
+                    "getBybitRestBaseUrl" => {
+                        api::get_bybit_rest_base_url(self, self.owner.clone(), network)
+                    }
                     "getBybitPublicWsUrl" => api::get_bybit_public_ws_url(
                         self,
+                        self.owner.clone(),
                         raw(if self.profile == "invalid-category" {
                             "inverse"
                         } else {
@@ -428,7 +431,9 @@ impl Harness {
                         }),
                         network,
                     ),
-                    "getBybitPrivateWsUrl" => api::get_bybit_private_ws_url(self, network),
+                    "getBybitPrivateWsUrl" => {
+                        api::get_bybit_private_ws_url(self, self.owner.clone(), network)
+                    }
                     _ => panic!("row"),
                 }
             }
@@ -460,6 +465,8 @@ impl Host for Harness {
             "emitAndLogError",
             "reconcilePrivateState",
             "fetchMarketsHelper",
+            "getConfiguredUrls",
+            "hyrotraderMode",
         ];
         if (Rc::ptr_eq(v, &self.owner) && functions.contains(&k))
             || (Rc::ptr_eq(v, &self.store) && k == "update")
@@ -538,6 +545,12 @@ impl Host for Harness {
         };
         assert!(captures.is_empty(), "native callback captures");
         match code.as_str() {
+            "hyrotraderMode" => Ok(raw("demo")),
+            "getConfiguredUrls" => Ok(object(vec![
+                ("label", raw("simulator")),
+                ("rest", get(&self.global, "HYROTRADER_SIMULATOR_URL")),
+                ("ws", get(&self.global, "HYROTRADER_SIMULATOR_WS_URL")),
+            ])),
             "input-current" => {
                 self.touch("isCurrent", &[])?;
                 Ok(boolean(self.profile != "stale-current"))
@@ -933,10 +946,10 @@ fn native(h: &Harness, result: &Result<Raw, Raw>) {
             if let Err(e) = result {
                 let message = if method == "getBybitPublicWsUrl" && h.profile == "invalid-category"
                 {
-                    "HyroTrader simulator only supports linear public WebSocket data"
+                    "HyroTrader only supports linear public WebSocket data"
                 } else {
                     match method {
-                        "getBybitRestBaseUrl" => "HyroTrader simulator REST URL is not configured",
+                        "getBybitRestBaseUrl" => "HyroTrader simulator REST URL is not configured.",
                         "getBybitPublicWsUrl" => {
                             "HyroTrader simulator public WebSocket URL is not configured"
                         }

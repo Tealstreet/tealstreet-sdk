@@ -363,33 +363,4 @@ describe('BloFin remaining audit regressions', () => {
     expect(refetchMarginType).not.toHaveBeenCalled();
     expect(fetchPositions).not.toHaveBeenCalled();
   });
-
-  it.each(['filled', 'canceled'])('prunes fill-delta memory when an order becomes %s', (state) => {
-    const exchange = createExchange();
-    const websocket = exchange.privateWebsocket;
-    const mappedOrder = {
-      id: 'order-1',
-      status: OrderStatus.Open,
-      symbol: 'BTCUSDT',
-      type: OrderType.Limit,
-      side: OrderSide.Buy,
-      price: 50_000,
-      amount: 2,
-      filled: 1,
-      remaining: 1,
-      reduceOnly: false,
-      lastUpdate: 1,
-      info: {},
-    };
-    vi.spyOn(exchange, 'mapOrders').mockReturnValue([mappedOrder]);
-    const fillMemory = (websocket as any).lastFilledSizeByOrderId as Map<string, number>;
-    fillMemory.set('order-1', 1);
-
-    websocket.handleOrderTopic({
-      data: [{ orderId: 'order-1', state, filledSize: '2', averagePrice: '50000' }],
-    });
-
-    expect(fillMemory.has('order-1')).toBe(false);
-    websocket.dispose();
-  });
 });

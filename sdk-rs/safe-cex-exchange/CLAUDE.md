@@ -1378,6 +1378,13 @@ endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
 
+The receive loop polls the open callback's synchronous prefix before dispatching
+a buffered first message, for direct and relay transports. A pending callback
+continues in the existing socket-owned task registry; the receive loop does not
+wait for its authentication or other asynchronous completion. The native TCP
+`js_socket_open_order` witness coalesces the upgrade and first frame and compares
+synchronous and asynchronous listener traces with Node.
+
 The shared JS facade's async snapshot/order/position methods return rejected
 Promises for preparation errors, including errors before their first await.
 Snapshot privacy/disposal guards precede retry-count coercion. The native

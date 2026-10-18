@@ -195,6 +195,11 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
             "HYROTRADER_SIMULATOR_WS_URL",
             &*crate::types::HYROTRADER_SIMULATOR_WS_URL,
         ),
+        ("HYROTRADER_PROD_URL", &*crate::types::HYROTRADER_PROD_URL),
+        (
+            "HYROTRADER_PROD_WS_URL",
+            &*crate::types::HYROTRADER_PROD_WS_URL,
+        ),
         ("INTERVAL", &*crate::types::INTERVAL),
         ("ORDER_SIDE", &*crate::types::ORDER_SIDE),
         ("POSITION_SIDE", &*crate::types::POSITION_SIDE),

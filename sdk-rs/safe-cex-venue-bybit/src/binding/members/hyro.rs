@@ -10,6 +10,9 @@ use crate::{
 
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     for name in [
+        "hyrotraderMode",
+        "getConfiguredUrls",
+        "shouldUseLocalRestOrderLifecycleFallback",
         "getBybitRestBaseUrl",
         "getBybitPublicWsUrl",
         "getBybitPrivateWsUrl",
@@ -17,15 +20,38 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let weak = std::rc::Rc::downgrade(&rt.shared);
         rt.this.define(
             name,
-            Js::function(name, move |_, args| {
+            Js::function(name, move |owner, args| {
                 let rt = safe_cex_exchange::js_runtime::scope::scope_of(&weak)?;
                 match name {
-                    "getBybitRestBaseUrl" => snapshots::get_bybit_rest_base_url(&rt, arg(&args, 0)),
+                    "hyrotraderMode" => Ok(Js::str(crate::hyro_configuration::hyrotrader_mode(
+                        &crate::binding::rt::venue(&rt)?.base.options(),
+                    ))),
+                    "getConfiguredUrls" => {
+                        let venue = crate::binding::rt::venue(&rt)?;
+                        let (label, _, _) =
+                            crate::hyro_configuration::get_configured_urls(&venue.base.options());
+                        let (rest, ws) = if label == "simulator" {
+                            ("HYROTRADER_SIMULATOR_URL", "HYROTRADER_SIMULATOR_WS_URL")
+                        } else {
+                            ("HYROTRADER_PROD_URL", "HYROTRADER_PROD_WS_URL")
+                        };
+                        Ok(Js::object(vec![
+                            ("label", Js::str(label)),
+                            ("rest", rt.global(rest)?),
+                            ("ws", rt.global(ws)?),
+                        ]))
+                    }
+                    "shouldUseLocalRestOrderLifecycleFallback" => Ok(Js::Bool(
+                        crate::hyro_configuration::should_use_local_rest_order_lifecycle_fallback(),
+                    )),
+                    "getBybitRestBaseUrl" => {
+                        snapshots::get_bybit_rest_base_url(&rt, owner, arg(&args, 0))
+                    }
                     "getBybitPublicWsUrl" => {
-                        snapshots::get_bybit_public_ws_url(&rt, arg(&args, 0), arg(&args, 1))
+                        snapshots::get_bybit_public_ws_url(&rt, owner, arg(&args, 0), arg(&args, 1))
                     }
                     "getBybitPrivateWsUrl" => {
-                        snapshots::get_bybit_private_ws_url(&rt, arg(&args, 0))
+                        snapshots::get_bybit_private_ws_url(&rt, owner, arg(&args, 0))
                     }
                     _ => unreachable!(),
                 }
