@@ -51067,7 +51067,7 @@
         }
       ]
     },
-    "evidence": "UNVALIDATED fixed generic profile: T=(f64,bool,String), native Js values constructed through production from_json. Calls the actual function from its compiler-selected source scope, without a new export or substitute helper. This profile does not claim all generic instantiations. Canonical/native controls pending.",
+    "evidence": "Executed finite generic profile: T=(f64,bool,String), native Js values constructed through production from_json. Calls the actual function from its compiler-selected source scope, without a new export or substitute helper. This profile does not claim all generic instantiations. Canonical missing-contract RED2 then native runtime GREEN2 over21 finite profiles, with all197 dependency decoder owners discovered. Independent production DTO/wire-presence mutations compile and fail the actual native UpdateOrder/public wire-decoder witnesses; exact restorations pass. See GENERIC_DECODER_REVIEW.md and scripts/generic-decoder-controls.py.",
     "instantiation": "decode",
     "monomorphization": "The actual generic function is selected without a new wrapper; its direct call fixes T=(f64,bool,String). Other generic instantiations are not claimed."
   },
@@ -51341,7 +51341,7 @@
         }
       ]
     },
-    "evidence": "UNVALIDATED fixed generic profile: D=owned serde_json::Value, T=Option<f64>; returned outer Some, explicit null and native number bits. Calls the actual function from its compiler-selected source scope, without a new export or substitute helper. This profile does not claim all generic instantiations. Canonical/native controls pending.",
+    "evidence": "Executed finite generic profile: D=owned serde_json::Value, T=Option<f64>; returned outer Some, explicit null and native number bits. Calls the actual function from its compiler-selected source scope, without a new export or substitute helper. This profile does not claim all generic instantiations. Canonical missing-contract RED2 then native runtime GREEN2 over21 finite profiles, with all197 dependency decoder owners discovered. Independent production DTO/wire-presence mutations compile and fail the actual native UpdateOrder/public wire-decoder witnesses; exact restorations pass. See GENERIC_DECODER_REVIEW.md and scripts/generic-decoder-controls.py.",
     "instantiation": "deserialize_present",
     "monomorphization": "The actual generic function is selected without a new wrapper; its direct call fixes D=owned serde_json::Value and T=Option<f64>. Other generic instantiations are not claimed."
   }
