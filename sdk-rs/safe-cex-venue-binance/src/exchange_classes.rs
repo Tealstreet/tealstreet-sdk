@@ -6,7 +6,8 @@ use crate::{
         PrivateBase, PrivateDependencies, PrivateParent, PrivateSocket, PrivateTimers,
     },
     private_event_value::{
-        EventArray, EventOps, EventValue, array_values, in_current_realm, native_json, number, record, string,
+        EventArray, EventOps, EventValue, array_values, in_current_realm, native_json, number,
+        record, string,
     },
     private_rest::{SnapshotClient, SnapshotRequestFuture},
     private_session::Venue,
