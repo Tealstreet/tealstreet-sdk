@@ -459,7 +459,10 @@ impl ApexOmniExchange {
             value => {
                 self.host.console(
                     "warn",
-                    &format!("[APEX OMNI] Refused order row: Order.reduceOnly must be boolean, got {value:?}"),
+                    &format!(
+                        "[APEX OMNI] Refused order row: Order.reduceOnly must be boolean, got {}",
+                        crate::response::diagnostic(value)?
+                    ),
                     None,
                 )?;
                 return Ok(Vec::new());
