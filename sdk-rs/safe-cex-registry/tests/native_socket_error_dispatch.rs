@@ -157,6 +157,7 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
     let actual = json!({
         "count": health.on_close_count,
         "lastCloseCode": health.last_close_code,
+        "lifetimeCloseCount": health.lifetime_close_count,
         "reconnectScheduled": logs.borrow().iter().any(|line| line.contains("Reconnecting in")),
     });
     venue.dispose().unwrap();

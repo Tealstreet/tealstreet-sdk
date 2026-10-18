@@ -395,18 +395,22 @@ impl WsRuntime for NativeRuntime {
                 Some(UpgradeHeaders::Static(map)) => map.clone().into_iter().collect(),
                 Some(UpgradeHeaders::Fresh(provider)) => provider().into_iter().collect(),
             };
-            let socket = connect_websocket(&url, &protocols, &headers)
-                .await
-                .map_err(|cause| {
+            let socket = match connect_websocket(&url, &protocols, &headers).await {
+                Ok(socket) => {
+                    if replay {
+                        frame_counts
+                            .borrow_mut()
+                            .push((url, socket.frame_counts.clone()));
+                    }
+                    Ok(socket)
+                }
+                Err(error @ safe_cex_transport::TransportError::Network(_)) => Err(error),
+                Err(cause) => {
                     let mut error = ExchangeError::new(cause.to_string());
                     error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(cause));
-                    error
-                })?;
-            if replay {
-                frame_counts
-                    .borrow_mut()
-                    .push((url, socket.frame_counts.clone()));
-            }
+                    return Err(error);
+                }
+            };
             Ok(Rc::new(native_ws_socket(socket)) as Rc<dyn WsSocket>)
         })
     }
@@ -430,29 +434,51 @@ impl WsRuntime for NativeRuntime {
     }
 }
 
-/// A plain (non-reconnecting) socket. Open is delivered first; after Close or
-/// terminate the stream stays pending, as a listener-less socket would.
+/// A plain socket delivers Open or the failed attempt's Error/Close pair.
+/// After Close or termination, event delivery stays pending.
 struct NativeWsSocket {
-    inner: Rc<NativeSocket>,
+    inner: Result<Rc<NativeSocket>, String>,
     opened: Rc<Cell<bool>>,
     ended: Rc<Cell<bool>>,
 }
-fn native_ws_socket(inner: NativeSocket) -> NativeWsSocket {
+fn native_ws_socket(
+    inner: Result<NativeSocket, safe_cex_transport::TransportError>,
+) -> NativeWsSocket {
     NativeWsSocket {
-        inner: Rc::new(inner),
+        inner: inner.map(Rc::new).map_err(|error| error.to_string()),
         opened: Rc::new(Cell::new(false)),
         ended: Rc::new(Cell::new(false)),
     }
 }
 impl WsSocket for NativeWsSocket {
     fn ready_state(&self) -> u8 {
-        self.inner.ready_state() as u8
+        self.inner
+            .as_ref()
+            .map_or(3, |inner| inner.ready_state() as u8)
     }
     fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+        let inner = match &self.inner {
+            Ok(inner) => inner.clone(),
+            Err(message) => {
+                if self.ended.get() {
+                    return Box::pin(std::future::pending());
+                }
+                let event = if !self.opened.replace(true) {
+                    WsEvent::Error(message.clone())
+                } else {
+                    self.ended.set(true);
+                    WsEvent::Close {
+                        code: Some(1006),
+                        reason: String::new(),
+                    }
+                };
+                return Box::pin(std::future::ready(Ok(event)));
+            }
+        };
         if !self.opened.replace(true) {
             return Box::pin(async { Ok(WsEvent::Open) });
         }
-        let (inner, ended) = (self.inner.clone(), self.ended.clone());
+        let ended = self.ended.clone();
         Box::pin(async move {
             if ended.get() {
                 return std::future::pending().await;
@@ -476,15 +502,19 @@ impl WsSocket for NativeWsSocket {
     }
     fn send(&self, message: &str) -> Result<(), ExchangeError> {
         self.inner
+            .as_ref()
+            .map_err(|message| ExchangeError::new(message.clone()))?
             .send(SocketFrame::Text(message.to_owned()))
             .map_err(|e| ExchangeError::new(e.to_string()))
     }
     fn close(&self) {
-        let _ = self.inner.close(Some(1000), "");
+        if let Ok(inner) = &self.inner {
+            let _ = inner.close(Some(1000), "");
+        }
     }
     fn terminate(&self) {
         self.ended.set(true);
-        let _ = self.inner.close(Some(1000), "");
+        self.close();
     }
     fn reconnect(&self) {
         // The core reconnects only host-managed wrappers; a plain socket just closes.

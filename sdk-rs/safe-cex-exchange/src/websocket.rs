@@ -1386,34 +1386,7 @@ impl BaseWebSocket {
                     descriptor.options,
                     reconnecting,
                 )
-                .await;
-            let socket = match socket {
-                Ok(socket) => socket,
-                Err(error) => {
-                    let connection_failed = error.origin.as_ref().is_some_and(|origin| {
-                        matches!(
-                            origin
-                                .error()
-                                .downcast_ref::<safe_cex_transport::TransportError>(),
-                            Some(safe_cex_transport::TransportError::Network(_))
-                        )
-                    });
-                    if !connection_failed {
-                        return Err(error);
-                    }
-                    if !self.is_disposed() && self.state.borrow().generation == generation {
-                        self.report_callback_result(
-                            self.handle_web_socket_error(&error.to_string()),
-                        );
-                        if !self.is_disposed() && self.state.borrow().generation == generation {
-                            self.report_callback_result(
-                                self.received_transport_close(Some(1006), ""),
-                            );
-                        }
-                    }
-                    return Ok(());
-                }
-            };
+                .await?;
             if self.is_disposed() || self.state.borrow().generation != generation {
                 socket.terminate();
                 socket.close();

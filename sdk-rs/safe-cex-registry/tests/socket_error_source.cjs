@@ -57,6 +57,7 @@ async function observe(name, failedUpgrade) {
     const closed = {
       count: owner.onCloseCount,
       lastCloseCode: owner.lastCloseCode ?? null,
+      lifetimeCloseCount: owner.lifetimeCloseCount,
       reconnectScheduled: logs.some(message => message.includes('Reconnecting in')),
     };
     assert(closed.reconnectScheduled, 'actual close schedules recovery');

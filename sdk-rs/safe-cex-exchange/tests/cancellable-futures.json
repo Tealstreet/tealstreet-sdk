@@ -2246,9 +2246,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "8aff9b3a5f6271b5efcb61c1e743ba5081425c080a1e37a58946b8afbbf8f6ae",
+      "producer_sha256": "048f152c708663808a27251ceb0570e69f32485381015fe7cb57fce6f1abeb89",
       "classification": "no-owned-latch",
-      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged. Reviewed #1094: the dial error projection retains its existing typed transport origin; no await, socket/task owner, guard or cancellation boundary changes."
+      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task. Reviewed #1082 physical counters: replay-only frame-count history is recorded synchronously after the successful handshake, holds numeric counters rather than the socket/task, and releases its borrow before return; handshake cancellation and NativeSocket drop ownership are unchanged. Reviewed #1094: Network failure returns a closed NativeWsSocket carrying Error/Close for existing core-owned event dispatch; admission failures retain their typed origin. No task or reader/writer is started on failure; successful handshake ownership and cancellation are unchanged."
     },
     {
       "owner": "src/native.rs::NativeWsSocket as WsSocket::next_event",
@@ -2261,9 +2261,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "2e164f4f5dcb5c3d0ac44751a1eb718285c42ed2030d01f1023e8f9222d4e509",
+      "producer_sha256": "ac427e6f86432604fb627b0733da9289d98d8ae3cceefa4750bc7143d6139a8b",
       "classification": "no-owned-latch",
-      "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future."
+      "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future. Reviewed #1094: the failed-network variant returns ready Error then Close futures and an unregistered terminal pending future, with no Open, waiter, task or new cancellation latch. Successful socket reads and existing termination ownership are unchanged; real native HTTP400/invalid-URL coverage is ws_lifecycle::native_failed_upgrade_delivers_error_then_close_without_open."
     },
     {
       "owner": "src/native.rs::TokenTunnel as TunnelHost::spawn_local",
@@ -2787,10 +2787,10 @@
         "await",
         "await"
       ],
-      "producer_sha256": "bf77191d6c863092ff61fbd7f8546ac04b85ee48e0c4f99440dc59812722cc37",
+      "producer_sha256": "b06fb61429e7a2d0bbcc168f05d4fc00f668e1fd8309b7939463fd63fd3558bc",
       "classification": "delegated",
       "delegate": "WsRuntime::dial / BaseWebSocket::start_managed_relay / BaseWebSocket::spawn_owned_kind",
-      "reason": "The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged. The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged. Reviewed #1082: opt-in per-dial history is appended synchronously; received_transport_close wraps the original close dispatch with counters and releases every receipt borrow before callbacks. All existing async boundaries and generation/task guards remain unchanged. Reviewed #1094: only typed network failures synchronously report error then abnormal close; constructor failures still propagate. Disposal/generation are checked before delivery and again after callbacks; no new await, task owner or guard is introduced."
+      "reason": "The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged. The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged. Reviewed #1082: opt-in per-dial history is appended synchronously; received_transport_close wraps the original close dispatch with counters and releases every receipt borrow before callbacks. All existing async boundaries and generation/task guards remain unchanged."
     },
     {
       "owner": "src/websocket.rs::BaseWebSocket::reconnect_base",
@@ -2835,7 +2835,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "6b4c07e974f03326430a525e7cf44c4e5d17ea2b366a48d31601fae2f92663ec"
+          "sha256": "bee4da68e6a1778eaf7383874013ac87bcfb743075db3668ee71d18666606061"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2880,7 +2880,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "6b4c07e974f03326430a525e7cf44c4e5d17ea2b366a48d31601fae2f92663ec"
+          "sha256": "bee4da68e6a1778eaf7383874013ac87bcfb743075db3668ee71d18666606061"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2985,7 +2985,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "6b4c07e974f03326430a525e7cf44c4e5d17ea2b366a48d31601fae2f92663ec"
+          "sha256": "bee4da68e6a1778eaf7383874013ac87bcfb743075db3668ee71d18666606061"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -3029,7 +3029,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "6b4c07e974f03326430a525e7cf44c4e5d17ea2b366a48d31601fae2f92663ec"
+          "sha256": "bee4da68e6a1778eaf7383874013ac87bcfb743075db3668ee71d18666606061"
         }
       ],
       "guards": [
