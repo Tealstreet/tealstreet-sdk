@@ -28323,5 +28323,70 @@
     },
     "reason": "Assembles ordered canonical Object entries from typed static field names and already retained Input payloads. It neither decodes nor projects those payloads; upstream parsing and downstream mapped-field admission remain separate owners.",
     "evidence": "Reviewed the complete production helper body and its callers. tests/support/websockets.rs::socket_frame_units_are_observed_before_wire executes the real private owner through SocketHost and observes all8 decoded peer packets before exact wire comparison, including non-ASCII/astral/surrogate args and ignored opaque data. tests/support/retained_info.rs::private_frame_info_keeps_opaque_utf16_and_wire_numbers constructs the actual binding and checks order/position Store info before JSON. All56 binding and72 exchange tests pass; native andWasm all-target strictClippy pass. This is a typed-construction classification, not an executed decoder-coverage claim."
+  },
+  "safe_cex_venue_apexomni::zklink_host::ZkLinkHandle": {
+    "category": "non-decoder",
+    "reason": "The production zkLink host carries an opaque Rc<dyn Any> between builder, transaction construction and signing. It exposes no raw-input decoder or string/JSON conversion; a foreign native payload is refused by the actual signer.",
+    "evidence": "packages/safe-cex/src/exchanges/apexomni/zklink/signer/transactions/contract.ts:67-82 constructs ContractBuilder, passes it to newContract and hands the result to createSignedContract. Native binding/signer.rs stores the actual Contract in this alias. binding::signer::handle_tests exercises that production NativeSigner (not a substitute): every native Contract field, retained pointer/lifetime, uninitialized signer refusal and foreign opaque payload refusal. Canonical accepted alias probes independently inspect the actual compiler type and absence of raw decoder traits; this row makes no signing-execution claim.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::any::Any",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::any::Any",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }

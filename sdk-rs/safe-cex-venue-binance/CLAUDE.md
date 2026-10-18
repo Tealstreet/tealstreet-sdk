@@ -13,6 +13,16 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
 
+Public socket owner receipts use `requiredFeatures: ["native"]`: the default
+inventory explicitly records unexecuted native-gated owners, then the canonical
+driver executes production NativeRuntime/ExchangeOwner observations. Callbacks,
+core handler state and binary64 bits are read before reporting; snapshot cases
+use actual reqwest HTTP against loopback. This is finite payload coverage, not
+arbitrary object/prototype or complete feature-matrix equivalence. Five unused
+family wrappers were retired; ExchangeOwner already constructed PublicSocket
+with PublicKind directly. Native observation fixtures use the existing Tokio
+runtime dependency only under the native feature.
+
 `scripts/public-dispatch-contracts.mjs` uses the maintained compiler driver with
 four exact owner filters for `public_dispatch::{Handlers,dispatch_binance_message}`
 and `ticker_capture::{Capture,lookup}`. The three raw-key/frame operations have
@@ -877,6 +887,20 @@ then restores exact production bytes and requires passes. These execution proofs
 do not classify the remaining Auth/PrivateState raw APIs or erase the documented
 UTF-8 frame boundary.
 
+`PrivateSocket` has a specific typed constructor/Deref accepted-set record.
+`scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
+including full dependency discovery and actual compiler features, then checks the
+one resulting classification receipt. It does not claim decoder execution;
+`private_owner_binding` and its independently compiled controls establish the
+separate real constructor/Store/authentication effects described above.
+
+`Auth` and `PrivateState` retain executed raw API contracts gated by the real
+native Cargo feature. The default receipt is explicitly unobserved; the canonical
+driver executes fresh native observations over production native_dependencies and
+ExchangeOwner. See [PRIVATE_NATIVE_OWNER_REVIEW.md](PRIVATE_NATIVE_OWNER_REVIEW.md)
+for the six actual APIs, finite native effects and independent compiled controls.
+Do not replace these raw observations with typed labels or default mock parents.
+
 The standalone `delegated_methods` extraction layer has no production caller and
 is retired with its options alias and mock-only oracle. Keep the six TypeScript
 rows on the live ExchangeState listener/dispatch members. The native candle,
@@ -896,6 +920,12 @@ Their classification receipts do not execute signing or establish arbitrary-JS
 parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
+
+The five `order_batches` function contracts distinguish static endpoint and native
+POST-forwarding roles from executed dense-array, iterable-guard and ID outputs.
+`ORDER_BATCH_CONTRACT_REVIEW.md` documents their finite native profiles, actual
+signed bulk-placement witness, compiled controls and canonical scoped measure.
+Keep the three existing callable alias records and their separate evidence.
 
 The exchange assembly's legacy JSON error port forwards the selected raw value
 to BaseExchange. Do not String-coerce it first: Base distinguishes strings,
