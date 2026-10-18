@@ -237,12 +237,27 @@ impl From<ExchangeError> for Thrown {
                     }
                 }
                 if matches!(
-                    cause.value().get("originalErrorIsSelf"),
+                    cause.value().get("originalErrorIsError"),
                     Some(OwnedJsValue::Bool(true))
                 ) {
+                    let snapshot = value.get("originalError").expect("captured original error");
+                    let original = error_object(
+                        &snapshot.get("name").expect("name").to_display(),
+                        &snapshot.get("message").expect("message").to_display(),
+                    );
+                    for (key, cell) in snapshot.own_entries().expect("captured error fields") {
+                        if key.as_ref() == "name".encode_utf16().collect::<Vec<_>>()
+                            && cell.strict_equals(&original.get("name").expect("name"))
+                        {
+                            continue;
+                        }
+                        original
+                            .define_key(&key, cell)
+                            .expect("fresh original error snapshot");
+                    }
                     value
-                        .define("originalError", value.clone())
-                        .expect("fresh self error property");
+                        .define("originalError", original)
+                        .expect("fresh original error snapshot");
                 }
                 if cause.value().get("enhancedMessage").is_some()
                     && matches!(cause.value().get("message"), Some(OwnedJsValue::String(units)) if String::from_utf16_lossy(units) == error.message)
@@ -267,9 +282,16 @@ impl From<ExchangeError> for Thrown {
             source = original.source();
         }
         if let Some(response) = error.retained_response_input() {
+            let response = from_retained_input(response);
             value
-                .define("response", from_retained_input(response))
+                .define("response", response.clone())
                 .expect("fresh retained response property");
+            let original = value.get("originalError").expect("fresh error field");
+            if matches!(&original, Js::Object(object) if object.class == "Error") {
+                original
+                    .define("response", response)
+                    .expect("fresh original response property");
+            }
         }
         if let Some(code) = &error.code {
             value

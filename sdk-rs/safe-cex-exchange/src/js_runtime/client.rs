@@ -728,11 +728,60 @@ impl RestAdapter for JsRestAdapter {
                             "originalError",
                         ] {
                             let value = optional(&thrown.value, field)?;
-                            if field == "originalError" && value.same_reference(&thrown.value) {
+                            if field == "originalError"
+                                && matches!(&value, Js::Object(object) if object.class == "Error")
+                            {
+                                use super::value::owned::OwnedJsValue;
+                                let OwnedJsValue::Object(mut snapshot) =
+                                    OwnedJsValue::object(fields.clone())
+                                else {
+                                    unreachable!("error metadata object")
+                                };
+                                for (key, cell) in value.own_entries()? {
+                                    if key.as_ref()
+                                        == "originalError".encode_utf16().collect::<Vec<_>>()
+                                        || key.as_ref()
+                                            == "response".encode_utf16().collect::<Vec<_>>()
+                                        || snapshot
+                                            .iter()
+                                            .any(|(name, _)| name.as_slice() == key.as_ref())
+                                        || cell.is_callable()
+                                    {
+                                        continue;
+                                    }
+                                    let captured = if key.as_ref()
+                                        == "config".encode_utf16().collect::<Vec<_>>()
+                                        && cell.is_object()
+                                    {
+                                        let mut config = vec![];
+                                        for (name, cell) in cell.own_entries()? {
+                                            if cell.is_callable()
+                                                || cell.array_items().is_some_and(|items| {
+                                                    items
+                                                        .into_iter()
+                                                        .flatten()
+                                                        .any(|item| item.is_callable())
+                                                })
+                                            {
+                                                continue;
+                                            }
+                                            config.push((
+                                                name.to_vec(),
+                                                OwnedJsValue::from_js(&cell)?,
+                                            ));
+                                        }
+                                        OwnedJsValue::Object(config)
+                                    } else {
+                                        OwnedJsValue::from_js(&cell)?
+                                    };
+                                    snapshot.push((key.to_vec(), captured));
+                                }
+                                let snapshot = OwnedJsValue::Object(snapshot);
                                 fields.push((
-                                    "originalErrorIsSelf",
+                                    "originalErrorIsError",
                                     super::value::owned::OwnedJsValue::Bool(true),
                                 ));
+                                fields.push(("originalError", snapshot));
                                 continue;
                             }
                             if !value.is_undefined() || thrown.value.has_own(field) {

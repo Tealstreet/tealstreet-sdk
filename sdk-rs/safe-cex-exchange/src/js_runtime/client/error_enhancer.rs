@@ -119,8 +119,27 @@ pub(super) fn enhance_axios_error(error: &Js, exchange: &str, now: f64) -> Resul
         )?;
     }
     enhanced.set("context", context)?;
-    enhanced.set("originalError", error.clone())?;
-    let original = error.clone();
+    let original = if let Js::Object(object) = error
+        && object.class == "Error"
+    {
+        let snapshot = error_object("Error", "");
+        let Js::Object(data) = &snapshot else {
+            unreachable!("Error constructor")
+        };
+        *data.props.borrow_mut() = object.props.borrow().clone();
+        *data.proto.borrow_mut() = object.proto.borrow().clone();
+        data.props.borrow_mut().shift_remove(
+            "originalError"
+                .encode_utf16()
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+        snapshot.define("message", enhanced.get("enhancedMessage")?)?;
+        snapshot
+    } else {
+        error.clone()
+    };
+    enhanced.set("originalError", original.clone())?;
     enhanced.define_accessor(
         "message",
         Some(std::rc::Rc::new(move |this| {

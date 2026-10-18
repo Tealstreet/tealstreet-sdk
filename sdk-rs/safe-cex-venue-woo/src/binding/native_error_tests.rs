@@ -78,6 +78,16 @@ fn constructed_woo_client_keeps_error_fields_through_typed_rest_adapter() {
             ]),
         )
         .unwrap();
+    original
+        .define(
+            "extra",
+            Js::object(vec![
+                ("number", Js::Number(f64::INFINITY)),
+                ("missing", Js::Undefined),
+                ("text", Js::utf16(&[0xd800])),
+            ]),
+        )
+        .unwrap();
     let requests = Rc::new(RefCell::new(vec![]));
     let exchange = WooExchange::new(
         safe_cex_types::ExchangeName::Woo,
@@ -173,13 +183,62 @@ fn constructed_woo_client_keeps_error_fields_through_typed_rest_adapter() {
     };
     assert_eq!(object.class, "Error");
     assert!(
-        error
+        !error
             .value
             .get("originalError")
             .unwrap()
             .strict_equals(&error.value),
-        "enhanced Error originalError refers to the materialized Error itself"
+        "approved originalError snapshot must not point back to the Error"
     );
+    let snapshot = error.value.get("originalError").unwrap();
+    assert!(matches!(&snapshot, Js::Object(object) if object.class == "Error"));
+    assert!(!snapshot.has_own("originalError"));
+    assert_eq!(
+        snapshot
+            .get("config")
+            .unwrap()
+            .get("url")
+            .unwrap()
+            .to_display(),
+        "/v3/accountinfo"
+    );
+    assert_eq!(
+        snapshot
+            .get("config")
+            .unwrap()
+            .get("method")
+            .unwrap()
+            .to_display(),
+        "get"
+    );
+    let extra = snapshot.get("extra").unwrap();
+    assert_eq!(
+        extra.get("number").unwrap().to_number().unwrap(),
+        f64::INFINITY
+    );
+    assert!(extra.has_own("missing") && extra.get("missing").unwrap().is_undefined());
+    assert_eq!(
+        extra.get("text").unwrap().to_js_string().unwrap().as_ref(),
+        &[0xd800]
+    );
+
+    for field in [
+        "name",
+        "message",
+        "code",
+        "stack",
+        "isAxiosError",
+        "enhancedMessage",
+    ] {
+        assert!(
+            snapshot
+                .get(field)
+                .unwrap()
+                .strict_equals(&error.value.get(field).unwrap()),
+            "original Error snapshot preserves {field}"
+        );
+    }
+
     assert_eq!(requests.borrow().len(), 1);
     assert!(
         !requests.borrow()[0]
@@ -193,6 +252,15 @@ fn constructed_woo_client_keeps_error_fields_through_typed_rest_adapter() {
     );
     use safe_cex_exchange::exchange::Exchange;
     exchange.dispose().unwrap();
+    let Js::Object(value) = &error.value else {
+        panic!("materialized Error")
+    };
+    let weak = Rc::downgrade(value);
+    drop(error);
+    assert!(
+        weak.upgrade().is_none(),
+        "ERROR-SNAPSHOT-RELEASE must not retain an Rc self cycle"
+    );
 }
 
 #[test]
