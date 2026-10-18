@@ -486,3 +486,13 @@ method lookup and the original values/errors through shared IteratorRecord.
 `runtime-receiver-controls.py` compiles one semantic fault per receiver, requiring
 named failures and exact restored passes. Keep limited/unlimited client selection
 observable through the real signed HTTP pipeline.
+
+### API retry receiver coverage
+
+`API_RETRY_RECEIVER_REVIEW.md` records the native read/signature retry predicates.
+Preserve source short-circuit/property access order and strict native code checks;
+reuse the shared transport deny-list data without a second String conversion.
+`accepted_api_receivers` reaches actual constructed Scope callbacks; the source
+script executes the live utility and exact Spot retry arrow. The three serial
+`api-receiver-controls.py` faults must fail named compiled witnesses and restore
+exactly. Array.join UTF16 behavior is shared-owned and repaired separately in #1037.

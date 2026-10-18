@@ -55,6 +55,31 @@ fn retry_condition_matches_network_exclusions_and_live_source_access_order() {
             .unwrap()
         );
     }
+    // Network codes are compared strictly, never coerced to UTF8 or strings.
+    for code in [Js::Number(7.0), Js::utf16(&[0xd800]), Js::object(vec![])] {
+        assert!(
+            result(
+                &predicate,
+                network_error(Js::str("GET"), code, Js::Undefined)
+            )
+            .unwrap()
+        );
+    }
+    for code in [
+        Js::Number(-0.0),
+        Js::Bool(false),
+        Js::Null,
+        Js::Undefined,
+        Js::str(""),
+    ] {
+        assert!(
+            !result(
+                &predicate,
+                network_error(Js::str("GET"), code, Js::Undefined)
+            )
+            .unwrap()
+        );
+    }
     let trace = Rc::new(RefCell::new(vec![]));
     let config = Js::object(vec![]);
     let seen = trace.clone();
@@ -182,11 +207,22 @@ fn spot_retry_condition_short_circuits_and_stamps_original_config_once() {
         "error",
         Js::array(vec![Js::str("EAPI:Invalid signature")]),
     )]);
-    let error = Js::object(vec![
-        ("config", config.clone()),
-        ("response", Js::object(vec![("data", data.clone())])),
-    ]);
+    let responses = Rc::new(Cell::new(0));
+    let gets = responses.clone();
+    let response = Js::object(vec![("data", data.clone())]);
+    let error = Js::object(vec![("config", config.clone())]);
+    error
+        .define_accessor(
+            "response",
+            Some(Rc::new(move |_| {
+                gets.set(gets.get() + 1);
+                Ok(response.clone())
+            })),
+            None,
+        )
+        .unwrap();
     assert!(result(&predicate, error.clone()).unwrap());
+    assert_eq!(responses.get(), 2);
     assert!(
         config
             .get(SIGNATURE_RETRY_CONFIG_KEY)
@@ -194,6 +230,7 @@ fn spot_retry_condition_short_circuits_and_stamps_original_config_once() {
             .strict_equals(&Js::Bool(true))
     );
     assert!(!result(&predicate, error).unwrap());
+    assert_eq!(responses.get(), 3);
     assert_eq!(
         data.get("error").unwrap().array_values().unwrap()[0].to_display(),
         "EAPI:Invalid signature"
