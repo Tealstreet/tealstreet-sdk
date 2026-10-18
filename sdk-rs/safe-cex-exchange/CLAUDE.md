@@ -577,6 +577,14 @@ Binance and BingX signature predicates use these conversions instead of rebuildi
 an Error from text. The native order/account witnesses cover resolved envelopes
 and HTTP rejection, and assert that coercion failures never trigger a resend.
 
+The JS REST adapter keeps string error-code UTF-16 units in the existing owned
+callback origin; `RestFailure.code` remains its explicit UTF-8 diagnostic view.
+The shared ExchangeError conversion applies response and context views to both
+retained callback causes and ordinary failures, preserving the complete original
+RestFailure for downcasts. The constructed Aster rejection regression compares
+normal and lone-surrogate codes to the maintained source; the core origin test
+also checks response phase, own undefined, signed zero, keys and request metadata.
+
 `RestFailure.context` is boxed to keep the response-bearing error small; the
 metadata is unchanged. `RestFailure.code` preserves general host/status error codes as well as the code
 copied from opaque NetworkFailure. The library network-or-idempotent helper is
@@ -1582,3 +1590,11 @@ js_number_safe_integer witness compares239 raw-bit inputs and13 argument types
 with Node, including poisonous objects. WOO’s constructed client-ID rule compares
 26 actual maintained-source cases through this shared builtin. Both regressions
 compile and fail when the static binding is absent.
+
+String uppercase/lowercase conversion maps whole valid Unicode runs and preserves
+unpaired UTF-16 units verbatim. Context-sensitive lowercase mappings keep their
+valid-run context. Trim slices the original units using the shared RegExp
+whitespace predicate. `tests/js_string_utf16.rs` compares 4,109 Node cases per
+method through the installed String builtin on NativeRuntime, including every
+surrogate unit, paired astral letters, Greek sigma and whitespace boundaries.
+All three regressions compile and fail against the original production bodies.
