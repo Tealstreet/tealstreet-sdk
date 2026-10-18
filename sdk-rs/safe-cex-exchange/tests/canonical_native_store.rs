@@ -1273,3 +1273,35 @@ fn audit_diagnostic_property_failure_stops_before_revision_and_notification() {
             .same_reference(&row)
     );
 }
+
+#[test]
+fn typed_snapshot_does_not_invent_null_for_source_undefined_optional_properties() {
+    let expected = source();
+    let store = DefaultStore::new();
+    let facade = store.facade().unwrap();
+    let raw = facade.call_method("serialize", vec![]).unwrap();
+    assert_eq!(
+        raw.has_own("starkConfig"),
+        expected["defaultProjection"]["starkConfigOwn"]
+            .as_bool()
+            .unwrap()
+    );
+    assert!(raw.get("starkConfig").unwrap().is_undefined());
+    assert!(
+        !expected["defaultProjection"]["wire"]
+            .as_object()
+            .unwrap()
+            .contains_key("starkConfig")
+    );
+    let typed = store.serialize().unwrap();
+    assert!(
+        typed.stark_config.is_none(),
+        "a source undefined optional JSON property cannot become Some(null)"
+    );
+    assert!(
+        serde_json::to_value(&typed)
+            .unwrap()
+            .get("starkConfig")
+            .is_none()
+    );
+}

@@ -220,10 +220,7 @@ fn request_increment_never_notifies_or_changes_socket_health() {
         .unwrap();
     store.record_request_outcome(RequestOutcome::Ok).unwrap();
     assert!(snapshot(&store).get("requestStats").is_none());
-    // The native source snapshot owns undefined; the strict typed optional
-    // record cannot represent that present property and refuses visibly.
-    assert_eq!(
-        store.serialize().unwrap_err().phase(),
-        safe_cex_types::StoreReadPhase::Projection
-    );
+    // The source snapshot retains own undefined, while its declared optional
+    // typed view omits it rather than inventing an empty record or JSON null.
+    assert!(store.serialize().unwrap().request_stats.is_none());
 }
