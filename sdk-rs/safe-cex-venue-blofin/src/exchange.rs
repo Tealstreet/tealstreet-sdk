@@ -165,6 +165,11 @@ pub trait BlofinExchangeHost: 'static {
     fn clock_ms(&self) -> f64;
     fn wall_clock_ms(&self) -> f64;
     fn sleep(&self, delay: f64) -> rest_lifecycle::LifecycleFuture<'_, (), Self::Error>;
+    /// Start each Promise.all child eagerly and retain it independently of its waiter.
+    fn start_order_read(
+        &self,
+        body: rest_lifecycle::LifecycleFuture<'static, Vec<Order>, Self::Error>,
+    ) -> rest_lifecycle::LifecycleFuture<'static, Vec<Order>, Self::Error>;
     fn init_external_public_data(
         &self,
         base: &Self::Base,
@@ -640,8 +645,24 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         order_reads::fetch_trigger_orders(self.context.store.as_ref(), self.xhr.as_ref(), &host)
             .await
     }
+    fn order_families(
+        self: &Rc<Self>,
+    ) -> [rest_lifecycle::LifecycleFuture<'static, Vec<Order>, H::Error>; 3] {
+        let normal = self.clone();
+        let algo = self.clone();
+        let trigger = self.clone();
+        [
+            self.host
+                .start_order_read(Box::pin(async move { normal.fetch_normal_orders().await })),
+            self.host
+                .start_order_read(Box::pin(async move { algo.fetch_algo_orders().await })),
+            self.host.start_order_read(Box::pin(
+                async move { trigger.fetch_trigger_orders().await },
+            )),
+        ]
+    }
     pub async fn fetch_orders_with_retry(
-        &self,
+        self: &Rc<Self>,
         retries: f64,
     ) -> Result<Vec<Order>, ServiceError<H::Error>> {
         let service = self.service();
@@ -651,16 +672,13 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             sleep: Box::new(move |delay| self.host.sleep(delay)),
             now: &now,
         };
-        order_reads::fetch_orders_with_retry(
-            retries,
-            self.context.store.as_ref(),
-            self.xhr.as_ref(),
-            &host,
-        )
+        order_reads::fetch_orders_with_retry(retries, self.context.store.as_ref(), &host, &|| {
+            self.order_families()
+        })
         .await
     }
     pub async fn fetch_orders(
-        &self,
+        self: &Rc<Self>,
         _symbols: Option<&[String]>,
     ) -> Result<Vec<Order>, ServiceError<H::Error>> {
         let service = self.service();
@@ -670,12 +688,9 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             sleep: Box::new(move |delay| self.host.sleep(delay)),
             now: &now,
         };
-        order_reads::fetch_orders(
-            _symbols,
-            self.context.store.as_ref(),
-            self.xhr.as_ref(),
-            &host,
-        )
+        order_reads::fetch_orders(_symbols, self.context.store.as_ref(), &host, &|| {
+            self.order_families()
+        })
         .await
     }
     pub async fn fetch_historical_orders(

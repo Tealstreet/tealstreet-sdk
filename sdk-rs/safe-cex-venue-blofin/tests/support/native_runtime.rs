@@ -24,7 +24,7 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
 };
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 pub struct Runtime {
@@ -176,6 +176,8 @@ pub struct Wire {
     pub bodies: RefCell<BTreeMap<String, Value>>,
     pub pages: RefCell<BTreeMap<String, std::collections::VecDeque<Value>>>,
     pub retained_bodies: RefCell<BTreeMap<String, RestResponseBody>>,
+    pub paused_cursor: Rc<RefCell<Option<String>>>,
+    pub paused_waker: Rc<RefCell<Option<Waker>>>,
 }
 pub fn path(url: &str) -> &str {
     url.split('?').next().unwrap_or(url)
@@ -202,7 +204,24 @@ impl RestAdapter for Wire {
                 .cloned()
                 .unwrap_or(json!({"code":"0","msg":"success","data":[]}))
         };
+        let paused_cursor = self.paused_cursor.clone();
+        let paused_waker = self.paused_waker.clone();
+        let cursor = r
+            .params
+            .as_ref()
+            .and_then(|p| p.get("after"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         Box::pin(async move {
+            std::future::poll_fn(|cx| {
+                if cursor.is_some() && *paused_cursor.borrow() == cursor {
+                    *paused_waker.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
             Ok(RestResponse {
                 status: 200,
                 reason: None,

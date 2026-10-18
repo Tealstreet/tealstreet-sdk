@@ -123,6 +123,17 @@ fn rejected_order_family_does_not_cancel_a_sibling_pagination() {
         ]
         .into(),
     );
+    *wire.paused_cursor.borrow_mut() = Some("page-b".into());
+    let logs = Rc::new(RefCell::new(Vec::new()));
+    let seen = logs.clone();
+    venue.base().on_args(
+        "log",
+        Rc::new(move |_, args| {
+            seen.borrow_mut()
+                .push(String::from_utf16(&args[0].to_js_string().unwrap()).unwrap());
+            Ok(())
+        }),
+    );
     let pending = venue.fetch_orders(None);
     drop(pending); // The public waiter owns neither the operation nor its siblings.
     runtime.pump();
@@ -145,9 +156,32 @@ fn rejected_order_family_does_not_cancel_a_sibling_pagination() {
         "ORDER-SIBLING public fetchOrders must finish the successful sibling's pagination after another family rejects"
     );
     assert_eq!(
+        wire.requests
+            .borrow()
+            .iter()
+            .filter(|r| support::path(&r.url) == "/api/v1/trade/orders-pending")
+            .count(),
+        1,
+        "the failed join enters backoff without waiting for the successful sibling or starting another attempt"
+    );
+    assert_eq!(
         runtime.now.get(),
         1_710_000_000_000.0,
         "no retry timer advanced"
     );
+    assert_eq!(source["backoff"], true);
+    assert!(
+        logs.borrow()
+            .iter()
+            .any(|s| s == "[blofin] fetchOrders attempt 1 failed, retrying..."),
+        "ORDER-FAIL-FAST backoff begins while the successful sibling's last HTTP response is still held"
+    );
+    assert!(
+        wire.paused_waker.borrow().is_some(),
+        "actual sibling response is held"
+    );
+    wire.paused_cursor.borrow_mut().take();
+    wire.paused_waker.borrow_mut().take().unwrap().wake();
+    runtime.pump();
     venue.dispose().unwrap();
 }
