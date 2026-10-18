@@ -135,6 +135,12 @@ Public websocket subscription helpers snapshot shared JS own-key order and read
 each count immediately before sending. Native-count callbacks preserve NaN and
 infinities; nonnumeric counts are None. Bind the fallible send callback to the
 core socket when composing classes. Send errors abort the remaining keys.
+All five concrete PublicState kinds use subscribe_binance_public and its private
+encoder. Keep the live-source cases on that actual shared route; do not recreate
+unused family-named forwarding wrappers. The native subscription receipt test
+opens every kind with native_dependencies and checks outgoing bytes, reentry and
+send failure. See PUBLIC_SUBSCRIPTION_REVIEW.md for individual classifications
+and compiled body controls.
 
 Public onOpen bodies use BaseWebSocket send/reset rather than local socket or
 orderbook replicas. Market variants keep their books; public/Spot variants reset
@@ -589,6 +595,37 @@ updates independently, requires the named native assertion to fail, restores exa
 source bytes and requires a pass after each fault. The selected alias inventory
 runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
 
+The account leverage aliases are native computation capabilities. The constructed
+Futures/PM overlay witness checks signed bracket requests, Store publication and
+unchanged market fields. `scripts/account-leverage-alias-contracts.mjs` measures
+their actual native traits with the maintained authenticated compiler context.
+
+The two `margin_mode` free functions are typed asynchronous commands, with exact
+compiler API classifications rather than decoder-admission claims. Their separate
+production-function witnesses in `margin_mode` and `margin_dispose` compare 64
+maintained source cases and poll both futures margin modes across a pending POST.
+Run the canonical accepted-set `--measure --module=margin_mode` for classification
+receipts; those receipts do not execute the commands or cover arbitrary JS inputs.
+
+### Position snapshot callback alias receipts
+
+`position_snapshots::{Emit,Log}` are executable capabilities captured from the
+actual ExchangeState. `node scripts/snapshot-alias-contracts.mjs` (cwd this
+crate) uses fresh authenticated compiler discovery and runs the two native alias
+trait/type probes. These are classification receipts, not callback execution.
+The concrete execution witnesses are in `tests/support/snapshot_aliases.rs`,
+included by the native `private_classes` target. They construct the production
+native dependencies/ExchangeOwner, drive signed Futures/PM positions failures
+and Futures account balance aggregation through native HTTP, and observe Base
+error/log callbacks, one-time logging, native balance bits and listener errors.
+Run them with `cargo test --locked --jobs 1 -p safe-cex-venue-binance --features
+native --test private_classes snapshot_aliases` from `sdk-rs`.
+`python3 safe-cex-venue-binance/scripts/snapshot-alias-controls.py` independently
+faults Emit forwarding and Log severity in the production capture bodies,
+requires the corresponding compiled native assertion to fail, then restores the
+exact file and requires GREEN. This cohort makes no claim for other aliases or
+Wasm callback execution.
+
 `public_rest::RestFuture` is the pinned request continuation returned by the live
 `RestContext::get`, with a reviewed `'static` compiler instantiation. Its specific
 non-decoder classification does not classify the resolved JSON or other lifetimes.
@@ -603,6 +640,21 @@ source claims before running ordinary alias probes. Separate
 paths independently; both must compile and fail the named native test, then pass
 after exact source restoration. Other owners and generic instantiations remain
 outside this finite evidence.
+
+Native HTTP weight guards receive canonical shared AxiosHeaders on both successful
+responses and reconstructed rejection responses. NativeImports reads and invokes
+the actual get method with the original header receiver. The native
+`production_native_request_weight_callbacks_observe_success_and_rejection` test
+compares five signed request outcomes, including mixed-case weight/retry headers,
+against actual maintained TS guards with installed Axios. Its only request stub
+is the terminal RestAdapter; the factories, signer and response guards are live.
+
+The twenty history/API/lifecycle capabilities have individual source-role records
+and authenticated native compiler probes in `scripts/lifecycle-alias-contracts.mjs`.
+Their real native owner/HTTP/socket/signing/Store witnesses and compiled controls
+are described in `LIFECYCLE_ALIAS_REVIEW.md`. Income paging uses the canonical
+native typed bridge on both sides of the shared pager, preserving native number
+bits while retaining the existing numeric transaction/trade ID String policy.
 
 ### Retired duplicate order throttle
 
@@ -624,3 +676,99 @@ production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
 receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
+
+
+The private REST `SnapshotCall` capture preserves each source console argument
+as a native value and forwards the explicit log severity. Caught errors use the
+canonical `Thrown` materialization, so their name/message reach the console sink
+as an Error rather than a message string. `snapshot_call_binding` in the native
+`private_classes` target executes actual signed order requests and observes the
+captured severity, original data bits/presence and caught Error before projection.
+`scripts/snapshot-call-controls.py` independently corrupts those three production
+forwarding paths, requires compiled named assertion failures and exact-restoration
+passes. `scripts/snapshot-call-alias-contracts.mjs` authenticates fresh compiler
+metadata and checks only the selected alias classification; it does not replace
+the native callback execution witnesses or classify the continuation aliases.
+
+The public ticker handlers consume canonical native EventArray values from the
+constructed public classes. The old PublicEvent/PublicEvents JSON adapter and its
+oracle-only test/control tail are removed; they had no production caller.
+The actual native ticker census in private_classes retains source comparisons for
+all three families; its production field-routing control requires three compiled
+failures and exact-restored passes.
+
+The remaining five public stream aliases have a finite authenticated compiler
+runner, `scripts/public-stream-alias-contracts.mjs`. Failure, TickerFields,
+CallbackList and CoreInvoke are specific non-decoder capabilities; their native
+trait receipts do not claim callback execution. The constructed native ticker
+census and inverse socket topic/depth tests execute their live consumers.
+BinanceDepthUpdate remains a live map decoder. Its two native observations read
+all keys, nested values, row cardinality, UTF16 units and numeric bits. Run the
+runner with `--controls` to corrupt opaque-member retention and signed zero
+independently, require named native failures, then restore the exact contract.
+These five rows do not classify other function owners or feature combinations.
+
+Keep production imports explicit. The canonical accepted-set scanner must prove
+macro provenance across each source scope; wildcard imports can hide that proof
+even when the current business logic compiles. Import changes also require review
+of any affected source pins; nested helper bodies keep their existing contracts.
+
+The public frame RAII guard lives at module scope so compiler discovery covers
+its lifetime and Drop implementation. The native `public_frame_guard` test in
+`private_classes` checks packet release after success, rejection and unwind,
+original failure identity and the next real Store ticker update for all families.
+`scripts/public-frame-guard-controls.py` removes the actual pop, requires a compiled
+packet-retention failure and restores the exact source before requiring GREEN.
+
+The private-construction Clone reviews in the Binance construction policy cover
+three reusable capabilities: the inverse listener retry context, shared class
+settlement observations and captured private arrows with their receiver/base
+leases. The disconnected candle-listener witness executes the actual retry
+clone before a real socket frame and cleanup; the native private-clone witness
+holds a listen-key request, drops the original settlement and observes both
+clones before invoking a cloned reconnect arrow. These reviews do not classify
+raw-input decoders or widen accepted representations.
+
+
+The private REST continuation aliases have finite native evidence in
+`tests/support/snapshot_future_binding.rs`. The actual PM exchange starts the
+regular signed request, awaits its member result before invoking the conditional
+member, and keeps the aggregate pending until that second HTTP response settles.
+The witness reads ordered native fields, signed-zero/NaN bits and own-undefined
+from both results, and separately checks rejected conditional settlement against
+the source Store fallback and Base error emitter. Only terminal HTTP is held.
+`scripts/snapshot-future-controls.py` independently corrupts member order and
+request-result forwarding, requires successful compilation plus the named native
+failure, restores exact production bytes and requires GREEN after each fault.
+`scripts/snapshot-future-alias-contracts.mjs` authenticates compiler artifacts and
+classifies only `SnapshotFuture`/`SnapshotRequestFuture`; those classification
+receipts are distinct from executing the real continuations and do not classify
+the response payloads or unrelated aliases.
+The seven `public_listeners` aliases have a finite compiler-authenticated review
+in `scripts/public-listener-alias-contracts.mjs`. `Book` is an actual map decoder,
+with native per-level binary64 observations and Rc identity; the six callable,
+future and sequence-state capabilities retain their individual role reviews.
+`tests/support/public_listener_aliases.rs` constructs the real native dependencies
+for Futures/PM/Spot. It advances the virtual timer before subscription, holds
+terminal snapshot HTTP while two frames buffer, checks the exact endpoint and
+flat query, then checks one retained book through live updates and cleanup.
+`NativeListenerOperations::get_snapshot` passes raw query fields to `run_request`:
+the latter installs GET args into config.params, so callers must not wrap again.
+Separate compiled semantic controls require named native failures and exact
+source restoration for every reviewed alias.
+
+The snapshot rejection fixture settles rejected HTTP through `RestFailure`, not
+a fulfilled response with status 400. Its exact Base-formatted emitter assertion
+distinguishes transport rejection from malformed fulfilled-body validation.
+`scripts/snapshot-rejection-fixture-control.py` compiles the old fulfilled fixture,
+requires that assertion to fail and restores the genuine rejection path. This is
+a fixture-semantics check, separate from the two production continuation controls.
+
+The legacy `public_message`, `private_message`, `spot_public_message` and
+`public_candle_delegate` callback extractions have no production callers and were
+removed with `message_entry` and its standalone oracle/control receipts. All
+nine mapped source members retain their existing concrete native class bodies.
+Use `private_classes --features native` for actual native private frame/Store,
+public ticker generations, candle delegation/cleanup and depth recovery proofs.
+Registry/N-API construction reaches those concrete classes. The current wasm FFI
+exports only `parity_probe`/`version`, with no legacy message entry.

@@ -2,7 +2,7 @@
 //! parsing and callback mutation. Captured realm referents retain inherited
 //! identity, arity and mutations shared with the core statistics implementation.
 use crate::{
-    private_event_value::*,
+    private_event_value::{EventOps, EventValue, number, string},
     public_listeners::Parser,
     request_weight::{Failure, type_error},
 };

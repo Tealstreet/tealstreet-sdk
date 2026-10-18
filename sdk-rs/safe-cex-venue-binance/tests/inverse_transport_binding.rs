@@ -111,10 +111,14 @@ fn actual_public_factory_bypasses_private_provider_routing() {
         .call_method("fetchMarkets", vec![])
         .unwrap();
     let markets = h
-        .drive(Box::pin(async move {
-            await_js(pending)
-                .await
-                .map_err(|error| error.to_exchange_error())
+        .drive(Box::pin({
+            let await_runtime: std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
+                h.runtime.clone();
+            async move {
+                await_js(&await_runtime, pending)
+                    .await
+                    .map_err(|error| error.to_exchange_error())
+            }
         }))
         .unwrap();
     assert_eq!(markets.get("length").unwrap().as_f64(), Some(1.0));

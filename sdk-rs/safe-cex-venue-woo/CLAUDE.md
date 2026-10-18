@@ -521,3 +521,7 @@ fields, raw numeric overflow and signed zero. It compares all eleven native numb
 fields before JSON; approved decision-3 refusal preserves the entire bad row.
 `parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
 behavior, requiring a compiled native failure and exact restored pass.
+
+Guard/algorithm/position-mode native corpora admit canonical retained UTF-16 inputs
+and inspect their units before strict String/DTO projection. Original typed field,
+enum, source-case, numeric-bit and effect assertions remain unchanged.

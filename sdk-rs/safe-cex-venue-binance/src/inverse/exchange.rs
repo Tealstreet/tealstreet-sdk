@@ -9,7 +9,10 @@ use safe_cex_exchange::{
     },
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_types::*;
+use safe_cex_types::{
+    Candle, Market, OHLCVOptions, Order, OrderBook, PlaceOrderOpts, Position, PositionSide,
+    PublicTrade, Ticker, UpdateOrderOpts, ValidateAccountResult,
+};
 
 impl BinanceInverseExchange {
     pub(crate) fn invoke<T: serde::de::DeserializeOwned + 'static>(
@@ -23,7 +26,7 @@ impl BinanceInverseExchange {
             .call_method(member, args)
             .map_err(|e| e.to_exchange_error());
         Box::pin(async move {
-            let value = await_js(pending?)
+            let value = await_js(&self.scope.exchange_runtime(), pending?)
                 .await
                 .map_err(|e| e.to_exchange_error())?;
             to_typed(&value).map_err(|e| e.to_exchange_error())
@@ -188,7 +191,9 @@ impl BinanceInverseExchange {
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let pending = self.scope.this.call_method(member, args).map_err(fail);
         Box::pin(async move {
-            await_js(pending?).await.map_err(fail)?;
+            await_js(&self.scope.exchange_runtime(), pending?)
+                .await
+                .map_err(fail)?;
             Ok(())
         })
     }
@@ -205,7 +210,7 @@ impl BinanceInverseExchange {
                 Ok(value) => callback(value),
                 Err(error) => reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source":"binanceinverse listener payload"}),
+                    &serde_json::json!({"source":"binanceinverse listener payload"}).into(),
                 ),
             }
             Ok(Js::Undefined)

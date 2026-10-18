@@ -22,7 +22,11 @@ fn type_error(message: &str) -> Thrown {
 /// `this.xhr.get(endpoint, config)` awaited: the Axios response.
 async fn get(rt: Rt, endpoint: String, config: Js) -> Result<Js, Thrown> {
     let xhr = rt.this.get("xhr")?;
-    await_js(xhr.call_method("get", vec![Js::str(&endpoint), config])?).await
+    await_js(
+        &rt.exchange_runtime(),
+        xhr.call_method("get", vec![Js::str(&endpoint), config])?,
+    )
+    .await
 }
 
 fn params(fields: Vec<(&str, Js)>) -> Js {
@@ -36,7 +40,10 @@ fn member_data(
     args: Vec<Js>,
 ) -> Result<impl Future<Output = Result<DataValue, Thrown>> + 'static + use<>, Thrown> {
     let pending = rt.this.call_method(name, args)?;
-    Ok(async move { Ok(to_data(&await_js(pending).await?)) })
+    Ok({
+        let await_runtime = rt.exchange_runtime();
+        async move { Ok(to_data(&await_js(&await_runtime, pending).await?)) }
+    })
 }
 
 fn log(rt: &Rt, message: &str, severity: &str) -> Result<(), Thrown> {
@@ -164,15 +171,17 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
     } else {
         this.call_method("fetchFees", vec![category.clone()])?
     };
-    let body = async move {
-        let fees = await_js(fees).await?;
-        let category_text = text(&category)?;
-        let timed_out = Rc::new(Cell::new(false));
-        let prelaunch = {
-            let rt = rt.clone();
-            let timed_out = timed_out.clone();
-            let category = category.clone();
-            rt.clone().spawn(Box::pin(async move {
+    let body = {
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            let fees = await_js(&await_runtime, fees).await?;
+            let category_text = text(&category)?;
+            let timed_out = Rc::new(Cell::new(false));
+            let prelaunch = {
+                let rt = rt.clone();
+                let timed_out = timed_out.clone();
+                let category = category.clone();
+                rt.clone().spawn(Box::pin(async move {
                 let warn = |rt: &Rt| {
                     if !timed_out.get() {
                         log(
@@ -207,28 +216,32 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
                     _ => warn(&rt),
                 }
             }))
-        };
-        let trading =
-            await_js(this.call_method("fetchTradingMarketsResponse", vec![category.clone()])?)
-                .await?;
-        let data = trading.get("data")?;
-        let ret_msg = get_key(&data, "retMsg")?;
-        if !ret_msg.strict_equals(&Js::str("OK")) {
-            let message = if ret_msg.truthy() {
-                ret_msg
-            } else {
-                Js::str("Failed to fetch Bybit Trading markets")
             };
-            this.call_method("emitAndLogError", vec![message.clone()])?;
-            return Err(Thrown::new(error_object("Error", &text(&message)?)));
-        }
-        // ts-bug: the grace timer's `.then` runs even when PreLaunch won the race, so the
-        // timeout warning is logged after 1.5s on every refresh.
-        let grace = {
-            let rt = rt.clone();
-            let timed_out = timed_out.clone();
-            let sleep = rt.shared.runtime.sleep(PRELAUNCH_GRACE_MS);
-            rt.clone().spawn(Box::pin(async move {
+            let trading = await_js(
+                &await_runtime,
+                this.call_method("fetchTradingMarketsResponse", vec![category.clone()])?,
+            )
+            .await?;
+            let data = trading.get("data")?;
+            let ret_msg = get_key(&data, "retMsg")?;
+            if !ret_msg.strict_equals(&Js::str("OK")) {
+                let message = if ret_msg.truthy() {
+                    ret_msg
+                } else {
+                    Js::str("Failed to fetch Bybit Trading markets")
+                };
+                this.call_method("emitAndLogError", vec![message.clone()])?;
+                return Err(Thrown::new(
+                    rt.global("Error")?.construct(vec![message], None)?,
+                ));
+            }
+            // ts-bug: the grace timer's `.then` runs even when PreLaunch won the race, so the
+            // timeout warning is logged after 1.5s on every refresh.
+            let grace = {
+                let rt = rt.clone();
+                let timed_out = timed_out.clone();
+                let sleep = rt.shared.runtime.sleep(PRELAUNCH_GRACE_MS);
+                rt.clone().spawn(Box::pin(async move {
                 sleep.await?;
                 timed_out.set(true);
                 log(
@@ -238,39 +251,40 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
                 )?;
                 Ok(Js::array(vec![]))
             }))
-        };
-        let prelaunch = race(prelaunch, grace).await?;
-        let mut rows = data
-            .get("result")?
-            .get("list")?
-            .array_values()
-            .ok_or_else(|| type_error("data.result.list is not iterable"))?;
-        rows.extend(
-            prelaunch
+            };
+            let prelaunch = race(prelaunch, grace).await?;
+            let mut rows = data
+                .get("result")?
+                .get("list")?
                 .array_values()
-                .ok_or_else(|| type_error("preLaunchMarkets is not iterable"))?,
-        );
-        let fees = super::super::value::to_retained_input(&fees)?;
-        let fees = fees.as_array().unwrap_or_default();
-        let mut mapped = Vec::with_capacity(rows.len());
-        for row in rows {
-            let market = crate::market_mapping::map_market(
-                &super::super::value::to_retained_input(&row)?,
-                fees,
-                &category_text,
-                crate::market_mapping::Family::Linear,
-            )
-            .map_err(|m| Thrown::error("TypeError", &m))?;
-            mapped.push(market);
-        }
-        let mut markets = Vec::with_capacity(mapped.len());
-        for market in mapped {
-            match market {
-                Ok(market) => markets.push(market),
-                Err(message) => log(&rt, &message, "warning")?,
+                .ok_or_else(|| type_error("data.result.list is not iterable"))?;
+            rows.extend(
+                prelaunch
+                    .array_values()
+                    .ok_or_else(|| type_error("preLaunchMarkets is not iterable"))?,
+            );
+            let fees = super::super::value::to_retained_input(&fees)?;
+            let fees = fees.as_array().unwrap_or_default();
+            let mut mapped = Vec::with_capacity(rows.len());
+            for row in rows {
+                let market = crate::market_mapping::map_market(
+                    &super::super::value::to_retained_input(&row)?,
+                    fees,
+                    &category_text,
+                    crate::market_mapping::Family::Linear,
+                )
+                .map_err(|m| Thrown::error("TypeError", &m))?;
+                mapped.push(market);
             }
+            let mut markets = Vec::with_capacity(mapped.len());
+            for market in mapped {
+                match market {
+                    Ok(market) => markets.push(market),
+                    Err(message) => log(&rt, &message, "warning")?,
+                }
+            }
+            from_typed(&markets)
         }
-        from_typed(&markets)
     };
     Ok(spawner.spawn(Box::pin(body)))
 }

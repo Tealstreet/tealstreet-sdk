@@ -136,13 +136,17 @@ impl ExchangeRuntime for TestRuntime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, error: &ExchangeError, _: &serde_json::Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports.borrow_mut().push(error.message.clone());
     }
     fn report_raw_exception(
         &self,
         error: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         self.reports
             .borrow_mut()

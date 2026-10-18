@@ -91,15 +91,17 @@ impl Host {
             ("store", safe_cex_exchange::js_runtime::store::facade(store)),
         ]);
         let weak = Rc::downgrade(&scope);
-        parent.define_accessor(
-            "isDisposed",
-            Some(Rc::new(move |_| {
-                Ok(Js::Bool(weak.upgrade().is_none_or(|s| {
-                    s.base.get().is_some_and(|b| b.is_disposed())
-                })))
-            })),
-            None,
-        );
+        parent
+            .define_accessor(
+                "isDisposed",
+                Some(Rc::new(move |_| {
+                    Ok(Js::Bool(weak.upgrade().is_none_or(|s| {
+                        s.base.get().is_some_and(|b| b.is_disposed())
+                    })))
+                })),
+                None,
+            )
+            .expect("fresh extensible accessor target");
         let public = sockets::base_websocket(&scope.sockets, parent.clone());
         let private = sockets::base_websocket(&scope.sockets, parent);
         Rc::new(Self {
@@ -171,7 +173,8 @@ impl Host {
             }
             let result = slept.and_then(|_| callback());
             if let Err(e) = result {
-                runtime.report_exception(&e, &serde_json::json!({"operation":"BingX timer"}));
+                runtime
+                    .report_exception(&e, &serde_json::json!({"operation":"BingX timer"}).into());
             }
         }));
         self.tasks.borrow_mut().push((id, task));
@@ -193,7 +196,10 @@ impl Host {
         let runtime = self.scope.runtime.clone();
         self.scope.runtime.spawn_local(Box::pin(async move {
             if let Err(e) = future.await {
-                runtime.report_exception(&e, &serde_json::json!({"operation":"BingX callback"}));
+                runtime.report_exception(
+                    &e,
+                    &serde_json::json!({"operation":"BingX callback"}).into(),
+                );
             }
         }));
     }
@@ -305,7 +311,7 @@ impl HistoryHost for Host {
                             if let Err(e) = f.await {
                                 rt.report_exception(
                                     &e,
-                                    &serde_json::json!({"operation":"BingX tick"}),
+                                    &serde_json::json!({"operation":"BingX tick"}).into(),
                                 );
                             }
                         }));

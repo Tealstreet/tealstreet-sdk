@@ -160,9 +160,18 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.25
     }
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
-        panic!("unexpected exception {context}: {}", error.message);
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+    }
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+        panic!("unexpected exception {context:?}: {}", error.message);
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
@@ -1042,7 +1051,8 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
                     Ok(value.clone())
                 })),
                 None,
-            );
+            )
+            .expect("fresh extensible accessor target");
         }
         let payload = Js::object(vec![
             ("order_book", book),
@@ -1050,14 +1060,16 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
         ]);
         for name in ["data", "result"] {
             let trace = trace.clone();
-            payload.define_accessor(
-                name,
-                Some(Rc::new(move |_| {
-                    trace.borrow_mut().push(name);
-                    Ok(Js::object(vec![]))
-                })),
-                None,
-            );
+            payload
+                .define_accessor(
+                    name,
+                    Some(Rc::new(move |_| {
+                        trace.borrow_mut().push(name);
+                        Ok(Js::object(vec![]))
+                    })),
+                    None,
+                )
+                .expect("fresh extensible accessor target");
         }
         f.call(method, vec![payload]);
         reads.push(json!({"method":method,"trace":*trace.borrow()}));

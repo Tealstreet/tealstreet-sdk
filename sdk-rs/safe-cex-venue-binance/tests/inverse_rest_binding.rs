@@ -13,8 +13,15 @@ use support::*;
 
 fn drive(h: &Harness, value: Result<Js, Thrown>) -> Js {
     let pending = value.unwrap();
-    let future: ExchangeFuture<'_, Js> =
-        Box::pin(async move { await_js(pending).await.map_err(|e| e.to_exchange_error()) });
+    let future: ExchangeFuture<'_, Js> = Box::pin({
+        let await_runtime: std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
+            h.runtime.clone();
+        async move {
+            await_js(&await_runtime, pending)
+                .await
+                .map_err(|e| e.to_exchange_error())
+        }
+    });
     h.drive(future).unwrap()
 }
 fn call(h: &Harness, method: &str, args: Vec<Js>) -> Js {
@@ -80,7 +87,11 @@ fn signed_response_error_keeps_native_utf16_message_and_response() {
         .call_method("get", vec![Js::str("/dapi/v1/openOrders")])
         .unwrap();
     let error = h
-        .drive(Box::pin(async move { Ok(await_js(pending).await) }))
+        .drive(Box::pin({
+            let await_runtime: std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
+                h.runtime.clone();
+            async move { Ok(await_js(&await_runtime, pending).await) }
+        }))
         .unwrap()
         .unwrap_err();
     let message = error.value.get("message").unwrap();

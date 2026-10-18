@@ -38,7 +38,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         panic!("accepted fixture unexpectedly scheduled work")
     }
-    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {
+    fn console_values(&self, _: &str, _: &[Js]) {
         panic!("accepted fixture unexpectedly logged")
     }
     fn unique_id(&self) -> String {
@@ -50,12 +50,20 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         panic!("accepted fixture unexpectedly requested entropy")
     }
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports.borrow_mut().push(json!({
             "name": error.name, "message": error.message, "context": context,
         }));
     }
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        _: &Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         panic!("accepted fixture unexpectedly reported a raw exception")
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -163,7 +171,7 @@ impl WsParent for Parent {
         &self,
         _: &str,
         _: Option<&str>,
-        _: Option<&Value>,
+        _: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         panic!("unexpected parent error")
     }

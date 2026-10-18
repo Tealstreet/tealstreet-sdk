@@ -48,11 +48,16 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, _: &ExchangeError, _: &serde_json::Value) {}
+    fn report_exception(
+        &self,
+        _: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+    }
     fn execute_worker_request(
         &self,
         _: serde_json::Value,
@@ -228,6 +233,124 @@ fn empty_response_and_fallback_brand_remain_distinguishable() {
     );
     assert!(!is_base_capability_fallback(&stub, method));
     assert!(is_inert_capability(&stub, method));
+}
+
+const SOURCE_BRAND_METHODS: [(&str, BaseCapabilityMethod); 10] = [
+    ("fetchClosedPnl", BaseCapabilityMethod::FetchClosedPnl),
+    (
+        "fetchHistoricalFills",
+        BaseCapabilityMethod::FetchHistoricalFills,
+    ),
+    (
+        "fetchIncomeHistory",
+        BaseCapabilityMethod::FetchIncomeHistory,
+    ),
+    (
+        "fetchIncomeHistoryRange",
+        BaseCapabilityMethod::FetchIncomeHistoryRange,
+    ),
+    (
+        "fetchHistoricalOrders",
+        BaseCapabilityMethod::FetchHistoricalOrders,
+    ),
+    ("placeOrder", BaseCapabilityMethod::PlaceOrder),
+    ("start", BaseCapabilityMethod::Start),
+    ("fetchOptionChain", BaseCapabilityMethod::FetchOptionChain),
+    (
+        "fetchOptionExpiries",
+        BaseCapabilityMethod::FetchOptionExpiries,
+    ),
+    (
+        "fetchAccountGreeks",
+        BaseCapabilityMethod::FetchAccountGreeks,
+    ),
+];
+fn source_brand() -> &'static serde_json::Value {
+    static SOURCE: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    SOURCE.get_or_init(|| {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/capability_brand_source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    })
+}
+fn brand_row(binding: &impl CapabilityBrand) -> Vec<bool> {
+    SOURCE_BRAND_METHODS
+        .iter()
+        .map(|(_, method)| is_base_capability_fallback(binding, *method))
+        .collect()
+}
+#[test]
+fn native_capability_brand_matrix_matches_source() {
+    let source = source_brand();
+    assert_eq!(
+        json!(SOURCE_BRAND_METHODS.map(|(name, _)| name)),
+        source["methods"]
+    );
+    let base = ExchangeCapabilities::default();
+    let matrix = vec![
+        brand_row(&base.fetch_closed_pnl),
+        brand_row(&base.fetch_historical_fills),
+        brand_row(&base.fetch_income_history),
+        brand_row(&base.fetch_income_history_range),
+        brand_row(&base.fetch_historical_orders),
+        brand_row(&base.place_order),
+        brand_row(&base.start),
+        brand_row(&base.fetch_option_chain),
+        brand_row(&base.fetch_option_expiries),
+        brand_row(&base.fetch_account_greeks),
+    ];
+    assert_eq!(
+        json!(matrix),
+        source["matrix"],
+        "CAPABILITY_BRAND exact method identity"
+    );
+}
+#[test]
+fn native_capability_brand_replacement_and_callback_match_source() {
+    let source = source_brand();
+    let mut venue = venue();
+    let original = std::mem::replace(
+        &mut venue.capabilities.fetch_income_history,
+        CapabilityBinding::implemented(|_, _| Box::pin(async { Ok(vec![]) })),
+    );
+    let method = BaseCapabilityMethod::FetchIncomeHistory;
+    assert_eq!(
+        json!({
+            "retainedAlias": is_base_capability_fallback(&original, method),
+            "replacementBranded": is_base_capability_fallback(&venue.capabilities.fetch_income_history, method),
+            "originalEmpty": ready(original.call(&venue, None)).unwrap().is_empty(),
+            "replacementEmpty": ready(venue.capabilities.fetch_income_history.call(&venue, None)).unwrap().is_empty(),
+        }),
+        source["replacement"],
+        "CAPABILITY_BRAND replacement is unbranded"
+    );
+    let calls = Rc::new(Cell::new(0));
+    let marker = Rc::new(Cell::new(17));
+    let (observed, result) = (calls.clone(), marker.clone());
+    let implemented = CapabilityBinding::implemented(move |_, ()| {
+        observed.set(observed.get() + 1);
+        let result = result.clone();
+        Box::pin(async move { Ok(result) })
+    });
+    let brand = brand_row(&implemented);
+    let calls_before = calls.get();
+    let returned = ready(implemented.call(&venue, ())).unwrap();
+    assert_eq!(
+        json!({"brand":brand,"callsBefore":calls_before,
+        "originalResult":Rc::ptr_eq(&returned,&marker),"callsAfter":calls.get()}),
+        source["implemented"],
+        "CAPABILITY_BRAND original callback and referent"
+    );
 }
 #[test]
 fn option_fallbacks_reject_naming_the_venue_and_carry_their_brand() {

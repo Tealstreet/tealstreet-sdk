@@ -211,8 +211,9 @@ impl Core {
         args: Result<Vec<Js>, ExchangeError>,
     ) -> ExchangeFuture<'static, T> {
         let this = self.this.clone();
+        let runtime = self.shared.http.runtime();
         Box::pin(async move {
-            let value = await_js(this.call_method(member, args?).map_err(err)?)
+            let value = await_js(&runtime, this.call_method(member, args?).map_err(err)?)
                 .await
                 .map_err(err)?;
             to_typed(&value).map_err(err)
@@ -225,8 +226,9 @@ impl Core {
         args: Result<Vec<Js>, ExchangeError>,
     ) -> ExchangeFuture<'static, ()> {
         let this = self.this.clone();
+        let runtime = self.shared.http.runtime();
         Box::pin(async move {
-            await_js(this.call_method(member, args?).map_err(err)?)
+            await_js(&runtime, this.call_method(member, args?).map_err(err)?)
                 .await
                 .map_err(err)?;
             Ok(())
@@ -243,7 +245,9 @@ impl Core {
         let handler = Js::function("", move |_, a| {
             match to_typed::<T>(&arg(&a, 0)) {
                 Ok(v) => callback(v),
-                Err(e) => runtime.report_exception(&err(e), &serde_json::json!({"source": member})),
+                Err(e) => {
+                    runtime.report_exception(&err(e), &serde_json::json!({"source": member}).into())
+                }
             }
             Ok(Js::Undefined)
         });

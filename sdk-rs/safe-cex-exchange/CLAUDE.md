@@ -140,6 +140,14 @@ A capability binding carries the actual callback and its origin together:
 base fallback, explicit empty override, or venue implementation. Only the SDK
 constructs base-fallback bindings; registering an override removes the brand.
 Support is never inferred from a returned empty vector or a separate boolean.
+This is a native implementation, not execution of base.ts's Symbol-keyed
+Object.defineProperty helpers. `tests/capability_brand_source.cjs` executes the
+unchanged maintained helpers with real Node Symbol descriptors; two focused
+`core_contract` tests compare all ten method brands, retained bindings after
+replacement, unbranded overrides and original callback results. The compiled
+cross-method and stale-brand controls are in `scripts/capability-brand-controls.py`.
+General JS Symbol-keyed descriptor support remains unavailable; it is unreachable
+from native capability branding and is not implemented by this typed metadata.
 The branded throwing defaults are `start`, `placeOrder` and the three option
 reads (`fetchOptionChain`, `fetchOptionExpiries`, `fetchAccountGreeks`), which
 reject naming the venue rather than return an empty chain; the branded empty
@@ -188,8 +196,8 @@ impl ExchangeRuntime for RecordingRuntime {
     fn unique_id(&self) -> String { "fixture-id".into() }
     fn is_worker(&self) -> bool { false }
     fn random(&self) -> f64 { 0.5 }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) { eprintln!("{}: {}", error.name, error.message); }
-    fn report_raw_exception(&self, _: &Js, _: &Value) { panic!("unexpected raw exception report") }
+    fn report_exception(&self, error: &ExchangeError, _: &safe_cex_types::retained_json::RetainedJsonInput) { eprintln!("{}: {}", error.name, error.message); }
+    fn report_raw_exception(&self, _: &Js, _: &safe_cex_types::retained_json::RetainedJsonInput) { panic!("unexpected raw exception report") }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         panic!("unexpected worker request")
     }
@@ -1562,6 +1570,12 @@ across six bound arithmetic and six comparison methods, and five min/max argumen
 sets against the actual npm dependency. Positive finite precision stays decimal;
 the public shared model types are unchanged.
 
+The BigNumber import supplies both native call and construct bodies. OKX's
+source placement formatter uses `new BigNumber(amount)`; a callable-only import
+refuses before any order reaches HTTP. The installed-package constructor witness
+compares both forms and constructed clones for all 22 scalar profiles, while the
+real OKX placement binding tests retain batch payload and attached-error checks.
+
 Error prototype thread-local storage stays inside its sole private accessor.
 Module-level item macros are rejected by the parity indexer. The focused
 `safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
@@ -1617,7 +1631,7 @@ NaN, both infinities, signed zero, clones and arithmetic results.
 Raw error reporter inputs use `ExchangeErrorInput::Raw(Js)`. Pass the original
 shared-runtime value; already-JSON readers use explicit `from_json` at that boundary.
 The reporter retains lazy reads, native formatted messages and worker error identity.
-Optional message/extra-data retain their stated UTF-8/JSON profiles; console and
+Optional message retains its stated UTF-8 profile; extra data uses retained input; console and
 main-thread raw exception hosts receive original local Js references; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
 
 Worker/native delivery services live in exchange-core so constructor hosts never
@@ -1666,10 +1680,13 @@ keeps original thrown values. Object.freeze preserves accessor setters while
 locking configuration and data writes; preventExtensions blocks new own fields.
 Descriptor reflection reads stored functions without invoking them. Integrity
 operations on array/collection storage await the separate storage cutover.
-The native define_accessor helper remains a host bootstrap installer with its
-existing ABI; it bypasses source descriptor validation and must not implement
-user descriptor operations. Its fallible callsite migration is separately held
-until the approved model-info cutover. Source definitions use define_property.
+The native define_accessor helper returns Result<(), Thrown> and delegates to
+canonical define_property with explicit get/set and enumerable/configurable flags.
+Its internal descriptor has a null prototype; omitted closures clear old slots.
+Integrity violations return TypeError. Supplied receivers propagate failures;
+fresh host construction asserts its extensible-object invariant. Native/Node
+checks in tests/js_native_accessor_refusals.rs cover refusal, replacement, original
+receiver and thrown-value identity, NaN payload bits and signed zero.
 tests/js_property_descriptors.rs executes both maintained Hyperliquid frozen
 configuration initializers and compares accessors with Node, including getter
 identity, strict writes, setter receivers, validation order and JS stringify.
@@ -1709,11 +1726,17 @@ that same scope-owned root. `tests/js_series_iteration.rs` compares forty-eight 
 installed-package cases and checks escaped exports, signed-zero stringify and
 scope/module release; its three compiled mutation controls restore exact source.
 
-Promise.resolve and the installed Promise constructor share the core thenable
-resolution operation. Serial helpers use it before awaiting input and callback
-results, preserving synchronous then lookup, deferred invocation, first-call
-settlement and original rejection identity. General direct await/async-return
-and combinator adoption remains a separately recorded follow-up after #901.
+Promise.resolve, the installed Promise constructor, direct await and async-return
+adoption share the core thenable resolution operation. `await_js` receives the
+owning runtime explicitly and returns a future that retains it; REST adapters and
+venue hosts pass their existing runtime through that boundary. Serial helpers use
+it before awaiting input and callback results. Promise.all/allSettled resolve and
+register each yielded input before the next IteratorRecord step. Synchronous then
+lookup, deferred invocation, first-call settlement, original rejection identity
+and scalar/native-Promise FIFO behavior remain intact. The real NativeRuntime
+matrix in `tests/js_thenable_adoption.rs` compares 108 cases with Node; its iterator
+ordering control restores eager consumption, compiles, and fails the ordering
+assertion before exact restoration passes. See THENABLE_ADOPTION_REVIEW.md.
 
 Ordinary Js objects, including host-resource objects, allocate with the active
 PrototypeRealm's real Object.prototype reference. A None prototype slot is null,
@@ -1762,6 +1785,24 @@ and checks reentry, exact references/bits, capture release and refusal behavior.
 Missing-publication and premature-publication production mutations must compile,
 fail the named source-visible assertions, restore exact bytes and pass.
 
+Exception reporter contexts and `emitAndLogError` extra data use canonical
+`RetainedJsonInput`. JS adapters capture before JSON so UTF-16, own undefined,
+NaN and signed zero reach the reporting sink intact. Native terminal formatting
+is a sink choice. Typed `ExchangeError` diagnostic strings keep their existing
+shape; original UTF-16 name/message fields use the existing retained callback
+cause and are restored only while their diagnostic views remain unchanged.
+
+## Shared for-in record
+
+ForInRecord enumerates original native descriptor names along canonical
+prototype links. Hidden own names suppress inherited enumerables, deleted
+unvisited names are skipped, and enumeration never reads property values.
+Native functions store name/length as ordinary nonenumerable configurable,
+readonly descriptors; redefining/deleting them uses the common property code.
+Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
+this does not widen the public intrinsic descriptor-reflection surface.
+Array descriptor/prototype migration remains the separate single-storage step.
+
 ## ccxt compatibility imports
 
 The shared library installs ccxt-compat numberToString, parsePrecision,
@@ -1772,3 +1813,12 @@ one-argument precision-count helper. The installed native/source tests cover
 123 scalar cases, UTF16 results, original value/throw identity, repeated property
 reads and precision operand coercion. The separate Realm implementation is
 removed only with the atomic Hyperliquid family consolidation.
+
+Operator numeric/default-hint conversion of ordinary objects and functions uses
+`Js::ordinary_to_primitive`, the same live hook traversal as direct value coercion.
+This preserves inherited Object intrinsics without executing unbound data-only
+handles, reads each getter once in valueOf/toString order, and retains original
+thrown values. Native builtin adapters keep their existing separate surfaces.
+`js_builtins_native` compares eight actual NativeRuntime operator hook cases with
+Node; the unchanged Dayjs, Breakout, Kraken candle and Paradex ticker consumers
+cover malformed objects reaching their source Date/arithmetic branches.

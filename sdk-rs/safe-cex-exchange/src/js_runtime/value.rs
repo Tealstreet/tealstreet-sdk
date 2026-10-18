@@ -137,11 +137,29 @@ impl Thrown {
         if let Some(native) = &self.native {
             return (**native).clone();
         }
-        let mut error = ExchangeError::new(self.message());
-        if let Ok(name) = self.value.get("name")
-            && let Js::String(name) = name
-        {
-            error.name = String::from_utf16_lossy(&name);
+        let message = match &self.value {
+            Js::Object(_) | Js::Function(_) => self.value.get("message").ok(),
+            other => Some(other.clone()),
+        };
+        let mut error =
+            ExchangeError::new(message.as_ref().map(Js::to_display).unwrap_or_default());
+        let name = self.value.get("name").ok();
+        if let Some(Js::String(name)) = &name {
+            error.name = String::from_utf16_lossy(name);
+        }
+        let fields: Vec<_> = [("name", name), ("message", message)]
+            .into_iter()
+            .filter_map(|(key, value)| match value {
+                Some(Js::String(units)) => Some((key, OwnedJsValue::String(units.to_vec()))),
+                _ => None,
+            })
+            .collect();
+        if fields.iter().any(|(_, value)| {
+            matches!(value, OwnedJsValue::String(units) if String::from_utf16(units).is_err())
+        }) {
+            error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(
+                owned::OwnedCallbackError::new(OwnedJsValue::object(fields)),
+            ));
         }
         error
     }
@@ -171,14 +189,19 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
-        if let Some(failure) = error.origin.as_ref().and_then(|origin| {
-            origin
-                .error()
-                .downcast_ref::<safe_cex_transport::RestFailure>()
-        }) && let Some(safe_cex_transport::TransportError::Rejected(origin)) =
-            failure.transport_error.as_deref()
-            && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
-        {
+        if let Some(cause) = error.origin.as_ref().and_then(|origin| {
+            let original = origin.error();
+            if let Some(cause) = original.downcast_ref::<owned::OwnedCallbackError>() {
+                return Some(cause);
+            }
+            let failure = original.downcast_ref::<safe_cex_transport::RestFailure>()?;
+            let safe_cex_transport::TransportError::Rejected(origin) =
+                failure.transport_error.as_deref()?
+            else {
+                return None;
+            };
+            origin.error().downcast_ref::<owned::OwnedCallbackError>()
+        }) {
             for (field, projected) in [("name", &error.name), ("message", &error.message)] {
                 if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
                     && String::from_utf16(units).is_err()
@@ -461,7 +484,26 @@ impl Js {
             extensible: Cell::new(true),
             name: utf16(name),
             call: Rc::new(call),
-            props: RefCell::new(IndexMap::new()),
+            props: RefCell::new(IndexMap::from([
+                (
+                    utf16("length"),
+                    Prop::DataDescriptor {
+                        value: Js::Number(0.),
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                ),
+                (
+                    utf16("name"),
+                    Prop::DataDescriptor {
+                        value: Js::str(name),
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                ),
+            ])),
             proto: RefCell::new(
                 realm
                     .reference(safe_cex_num::ProtoMember::Constructor)
@@ -855,7 +897,7 @@ impl Js {
         }
     }
 
-    fn prototype(&self) -> Option<Js> {
+    pub(super) fn prototype(&self) -> Option<Js> {
         match self {
             Js::Object(object) => object.proto.borrow().clone(),
             Js::Function(function) => function.proto.borrow().clone(),
@@ -995,11 +1037,6 @@ impl Js {
             }) => getter.call(receiver.clone(), vec![]),
             Some(Prop::Accessor { get: None, .. }) => Ok(Js::Undefined),
             None => {
-                if let Js::Function(function) = self {
-                    if key == utf16("name").as_ref() {
-                        return Ok(Js::String(function.name.clone()));
-                    }
-                }
                 if let Some(proto) = self.prototype() {
                     return proto.get_key_receiver(key, receiver);
                 }
@@ -1476,7 +1513,6 @@ impl Js {
                     || array_index(key)
                         .is_some_and(|i| matches!(items.borrow().get(i), Some(Some(_))))
             }
-            Js::Function(_) if key == utf16("name").as_ref() => true,
             Js::Builtin(reference) => String::from_utf16(key).is_ok_and(|key| {
                 reference.own_fields().contains_key(&key)
                     || !matches!(reference.get(&key), safe_cex_num::PrototypeValue::Undefined)
@@ -1486,25 +1522,29 @@ impl Js {
                 .is_some_and(|parent| parent.has_property(key)),
         }
     }
-    pub fn define_accessor(&self, key: &str, getter: Option<Getter>, setter: Option<Setter>) {
-        if let Some(props) = self.own_props() {
-            let get = getter.map(|get| Js::function("get", move |this, _| get(&this)));
-            let set = setter.map(|set| {
-                Js::function("set", move |this, args| {
-                    set(&this, arg(&args, 0))?;
-                    Ok(Js::Undefined)
-                })
-            });
-            props.borrow_mut().insert(
-                utf16(key),
-                Prop::Accessor {
-                    get,
-                    set,
-                    enumerable: true,
-                    configurable: true,
-                },
-            );
-        }
+    pub fn define_accessor(
+        &self,
+        key: &str,
+        getter: Option<Getter>,
+        setter: Option<Setter>,
+    ) -> Result<(), Thrown> {
+        let get = getter.map_or(Js::Undefined, |get| {
+            Js::function("get", move |this, _| get(&this))
+        });
+        let set = setter.map_or(Js::Undefined, |set| {
+            Js::function("set", move |this, args| {
+                set(&this, arg(&args, 0))?;
+                Ok(Js::Undefined)
+            })
+        });
+        let descriptor = Js::object(vec![
+            ("get", get),
+            ("set", set),
+            ("enumerable", Js::Bool(true)),
+            ("configurable", Js::Bool(true)),
+        ]);
+        descriptor.set_prototype(Js::Null)?;
+        self.define_property(&utf16(key), &descriptor)
     }
     pub fn delete(&self, key: &[u16]) {
         match self {
@@ -1594,8 +1634,14 @@ impl Js {
                 keys.push(utf16("length"));
                 keys
             }
-            Js::Object(o) => {
-                let keys: Vec<Str> = o.props.borrow().keys().cloned().collect();
+            Js::Object(_) | Js::Function(_) => {
+                let keys: Vec<Str> = self
+                    .own_props()
+                    .expect("ordinary property storage")
+                    .borrow()
+                    .keys()
+                    .cloned()
+                    .collect();
                 let mut indexed: Vec<(usize, Str)> = keys
                     .iter()
                     .filter_map(|k| array_index(k).map(|i| (i, k.clone())))
@@ -1605,13 +1651,51 @@ impl Js {
                 out.extend(keys.into_iter().filter(|k| array_index(k).is_none()));
                 out
             }
-            Js::Function(_) | Js::Builtin(_) => {
+            Js::Builtin(_) => {
                 return Err(Thrown::type_error(
-                    "Object.getOwnPropertyNames does not model function or intrinsic keys",
+                    "Object.getOwnPropertyNames does not model intrinsic keys",
                 ));
             }
             _ => vec![],
         })
+    }
+    pub(super) fn for_in_own_names(&self) -> Result<Vec<Str>, Thrown> {
+        match self {
+            Js::Builtin(reference) => Ok(reference
+                .own_properties()
+                .into_iter()
+                .map(|(name, _)| utf16(&name))
+                .collect()),
+            _ => self.own_property_names(),
+        }
+    }
+    pub(super) fn own_enumerability(&self, key: &[u16]) -> Result<Option<bool>, Thrown> {
+        match self {
+            Js::Builtin(reference) => Ok(reference
+                .own_properties()
+                .into_iter()
+                .find(|(name, _)| name.encode_utf16().eq(key.iter().copied()))
+                .map(|(_, enumerable)| enumerable)),
+            Js::Array(_) | Js::String(_) => {
+                if key == utf16("length").as_ref() {
+                    return Ok(Some(false));
+                }
+                Ok(self
+                    .own_keys()
+                    .iter()
+                    .any(|name| name.as_ref() == key)
+                    .then_some(true))
+            }
+            Js::Object(_) | Js::Function(_) => {
+                let descriptor = self.own_property_descriptor(key)?;
+                if descriptor.is_undefined() {
+                    Ok(None)
+                } else {
+                    Ok(Some(descriptor.get("enumerable")?.truthy()))
+                }
+            }
+            _ => Ok(None),
+        }
     }
     /// Object spread / Object.assign source read: own enumerable values in key order.
     pub fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
@@ -1681,6 +1765,19 @@ impl Js {
                     let proto = this.prototype();
                     let bound_this = arg(&args, 0);
                     let bound_args: Vec<Js> = args.into_iter().skip(1).collect();
+                    let mut length = 0.;
+                    if this.own_enumerability(&utf16("length"))?.is_some()
+                        && let Js::Number(target_length) = this.get("length")?
+                    {
+                        length = if target_length.is_nan() {
+                            0.
+                        } else {
+                            safe_cex_num::math_max(
+                                target_length.trunc() - bound_args.len() as f64,
+                                0.,
+                            )
+                        };
+                    }
                     let target_name = this.get("name")?;
                     let mut name: Vec<u16> = "bound ".encode_utf16().collect();
                     if let Js::String(target_name) = target_name {
@@ -1695,15 +1792,36 @@ impl Js {
                         Js::Builtin(reference) => reference.realm().clone(),
                         _ => unreachable!(),
                     };
+                    let name: Str = name.into();
+                    let props = IndexMap::from([
+                        (
+                            utf16("length"),
+                            Prop::DataDescriptor {
+                                value: Js::Number(length),
+                                writable: false,
+                                enumerable: false,
+                                configurable: true,
+                            },
+                        ),
+                        (
+                            utf16("name"),
+                            Prop::DataDescriptor {
+                                value: Js::String(name.clone()),
+                                writable: false,
+                                enumerable: false,
+                                configurable: true,
+                            },
+                        ),
+                    ]);
                     Ok(Js::Function(Rc::new(FunctionData {
                         extensible: Cell::new(true),
-                        name: name.into(),
+                        name,
                         call: Rc::new(move |_, args| {
                             let mut combined = bound_args.clone();
                             combined.extend(args);
                             this.call(bound_this.clone(), combined)
                         }),
-                        props: RefCell::default(),
+                        props: RefCell::new(props),
                         proto: RefCell::new(proto),
                         construct,
                         realm,

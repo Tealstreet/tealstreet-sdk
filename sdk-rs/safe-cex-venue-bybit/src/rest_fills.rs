@@ -83,7 +83,7 @@ async fn get(rt: &Rt, endpoint: &str, params: Js) -> Result<Js, Thrown> {
         "get",
         vec![Js::str(endpoint), Js::object(vec![("params", params)])],
     )?;
-    await_js(request).await?.get("data")
+    await_js(&rt.exchange_runtime(), request).await?.get("data")
 }
 fn ret_msg(rt: &Rt, data: &Js) -> Result<String, Thrown> {
     let value = rt
@@ -272,13 +272,13 @@ pub(crate) fn fetch_historical_fills(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             log(&rt, &warning)?;
             let name = text(&rt.this.get("name")?)?;
             console_warn(&rt, &format!("[{name}] {warning}"))?;
-            let fallback = await_js(rt.this.call_method("fetchExecutionsFallbackFromOrderHistory", vec![opts.clone()])?).await?;
+            let fallback = await_js(&rt.exchange_runtime(), rt.this.call_method("fetchExecutionsFallbackFromOrderHistory", vec![opts.clone()])?).await?;
             if !inverse && (fallback.get("length")?.to_number()? > 0. || !from.is_undefined() || order_id.truthy()) { return Ok(fallback); }
             if !inverse && to.is_undefined() && rt.this.get("DEFAULT_EXECUTIONS_LOOKBACK_MS")?.to_number()? < 2592000000. {
                 let warning = format!("fetchHistoricalFills short fallback returned no rows for {}; retrying 30d order-history lookup for recovery", text(&symbol)?);
                 log(&rt, &warning)?;
                 console_warn(&rt, &format!("[{name}] {warning}"))?;
-                return await_js(rt.this.call_method("fetchExecutionsFallbackFromOrderHistory", vec![opts.clone(), Js::Number(2592000000.)])?).await;
+                return await_js(&rt.exchange_runtime(), rt.this.call_method("fetchExecutionsFallbackFromOrderHistory", vec![opts.clone(), Js::Number(2592000000.)])?).await;
             }
             if fallback.get("length")?.to_number()? == 0. { log(&rt, &format!("fetchHistoricalFills fallback returned no rows for {}", text(&symbol)?))?; }
             Ok::<Js, Thrown>(fallback)

@@ -1,5 +1,14 @@
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
+#[cfg(feature = "native")]
+#[path = "support/lifecycle_aliases.rs"]
+mod lifecycle_aliases;
+#[cfg(feature = "native")]
+#[path = "support/public_frame_guard.rs"]
+mod public_frame_guard;
+#[cfg(feature = "native")]
+#[path = "support/public_subscription_receipts.rs"]
+mod public_subscription_receipts;
 use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
@@ -32,9 +41,11 @@ impl ExchangeTask for Task {
 #[derive(Default)]
 struct Runtime {
     now: Cell<f64>,
+    monotonic_clock: Cell<Option<f64>>,
     sleep_clock: Rc<Cell<f64>>,
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
+    console_frames: RefCell<Vec<(String, Vec<EventValue>)>>,
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
     dial_socket: RefCell<Option<Rc<dyn WsSocket>>>,
 }
@@ -57,7 +68,7 @@ impl ExchangeRuntime for Runtime {
         self.now.get()
     }
     fn monotonic_now_ms(&self) -> f64 {
-        22000.0
+        self.monotonic_clock.get().unwrap_or(22000.0)
     }
     fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
         self.sleeps.borrow_mut().push(delay);
@@ -75,7 +86,11 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(f);
         Box::new(Task)
     }
-    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
+    fn console_values(&self, level: &str, values: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.console_frames
+            .borrow_mut()
+            .push((level.into(), values.to_vec()));
+    }
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -88,11 +103,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reported.borrow_mut().push(error.name.clone());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -3050,6 +3069,33 @@ const SIXTEEN_METHOD_OUTCOMES: &[(&str, &str, &str, &[&str])] = &[
     ("Spot", "fetch_public_trades", r#"err:Not implemented"#, &[]),
 ];
 
+fn assert_method_outcome_json(actual: &Value, expected: &Value, path: &str) {
+    match (actual, expected) {
+        (Value::Number(actual), Value::Number(expected)) => assert_eq!(
+            actual.as_f64().unwrap().to_bits(),
+            expected.as_f64().unwrap().to_bits(),
+            "{path} numeric bits"
+        ),
+        (Value::Array(actual), Value::Array(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{path} array length");
+            for (index, expected) in expected.iter().enumerate() {
+                assert_method_outcome_json(&actual[index], expected, &format!("{path}[{index}]"));
+            }
+        }
+        (Value::Object(actual), Value::Object(expected)) => {
+            assert_eq!(
+                actual.keys().collect::<Vec<_>>(),
+                expected.keys().collect::<Vec<_>>(),
+                "{path} object keys"
+            );
+            for (key, expected) in expected {
+                assert_method_outcome_json(&actual[key], expected, &format!("{path}.{key}"));
+            }
+        }
+        _ => assert_eq!(actual, expected, "{path}"),
+    }
+}
+
 #[test]
 fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() {
     use safe_cex_exchange::exchange::Exchange;
@@ -3153,7 +3199,17 @@ fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() 
             observed.iter().zip(expected)
         {
             assert_eq!(label, want_label, "method order: {venue:?}");
-            assert_eq!(outcome, want_outcome, "{venue:?} {label} outcome");
+            match (
+                outcome.strip_prefix("ok:"),
+                want_outcome.strip_prefix("ok:"),
+            ) {
+                (Some(actual), Some(expected)) => assert_method_outcome_json(
+                    &serde_json::from_str(actual).unwrap(),
+                    &serde_json::from_str(expected).unwrap(),
+                    &format!("{venue:?} {label} outcome"),
+                ),
+                _ => assert_eq!(outcome, *want_outcome, "{venue:?} {label} outcome"),
+            }
             assert_eq!(
                 requests, want_requests,
                 "{venue:?} {label} transport requests"
@@ -4728,7 +4784,10 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
     use safe_cex_transport::{
         RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
     };
-    use std::sync::{Arc, Mutex};
+    use std::{
+        io::Write,
+        sync::{Arc, Mutex},
+    };
     struct Response {
         status: u16,
         header: &'static str,
@@ -4753,8 +4812,12 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             Box::pin(async move { Ok(response) })
         }
     }
+    let mut source_input = vec![];
+    let mut native_pauses = vec![];
     for (status, header, value, duration) in [
         (200, "x-mbx-used-weight-1m", "1920", 60_000.0),
+        (200, "X-MbX-UsEd-WeIgHt-1m", "1920", 60_000.0),
+        (429, "ReTrY-AfTeR", "2.5", 2_500.0),
         (429, "retry-after", "2.5", 2_500.0),
         (429, "retry-after", "invalid", 60_000.0),
     ] {
@@ -4807,7 +4870,7 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         assert_eq!(
             owner.paused_until.get(),
             1_000.0 + duration,
-            "native request-weight observer must run on HTTP status {status}"
+            "native request-weight observer must run on HTTP status {status} header {header}"
         );
         assert!(owner.paused());
         let requests = requests.lock().unwrap();
@@ -4819,8 +4882,38 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         assert_eq!(path, "/fapi/v1/openOrders");
         assert!(query.contains("timestamp="));
         assert!(query.contains("signature="));
+        source_input
+            .push(json!({"status":status,"header":header,"value":value,"now":runtime.now.get()}));
+        native_pauses.push(owner.paused_until.get());
         owner.dispose().unwrap();
     }
+    let mut source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/native-weight-headers-source.cjs"
+        ))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    source
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&source_input).unwrap())
+        .unwrap();
+    let source = source.wait_with_output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source_pauses: Vec<f64> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        native_pauses, source_pauses,
+        "all five native request outcomes match actual TS/Axios guards"
+    );
 }
 
 #[test]
@@ -5095,6 +5188,10 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
     }
 }
 
+#[cfg(feature = "native")]
+#[path = "support/snapshot_aliases.rs"]
+mod snapshot_aliases;
+
 #[test]
 #[cfg(feature = "native")]
 fn production_native_public_rest_future_waits_and_preserves_candles_and_rejection() {
@@ -5269,3 +5366,393 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
 #[cfg(feature = "native")]
 #[path = "support/order_throttle_binding.rs"]
 mod order_throttle_binding;
+
+#[cfg(feature = "native")]
+#[path = "support/snapshot_call_binding.rs"]
+mod snapshot_call_binding;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_clones_share_settlement_and_captured_receiver() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct ListenKey {
+        released: Arc<AtomicBool>,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+    impl RestAdapter for ListenKey {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.requests.lock().unwrap().push(request.url);
+            let released = self.released.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                if !released.load(Ordering::SeqCst) {
+                    return Poll::Pending;
+                }
+                Poll::Ready(Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Encoded(
+                        br#"{"listenKey":"native-clone-key"}"#.to_vec(),
+                    ),
+                }))
+            }))
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let released = Arc::new(AtomicBool::new(false));
+    let requests = Arc::<Mutex<Vec<String>>>::default();
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        Arc::new(ListenKey {
+            released: released.clone(),
+            requests: requests.clone(),
+        }),
+        Rc::new(|_, _| panic!("no external provider")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let owner = ExchangeOwner::new(
+        Venue::Futures,
+        safe_cex_types::ExchangeName::Binance,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        dependencies,
+    )
+    .unwrap();
+    let original = owner.private.connect_and_subscribe();
+    let mut first = Box::pin(original.clone());
+    let second = original.clone();
+    drop(original);
+    runtime.pump();
+    assert!(
+        first
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "settlement clones share one real listen-key request"
+    );
+    released.store(true, Ordering::SeqCst);
+    run(&runtime, first).unwrap();
+    run(&runtime, second).unwrap();
+    assert!(!owner.private.connect.connecting.get());
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "both settlement clones observe the same completion"
+    );
+    let action = owner.private.capture_connect();
+    let retained = action.clone();
+    assert!(
+        action.same(&retained),
+        "CapturedAction Clone retains the actual bound arrow"
+    );
+    drop(action);
+    retained.call().unwrap();
+    for _ in 0..16 {
+        runtime.pump();
+    }
+    let requests = requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "cloned current arrow reconnects through the real native parent"
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|path| path.starts_with("/fapi/v1/listenKey"))
+    );
+    drop(requests);
+    owner.dispose().unwrap();
+    assert!(runtime.reported.borrow().is_empty());
+}
+
+#[cfg(feature = "native")]
+#[path = "support/snapshot_future_binding.rs"]
+mod snapshot_future_binding;
+
+#[cfg(feature = "native")]
+#[path = "support/public_listener_aliases.rs"]
+mod public_listener_aliases;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_leverage_aliases_update_account_market_overlay() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{Arc, Mutex};
+    struct Brackets(Arc<Mutex<Vec<RestRequest>>>);
+    impl RestAdapter for Brackets {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.lock().unwrap().push(request);
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: None,
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(
+                    serde_json::to_vec(&json!([
+                        {"symbol":"BTCUSDT","brackets":[{"initialLeverage":"125"}]},
+                        {"symbol":"ETHUSDT","brackets":[{"initialLeverage":0}]}
+                    ]))
+                    .unwrap(),
+                ),
+            })))
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM] {
+        let runtime = Rc::new(Runtime::default());
+        let calls = Arc::<Mutex<Vec<RestRequest>>>::default();
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            Arc::new(Brackets(calls.clone())),
+            Rc::new(|_, _| panic!("no external provider is configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let markets: Vec<safe_cex_types::Market> = ["BTCUSDT", "ETHUSDT", "SOLUSDT"].into_iter().map(|symbol|
+            serde_json::from_value(json!({"id":symbol,"symbol":symbol,"base":symbol.trim_end_matches("USDT"),"quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.01},"limits":{"amount":{"min":0.01,"max":9},"leverage":{"min":1,"max":3},"price":{"min":0.1,"max":999999}}})).unwrap()
+        ).collect();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(if venue == Venue::PM {
+                "binancepm"
+            } else {
+                "binance"
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store,
+            dependencies,
+        )
+        .unwrap();
+        let publications = Rc::new(Cell::new(0));
+        let notifications = publications.clone();
+        let unsubscribe = owner.base.store.subscribe(Box::new(move |_, from_worker| {
+            assert!(!from_worker);
+            notifications.set(notifications.get() + 1);
+            Ok(())
+        }));
+        let operation = owner.invoke(Method::Overlay, vec![]);
+        run(
+            &runtime,
+            safe_cex_venue_binance::class_jobs::reaction(operation),
+        )
+        .unwrap();
+        let observed = owner.base.store.markets();
+        assert_eq!(
+            observed.len(),
+            markets.len(),
+            "overlay preserves market count {venue:?}"
+        );
+        assert_eq!(
+            observed[0].limits.leverage.max, 125.0,
+            "the actual leverage future publishes its account-specific maximum {venue:?}"
+        );
+        assert_eq!(
+            observed[1].limits.leverage.max, 3.0,
+            "zero bracket leaves the original maximum {venue:?}"
+        );
+        assert_eq!(
+            observed[2].limits.leverage.max, 3.0,
+            "absent bracket leaves the original maximum {venue:?}"
+        );
+        for (actual, seed) in observed.iter().zip(&markets) {
+            let mut expected = seed.clone();
+            if expected.symbol == "BTCUSDT" {
+                expected.limits.leverage.max = 125.0;
+            }
+            assert_eq!(
+                serde_json::to_value(actual).unwrap(),
+                serde_json::to_value(expected).unwrap(),
+                "overlay preserves every other market field {venue:?}"
+            );
+        }
+        drop(observed);
+        assert_eq!(
+            publications.get(),
+            1,
+            "one live Store publication {venue:?}"
+        );
+        unsubscribe();
+        let requests = calls.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "the actual leverage loader starts exactly one native request {venue:?}"
+        );
+        let (path, query) = requests[0].url.split_once('?').unwrap();
+        assert_eq!(
+            path,
+            if venue == Venue::PM {
+                "/papi/v1/um/leverageBracket"
+            } else {
+                "/fapi/v1/leverageBracket"
+            }
+        );
+        assert!(query.contains("timestamp="));
+        assert!(query.contains("signature="));
+        assert!(runtime.reported.borrow().is_empty());
+        drop(requests);
+        owner.dispose().unwrap();
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    struct CandleSocket {
+        events: Rc<RefCell<std::collections::VecDeque<WsEvent>>>,
+        sent: RefCell<Vec<String>>,
+    }
+    impl WsSocket for CandleSocket {
+        fn ready_state(&self) -> u8 {
+            1
+        }
+        fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+            let events = self.events.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                events
+                    .borrow_mut()
+                    .pop_front()
+                    .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+            }))
+        }
+        fn send(&self, text: &str) -> Result<(), ExchangeError> {
+            self.sent.borrow_mut().push(text.into());
+            Ok(())
+        }
+        fn close(&self) {}
+        fn terminate(&self) {}
+        fn reconnect(&self) {}
+        fn is_reconnecting(&self) -> bool {
+            false
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let runtime = Rc::new(Runtime::default());
+        let socket = Rc::new(CandleSocket {
+            events: Rc::new(RefCell::new(std::collections::VecDeque::from([
+                WsEvent::Open,
+            ]))),
+            sent: RefCell::default(),
+        });
+        *runtime.dial_socket.borrow_mut() = Some(socket.clone());
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            std::sync::Arc::new(IdOnlyAdapter),
+            Rc::new(|_, _| panic!("no external candle provider configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(match venue {
+                Venue::Futures => "binance",
+                Venue::PM => "binancepm",
+                Venue::Spot => "binancespot",
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            dependencies,
+        )
+        .unwrap();
+        let receiver = owner.public.market_websocket.get().unwrap_or(&owner.public);
+        receiver.connect_and_subscribe().unwrap();
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        let seen = Rc::new(RefCell::new(Vec::<safe_cex_types::Candle>::new()));
+        let capture = seen.clone();
+        let cleanup = owner
+            .public
+            .listen_ohlcv(
+                EventValue::from_json(json!({"symbol":"BTCUSDT","interval":"1m"})),
+                Rc::new(move |candle| {
+                    capture.borrow_mut().push(candle);
+                    Ok(())
+                }),
+            )
+            .unwrap();
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|wire| wire.contains("SUBSCRIBE") && wire.contains("btcusdt@kline_1m"))
+        );
+        let wire = r#"{"e":"kline","s":"BTCUSDT","k":{"s":"BTCUSDT","i":"1m","t":120000,"o":"-0","h":"9.5","l":"-2","c":"4.25","v":"3.125"}}"#;
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(wire.into())));
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        {
+            let rows = seen.borrow();
+            assert_eq!(rows.len(), 1, "native candle delegation callback {venue:?}");
+            let c = &rows[0];
+            for (key, actual, expected) in [
+                ("timestamp", c.timestamp, 120.0_f64),
+                ("open", c.open, -0.0),
+                ("high", c.high, 9.5),
+                ("low", c.low, -2.0),
+                ("close", c.close, 4.25),
+                ("volume", c.volume, 3.125),
+            ] {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "native candle {venue:?} {key}"
+                );
+            }
+            assert!(c.last_side.is_none());
+        }
+        cleanup().unwrap();
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|wire| wire.contains("UNSUBSCRIBE") && wire.contains("btcusdt@kline_1m"))
+        );
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(wire.into())));
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "native candle cleanup removes parser {venue:?}"
+        );
+        owner.dispose().unwrap();
+    }
+}

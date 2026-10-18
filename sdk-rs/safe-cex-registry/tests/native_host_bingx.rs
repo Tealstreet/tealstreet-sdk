@@ -181,6 +181,7 @@ fn native_listen_key_rebuild_resumes_after_io_wake_and_ignores_old_wire_close() 
         let runtime = Rc::new(LocalDial {
             inner: safe_cex_exchange::native::native_runtime(),
             origin: ws_origin,
+            reports: Default::default(),
         });
         let host = native_venue_host_with(runtime, adapters, hyperliquid_rate_limiter());
         let store = Rc::new(safe_cex_store::store::DefaultStore::new());

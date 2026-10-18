@@ -240,7 +240,8 @@ impl<X> Scope<X> {
                     Ok(()) => callback().map_err(|error| (error.to_exchange_error(), "setTimeout")),
                 };
                 if let Err((error, source)) = outcome {
-                    reporter.report_exception(&error, &serde_json::json!({ "source": source }));
+                    reporter
+                        .report_exception(&error, &serde_json::json!({ "source": source }).into());
                 }
             }),
         );
@@ -261,7 +262,7 @@ impl<X> Scope<X> {
     pub fn report(&self, error: &Thrown, source: &str) {
         self.shared.runtime.report_exception(
             &error.to_exchange_error(),
-            &serde_json::json!({"source": source}),
+            &serde_json::json!({"source": source}).into(),
         );
     }
 }

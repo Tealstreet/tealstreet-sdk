@@ -94,14 +94,16 @@ fn orderbook_updates_match_source_raw_comparisons_and_lazy_reads() {
                             Js::object(vec![("amount", Js::Number(1.)), ("total", Js::Number(0.))]);
                         let log = trace.clone();
                         let price = input(price);
-                        level.define_accessor(
-                            "price",
-                            Some(Rc::new(move |_| {
-                                log.borrow_mut().push(format!("level:{i}"));
-                                Ok(price.clone())
-                            })),
-                            None,
-                        );
+                        level
+                            .define_accessor(
+                                "price",
+                                Some(Rc::new(move |_| {
+                                    log.borrow_mut().push(format!("level:{i}"));
+                                    Ok(price.clone())
+                                })),
+                                None,
+                            )
+                            .expect("test accessor target permits definition");
                         Some(level)
                     })
                     .collect(),
@@ -109,35 +111,39 @@ fn orderbook_updates_match_source_raw_comparisons_and_lazy_reads() {
             let update = Js::object(vec![("total", Js::Number(0.))]);
             let log = trace.clone();
             let price = input(&s["price"]);
-            update.define_accessor(
-                "price",
-                Some(Rc::new(move |_| {
-                    log.borrow_mut().push("price".into());
-                    Ok(price.clone())
-                })),
-                None,
-            );
+            update
+                .define_accessor(
+                    "price",
+                    Some(Rc::new(move |_| {
+                        log.borrow_mut().push("price".into());
+                        Ok(price.clone())
+                    })),
+                    None,
+                )
+                .expect("test accessor target permits definition");
             let log = trace.clone();
             let amount = input(&s["amount"]);
             let second = s.get("secondAmount").map(input);
             let throws = s["throwAmount"] == true;
             let reads = Cell::new(0);
-            update.define_accessor(
-                "amount",
-                Some(Rc::new(move |_| {
-                    log.borrow_mut().push("amount".into());
-                    if throws {
-                        return Err(Thrown::error("RangeError", "amount"));
-                    }
-                    reads.set(reads.get() + 1);
-                    Ok(if reads.get() == 2 {
-                        second.clone().unwrap_or_else(|| amount.clone())
-                    } else {
-                        amount.clone()
-                    })
-                })),
-                None,
-            );
+            update
+                .define_accessor(
+                    "amount",
+                    Some(Rc::new(move |_| {
+                        log.borrow_mut().push("amount".into());
+                        if throws {
+                            return Err(Thrown::error("RangeError", "amount"));
+                        }
+                        reads.set(reads.get() + 1);
+                        Ok(if reads.get() == 2 {
+                            second.clone().unwrap_or_else(|| amount.clone())
+                        } else {
+                            amount.clone()
+                        })
+                    })),
+                    None,
+                )
+                .expect("test accessor target permits definition");
             let book = Js::object(vec![(s["side"].as_str().unwrap(), levels.clone())]);
             let outcome = g.get("updateOrderBook").unwrap().call(
                 Js::Undefined,
@@ -203,34 +209,36 @@ fn orderbook_totals_match_source_side_reads_live_rows_and_raw_addition() {
                             let array = levels.clone();
                             let replace = spec["replaceRow"] == true;
                             let append = spec["appendRow"] == true;
-                            level.define_accessor(
-                                "amount",
-                                Some(Rc::new(move |_| {
-                                    log.borrow_mut().push(format!("{side}:{i}"));
-                                    if side == "bids" && i == 0 {
-                                        if replace {
-                                            array.set(
-                                                "0",
-                                                Js::object(vec![
-                                                    ("amount", Js::Number(9.)),
-                                                    ("total", Js::Number(0.)),
-                                                ]),
-                                            )?;
+                            level
+                                .define_accessor(
+                                    "amount",
+                                    Some(Rc::new(move |_| {
+                                        log.borrow_mut().push(format!("{side}:{i}"));
+                                        if side == "bids" && i == 0 {
+                                            if replace {
+                                                array.set(
+                                                    "0",
+                                                    Js::object(vec![
+                                                        ("amount", Js::Number(9.)),
+                                                        ("total", Js::Number(0.)),
+                                                    ]),
+                                                )?;
+                                            }
+                                            if append && array.get("length")?.as_f64() == Some(1.) {
+                                                array.call_method(
+                                                    "push",
+                                                    vec![Js::object(vec![
+                                                        ("amount", Js::Number(2.)),
+                                                        ("total", Js::Number(0.)),
+                                                    ])],
+                                                )?;
+                                            }
                                         }
-                                        if append && array.get("length")?.as_f64() == Some(1.) {
-                                            array.call_method(
-                                                "push",
-                                                vec![Js::object(vec![
-                                                    ("amount", Js::Number(2.)),
-                                                    ("total", Js::Number(0.)),
-                                                ])],
-                                            )?;
-                                        }
-                                    }
-                                    Ok(amount.clone())
-                                })),
-                                None,
-                            );
+                                        Ok(amount.clone())
+                                    })),
+                                    None,
+                                )
+                                .expect("test accessor target permits definition");
                         }
                     }
                 }
@@ -242,7 +250,8 @@ fn orderbook_totals_match_source_side_reads_live_rows_and_raw_addition() {
                         Ok(levels.clone())
                     })),
                     None,
-                );
+                )
+                .expect("test accessor target permits definition");
             }
             let error = g
                 .get("calcOrderBookTotal")

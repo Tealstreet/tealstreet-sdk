@@ -829,10 +829,11 @@ fn promise_member(p: Promise, name: &str) -> Option<Js> {
 
 /// Await `p`, then settle with `outcome` (finally keeps the original result).
 fn chain_value(rt: &Rc<dyn ExchangeRuntime>, p: Js, outcome: Result<Js, Thrown>) -> Js {
+    let runtime = rt.clone();
     Js::Promise(Promise::spawn(
         rt,
         Box::pin(async move {
-            await_js(p).await?;
+            await_js(&runtime, p).await?;
             outcome
         }),
     ))

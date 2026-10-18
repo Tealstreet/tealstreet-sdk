@@ -1990,149 +1990,17 @@ Own code, source/oracle/manifests and shared dependencies are byte-unchanged, so
 Merged extractor text explicitly reports `Would update 0 manifests; 0 added, 0 orphaned symbols.`, exit0; diff check exit0. Keyed tomllib census against the fetched integration still moves4 pending->ported,0->divergent. Full records are committed in `POSITION_REFRESH_FINAL_MERGE_GATE_EXITS.json`; the previous enumeration floor and unrun checks/composition limits still apply.
 
 
-## Eight public ticker event handler ports (2026-10-14)
+## Retired message-entry extraction harness
 
-Moved **8 pending -> ported, 0 -> divergent**, keyed tomllib census over all
-Binance manifests: **141/22/123 -> 149/22/115**. Immediate reviewed integration
-parent actually built on: `c39794931d672a4d8632e8db147f46e28dffb6b3` (PR7526). No unreviewed
-feature branch was used as the base. Candidate gate SHA:
-`bf8870d1141d9d46030000724ae18438c6ea2c58`. `PUBLIC_TICKER_GATE_EXITS.json` commits exact commands,
-exits, full outputs and fourteen byte-restored input hashes bound to that SHA.
-
-Ported Futures/PM market ticker and mark-price handlers, Futures/PM public
-book-ticker handlers, and Spot public ticker/book handlers. Each independently
-implemented body captures its live dictionary once, rereads live event length/
-entries, skips all JS-falsy lookup results, captures the current Store method and
-receiver before ordered field parsing, and forwards original ticker handles.
-Spot reads c separately for last/mark/index. Shared real get-key/String/parseFloat
-preserve missing-field NaN, aliases P/p and T/t, numeric prefixes, JSON coercion
-errors, and partial effects. The source oracle executes actual eight bodies,
-actual get-key/lodash and the actual BaseWebSocket.store getter.
-
-Scoped `public_ticker_events` target with configured TypeScript and
-`--include-ignored`: baseline and final restore **8 passed, 0 failed, 0 ignored,
-exit0**. Eight native first-field+1 controls compiled and failed named
-case0/row0/field0 assertions, **exit101**: ticker **13.3 vs12.3**, mark
-**14.1 vs13.1**, book bid **13.2 vs12.2** across all eight targets. Spot's control
-changes only its first c read. Two independent actual TS Futures-ticker and
-Spot-book first-field+1 controls completed all twenty-eight native cases each,
-then failed decoded source case0 first-field assertions, **exit101**. No selected
-survivor. Each mutation restored in finally; fourteen inputs matched their
-committed original bytes after all gates. Native field bits/NaN, schema order/
-counts, ticker/dictionary identity, receivers, unchanged model fields, live array/
-dictionary effects and original/generated error assertions precede source
-comparisons. No native roundtrip or re-encoded-byte assertion.
-
-Scoped Binance cargo check (`--all-targets --jobs2`), extractor check, three-file
-rustfmt and diff check each **exit0**. Extractor text explicitly says
-`Would update 0 manifests; 0 added, 0 orphaned symbols.` Both manifest writer runs
-measured exit0 with `Updated 3 manifests; 0 added, 0 orphaned symbols.` Initial
-uncommitted target run also passed8/0/0; no preliminary failure or survivor was
-observed. Read-only sub-agent body, runner and manifest reviews approved.
-
-Enumeration is a **224-case floor**, eight handlers each28, stopping
-`false-ticker`. Ten selected compiling controls stop at iteration ten, Spot book
-source case0; mutated tests stop at their named case0 failure. Native input events
-are undefined or decoded JSON cells with stock prototypes, and callbacks provide
-live dictionary capture/lookup (all JS-falsy entries normalize to None) and current
-Store method/receiver capture plus invocation. Own undefined-valued fields,
-non-JSON mutation/coercion, executable property hooks, inherited dictionary lookup
-or access beyond configured callbacks, and concrete class/Store/dictionary wiring
-remain pending. Full crate suites, workspace builds, host clippy, wasm clippy, CI,
-whole-venue and cross-engine audits were **not run**. No whole-149-row proof claim.
-
-
-### Public ticker integration merge-down preservation
-
-Merged integration `142cece1de89a061be37dca307d0a13b8b09471c` down. Preservation/extractor gate SHA:
-`482dca82ba6a173d31154f12542111e6f3fe10ba`. Actual `git diff --exit-code bf8870d1141d9d46030000724ae18438c6ea2c58 HEAD -- <Binance>/src <Binance>/tests`
-exited **0**. Source/oracle/manifests comparison exited **0**;
-shared dependency comparison exited **1**. Candidate function/control exits
-retain their original `bf8870d1141d9d46030000724ae18438c6ea2c58` SHA and are not relabeled as rerun.
-Changed gate inputs triggered fresh scoped public_ticker_events tests (8/0/0, exit0) at the merge SHA. Controls and rustfmt were not rerun.
-Changed shared dependencies triggered a fresh scoped Binance cargo check, exit0, at the merge SHA.
-Merged extractor exit0 explicitly reports `Would update 0 manifests; 0 added, 0 orphaned symbols.` Diff check exit0. Keyed tomllib census against fetched integration still moves8 pending->ported,0->divergent. Full commands/exits/outputs/hashes committed in `PUBLIC_TICKER_MERGE_GATE_EXITS.json`; earlier scope/floor/non-claims remain unchanged.
-
-
-### Public ticker final merge-down preservation
-
-Final fetch merged integration `4fa402f6fb4890a9ebd0d2ccf585f720c6f3a10a` down. Preservation/extractor
-gate SHA: `af679981fd836295052ca94d2404d59ca32ae50c`. Actual code/tests, fourteen source/oracle inputs and shared
-dependency diffs against `482dca82ba6a173d31154f12542111e6f3fe10ba` each exited **0**, preserving the refreshed
-8/0/0 tests and scoped cargo exits at `482dca82ba6a173d31154f12542111e6f3fe10ba`. Ten control
-measurements remain attached to `bf8870d1141d9d46030000724ae18438c6ea2c58`.
-Tests/cargo/controls/rustfmt were not rerun here. Final extractor exit0 explicitly
-reports `Would update 0 manifests; 0 added, 0 orphaned symbols.` Diff check exit0.
-Keyed tomllib against fetched integration still moves8 pending->ported,0->divergent:
-149/22/115. Full records/hashes/commands/limits are committed in
-`PUBLIC_TICKER_FINAL_MERGE_GATE_EXITS.json`. Earlier scope/floor/non-claims remain.
-
-
-## Nine message entry and market candle forwarding rows (2026-10-14)
-
-Moved **9 pending -> ported, 0 -> divergent**, keyed tomllib census over Binance
-manifests: **149/22/115 -> 158/22/106**. Fresh feature base actually used:
-`976c7bf08eb0d23329d7dfd9042035e3aabe2358`; no unreviewed external feature ancestor. Gate candidate
-`43867bba39aeae3c85356c413a41b603d0b5412a`, immediate parent `277451975db8872eed8346888e82d764b062e827`.
-`MESSAGE_ENTRY_GATE_EXITS.json` commits exact commands, full outputs, measured
-exits, twenty-one restored input hashes, per-control call sites and census rows.
-
-Ported five public onMessage wrappers, Futures/PM private onMessage routers, and
-Futures/PM public listenOHLCV companion-market forwards. Public data extraction
-precedes disposal; actual shared core traffic tracking precedes configured dispatch.
-Private routing uses actual core tracking/stats and production shared parsers:
-Futures protects bigint IDs/returns non-string input unchanged; PM coerces input,
-rounds JSON numbers and catches coercion errors to null. Separate event/id ifs
-reread retained payloads after callbacks. Delegates preserve original options,
-callback and cleanup handles and configured callback error identity.
-
-Scoped `message_entry` target, configured TypeScript, `--include-ignored`: baseline
-and exact final restore **9 passed, 0 failed, 0 ignored, exit0**. Nine compiling
-native controls each fail the named case0 assertion, **exit101**: public dispatch
-count **0 vs1** (five rows), private callback count **0 vs1** (two rows), options
-limit **8 vs7** (two rows). Two actual TS body controls complete native lane
-assertions first, then fail named source assertions, **exit101**: Futures account
-route trace length **native6 vs source4**, PM delegate limit **native7 vs source8**.
-All inputs restored byte-for-byte; no compiling selected control survived.
-Scoped cargo check (`--all-targets --jobs2`), extractor check, scoped rustfmt and
-diff check each **exit0**. Extractor text: `Would update 0 manifests; 0 added,
-0 orphaned symbols.` Latest manifest writer **exit0**, `Updated 5 manifests;
-0 added, 0 orphaned symbols.` Native decoded fields, identity, independent counts
-and real core state precede source comparisons for each lane; no roundtrip gate.
-
-Enumeration is a **154-case floor**: public5x14/private2x36 stop `preinitialized`,
-delegate2x6 stop `repeat-cleanup`; eleven compiling controls stop at iteration11,
-PM source delegate case0. Preliminary PM coercion mismatch (exit101) was corrected;
-an unchanged failed exploratory retry and an initial dispatch control compile
-failure are inventoried explicitly. That compile failure was **not** a kill.
-Earlier documentation-stage measurements keep their original SHA, with fresh
-final gates above. Read-only sub-agent review approved candidate `43867bba39aeae3c85356c413a41b603d0b5412a`.
-
-Configured data accessor/dispatch/diagnostic/handler/pong/market methods and their
-receivers remain class boundaries. Shared core health/stats errors cross the
-by-value ExchangeError API: name/message/metadata are retained; original native
-error-object identity is **not claimed**. Captured primitive cells stay immutable;
-object/array cells retain value/kind/identity and allow property/element mutations;
-whole-cell replacement is outside the configured data contract. Public dispatcher
-and concrete class wiring remain pending. Timer jobs retained but not executed;
-no timer execution/cancellation ownership proof. Full Binance test suite (only new
-target ran), workspace build, host clippy, wasm clippy, CI, arbitrary executable
-property hooks/own-undefined non-JSON payloads, whole venue and cross-engine
-verification **not run**. No whole-158-port proof claim.
-
-
-### Message-entry integration merge-down preservation
-
-Merged reviewed integration `ab593ef7504191a1cfd2bb094ef066aedd4c5c25` down. Preservation/extractor gate SHA
-`6be0546e09264f14d4275d68491317f51c00a6a9`. Actual `git diff --exit-code 43867bba39aeae3c85356c413a41b603d0b5412a HEAD -- <Binance>/src <Binance>/tests`
-exit **0**; source/oracle/manifests exit **0**; shared dependency inputs
-exit **0**. Original control measurements remain bound to `43867bba39aeae3c85356c413a41b603d0b5412a`;
-controls/rustfmt were not rerun. All compared inputs are byte-unchanged: tests/cargo/controls retain their original candidate SHA; tests/cargo were not rerun here.
-Merged extractor exit0 explicitly reports `Would update 0 manifests; 0 added,
-0 orphaned symbols.` Diff check exit0. Keyed tomllib against fetched integration
-moves9 pending->ported,0->divergent, census `{'ported': 149, 'divergent': 22, 'pending': 115}` -> `{'ported': 158, 'divergent': 22, 'pending': 106}`.
-Full commands/exits/outputs/hash comparisons committed in
-`MESSAGE_ENTRY_MERGE_GATE_EXITS.json`. Prior floor, boundaries and unrun claims apply.
+The four callback-only message/forwarding modules and their nine-entry harness
+were retired after a tracked production-source caller audit found only their
+function definitions. Registry and N-API construction reach the concrete
+`exchange_classes`, `private_classes` and `public_classes` paths. The wasm FFI
+currently exports only `parity_probe` and `version`, with no legacy message entry.
+The legacy receipt files described that removed harness and were retired with it.
+Manifest rows retain the existing live `PrivateState::on_message`,
+`PublicState::on_message` and `PublicState::listen_ohlcv` mappings. Constructed
+native frame/Store tests remain in `tests/private_classes.rs`.
 
 
 ## Eight REST response and reconciliation helpers (2026-10-14)

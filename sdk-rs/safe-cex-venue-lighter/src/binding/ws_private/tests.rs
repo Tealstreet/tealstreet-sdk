@@ -138,12 +138,20 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports
             .borrow_mut()
             .push(safe_cex_exchange::runtime::exception_text(error));
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports.borrow_mut().push(error.to_string());
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -818,7 +826,8 @@ fn production_private_position_loop_closes_only_after_a_body_throw() {
                             mode,
                             Some(Rc::new(move |_| Err(Thrown::new(failure.clone())))),
                             None,
-                        );
+                        )
+                        .expect("fresh extensible accessor target");
                     }
                     Ok(step)
                 }),

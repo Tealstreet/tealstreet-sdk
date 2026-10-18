@@ -389,10 +389,10 @@ impl Client {
             Err(_) => ProbeResult::Failed,
             Ok(execution) => {
                 let data = response_data(&execution.receipt.response.body);
-                match get_bybit_response_meta(&data) {
-                    Ok(meta) if meta.is_success => ProbeResult::Mismatch(probe.diagnostic.clone()),
-                    Ok(_) => ProbeResult::NoMismatch,
-                    Err(_) => ProbeResult::Failed,
+                if get_bybit_response_meta(&data).is_success {
+                    ProbeResult::Mismatch(probe.diagnostic.clone())
+                } else {
+                    ProbeResult::NoMismatch
                 }
             }
         }
@@ -401,9 +401,9 @@ impl Client {
     async fn maybe_prepend_env_mismatch(
         self: &Rc<Self>,
         code: Option<f64>,
-        message: Option<String>,
+        message: Option<Vec<u16>>,
         request: &RestRequest,
-    ) -> Result<Option<String>, RestFailure> {
+    ) -> Result<Option<Vec<u16>>, RestFailure> {
         if !matches!(code, Some(10003. | 401. | 403.)) {
             return Ok(message);
         }
@@ -411,7 +411,10 @@ impl Client {
             Some(message) if !message.is_empty() => message,
             other => return Ok(other),
         };
-        if message.contains(crate::api::BYBIT_ENV_MISMATCH_MESSAGE_PREFIX) {
+        let prefix: Vec<_> = crate::api::BYBIT_ENV_MISMATCH_MESSAGE_PREFIX
+            .encode_utf16()
+            .collect();
+        if message.windows(prefix.len()).any(|window| window == prefix) {
             return Ok(Some(message));
         }
         match self
@@ -419,7 +422,12 @@ impl Client {
             .await
             .map_err(|error| RestFailure::pre_transmit(error.to_string(), request.clone()))?
         {
-            ProbeResult::Mismatch(diagnostic) => Ok(Some(format!("{diagnostic} [{message}]"))),
+            ProbeResult::Mismatch(diagnostic) => {
+                let mut prefixed: Vec<_> = format!("{diagnostic} [").encode_utf16().collect();
+                prefixed.extend(message);
+                prefixed.push(93);
+                Ok(Some(prefixed))
+            }
             ProbeResult::NoMismatch | ProbeResult::Failed => Ok(Some(message)),
         }
     }
@@ -431,9 +439,7 @@ impl Client {
         let request = &execution.receipt.config;
         let response = &mut execution.receipt.response;
         let mut data = response_data(&response.body);
-        let refusal =
-            |error| RestFailure::from_transport(TransportError::JavaScript(error), request.clone());
-        let meta = get_bybit_response_meta(&data).map_err(refusal)?;
+        let meta = get_bybit_response_meta(&data);
         if !meta.has_explicit_status && response.status >= 400 {
             let blocked = crate::api_request::blocked_by_cdn(&data);
             let auth = !blocked && matches!(response.status, 401 | 403);
@@ -447,12 +453,12 @@ impl Client {
                 self.record_auth_failure(request)?;
                 self.maybe_prepend_env_mismatch(
                     Some(f64::from(response.status)),
-                    Some(message),
+                    Some(message.encode_utf16().collect()),
                     request,
                 )
                 .await?
             } else {
-                Some(message)
+                Some(message.encode_utf16().collect())
             };
             let mut body = body;
             body.push((
@@ -469,9 +475,7 @@ impl Client {
         }
         // Re-signed once before it may count as a bad key: these arrive in bursts right
         // after a reconnect, on keys that work.
-        if !execution.flags.signature_retry
-            && crate::api::is_bybit_sign_rejection(&data).map_err(refusal)?
-        {
+        if !execution.flags.signature_retry && crate::api::is_bybit_sign_rejection(&data) {
             return self
                 .request(
                     request.clone(),
@@ -499,9 +503,9 @@ impl Client {
             set_message(&mut data, message);
             response.body = RestResponseBody::Transformed(data.clone());
         }
-        let final_meta = get_bybit_response_meta(&data).map_err(refusal)?;
+        let final_meta = get_bybit_response_meta(&data);
         if data.is_truthy() && final_meta.has_explicit_status && !final_meta.is_success {
-            let message = final_meta.ret_msg.as_deref().unwrap_or("");
+            let message = final_meta.ret_msg.as_deref().unwrap_or(&[]);
             if crate::api::is_bybit_clock_sync_ret_msg(message) {
                 if !execution.flags.clock_retry {
                     let server = crate::api::parse_bybit_server_timestamp(message);
@@ -582,14 +586,14 @@ fn spread_data(data: &Input) -> Vec<(Vec<u16>, Input)> {
         _ => Vec::new(),
     }
 }
-fn set_message(data: &mut Input, message: Option<String>) {
+fn set_message(data: &mut Input, message: Option<Vec<u16>>) {
     if let Some(object) = data.as_object_mut() {
         let key: Vec<_> = "retMsg".encode_utf16().collect();
         if let Some(message) = message {
             if let Some((_, value)) = object.iter_mut().rev().find(|(name, _)| name == &key) {
-                *value = Input::Text(message.encode_utf16().collect());
+                *value = Input::Text(message);
             } else {
-                object.push((key, Input::Text(message.encode_utf16().collect())));
+                object.push((key, Input::Text(message)));
             }
         } else {
             object.retain(|(name, _)| name != &key);
@@ -657,12 +661,6 @@ fn retry_bybit<'a>(
                 let rejected = if !signature_retry.get() {
                     if let Some(response) = error.response.as_deref() {
                         crate::api::is_bybit_sign_rejection(&response.body.clone().into_data())
-                            .map_err(|fault| {
-                                RestFailure::from_transport(
-                                    TransportError::JavaScript(fault),
-                                    request.clone(),
-                                )
-                            })?
                     } else {
                         false
                     }

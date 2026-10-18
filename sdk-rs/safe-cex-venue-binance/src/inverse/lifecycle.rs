@@ -1,5 +1,11 @@
 //! COIN-M reconciliation state and request-weight guards.
-use super::{Rt, ops::*};
+use super::{
+    Rt,
+    ops::{
+        enum_value, global, install_async, install_sync, optional, or, request, require_array,
+        store, text, v,
+    },
+};
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
@@ -187,6 +193,7 @@ fn load_overlay(rt: Rt, _: Vec<Js>) -> safe_cex_exchange::js_runtime::promise::J
             })))
         });
         safe_cex_exchange::js_runtime::promise::await_js(
+            &rt.exchange_runtime(),
             rt.call_path("loadAccountMarketOverlay", vec![loader])?,
         )
         .await
@@ -196,14 +203,26 @@ fn start(rt: Rt, _: Vec<Js>) -> safe_cex_exchange::js_runtime::promise::JsFuture
     Box::pin(async move {
         use safe_cex_exchange::js_runtime::promise::await_js;
         if rt.this.get("needsAccountMarketOverlay")?.truthy() {
-            await_js(rt.call_path("loadAccountMaxLeverage", vec![])?).await?;
+            await_js(
+                &rt.exchange_runtime(),
+                rt.call_path("loadAccountMaxLeverage", vec![])?,
+            )
+            .await?;
             if rt.this.get("isDisposed")?.truthy() {
                 return Ok(Js::Undefined);
             }
         }
-        let external = await_js(rt.call_path("initExternalPublicData", vec![])?).await?;
+        let external = await_js(
+            &rt.exchange_runtime(),
+            rt.call_path("initExternalPublicData", vec![])?,
+        )
+        .await?;
         if !external.truthy() {
-            let markets = await_js(rt.call_path("fetchMarkets", vec![])?).await?;
+            let markets = await_js(
+                &rt.exchange_runtime(),
+                rt.call_path("fetchMarkets", vec![])?,
+            )
+            .await?;
             if rt.this.get("isDisposed")?.truthy() {
                 return Ok(Js::Undefined);
             }
@@ -216,7 +235,11 @@ fn start(rt: Rt, _: Vec<Js>) -> safe_cex_exchange::js_runtime::promise::JsFuture
                     ("loaded", loaded),
                 ])],
             )?;
-            let tickers = await_js(rt.call_path("fetchTickers", vec![])?).await?;
+            let tickers = await_js(
+                &rt.exchange_runtime(),
+                rt.call_path("fetchTickers", vec![])?,
+            )
+            .await?;
             if rt.this.get("isDisposed")?.truthy() {
                 return Ok(Js::Undefined);
             }
@@ -245,7 +268,7 @@ fn start(rt: Rt, _: Vec<Js>) -> safe_cex_exchange::js_runtime::promise::JsFuture
         } else {
             "_startPrivate"
         };
-        await_js(rt.call_path(method, vec![])?).await?;
+        await_js(&rt.exchange_runtime(), rt.call_path(method, vec![])?).await?;
         Ok(Js::Undefined)
     })
 }
@@ -253,14 +276,18 @@ fn start_private(rt: Rt, _: Vec<Js>) -> safe_cex_exchange::js_runtime::promise::
     Box::pin(async move {
         use safe_cex_exchange::js_runtime::promise::await_js;
         rt.call_path("privateWebsocket.connectAndSubscribe", vec![])?;
-        let mode = await_js(rt.call_path("fetchPositionMode", vec![])?).await?;
+        let mode = await_js(
+            &rt.exchange_runtime(),
+            rt.call_path("fetchPositionMode", vec![])?,
+        )
+        .await?;
         rt.call_path("store.setSetting", vec![Js::str("isHedged"), mode])?;
-        await_js(rt.call_path("tick", vec![])?).await?;
+        await_js(&rt.exchange_runtime(), rt.call_path("tick", vec![])?).await?;
         if rt.this.get("isDisposed")?.truthy() {
             return Ok(Js::Undefined);
         }
         rt.call_path("log", vec![Js::str("Ready to trade on Binance COIN-M")])?;
-        let orders = await_js(rt.call_path("fetchOrders", vec![])?).await?;
+        let orders = await_js(&rt.exchange_runtime(), rt.call_path("fetchOrders", vec![])?).await?;
         if rt.this.get("isDisposed")?.truthy() || rt.this.get("ordersSnapshotStale")?.truthy() {
             return Ok(Js::Undefined);
         }
@@ -311,7 +338,7 @@ fn retry_orders(rt: Rt, _: Vec<Js>) -> safe_cex_exchange::js_runtime::promise::J
             return Ok(Js::Undefined);
         }
         rt.this.set("lastOrdersRetryAt", Js::Number(rt.now()))?;
-        let orders = await_js(rt.call_path("fetchOrders", vec![])?).await?;
+        let orders = await_js(&rt.exchange_runtime(), rt.call_path("fetchOrders", vec![])?).await?;
         if rt.this.get("isDisposed")?.truthy() || rt.this.get("ordersSnapshotStale")?.truthy() {
             return Ok(Js::Undefined);
         }
@@ -363,14 +390,22 @@ fn tick(rt: Rt, _: Vec<Js>) -> safe_cex_exchange::js_runtime::promise::JsFuture<
                 || now - rt.this.get("lastAccountReconciliationAt")?.to_number()? >= interval);
         let result = async {
             if rt.this.get("ordersSnapshotStale")?.truthy() {
-                await_js(rt.call_path("retryOrdersSnapshot", vec![])?).await?;
+                await_js(
+                    &rt.exchange_runtime(),
+                    rt.call_path("retryOrdersSnapshot", vec![])?,
+                )
+                .await?;
             }
             if rt.this.get("isDisposed")?.truthy() {
                 return Ok::<_, Thrown>(false);
             }
             if risk {
                 let version = rt.call_path("getPositionStateVersion", vec![])?;
-                let positions = await_js(rt.call_path("fetchPositions", vec![])?).await?;
+                let positions = await_js(
+                    &rt.exchange_runtime(),
+                    rt.call_path("fetchPositions", vec![])?,
+                )
+                .await?;
                 if version.strict_equals(&rt.call_path("getPositionStateVersion", vec![])?) {
                     rt.call_path(
                         "store.update",
@@ -386,7 +421,11 @@ fn tick(rt: Rt, _: Vec<Js>) -> safe_cex_exchange::js_runtime::promise::JsFuture<
                     .truthy()
             {
                 let version = rt.call_path("getPositionStateVersion", vec![])?;
-                let result = await_js(rt.call_path("fetchPositionsAndBalance", vec![])?).await?;
+                let result = await_js(
+                    &rt.exchange_runtime(),
+                    rt.call_path("fetchPositionsAndBalance", vec![])?,
+                )
+                .await?;
                 let balance = result.get("balance")?;
                 let positions = result.get("positions")?;
                 if rt.this.get("isDisposed")?.truthy() {
@@ -450,7 +489,7 @@ fn listen_candle(rt: &Rt, a: &[Js]) -> Result<Js, Thrown> {
     let scope = rt.clone();
     rt.spawn(Box::pin(async move {
         let result = async {
-            let candles = await_js(pending).await?;
+            let candles = await_js(&scope.exchange_runtime(), pending).await?;
             if state.get() || scope.this.get("isDisposed")?.truthy() {
                 return Ok::<_, Thrown>(());
             }

@@ -295,7 +295,8 @@ impl Host {
                     ))
                 })),
                 None,
-            );
+            )
+            .expect("fresh extensible accessor target");
         }
         {
             let venue = Rc::downgrade(venue);
@@ -308,7 +309,8 @@ impl Host {
                     Ok(Js::Bool(Exchange::is_public_data_only(venue.as_ref())))
                 })),
                 None,
-            );
+            )
+            .expect("fresh extensible accessor target");
         }
         {
             let read = Rc::downgrade(venue);
@@ -326,7 +328,8 @@ impl Host {
                     }
                     Ok(())
                 })),
-            );
+            )
+            .expect("fresh extensible accessor target");
         }
         let members: &[(&str, Member)] = &[
             ("log", |h, a| {
@@ -765,7 +768,7 @@ impl Host {
             if let Err(error) = callback() {
                 runtime.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source": "setTimeout"}),
+                    &serde_json::json!({"source": "setTimeout"}).into(),
                 );
             }
         }));
@@ -1021,7 +1024,7 @@ impl ExchangeRuntimeHost for Host {
                 if let Err(error) = callback() {
                     runtime.report_exception(
                         &error.to_exchange_error(),
-                        &serde_json::json!({"source": "loop"}),
+                        &serde_json::json!({"source": "loop"}).into(),
                     );
                 }
                 Ok(Js::Undefined)

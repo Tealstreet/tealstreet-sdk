@@ -372,7 +372,10 @@ impl SessionHost for Private {
         self.host().expect("live runtime").spawn(task)
     }
     fn await_value(&self, v: Js) -> JsPromise<Js> {
-        Box::pin(async move { value(await_js(v).await) })
+        {
+            let host = self.host();
+            Box::pin(async move { value(await_js(&value(host)?.0.exchange_runtime(), v).await) })
+        }
     }
 }
 impl PrivateLifecycleHost for Private {

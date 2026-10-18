@@ -63,6 +63,25 @@ fn view(g: &Js, n: &Js) -> Value {
     json!({"str":call("toString",vec![]).to_display(),"value":call("valueOf",vec![]).to_display(),"fixed":[call("toFixed",vec![]).to_display(),call("toFixed",vec![Js::Number(0.)]).to_display(),call("toFixed",vec![Js::Number(2.)]).to_display(),call("toFixed",vec![Js::Number(6.)]).to_display()],"json":g.get("JSON").unwrap().call_method("stringify",vec![Js::object(vec![("sz",n.clone())])]).unwrap().to_display(),"nan":call("isNaN",vec![]).truthy(),"finite":call("isFinite",vec![]).truthy(),"number":number})
 }
 #[test]
+fn bignumber_construct_and_call_match_the_installed_package() {
+    let source = source();
+    let cases = source["scalars"].as_array().unwrap();
+    assert_eq!(cases.len(), 22);
+    host(|g| {
+        let ctor = g.get("BigNumber").unwrap();
+        assert!(ctor.is_constructor(), "BigNumber must support source `new`");
+        for row in cases {
+            let called = ctor.call(Js::Undefined, vec![input(&row["spec"])]).unwrap();
+            assert_eq!(view(g, &called), row["call"], "call {}", row["spec"]);
+            let constructed = ctor.construct(vec![input(&row["spec"])], None).unwrap();
+            assert_eq!(view(g, &constructed), row["result"], "new {}", row["spec"]);
+            let cloned = ctor.construct(vec![constructed], None).unwrap();
+            assert_eq!(view(g, &cloned), row["clone"], "new clone {}", row["spec"]);
+        }
+    });
+}
+
+#[test]
 fn bignumber_scalars_preserve_signed_zero_nonfinite_values_and_json() {
     let source = source();
     let cases = source["scalars"].as_array().unwrap();

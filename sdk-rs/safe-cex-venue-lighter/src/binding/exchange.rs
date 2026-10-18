@@ -186,9 +186,12 @@ impl LighterNativeExchange {
     ) -> ExchangeFuture<'_, T> {
         let this = self.this.borrow().clone();
         Box::pin(async move {
-            let value = await_js(this.call_method(member, args).map_err(err)?)
-                .await
-                .map_err(err)?;
+            let value = await_js(
+                &self.realm.exchange_runtime(),
+                this.call_method(member, args).map_err(err)?,
+            )
+            .await
+            .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
@@ -215,9 +218,12 @@ impl LighterNativeExchange {
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.this.borrow().clone();
         Box::pin(async move {
-            await_js(this.call_method(member, args).map_err(err)?)
-                .await
-                .map_err(err)?;
+            await_js(
+                &self.realm.exchange_runtime(),
+                this.call_method(member, args).map_err(err)?,
+            )
+            .await
+            .map_err(err)?;
             Ok(())
         })
     }
@@ -463,11 +469,16 @@ mod tests {
         fn random(&self) -> f64 {
             panic!("runtime used while installing globals")
         }
-        fn report_exception(&self, _: &ExchangeError, _: &serde_json::Value) {}
+        fn report_exception(
+            &self,
+            _: &ExchangeError,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
+        ) {
+        }
         fn report_raw_exception(
             &self,
             _: &safe_cex_exchange::js_runtime::value::Js,
-            _: &serde_json::Value,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
         ) {
         }
         fn execute_worker_request(

@@ -106,7 +106,11 @@ impl ParadexExchange {
         a: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
         let this = self.rt.this.clone();
-        Box::pin(async move { Ok(to_typed(&await_js(this.call_method(n, a)?).await?)?) })
+        Box::pin(async move {
+            Ok(to_typed(
+                &await_js(&self.rt.exchange_runtime(), this.call_method(n, a)?).await?,
+            )?)
+        })
     }
     fn listen<T: serde::de::DeserializeOwned + 'static>(
         &self,
@@ -127,7 +131,7 @@ impl ParadexExchange {
     fn unit(&self, n: &'static str, a: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            await_js(this.call_method(n, a)?).await?;
+            await_js(&self.rt.exchange_runtime(), this.call_method(n, a)?).await?;
             Ok(())
         })
     }
@@ -290,10 +294,10 @@ impl Drop for ParadexExchange {
     fn drop(&mut self) {
         if !self.rt.base().is_disposed() {
             if let Err(e) = self.dispose() {
-                self.rt
-                    .shared
-                    .runtime
-                    .report_exception(&e, &serde_json::json!({"source":"ParadexExchange.drop"}));
+                self.rt.shared.runtime.report_exception(
+                    &e,
+                    &serde_json::json!({"source":"ParadexExchange.drop"}).into(),
+                );
             }
         }
         for (_, task) in self.rt.shared.timers.borrow_mut().drain(..) {

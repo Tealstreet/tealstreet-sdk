@@ -53,8 +53,18 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, _: &ExchangeError, _: &Value) {}
-    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
+    fn report_exception(
+        &self,
+        _: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+    }
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+    }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
     }
@@ -179,7 +189,10 @@ impl World {
         self.http.sent.borrow().clone()
     }
     fn settle(&self, value: Js) -> Result<Js, Thrown> {
-        let mut future = Box::pin(await_js(value));
+        let mut future = Box::pin(await_js(
+            &(self.runtime.clone() as Rc<dyn ExchangeRuntime>),
+            value,
+        ));
         for _ in 0..64 {
             if let Poll::Ready(v) = future
                 .as_mut()
@@ -831,16 +844,18 @@ fn poison_unread_helper_fields(value: &Js) {
         for child in values {
             poison_unread_helper_fields(&child);
         }
-    } else {
-        for (_, child) in value.own_entries().unwrap() {
-            poison_unread_helper_fields(&child);
-        }
+        return;
     }
-    value.define_accessor(
-        "unused",
-        Some(Rc::new(|_| Err(Thrown::error("Error", "unread field")))),
-        None,
-    );
+    for (_, child) in value.own_entries().unwrap() {
+        poison_unread_helper_fields(&child);
+    }
+    value
+        .define_accessor(
+            "unused",
+            Some(Rc::new(|_| Err(Thrown::error("Error", "unread field")))),
+            None,
+        )
+        .expect("fresh extensible accessor target");
 }
 
 #[test]
@@ -874,16 +889,22 @@ fn production_lighter_helpers_read_only_sparse_source_fields() {
         }
         match case["mode"].as_str().unwrap() {
             "early-decimal" => {
-                args[0].define_accessor(
-                    "precision",
-                    Some(Rc::new(|_| Err(Thrown::error("Error", "unread precision")))),
-                    None,
-                );
-                args[0].get("info").unwrap().define_accessor(
-                    "quantityDecimals",
-                    Some(Rc::new(|_| Err(Thrown::error("Error", "unread alias")))),
-                    None,
-                );
+                args[0]
+                    .define_accessor(
+                        "precision",
+                        Some(Rc::new(|_| Err(Thrown::error("Error", "unread precision")))),
+                        None,
+                    )
+                    .expect("fresh extensible accessor target");
+                args[0]
+                    .get("info")
+                    .unwrap()
+                    .define_accessor(
+                        "quantityDecimals",
+                        Some(Rc::new(|_| Err(Thrown::error("Error", "unread alias")))),
+                        None,
+                    )
+                    .expect("fresh extensible accessor target");
             }
             "utf16-id" => args[0]
                 .get("0")
@@ -912,20 +933,28 @@ fn production_lighter_helpers_read_only_sparse_source_fields() {
                 .unwrap()
                 .set("minBaseAmount", Js::SymbolIterator)
                 .unwrap(),
-            "skip-id" => args[0].get("0").unwrap().define_accessor(
-                "id",
-                Some(Rc::new(|_| Err(Thrown::error("Error", "unread order id")))),
-                None,
-            ),
-            "throw-read" => args[0].get("info").unwrap().define_accessor(
-                if helper == "getLighterAmountDecimals" {
-                    "amountDecimals"
-                } else {
-                    "minBaseAmount"
-                },
-                Some(Rc::new(|_| Err(Thrown::error("Error", "used getter")))),
-                None,
-            ),
+            "skip-id" => args[0]
+                .get("0")
+                .unwrap()
+                .define_accessor(
+                    "id",
+                    Some(Rc::new(|_| Err(Thrown::error("Error", "unread order id")))),
+                    None,
+                )
+                .expect("fresh extensible accessor target"),
+            "throw-read" => args[0]
+                .get("info")
+                .unwrap()
+                .define_accessor(
+                    if helper == "getLighterAmountDecimals" {
+                        "amountDecimals"
+                    } else {
+                        "minBaseAmount"
+                    },
+                    Some(Rc::new(|_| Err(Thrown::error("Error", "used getter")))),
+                    None,
+                )
+                .expect("fresh extensible accessor target"),
             _ => {}
         }
         let result = world

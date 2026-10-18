@@ -217,3 +217,113 @@ fn native_dayjs_start_of_end_boundaries_match_installed_plugin() {
         }
     });
 }
+
+#[test]
+fn native_operator_objects_reuse_ordinary_primitive_conversion() {
+    use safe_cex_exchange::js_runtime::{ops, value::Thrown};
+    use std::cell::RefCell;
+    let output = std::process::Command::new("node").args(["-e", r#"
+const modes=['default','skip-value','skip-both','null-proto','object-results','negative-zero','value-throws','getter-throws'];
+const rows=[];
+for(const mode of modes){
+ const trace=[], token={unit:'\ud800'}, obj=mode==='null-proto'?Object.create(null):{};
+ if(!['default','null-proto'].includes(mode))for(const name of ['valueOf','toString'])Object.defineProperty(obj,name,{get(){
+   trace.push('get:'+name);
+   if(mode==='getter-throws'&&name==='valueOf')throw token;
+   if(mode==='skip-both'||(mode==='skip-value'&&name==='valueOf'))return null;
+   return function(){trace.push('call:'+name);if(this!==obj)throw Error('wrong receiver');if(mode==='value-throws')throw token;if(mode==='object-results')return {};return name==='valueOf'?-0:'9';};
+ }});
+ let observed;
+ try{const value=+obj;observed={kind:'number',value:Number.isNaN(value)?'NaN':Object.is(value,-0)?'-0':String(value)};}
+ catch(e){observed={kind:'throw',same:e===token,name:e===token?null:e.name,message:e===token?null:e.message};}
+ rows.push({mode,trace,observed});
+}
+process.stdout.write(JSON.stringify(rows));
+"#]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 8);
+    run_native(|scope| {
+        let mut rows = vec![];
+        for mode in [
+            "default",
+            "skip-value",
+            "skip-both",
+            "null-proto",
+            "object-results",
+            "negative-zero",
+            "value-throws",
+            "getter-throws",
+        ] {
+            let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+            let token = Js::object(vec![("unit", Js::utf16(&[0xd800]))]);
+            let obj = Js::object(vec![]);
+            if mode == "null-proto" {
+                scope
+                    .global("Object")
+                    .unwrap()
+                    .call_method("setPrototypeOf", vec![obj.clone(), Js::Null])
+                    .unwrap();
+            }
+            if !matches!(mode, "default" | "null-proto") {
+                for name in ["valueOf", "toString"] {
+                    let trace = trace.clone();
+                    let token = token.clone();
+                    obj.define_accessor(
+                        name,
+                        Some(Rc::new(move |owner| {
+                            trace.borrow_mut().push(format!("get:{name}"));
+                            if mode == "getter-throws" && name == "valueOf" {
+                                return Err(Thrown::new(token.clone()));
+                            }
+                            if mode == "skip-both" || mode == "skip-value" && name == "valueOf" {
+                                return Ok(Js::Null);
+                            }
+                            let owner = owner.clone();
+                            let trace = trace.clone();
+                            let token = token.clone();
+                            Ok(Js::function(name, move |this, _| {
+                                assert!(this.same_reference(&owner));
+                                trace.borrow_mut().push(format!("call:{name}"));
+                                if mode == "value-throws" {
+                                    return Err(Thrown::new(token.clone()));
+                                }
+                                Ok(if mode == "object-results" {
+                                    Js::object(vec![])
+                                } else if name == "valueOf" {
+                                    Js::Number(-0.)
+                                } else {
+                                    Js::str("9")
+                                })
+                            }))
+                        })),
+                        None,
+                    )
+                    .expect("test accessor target permits definition");
+                }
+            }
+            let observed = match ops::to_numeric(&obj) {
+                Ok(Js::Number(value)) => {
+                    json!({"kind":"number", "value":if value.is_nan() {"NaN".to_owned()} else if value.to_bits() == (-0.0_f64).to_bits() {"-0".to_owned()} else {safe_cex_num::js_number_string(value)}})
+                }
+                Ok(value) => panic!("expected Number, got {value:?}"),
+                Err(error) => {
+                    let same = error.value.same_reference(&token);
+                    if same {
+                        assert_eq!(
+                            &*token.get("unit").unwrap().to_js_string().unwrap(),
+                            &[0xd800]
+                        );
+                    }
+                    json!({"kind":"throw", "same":same, "name":if same {Value::Null} else {json!(error.value.get("name").unwrap().to_display())}, "message":if same {Value::Null} else {json!(error.value.get("message").unwrap().to_display())}})
+                }
+            };
+            rows.push(json!({"mode":mode,"trace":*trace.borrow(),"observed":observed}));
+        }
+        assert_eq!(json!(rows), source);
+    });
+}

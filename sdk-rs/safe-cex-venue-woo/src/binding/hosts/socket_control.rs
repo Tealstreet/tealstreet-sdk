@@ -215,7 +215,10 @@ impl body::Host for Frame {
         Callee::of(signer, "sign", "this.parent.options.remoteSigner.sign")
     }
     fn sign(&mut self, signer: Callee, request: Js) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(Box::pin(await_js(signer.invoke(vec![request])?)))
+        Ok(Box::pin(await_js(
+            &self.rt()?.exchange_runtime(),
+            signer.invoke(vec![request])?,
+        )))
     }
     fn hmac_sha256_hex(&mut self, secret: Js, to_sign: JsString) -> Result<JsString, Thrown> {
         let hmac =
@@ -240,7 +243,7 @@ impl body::Host for Frame {
             if let Err(e) = venue.fetch_and_set_private_snapshot(1).await {
                 reporter.report_exception(
                     &e,
-                    &serde_json::json!({ "source": "fetchAndSetPrivateSnapshot" }),
+                    &serde_json::json!({ "source": "fetchAndSetPrivateSnapshot" }).into(),
                 );
             }
             Ok(Js::Undefined)

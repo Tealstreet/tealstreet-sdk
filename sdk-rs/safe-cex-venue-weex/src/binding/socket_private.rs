@@ -222,7 +222,7 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
                 WeexRefreshKind::Balance => "fetchBalance",
             };
             let pending = parent_call(h, method, std::vec![])?;
-            Ok(Box::pin(await_js(pending)))
+            Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
         apply_refresh: |h, kind, value| match kind {
             WeexRefreshKind::Orders => call_unit(

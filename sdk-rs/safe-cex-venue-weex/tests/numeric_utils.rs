@@ -97,17 +97,35 @@ fn numeric_utilities_match_actual_typescript() {
         }
     }
     assert_eq!(compared, 2132, "cardinality::numeric_utils.rs::compared");
+    let mut retained_cases = 0;
     for case in corpus["refusals"].as_array().unwrap() {
         let raw = case["raw"].as_str().unwrap();
-        assert!(
-            serde_json::from_str::<WeexUtilityInput>(raw).is_err(),
-            "numeric_utility_utf8_refusal"
-        );
-        assert!(
-            js_from_str::<WeexUtilityInput>(raw).is_err(),
-            "numeric_utility_utf8_refusal"
-        );
+        for input in [
+            serde_json::from_str::<WeexUtilityInput>(raw).unwrap(),
+            js_from_str::<WeexUtilityInput>(raw).unwrap(),
+        ] {
+            assert_eq!(input.as_value().as_text(), Some([0xd800].as_slice()));
+            match case["fn"].as_str().unwrap() {
+                "toNumber" => assert_eq!(
+                    bits(to_number(Some(&input), Some(131.0)).unwrap()),
+                    case["native"]["bits"].as_str().unwrap()
+                ),
+                "normalizePercentage" => assert_eq!(
+                    bits(normalize_percentage(Some(&input), 131.0, 100.0).unwrap()),
+                    case["native"]["bits"].as_str().unwrap()
+                ),
+                "toIntegerString" => {
+                    assert_eq!(case["native"]["utf16"], serde_json::json!([0xd800]));
+                    let error = to_integer_string(Some(&input)).unwrap_err();
+                    assert_eq!(error.name, "TypeError", "closed String output refusal");
+                    assert!(!error.message.is_empty());
+                }
+                name => panic!("unknown UTF16 numeric function {name}"),
+            }
+            retained_cases += 1;
+        }
     }
+    assert_eq!(retained_cases, 6, "retained UTF16 source comparisons");
     for case in corpus["depth"].as_array().unwrap() {
         let raw = case["raw"].as_str().unwrap();
         assert!(

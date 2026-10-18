@@ -216,7 +216,12 @@ fn private_connect(s: &OkxScope, business: bool) -> Result<(), Thrown> {
 async fn private_open(s: OkxScope, business: bool) -> Result<Js, Thrown> {
     let this = s.this.clone();
     let disposed = || Ok(this.get("isDisposed")?.truthy());
-    let auth = || Ok(await_js(this.call_method("auth", vec![])?));
+    let auth = || {
+        Ok(await_js(
+            &s.exchange_runtime(),
+            this.call_method("auth", vec![])?,
+        ))
+    };
     let emit_error =
         |e: &Thrown| unit(this.call_method("emitAndLogError", vec![as_error(&e.value)?]));
     let invoke = |name: &str| {
@@ -297,7 +302,12 @@ async fn private_auth(s: OkxScope, business: bool) -> Result<Js, Thrown> {
             &format!("unknown OKX auth capability {other}"),
         )),
     };
-    let sign = |signer: Js, request: Js| Ok(await_js(signer.call(Js::Undefined, vec![request])?));
+    let sign = |signer: Js, request: Js| {
+        Ok(await_js(
+            &s.exchange_runtime(),
+            signer.call(Js::Undefined, vec![request])?,
+        ))
+    };
     let get = |v: &Js, key: &str| v.get(key);
     let template = |v: &Js| units(v);
     let string = |u: Vec<u16>| Js::utf16(&u);
@@ -528,7 +538,7 @@ fn account_members(s: &OkxScope) {
 }
 
 /// The members OKXPrivateWebsocket declares and OKXBusinessWebsocket overrides.
-fn session_members(s: &OkxScope, business: bool) {
+fn session_members(s: &OkxScope, business: bool) -> Result<(), Thrown> {
     let endpoint: Getter = Rc::new(move |this| {
         let (region, testnet) = region_and_testnet(this)?;
         Ok(Js::str(if business {
@@ -537,7 +547,7 @@ fn session_members(s: &OkxScope, business: bool) {
             family_policy::get_private_websocket_endpoint(region, Some(testnet))
         }))
     });
-    s.this.define_accessor("endpoint", Some(endpoint), None);
+    s.this.define_accessor("endpoint", Some(endpoint), None)?;
     sync_member(s, "connectAndSubscribe", move |s, _| {
         private_connect(s, business).map(|_| Js::Undefined)
     });
@@ -577,6 +587,7 @@ fn session_members(s: &OkxScope, business: bool) {
         }
         Ok(Js::Undefined)
     });
+    Ok(())
 }
 
 fn define_fields(this: &Js, fields: Vec<(&str, Js)>) -> Result<(), Thrown> {
@@ -599,7 +610,7 @@ fn private_fields(this: &Js, state: PrivateSocketState<Js>) -> Result<(), Thrown
 
 fn new_private(s: &OkxScope) -> Result<(), Thrown> {
     private_fields(&s.this, PrivateSocketState::initialize(&socket_ops(s))?)?;
-    session_members(s, false);
+    session_members(s, false)?;
     account_members(s);
     Ok(())
 }
@@ -614,8 +625,8 @@ fn new_business(s: &OkxScope) -> Result<(), Thrown> {
         ))
     });
     s.this
-        .define_accessor("resyncsPrivateStateOnReopen", Some(resyncs), None);
-    session_members(s, true);
+        .define_accessor("resyncsPrivateStateOnReopen", Some(resyncs), None)?;
+    session_members(s, true)?;
     sync_member(s, "dispatchMessageHandler", |s, a| {
         business_dispatch(s, arg(&a, 0), arg(&a, 1)).map(|_| Js::Undefined)
     });
