@@ -624,3 +624,12 @@ production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
 receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
+
+The private-construction Clone reviews in the Binance construction policy cover
+three reusable capabilities: the inverse listener retry context, shared class
+settlement observations and captured private arrows with their receiver/base
+leases. The disconnected candle-listener witness executes the actual retry
+clone before a real socket frame and cleanup; the native private-clone witness
+holds a listen-key request, drops the original settlement and observes both
+clones before invoking a cloned reconnect arrow. These reviews do not classify
+raw-input decoders or widen accepted representations.
