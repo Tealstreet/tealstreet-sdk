@@ -623,6 +623,13 @@ paths independently; both must compile and fail the named native test, then pass
 after exact source restoration. Other owners and generic instantiations remain
 outside this finite evidence.
 
+The twenty history/API/lifecycle capabilities have individual source-role records
+and authenticated native compiler probes in `scripts/lifecycle-alias-contracts.mjs`.
+Their real native owner/HTTP/socket/signing/Store witnesses and compiled controls
+are described in `LIFECYCLE_ALIAS_REVIEW.md`. Income paging uses the canonical
+native typed bridge on both sides of the shared pager, preserving native number
+bits while retaining the existing numeric transaction/trade ID String policy.
+
 ### Retired duplicate order throttle
 
 The former `orders_throttle` generic module had no production caller; its only
@@ -650,3 +657,12 @@ compiler contracts and actual native binding/fault witnesses. See
 `RefreshCallback` and `KeyFuture` were retired with test-only scheduling and key
 wrappers. Keep the live receiver's native key future, retry/refresh methods and
 single shared detach helper; do not restore parallel helpers for the census.
+
+The private-construction Clone reviews in the Binance construction policy cover
+three reusable capabilities: the inverse listener retry context, shared class
+settlement observations and captured private arrows with their receiver/base
+leases. The disconnected candle-listener witness executes the actual retry
+clone before a real socket frame and cleanup; the native private-clone witness
+holds a listen-key request, drops the original settlement and observes both
+clones before invoking a cloned reconnect arrow. These reviews do not classify
+raw-input decoders or widen accepted representations.
