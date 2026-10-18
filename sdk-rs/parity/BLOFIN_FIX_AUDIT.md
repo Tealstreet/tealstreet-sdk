@@ -21,8 +21,8 @@ dropped. This measures sibling survival, not arbitrary microtask-count parity.
 | `BlofinExchange.getOrFetchPositionMode` | PENDING real-binding probe; original static finding is not a verdict. |
 | `BlofinExchange.getOrFetchMarginType` | PENDING real-binding probe; original static finding is not a verdict. |
 | `BlofinExchange.fetchLeverageForSymbol` | PENDING real-binding probe; original static finding is not a verdict. |
-| `BlofinExchange.fetchOrders` | FIX: compiled real-binding sibling-pagination RED → GREEN in this change; both the public entry and its retry join execute. Other helper rows remain pending individual timing probes. |
-| `BlofinExchange#fetchOrdersWithRetry` | FIX: compiled real-binding sibling-pagination RED → GREEN in this change; both the public entry and its retry join execute. Other helper rows remain pending individual timing probes. |
+| `BlofinExchange.fetchOrders` | FIXED #1068: compiled real-binding sibling-pagination RED → GREEN; both the public entry and its retry join execute. Other helper rows remain pending individual timing probes. |
+| `BlofinExchange#fetchOrdersWithRetry` | FIXED #1068: compiled real-binding sibling-pagination RED → GREEN; both the public entry and its retry join execute. Other helper rows remain pending individual timing probes. |
 | `BlofinExchange#fetchPaginatedOrderRows` | PENDING real-binding probe; original static finding is not a verdict. |
 | `BlofinExchange.fetchNormalOrders` | PENDING real-binding probe; original static finding is not a verdict. |
 | `BlofinExchange.fetchAlgoOrders` | PENDING real-binding probe; original static finding is not a verdict. |
