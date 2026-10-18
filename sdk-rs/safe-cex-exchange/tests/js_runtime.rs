@@ -2252,10 +2252,16 @@ fn store_facade_reads_fetched_leverage_and_writes_settings_and_statuses() {
         .call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)])
         .unwrap();
     assert!(store.options().unwrap().is_hedged);
+    facade
+        .call_method("setSetting", vec![Js::str("other"), Js::Bool(true)])
+        .unwrap();
     assert!(
         facade
-            .call_method("setSetting", vec![Js::str("other"), Js::Bool(true)])
-            .is_err()
+            .get("options")
+            .unwrap()
+            .get("other")
+            .unwrap()
+            .strict_equals(&Js::Bool(true))
     );
 
     store.add_order(order("one", "BTC")).unwrap();
