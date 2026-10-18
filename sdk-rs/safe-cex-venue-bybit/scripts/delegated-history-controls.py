@@ -17,7 +17,7 @@ command = ['cargo', 'test', '--locked', '--jobs', '2', '-p', 'safe-cex-venue-byb
 env = dict(os.environ, CARGO_INCREMENTAL='0')
 controls = [
     ('bypass final admission', 'admit_execution_rows(&rt, rows?)', '{ let _ = admit_execution_rows; rows }', 'BYBIT-HISTORY-ROW'),
-    ('lose good neighbors', 'accepted.push(row);', 'let _ = row;', 'BYBIT-HISTORY-ROW'),
+    ('lose good neighbors', 'accepted.push(row);', 'accepted.push(row); accepted.clear();', 'BYBIT-HISTORY-ROW'),
     ('admit bad symbol', 'if !value.is_string() && (required || !value.is_undefined()) {',
      'if field != "symbol" && !value.is_string() && (required || !value.is_undefined()) {', 'BYBIT-HISTORY-ROW'),
     ('admit bad commission asset', 'if !value.is_string() && (required || !value.is_undefined()) {',
