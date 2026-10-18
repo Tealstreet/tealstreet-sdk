@@ -901,6 +901,54 @@ fn native_synced_clock_reaches_all_order_mapping_paths() {
     );
 }
 
+// Desired behavior for the coordinated native request-body carrier cutover.
+#[test]
+fn nan_leverage_reaches_source_signer_before_wire_projection() {
+    const LEVERAGE: &str = "/openApi/swap/v2/trade/leverage";
+    let h = fixture();
+    let result = h.drive(h.venue().set_leverage("BTCUSDT".into(), f64::NAN, None));
+    let calls = h.http.calls(LEVERAGE);
+    assert_eq!(
+        calls.len(),
+        1,
+        "native NaN leverage must reach the production HTTP adapter: {result:?}"
+    );
+    result.expect("the scripted venue accepts the source request");
+    let body = &calls[0].data;
+    assert_eq!(
+        body.get("leverage"),
+        Some(&Value::Null),
+        "JSON.stringify projects NaN only after signing"
+    );
+    let timestamp = body["timestamp"].as_f64().unwrap().to_string();
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/native_nan_leverage_source.cjs"
+        ))
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .arg(timestamp)
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source witness failed: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        body, &expected["body"],
+        "real wire body and NaN-signed HMAC must match maintained source"
+    );
+    assert!(
+        expected["preimage"]
+            .as_str()
+            .unwrap()
+            .contains("leverage=NaN")
+    );
+    done(&h);
+}
+
 #[test]
 fn historical_fills_use_host_local_time_conversion() {
     use std::{cell::RefCell, process::Command, rc::Rc};

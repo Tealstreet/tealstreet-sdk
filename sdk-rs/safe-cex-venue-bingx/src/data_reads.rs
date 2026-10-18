@@ -13,7 +13,7 @@ use safe_cex_transport::RestRequest;
 use safe_cex_types::{
     Balance, FetchedLeverage, MarginType, Market, MarketLimits, MarketLimitsAmount,
     MarketLimitsLeverage, MarketPrecision, Order, OrderStatus, Position, PositionMode,
-    PositionSide, Ticker,
+    PositionSide, Ticker, retained_json::RetainedJsonInput,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -153,14 +153,11 @@ impl BingxDataReads {
         })
         .await
     }
-    async fn post(&self, endpoint: &str, body: Value) -> Result<Value, ExchangeError> {
+    async fn post(&self, endpoint: &str, body: RetainedJsonInput) -> Result<Value, ExchangeError> {
         self.configured_request(RestRequest {
             method: "POST".into(),
             url: endpoint.into(),
-            body: Some(safe_cex_transport::RestBody::Untransformed(
-                safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
-                    .map_err(|error| ExchangeError::new(error.to_string()))?,
-            )),
+            body: Some(safe_cex_transport::RestBody::Untransformed(body)),
             ..Default::default()
         })
         .await
@@ -892,7 +889,14 @@ impl BingxDataReads {
             let response = self
                 .post(
                     crate::constants::ENDPOINTS[6].1,
-                    json!({"dualSidePosition": if hedged {"true"} else {"false"}}),
+                    RetainedJsonInput::Object(vec![(
+                        "dualSidePosition".encode_utf16().collect(),
+                        RetainedJsonInput::Text(
+                            if hedged { "true" } else { "false" }
+                                .encode_utf16()
+                                .collect(),
+                        ),
+                    )]),
                 )
                 .await?;
             Self::check_code(&response)?;
@@ -925,12 +929,36 @@ impl BingxDataReads {
             return Err(ExchangeError::new("Symbol is required"));
         };
         let result = async {
-            let response = self.post(crate::constants::ENDPOINTS[7].1, json!({"symbol":self.venue_symbol(symbol), "marginType":if isolated {"ISOLATED"} else {"CROSSED"}})).await?;
+            let response = self
+                .post(
+                    crate::constants::ENDPOINTS[7].1,
+                    RetainedJsonInput::Object(vec![
+                        (
+                            "symbol".encode_utf16().collect(),
+                            RetainedJsonInput::Text(
+                                self.venue_symbol(symbol).encode_utf16().collect(),
+                            ),
+                        ),
+                        (
+                            "marginType".encode_utf16().collect(),
+                            RetainedJsonInput::Text(
+                                if isolated { "ISOLATED" } else { "CROSSED" }
+                                    .encode_utf16()
+                                    .collect(),
+                            ),
+                        ),
+                    ]),
+                )
+                .await?;
             Self::check_code(&response)?;
             self.get_or_fetch_position_mode(true).await?;
             let positions = self.fetch_positions(Some(&[symbol.to_owned()])).await?;
-            self.base.store.add_or_update_positions(positions).map_err(ExchangeError::from)
-        }.await;
+            self.base
+                .store
+                .add_or_update_positions(positions)
+                .map_err(ExchangeError::from)
+        }
+        .await;
         if let Err(error) = &result {
             self.report(error_message(error)?, None)?;
         }
@@ -968,10 +996,20 @@ impl BingxDataReads {
                 safe_cex_num::math_max(input, market.limits.leverage.min),
                 market.limits.leverage.max,
             );
-            let mut body = json!({"symbol":self.venue_symbol(symbol),"side":position_side});
-            body["leverage"] = safe_cex_types::retained_json::RetainedJsonInput::Float(leverage)
-                .into_value()
-                .map_err(|_| type_error("typed RestBody refuses NaN leverage"))?;
+            let body = RetainedJsonInput::Object(vec![
+                (
+                    "symbol".encode_utf16().collect(),
+                    RetainedJsonInput::Text(self.venue_symbol(symbol).encode_utf16().collect()),
+                ),
+                (
+                    "side".encode_utf16().collect(),
+                    RetainedJsonInput::Text(position_side.encode_utf16().collect()),
+                ),
+                (
+                    "leverage".encode_utf16().collect(),
+                    RetainedJsonInput::Float(leverage),
+                ),
+            ]);
             let response = self.post(crate::constants::ENDPOINTS[8].1, body).await?;
             Self::check_code(&response)?;
             let positions = self.fetch_positions(Some(&[symbol.to_owned()])).await?;

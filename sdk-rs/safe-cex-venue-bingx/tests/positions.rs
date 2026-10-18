@@ -1,9 +1,11 @@
+use safe_cex_exchange::js_runtime::value::{Js, from_json, from_retained_input};
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_types::retained_json::RetainedJsonInput;
 use safe_cex_types::*;
 use safe_cex_venue_bingx::data_reads::{BingxDataReads, PositionMetadata, ReadTransport};
 use serde_json::{Value, json};
@@ -47,6 +49,27 @@ fn ready<F: Future>(future: F) -> F::Output {
 }
 fn number(n: f64) -> Value {
     json!({"number":if n.is_nan(){"NaN".into()}else{format!("{:016x}",n.to_bits())}})
+}
+fn observe_input(input: &RetainedJsonInput) -> Value {
+    match input {
+        RetainedJsonInput::Undefined => json!({"undefined":true}),
+        RetainedJsonInput::Null => Value::Null,
+        RetainedJsonInput::Bool(value) => json!(value),
+        RetainedJsonInput::Text(value) => json!(String::from_utf16(value).unwrap()),
+        RetainedJsonInput::Float(value) => number(*value),
+        RetainedJsonInput::Lexeme(_) => {
+            number(from_retained_input(input.clone()).as_f64().unwrap())
+        }
+        RetainedJsonInput::Array(values) => {
+            Value::Array(values.iter().map(observe_input).collect())
+        }
+        RetainedJsonInput::Object(values) => Value::Object(
+            values
+                .iter()
+                .map(|(key, value)| (String::from_utf16(key).unwrap(), observe_input(value)))
+                .collect(),
+        ),
+    }
 }
 fn observe(v: &Value) -> Value {
     match v {
@@ -184,34 +207,40 @@ impl ReadTransport for Transport {
         if let Some(hook) = self.hook.borrow().as_ref() {
             hook(&request);
         }
-        let body_value = request
+        let body = request
             .body
             .as_ref()
-            .map(|b| b.untransformed().unwrap().clone().into_value().unwrap());
-        let body = body_value.as_ref();
-        let args = if request.method == "POST" {
-            body.cloned().unwrap()
+            .map(|body| body.untransformed().unwrap());
+        let params = if request.method == "POST" {
+            from_retained_input(body.unwrap().clone())
         } else {
             request
                 .params
                 .as_ref()
-                .map_or(json!({"undefined":true}), |v| json!({"params":v}))
+                .map(from_json)
+                .unwrap_or(Js::Undefined)
+        };
+        let observed = if request.method == "POST" {
+            observe_input(body.unwrap())
+        } else {
+            observe(
+                &request
+                    .params
+                    .as_ref()
+                    .map_or(json!({"undefined":true}), |v| json!({"params":v})),
+            )
         };
         self.calls
             .borrow_mut()
-            .push(json!({"method":request.method,"url":request.url,"config":observe(&args)}));
-        let params = if request.method == "POST" {
-            body
-        } else {
-            request.params.as_ref()
-        };
+            .push(json!({"method":request.method,"url":request.url,"config":observed}));
         let error = &self.input["error"];
         let rejected = !error.is_null()
             && (error["scope"] == "all"
                 || (error["scope"] == "margin"
                     && request.method == "GET"
                     && request.url == "/openApi/swap/v2/trade/marginType")
-                || (error["scope"] == "order-b" && params.unwrap()["orderId"] == "b"));
+                || (error["scope"] == "order-b"
+                    && params.get("orderId").unwrap().strict_equals(&Js::str("b"))));
         let result = if rejected {
             let mut e = ExchangeError::new(error["message"].as_str().unwrap());
             e.response = Some(json!({"data":{"msg":error["msg"]}}));
@@ -224,12 +253,12 @@ impl ReadTransport for Transport {
                         && self.input["postCode"] == 0
                     {
                         *self.mode.borrow_mut() =
-                            params.unwrap()["dualSidePosition"].as_str().unwrap().into();
+                            params.get("dualSidePosition").unwrap().to_display();
                     }
                     json!({"code":self.input["postCode"],"msg":self.input["postMsg"]})
                 }
                 "DELETE" => {
-                    json!({"code":if request.url=="/openApi/swap/v2/trade/order"{self.input["cancelCodes"][params.unwrap()["orderId"].as_str().unwrap()].clone()}else{self.input.get("cancelAllCode").cloned().unwrap_or(json!(0))},"msg":"cancel rejected"})
+                    json!({"code":if request.url=="/openApi/swap/v2/trade/order"{self.input["cancelCodes"][params.get("orderId").unwrap().to_display()].clone()}else{self.input.get("cancelAllCode").cloned().unwrap_or(json!(0))},"msg":"cancel rejected"})
                 }
                 "GET" => match request.url.as_str() {
                     "/openApi/swap/v2/user/positions" => {
@@ -239,7 +268,7 @@ impl ReadTransport for Transport {
                         json!({"code":0,"data":{"dualSidePosition":*self.mode.borrow()}})
                     }
                     "/openApi/swap/v2/trade/leverage" => {
-                        let symbol = params.unwrap()["symbol"].as_str().unwrap();
+                        let symbol = params.get("symbol").unwrap().to_display();
                         if self.input["leverageFailure"] == symbol {
                             json!({"code":9,"msg":"no leverage"})
                         } else {
@@ -247,7 +276,7 @@ impl ReadTransport for Transport {
                         }
                     }
                     "/openApi/swap/v2/trade/marginType" => {
-                        json!({"code":0,"data":{"marginType":if params.unwrap()["symbol"]=="ETH-USDC"{"CROSSED"}else{"ISOLATED"}}})
+                        json!({"code":0,"data":{"marginType":if params.get("symbol").unwrap().strict_equals(&Js::str("ETH-USDC")){"CROSSED"}else{"ISOLATED"}}})
                     }
                     _ => panic!("unexpected URL {}", request.url),
                 },
@@ -465,7 +494,7 @@ fn positions_match_actual_typescript() {
     assert_eq!(counts, [4; 8], "BINGX-POS native executed rows");
 }
 #[test]
-fn typed_position_and_nan_request_boundaries_are_explicit() {
+fn typed_position_refusal_and_native_nan_post_match_source() {
     assert_eq!(
         corpus()["boundary"]["inherited"]["side"],
         "function",
@@ -493,20 +522,23 @@ fn typed_position_and_nan_request_boundaries_are_explicit() {
         "BINGX-POS actual source forwards NaN"
     );
     let (venue, _, transport, host) = fixture(corpus()["cases"][21]["input"].clone());
-    let error = ready(venue.set_leverage("BTCUSDT", f64::NAN, None)).unwrap_err();
+    ready(venue.set_leverage("BTCUSDT", f64::NAN, None)).unwrap();
+    let calls = transport.calls.borrow();
+    let post = calls.iter().find(|call| call["method"] == "POST").unwrap();
     assert_eq!(
-        error.message, "typed RestBody refuses NaN leverage",
-        "BINGX-POS explicit NaN refusal"
+        post["config"],
+        corpus()["boundary"]["nanBody"],
+        "BINGX-POS native NaN reaches the configured transport before wire projection"
     );
     assert_eq!(
-        transport.calls.borrow().len(),
-        1,
-        "BINGX-POS no NaN POST and no position refresh"
+        json!(*calls),
+        corpus()["boundary"]["nanCalls"],
+        "BINGX-POS NaN request sequence matches source through position refresh"
     );
     assert_eq!(
-        *host.logs.borrow(),
-        vec!["typed RestBody refuses NaN leverage"],
-        "BINGX-POS visible NaN refusal"
+        json!(*host.logs.borrow()),
+        corpus()["boundary"]["nanReports"],
+        "BINGX-POS NaN reports match source"
     );
 }
 #[test]

@@ -248,6 +248,13 @@ Signature-predicate coercion failures retain their TypeError name and unprefixed
 message through the shared ExchangeError conversion. The real native receiver
 regressions cover both resolved and rejected HTTP responses without a resend.
 
+Configuration POST producers pass canonical RetainedJsonInput directly into the
+configured transport. In particular, setLeverage retains its clamped native f64
+until the API computes the qs preimage; NaN signs as `leverage=NaN` and becomes
+JSON null only in the final body serialization. The real binding regression
+`nan_leverage_reaches_source_signer_before_wire_projection` compares that complete
+wire body and HMAC with maintained setLeverage/createAPI and installed Axios/qs.
+
 Historical fill ISO dates without an offset use the required
 `BingxDependencies.local_wall_time_to_utc` callback; explicit offsets bypass it.
 The native registry supplies its UTC profile explicitly. The real binding test

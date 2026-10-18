@@ -81,5 +81,5 @@ async function invoke(venue,method,input){switch(method){case 'fetchOpenPosition
  const early=await late.venue.fetchPositionMetadata(['BTCUSDT']);const before=!!late.store.fetchedLeverage.BTCUSDT;release();for(let i=0;i<5;i++)await Promise.resolve();
  const lateSibling={early:observe(early),before,afterBuyLeverage:late.store.fetchedLeverage.BTCUSDT.buyLeverage};
  const nan=fixtures('setLeverage',1);nan.leverage=NaN;const n=setup(nan);await n.venue.setLeverage(nan.symbol,nan.leverage);const post=n.calls.find(c=>c.method==='POST');
- process.stdout.write(JSON.stringify({runtime:{node:process.version,arch:process.arch,platform:process.platform},names,cases,boundary:{lateSibling,inherited:{input:inherited,side:typeof value[0].side,id:value[0].id},prefix:{input:prefix,reports:p.reports},nanBody:observe(post.config)}}));
+ process.stdout.write(JSON.stringify({runtime:{node:process.version,arch:process.arch,platform:process.platform},names,cases,boundary:{lateSibling,inherited:{input:inherited,side:typeof value[0].side,id:value[0].id},prefix:{input:prefix,reports:p.reports},nanBody:observe(post.config),nanCalls:observe(n.calls),nanReports:observe(n.reports)}}));
 })().catch(e=>{console.error(e);process.exitCode=1;});
