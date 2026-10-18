@@ -64,5 +64,23 @@
     "file": "safe-cex-venue-kraken/src/binding/host.rs",
     "reason": "Reviewed the complete production ErrorHost impl. emit_and_log forwards the original native message/Error cell and optional text context to the already-assembled emitAndLogError member; formatting/reporting belongs to BaseExchange and this receiver does not decode errors. tests/support/accepted_trading_error_receivers.rs::emit_and_log_reaches_real_base_console_and_event_with_context uses the actual constructed KrakenExchange Scope, real BaseExchange native console sink and error listener: original TypeError identity at the console, exact contextual event, then the separate context-absent string branch. No replacement emitter or host implementation is supplied.",
     "itemSha256": "593965b5f01b74b1833d17f78f3ca5112218d2620a72d00788c15d50ce0486a4"
+  },
+  "safe_cex_venue_kraken::trading::TradingHost::iterable for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host.rs",
+    "reason": "Reviewed the entire TradingHost impl. iterable delegates acquisition, cached-next stepping and native value retention to the shared IteratorRecord after resolving the protocol method once; it adds no array/string schema and keeps the two actual spread expression diagnostics for missing methods. tests/support/accepted_runtime_receivers.rs::iterable_uses_native_collection_protocol_and_retains_cells reaches the Scope of a constructed Spot exchange: native Set/Map/reference identity, infinity, negative-zero bits, paired/unpaired UTF16 strings, iterator-self, cached next getter/original receiver/exhaustion and original abrupt getter Error. scripts/runtime-receiver-source.cjs selects the actual txids array spread inside live KrakenSpotExchange.placeOrder and confirms those protocol cases. The original Array/String-only body fails the native Set assertion; the compiled role control and exact restoration exercise that same named witness.",
+    "itemSha256": "748661f092ce13e7d85fa5de36c51f4fe0912b37e32596ad714188a93438a795"
+  },
+  "safe_cex_venue_kraken::trading::TradingHost::send for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host.rs",
+    "reason": "Reviewed the entire TradingHost impl. send chooses the source limited/unlimited assembled client and POST/PUT member, passes the original native body, then delegates promise settlement and data lookup to the shared runtime. It is a request/continuation adapter, not a response decoder. tests/support/accepted_runtime_receivers.rs::send_uses_actual_clients_verbs_wire_and_native_response uses the constructed exchange actual signing/client graph and terminal HTTP for all four client/verb combinations, observing final signed form fields, a real per-client interceptor header, exactly one request, response-cell identity, lone UTF16 and negative-zero bits. A compiled wrong-client mutation fails that named native wire assertion; exact restoration passes.",
+    "itemSha256": "748661f092ce13e7d85fa5de36c51f4fe0912b37e32596ad714188a93438a795"
+  },
+  "safe_cex_venue_kraken::periodic_sync::TickHost::emit_tick_error for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
+    "reason": "Reviewed the entire TickHost impl. emit_tick_error consumes a typed ExchangeError and forwards its nonempty message or the supplied static fallback as one native argument to the live emitAndLogError member. It does not interpret raw error records; BaseExchange owns formatting, console dispatch and event delivery. tests/support/accepted_runtime_receivers.rs::emit_tick_error_uses_message_or_fallback_through_real_base observes the actual constructed Scope, real Base native console/error events and both message/fallback branches. scripts/runtime-receiver-source.cjs executes the live KrakenExchange.tick arrow and confirms its source message/fallback behavior. A compiled fallback corruption fails the named native event assertion and exact restoration passes.",
+    "itemSha256": "488700bb837df7d3412a9d7554d45ae22de772b0714629c276180ed29eccbe1f"
   }
 }
