@@ -303,7 +303,7 @@ fn update_body(rt: &Rt, opts: Js, primary: bool) -> Result<Js, Thrown> {
                 ),
             ]);
             if !primary {
-                payload.delete(&"tpslMode".encode_utf16().collect::<Vec<_>>());
+                payload.delete(&"tpslMode".encode_utf16().collect::<Vec<_>>())?;
             }
             let stop_loss = kind == STOP_LOSS;
             if update.has_own("price") {

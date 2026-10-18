@@ -27,7 +27,7 @@ impl WsHost for Host {
         v.set_key(k, x)
     }
     fn remove(&mut self, v: &Js, k: &[u16]) -> Result<(), Thrown> {
-        v.delete(k);
+        v.delete(k)?;
         Ok(())
     }
     fn truthy(&mut self, v: &Js) -> bool {

@@ -106,7 +106,7 @@ fn functions_keep_live_prototypes_receivers_and_bound_inheritance() {
             .get("staticValue")
             .unwrap()
             .same_reference(&sentinel);
-    derived.delete(&utf16("__proto__"));
+    derived.delete(&utf16("__proto__")).unwrap();
     assert!(derived.get("__proto__").unwrap().same_reference(&base));
     let make = |realm: &Rc<PrototypeRealm>, name| {
         let _binding = realm.bind();
@@ -238,7 +238,7 @@ fn inherited_function_accessors_keep_original_throws_and_data_shadows() {
     );
     child.define("failure", Js::Undefined).unwrap();
     assert!(child.get("failure").unwrap().is_undefined());
-    child.delete(&utf16("failure"));
+    child.delete(&utf16("failure")).unwrap();
     assert!(
         child
             .get("failure")

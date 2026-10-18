@@ -32,7 +32,7 @@ pub(super) fn runtime() -> WeexPublicFeedRuntime<Host, Js, Thrown> {
         lookup: |_, o, k| o.get_key(&k.to_js_string()?),
         assign: v::define,
         remove: |_, o, k| {
-            o.delete(&k.to_js_string()?);
+            o.delete(&k.to_js_string()?)?;
             Ok(())
         },
         truthy: Js::truthy,
