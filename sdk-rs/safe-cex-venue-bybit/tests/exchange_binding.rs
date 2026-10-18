@@ -2043,7 +2043,7 @@ fn retained_info_option_coercion_keeps_source_warning_message() {
     assert_eq!(
         warnings,
         [format!(
-            "{prefix}{}",
+            "{prefix}{} warning",
             expected["optionCoercionError"]["message"].as_str().unwrap()
         )],
         "BYBIT_RETAINED actual option receiver warning preserves maintained message"

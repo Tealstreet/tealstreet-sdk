@@ -86,9 +86,9 @@ note = "safe-cex-venue-binance/src/reconciliation.rs::get_position_state_version
 ts = "BinanceExchange.detectBalanceIssue"
 kind = "method"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/order_logic.rs::detect_balance_issue", "safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::detect_balance_issue" ]
+rs = "safe-cex-venue-binance/src/order_logic.rs::detect_balance_issue"
 status = "ported"
-note = "safe-cex-venue-binance/src/order_logic.rs::detect_balance_issue extracts the pure helper ahead of exchange-class integration. Deprecated method remains unconditionally false. Split member `safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::detect_balance_issue`. Concrete class composition: shared Futures/PM/Spot ExchangeState member that the class field binds for this TypeScript member, selecting the venue body named by this row; it is the bound callable, not a second algorithm."
+note = "Rename target: `safe-cex-venue-binance/src/order_logic.rs::detect_balance_issue`. The deprecated source detector remains unconditionally false in the canonical free helper. The uncalled State forwarding method was removed after a workspace reference and constructed receiver-binding review; no class callable is implied. Existing native predicate/source witnesses retain the original false contract."
 
 [[symbol]]
 ts = "BinanceExchange.constructor"
@@ -102,9 +102,9 @@ note = "Explicit constructor body at configured super-and-implicit-fields, split
 ts = "BinanceExchange#getResponseHeader"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/request_weight.rs::get_response_header", "safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::get_response_header" ]
+rs = "safe-cex-venue-binance/src/request_weight.rs::get_response_header"
 status = "ported"
-note = "Extracted header body with normalized header truthiness, two separate get-member reads when callable, bound current get receiver, immediate accessor/call errors, and exact/lower/upper nullish fallback including falsy stops and last explicit null. Configured get-member/property access and bound receiver are adapter boundaries; names are ASCII HTTP header names. Unicode/non-HTTP name transforms remain pending. NativeImports binds the actual get method to canonical shared AxiosHeaders on fulfilled and rejected HTTP responses. The constructed native five-case test compares mixed-case used-weight and retry-after pauses to the actual TS guards with installed Axios; replacing the native host with unmodified master makes the named pause assertion fail. Native decoded value/identity/count/error assertions precede actual-source checks; authored133-case floor. Rename target: `safe-cex-venue-binance/src/request_weight.rs::get_response_header`. Split member `safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::get_response_header`. Concrete class composition: shared Futures/PM/Spot ExchangeState member that the class field binds for this TypeScript member, selecting the venue body named by this row; it is the bound callable, not a second algorithm."
+note = "Rename target: `safe-cex-venue-binance/src/request_weight.rs::get_response_header`. The canonical free helper retains current AxiosHeaders.get versus property fallback and original error behavior. The actual request-weight interceptor closure in ExchangeState::install_guards calls it directly; the uncalled State forwarding method was removed. The constructed native signed-client success/rejection witness covers this live binding and source accessor ordering. Names remain bounded to ASCII HTTP headers; Unicode/non-HTTP name transformations are unclaimed. The existing authored133-case helper/source floor and native value/error/identity assertions remain unchanged."
 
 [[symbol]]
 ts = "BinanceExchange#pauseBackgroundReconciliation"
@@ -118,9 +118,9 @@ note = "safe-cex-venue-binance/src/reconciliation.rs::pause_background_reconcili
 ts = "BinanceExchange#observeRequestWeight"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/request_weight.rs::observe_request_weight", "safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::observe_request_weight" ]
+rs = "safe-cex-venue-binance/src/request_weight.rs::observe_request_weight"
 status = "ported"
-note = "Extracted decoded optional status body: strict numeric429/418 branch, shared Number coercion, finite-positive retry seconds to milliseconds, default60000, strict used-weight threshold1920 and early return. Current header expression and pause method are configured class bindings; accessor/non-JSON response properties remain outside this decoded status/JSON header-value domain. No source timer/HTTP class ownership claim. Native decoded value/identity/count/error assertions precede actual-source checks; authored133-case floor. Rename target: `safe-cex-venue-binance/src/request_weight.rs::observe_request_weight`. Split member `safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::observe_request_weight`. Concrete class composition: shared Futures/PM/Spot ExchangeState member that the class field binds for this TypeScript member, selecting the venue body named by this row; it is the bound callable, not a second algorithm."
+note = "Rename target: `safe-cex-venue-binance/src/request_weight.rs::observe_request_weight`. The canonical free helper retains strict numeric429/418, finite-positive retry seconds/default60000, threshold1920 and early return. The actual request-weight interceptor closure in ExchangeState::install_guards calls it directly with current headers and pause binding; the uncalled State forwarding method was removed. The constructed native success/rejection witness observes signed requests, accessor counts and reconciliation pause state. Existing finite JSON/status boundaries remain explicit in the helper review."
 
 [[symbol]]
 ts = "BinanceExchange#installRequestWeightGuards"
@@ -438,9 +438,9 @@ note = "safe-cex-venue-binance/src/order_logic.rs::is_algo_order_type extracts t
 ts = "BinanceExchange#isPostOnlyRejectionError"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/order_logic.rs::is_post_only_rejection_error", "safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::is_post_only_rejection" ]
+rs = "safe-cex-venue-binance/src/order_logic.rs::is_post_only_rejection_error"
 status = "ported"
-note = "safe-cex-venue-binance/src/order_logic.rs::is_post_only_rejection_error Extracted pure classification over JSON wire values using shared truthiness and fallible String conversion. Preserves source nullish versus truthy fallback and strict numeric code checks; coercion throws remain Result errors. Class/socket integration remains pending. Split member `safe-cex-venue-binance/src/exchange_classes.rs::ExchangeState::is_post_only_rejection`. Concrete class composition: shared Futures/PM/Spot ExchangeState member that the class field binds for this TypeScript member, selecting the venue body named by this row; it is the bound callable, not a second algorithm."
+note = "Rename target: `safe-cex-venue-binance/src/order_logic.rs::is_post_only_rejection_error`. The canonical free classifier retains nullish/truthy message fallback, strict numeric code checks and fallible coercion over its existing JSON wire boundary. The live Context::capture_post_only closure invokes it directly; the uncalled State forwarding method was removed. The actual native batch-rejection witness retains accepted IDs, suppresses post-only refusal emission and emits the ordinary row failure."
 
 [[symbol]]
 ts = "BinanceExchange#formatCreateOrder"

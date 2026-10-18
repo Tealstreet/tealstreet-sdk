@@ -131,16 +131,20 @@ where
                 }
             };
             markets.push(Market {
+                runtime: Default::default(),
                 id,
                 symbol: symbol.into(),
                 base: base.into(),
                 quote: "USDT".into(),
                 active: true,
                 precision: MarketPrecision {
+                    base: None,
+                    quote: None,
                     amount: amount_precision,
                     price: price_precision,
                 },
                 limits: MarketLimits {
+                    cost: None,
                     amount: MarketLimitsAmount {
                         min: 0.0,
                         max: max_amount,

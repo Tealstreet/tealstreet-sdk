@@ -40,6 +40,7 @@ pub struct Runtime {
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
     pub console: RefCell<Vec<(String, String)>>,
+    pub native_console: RefCell<Vec<(String, Vec<Js>)>>,
     pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
 struct Task(Rc<Cell<bool>>);
@@ -109,6 +110,9 @@ impl ExchangeRuntime for Runtime {
         Box::new(Task(flag))
     }
     fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.native_console
+            .borrow_mut()
+            .push((severity.into(), message.to_vec()));
         let rendered = safe_cex_exchange::runtime::console_text(message);
         let message = rendered.as_str();
         self.console

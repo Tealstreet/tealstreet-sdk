@@ -87,8 +87,36 @@ These classifications are not independent runtime proof. Unknown local custom tr
 to module scope for concrete API classification; local unions/generics and
 unknown procedural expansion fail closed. Function-local `macro_rules!`
 definitions and their invocations are ignored by public-surface discovery
-because lexical block scope makes them unnameable outside that body. A
-module-scope `macro_rules!` is accepted only when every same-name definition in
+because lexical block scope makes them unnameable outside that body. Their
+invoked effects are checked separately: exactly one empty matcher or one
+`($name:literal, $value:expr)` matcher is supported, with no extra arms,
+repetitions, forwarding fragments or unknown captures. The census substitutes
+parenthesized fragments into the body and visits both that body and every
+argument, including unused arguments. Hidden impls, modules/imports, opaque
+attributes and unresolved nested macros remain refused; no macro-name allowance
+is involved. The actual Bitrue enum registration recipe and compiled global-impl
+controls exercise this bounded form.
+
+Direct workspace dependency-root globs can supply exact public names to these
+same import guards. The driver authenticates the active Cargo binding, consumer
+rustdoc dependency, unique library artifact and feature set; it then builds fresh
+private/hidden rustdoc for that dependency under the same target and features.
+Complete public root exports, including named reexports and macros, are checked
+against the actual library source path. The existing effect scanner also checks
+that dependency's complete guarded source closure (including inactive modules),
+using fresh provider artifacts and macro origins. Unverified provider expansion
+cannot hide a non-doc export behind rustdoc's configuration. Unresolved public glob reexports,
+missing/ambiguous artifacts or export names, and competing source root bindings
+remain refused. The scanner expands proven names into ordinary import checks;
+an exported builtin-name macro or attribute does not acquire a trusted origin.
+The Bitrue control compiles and executes a dependency `format!` through the
+actual exchange module's glob, requires its existing import-scope refusal, then
+restores both sources exactly and reruns the full inventory. A second compiled
+control checks an export hidden behind a module macro and `cfg(not(doc))`. No dependency-name
+allowance replaces this proof. Registry/sysroot macro origins keep their existing
+separate authentication.
+
+A module-scope `macro_rules!` is accepted only when every same-name definition in
 the target is unconditional and every arm transcribes without a declaration
 keyword or `item` fragment; each invocation's arguments get the same check. Macro binding guards still
 reject local shadowing of trusted expression/derive/attribute names and

@@ -399,3 +399,61 @@ fn production_ticker_coercion_matches_constructed_typescript() {
 }
 
 include!("support/retained_info.rs");
+
+#[test]
+fn native_sdk_initialization_has_no_deferred_module_work() {
+    fn settle<T>(
+        h: &Harness,
+        future: impl std::future::Future<Output = Result<T, safe_cex_exchange::runtime::ExchangeError>>,
+    ) -> T {
+        let mut future = std::pin::pin!(future);
+        for _ in 0..64 {
+            if let std::task::Poll::Ready(result) = future
+                .as_mut()
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+            {
+                return result.unwrap();
+            }
+            h.runtime.pump();
+        }
+        panic!("SDK initialization needs deferred module work");
+    }
+    let h = fixture();
+    let clock = h.runtime.now.get();
+    for _ in 0..2 {
+        let result = settle(&h, h.venue().validate_account());
+        assert_eq!(result.error.as_value(), &json!(""));
+    }
+    for client_id in ["sdk-initial-1", "sdk-initial-2"] {
+        let mut order = placed();
+        order.client_order_id = Some(client_id.into());
+        assert_eq!(
+            settle(
+                &h,
+                h.exchange.base().place_order(h.exchange.as_ref(), order)
+            ),
+            ["9007199254740993"]
+        );
+    }
+    assert_eq!(h.http.calls("/v3/user").len(), 2);
+    let requests = h.http.calls("/v3/order");
+    assert_eq!(requests.len(), 2);
+    for (request, id) in requests.iter().zip(["sdk-initial-1", "sdk-initial-2"]) {
+        assert_eq!(request.data["clientOrderId"], id);
+        let signature = request.data["signature"].as_str().unwrap();
+        assert_eq!(signature.len(), 128, "actual initialized L2 signer");
+        assert!(signature.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(request.headers["APEX-API-KEY"], "fixture-key");
+    }
+    assert!(
+        h.store.orders().is_empty(),
+        "placement does not invent Store rows"
+    );
+    assert_eq!(
+        h.runtime.now.get(),
+        clock,
+        "SDK init needs no timer or background loader"
+    );
+    assert!(h.runtime.report_names.borrow().is_empty());
+    done(&h);
+}

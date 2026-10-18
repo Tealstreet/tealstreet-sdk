@@ -255,9 +255,7 @@ pub(crate) fn dispatch(
             Ok(Js::Undefined)
         }),
         ("spot_cancel", "cancel_orders") => future(async move {
-            spot_cancel::cancel_orders(&rt, a0)
-                .await
-                .map_err(Thrown::from)?;
+            spot_cancel::cancel_orders(&rt, a0).await?;
             Ok(Js::Undefined)
         }),
         // ---- typed read bodies ----

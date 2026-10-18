@@ -222,7 +222,7 @@ fn fill_history_caps_cursor_recursion_and_inverse_coerces_ids() {
             .logs
             .borrow()
             .iter()
-            .any(|m| m == "warning: fetchHistoricalFills reached max recursion depth of 5")
+            .any(|m| m == "warning: fetchHistoricalFills reached max recursion depth of 5 warning")
     );
     h.venue().dispose().unwrap();
 }

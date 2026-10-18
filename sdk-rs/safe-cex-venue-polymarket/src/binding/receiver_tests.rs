@@ -428,3 +428,95 @@ fn native_receiver_socket_forwarding_and_refresh_effects() {
         assert_eq!(refreshes.get(), 1);
     });
 }
+
+#[test]
+fn native_pin_task_settlement_preserves_arguments_and_original_values() {
+    run(async {
+        let venue = venue();
+        let rt = &venue.rt;
+        let payload = Js::object(vec![
+            ("text", Js::utf16(&[0xd800, 0])),
+            ("negativeZero", Js::Number(-0.0)),
+            ("nan", Js::Number(f64::from_bits(0x7ff8_0000_0000_0042))),
+            ("undefined", Js::Undefined),
+        ]);
+        let cause = Js::object(vec![("original", payload.clone())]);
+        let calls = Rc::new(Cell::new(0));
+        let polls = Rc::new(Cell::new(0));
+        let observed_calls = calls.clone();
+        let observed_polls = polls.clone();
+        let expected = payload.clone();
+        let rejection = cause.clone();
+        let method = ExchangeHost::async_method(
+            rt,
+            Rc::new(move |args| {
+                observed_calls.set(observed_calls.get() + 1);
+                assert_eq!(args.len(), 2, "PinTask native argument forwarding");
+                assert!(
+                    args[0].same_reference(&expected),
+                    "PinTask original argument"
+                );
+                let reject = args[1].truthy();
+                let output = expected.clone();
+                let error = rejection.clone();
+                let polls = observed_polls.clone();
+                let mut pending = true;
+                let task: crate::exchange::PinTask<Js, Thrown> =
+                    Box::pin(std::future::poll_fn(move |cx| {
+                        polls.set(polls.get() + 1);
+                        if pending {
+                            pending = false;
+                            cx.waker().wake_by_ref();
+                            return std::task::Poll::Pending;
+                        }
+                        std::task::Poll::Ready(if reject {
+                            Err(Thrown::new(error.clone()))
+                        } else {
+                            Ok(output.clone())
+                        })
+                    }));
+                task
+            }),
+        );
+        let promise = method
+            .call(Js::Null, vec![payload.clone(), Js::Bool(false)])
+            .unwrap();
+        assert_eq!(calls.get(), 1, "PinTask eager invocation");
+        let value = await_js(&rt.exchange_runtime(), promise).await.unwrap();
+        assert!(
+            value.same_reference(&payload),
+            "PinTask original fulfilled referent"
+        );
+        assert_eq!(units(&value.get("text").unwrap()), [0xd800, 0]);
+        assert_eq!(
+            value
+                .get("negativeZero")
+                .unwrap()
+                .to_number()
+                .unwrap()
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert_eq!(
+            value.get("nan").unwrap().to_number().unwrap().to_bits(),
+            0x7ff8_0000_0000_0042
+        );
+        assert!(value.has_own("undefined") && value.get("undefined").unwrap().is_undefined());
+        value.set("mutation", Js::utf16(&[0xdc00])).unwrap();
+        assert_eq!(units(&payload.get("mutation").unwrap()), [0xdc00]);
+        let promise = method
+            .call(Js::Undefined, vec![payload, Js::Bool(true)])
+            .unwrap();
+        let thrown = await_js(&rt.exchange_runtime(), promise).await.unwrap_err();
+        assert!(
+            thrown.value.same_reference(&cause),
+            "PinTask original rejection"
+        );
+        assert_eq!(calls.get(), 2);
+        assert_eq!(
+            polls.get(),
+            4,
+            "PinTask pending then ready for each invocation"
+        );
+    });
+}

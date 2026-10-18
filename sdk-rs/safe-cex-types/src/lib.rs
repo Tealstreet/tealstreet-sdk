@@ -218,6 +218,21 @@ pub struct OptionGreeks {
 pub struct MarketPrecision {
     pub amount: f64,
     pub price: f64,
+    // Runtime properties emitted by maintained venue mappers (outside the TS declaration).
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub base: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub quote: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -241,6 +256,13 @@ pub struct MarketLimitsLeverage {
 #[ts(optional_fields)]
 pub struct MarketLimitsPrice {
     pub min: f64,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub max: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -258,6 +280,68 @@ pub struct MarketLimits {
     )]
     #[ts(inline)]
     pub price: Option<MarketLimitsPrice>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub cost: Option<MarketLimitsLeverage>,
+}
+
+/// Extra properties constructed by venue TypeScript at runtime, beyond Market's declaration.
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketRuntime {
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub kind: Option<String>,
+    #[serde(
+        rename = "spot",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub spot: Option<bool>,
+    #[serde(
+        rename = "swap",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub swap: Option<bool>,
+    #[serde(
+        rename = "future",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub future: Option<bool>,
+    #[serde(
+        rename = "contract",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub contract: Option<bool>,
+    #[serde(
+        rename = "linear",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub linear: Option<bool>,
+    #[serde(
+        rename = "inverse",
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub inverse: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, TS)]
@@ -295,6 +379,9 @@ pub struct Market {
     pub taker_fee: Option<f64>,
 
     pub maker_fee: Option<f64>,
+    /// Runtime venue properties; serialized at the Market object's top level.
+    #[ts(skip)]
+    pub runtime: MarketRuntime,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -3258,11 +3345,83 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::MarketRuntime")]
+    #[serde(rename_all = "camelCase")]
+    struct WireMarketRuntime {
+        #[serde(
+            rename = "type",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        kind: Option<String>,
+        #[serde(
+            rename = "spot",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        spot: Option<bool>,
+        #[serde(
+            rename = "swap",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        swap: Option<bool>,
+        #[serde(
+            rename = "future",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        future: Option<bool>,
+        #[serde(
+            rename = "contract",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        contract: Option<bool>,
+        #[serde(
+            rename = "linear",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        linear: Option<bool>,
+        #[serde(
+            rename = "inverse",
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        inverse: Option<bool>,
+    }
+    impl<'de> serde::Deserialize<'de> for super::MarketRuntime {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireMarketRuntime::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::MarketPrecision")]
     #[serde(rename_all = "camelCase")]
     struct WireMarketPrecision {
         amount: f64,
         price: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        base: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        quote: Option<f64>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::MarketPrecision {
@@ -3311,6 +3470,12 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         price: Option<MarketLimitsPrice>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        cost: Option<MarketLimitsLeverage>,
     }
 
     #[derive(serde::Deserialize)]
@@ -3318,6 +3483,12 @@ mod strict_codecs {
     #[serde(rename_all = "camelCase")]
     struct WireMarketLimitsPrice {
         min: f64,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        max: Option<f64>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::MarketLimitsPrice {
@@ -3514,6 +3685,8 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         maker_fee: Option<f64>,
+        #[serde(flatten)]
+        runtime: super::MarketRuntime,
     }
 
     impl<'de> serde::Deserialize<'de> for super::Market {

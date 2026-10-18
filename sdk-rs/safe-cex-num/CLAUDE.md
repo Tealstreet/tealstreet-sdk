@@ -181,6 +181,14 @@ buffers and generic JSON payloads use `JsNumberInput`: e.g.
 itself is not declared lossy; the typed adapter must emit real numeric events
 for Serde Content, whose downstream Value visitor cannot retain infinity.
 
+Typed String/keys use the same std UTF-16 well-formed projection as the lower
+native typed adapter: isolated units become U+FFFD under the coordinator's
+2026-10-18 ingress ruling. Capture and retained info remain lossless. The numeric
+eligibility, Value-buffer refusal and native output checks still apply unchanged;
+text normalization must not weaken any of them. Exchange's js_json_parse target
+checks the actual Vec<Market> numeric wire entry alongside the real HTTP/Store
+binding over seven source profiles, retaining all rows and exact info units.
+
 Register ALL output fields with `js_number_output!`. The recursive eligibility
 contract includes skipped and asymmetrically renamed Serialize fields. Exhaustive
 destructuring refuses omitted fields; Value-backed fields fail the trait bound.
@@ -363,7 +371,8 @@ values. It does not implement object-to-primitive Date constructor coercion.
 The retained JSON writer traverses the canonical UTF-16 carrier directly. It
 shares the lower quotation helper and numeric/key-order primitives with prepared
 JSON rendering. Undefined and nonfinite numbers remain native until the final
-wire projection; typed Rust String/Value adapters explicitly reject lone units.
+wire projection; typed Rust Strings normalize isolated units only at their typed
+view, while explicit strict Value projection remains a separate boundary.
 The retained_json_writer target compares every UTF-16 unit and a native object
 containing duplicate/index/lone-unit keys, undefined, infinities and signed zero
 with Node JSON.stringify. It also observes the retained input after rendering.

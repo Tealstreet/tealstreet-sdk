@@ -101,7 +101,7 @@ pub fn nominal_names(source: &str) -> Result<Vec<String>, syn::Error> {
 }
 
 /// Check source modules independently of rustdoc's `doc` configuration.
-pub fn doc_guards(root: &Path) -> Result<(), String> {
+pub fn doc_guards(root: &Path) -> Result<Vec<std::path::PathBuf>, String> {
     fn file(
         path: &Path,
         root: bool,
@@ -186,7 +186,9 @@ pub fn doc_guards(root: &Path) -> Result<(), String> {
         }
         Ok(())
     }
-    file(root, true, &mut std::collections::BTreeSet::new())
+    let mut seen = std::collections::BTreeSet::new();
+    file(root, true, &mut seen)?;
+    Ok(seen.into_iter().collect())
 }
 
 struct DocGuards(bool);
@@ -306,14 +308,49 @@ impl<'ast> Visit<'ast> for LocalMacroEffects {
 }
 
 // A deliberately bounded invocation grammar, not a macro_rules expander.
+// Accept a single empty matcher or exactly ($name:literal, $value:expr).
 // Other matchers/arms/forwarding require explicit effect support before use.
-fn local_macro_body(tokens: proc_macro2::TokenStream) -> Option<syn::Block> {
-    use proc_macro2::{Delimiter, TokenStream, TokenTree};
+fn local_macro_body(
+    tokens: proc_macro2::TokenStream,
+    arguments: proc_macro2::TokenStream,
+) -> Option<(syn::Block, Vec<syn::Expr>)> {
+    use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
+    use syn::parse::Parser;
+
+    fn substitute(
+        tokens: TokenStream,
+        captures: &HashMap<String, TokenStream>,
+    ) -> Option<TokenStream> {
+        let mut output = TokenStream::new();
+        let mut tokens = tokens.into_iter();
+        while let Some(token) = tokens.next() {
+            output.extend([match token {
+                TokenTree::Punct(dollar) if dollar.as_char() == '$' => {
+                    let TokenTree::Ident(name) = tokens.next()? else {
+                        return None;
+                    };
+                    let name = name.to_string();
+                    let value = captures.get(name.trim_start_matches("r#"))?;
+                    // Preserve the opaque expression fragment's precedence.
+                    TokenTree::Group(Group::new(Delimiter::Parenthesis, value.clone()))
+                }
+                TokenTree::Group(group) => {
+                    let mut substituted =
+                        Group::new(group.delimiter(), substitute(group.stream(), captures)?);
+                    substituted.set_span(group.span());
+                    TokenTree::Group(substituted)
+                }
+                token => token,
+            }]);
+        }
+        Some(output)
+    }
+
     let mut tokens = tokens.into_iter();
     let TokenTree::Group(matcher) = tokens.next()? else {
         return None;
     };
-    if matcher.delimiter() != Delimiter::Parenthesis || !matcher.stream().is_empty() {
+    if matcher.delimiter() != Delimiter::Parenthesis {
         return None;
     }
     let (TokenTree::Punct(equal), TokenTree::Punct(arrow), TokenTree::Group(body)) =
@@ -331,7 +368,63 @@ fn local_macro_body(tokens: proc_macro2::TokenStream) -> Option<syn::Block> {
             return None;
         }
     }
-    syn::parse2::<syn::Block>(TokenStream::from(TokenTree::Group(body))).ok()
+    if matcher.stream().is_empty() {
+        return arguments.is_empty().then(|| {
+            syn::parse2::<syn::Block>(TokenStream::from(TokenTree::Group(body)))
+                .ok()
+                .map(|body| (body, Vec::new()))
+        })?;
+    }
+    let names = (|input: syn::parse::ParseStream<'_>| {
+        let mut names = Vec::new();
+        for (index, expected) in ["literal", "expr"].into_iter().enumerate() {
+            if index != 0 {
+                input.parse::<syn::Token![,]>()?;
+            }
+            input.parse::<syn::Token![$]>()?;
+            let name = input.parse::<syn::Ident>()?.to_string();
+            input.parse::<syn::Token![:]>()?;
+            let fragment = input.parse::<syn::Ident>()?;
+            if fragment != expected {
+                return Err(input.error("unsupported local macro fragment"));
+            }
+            names.push(name.trim_start_matches("r#").to_owned());
+        }
+        Ok(names)
+    })
+    .parse2(matcher.stream())
+    .ok()?;
+    if names[0] == names[1] {
+        return None;
+    }
+    let (literal, expression) = (|input: syn::parse::ParseStream<'_>| {
+        let literal = input.parse::<syn::Lit>()?;
+        input.parse::<syn::Token![,]>()?;
+        let expression = input.parse::<syn::Expr>()?;
+        Ok((literal, expression))
+    })
+    .parse2(arguments.clone())
+    .ok()?;
+    // Keep the original token streams without requiring a token-printing codec.
+    // The first comma separates a single literal token from the expression.
+    let mut argument_tokens = arguments.into_iter();
+    let literal_tokens = TokenStream::from(argument_tokens.next()?);
+    if !matches!(argument_tokens.next()?, TokenTree::Punct(p) if p.as_char() == ',') {
+        return None;
+    }
+    let captures = HashMap::from([
+        (names[0].clone(), literal_tokens),
+        (names[1].clone(), argument_tokens.collect()),
+    ]);
+    let mut substituted = Group::new(Delimiter::Brace, substitute(body.stream(), &captures)?);
+    substituted.set_span(body.span());
+    let body = syn::parse2::<syn::Block>(TokenStream::from(TokenTree::Group(substituted))).ok()?;
+    // Inspect even unused arguments: an opaque recipe cannot conceal effects.
+    let literal = syn::Expr::Lit(syn::ExprLit {
+        attrs: Vec::new(),
+        lit: literal,
+    });
+    Some((body, vec![literal, expression]))
 }
 
 /// Module-scope `macro_rules!` recipes proven to expand to expressions only,
@@ -454,6 +547,7 @@ pub fn module_recipes(paths: &[&Path]) -> super::Result<ModuleRecipes> {
 struct LocalTypes {
     depth: usize,
     verified_macro_origins: HashSet<String>,
+    dependency_glob_exports: HashMap<String, Vec<String>>,
     // A conditional nearest binding is present but unsupported (None). It must
     // never fall through to an outer recipe or a builtin of the same name.
     local_macro_scopes: Vec<HashMap<String, Option<proc_macro2::TokenStream>>>,
@@ -582,17 +676,16 @@ impl LocalTypes {
                     .cloned()
             });
         if let Some(recipe) = local_macro {
-            let body = recipe.and_then(local_macro_body);
+            let body = recipe.and_then(|recipe| local_macro_body(recipe, item.tokens.clone()));
             let mut effects = LocalMacroEffects::default();
-            if let Some(body) = &body {
-                // No cfg filtering: hidden impls must be rejected too.
+            if let Some((body, arguments)) = &body {
+                // No cfg filtering: hidden impls and unused arguments stay visible.
+                for argument in arguments {
+                    effects.visit_expr(argument);
+                }
                 effects.visit_block(body);
             }
-            if self.inside_local_recipe
-                || !item.tokens.is_empty()
-                || body.is_none()
-                || effects.unsupported
-            {
+            if self.inside_local_recipe || body.is_none() || effects.unsupported {
                 let end = item.span().end();
                 self.names.push((
                     format!(
@@ -975,6 +1068,60 @@ impl<'ast> Visit<'ast> for LocalTypes {
         visit::visit_item_extern_crate(self, item);
     }
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+        // Expand only authenticated direct dependency-root globs. Every actual
+        // exported name goes through the same binding/shadow guards as an
+        // explicit import; missing evidence leaves the original glob opaque.
+        fn resolve(
+            tree: &syn::UseTree,
+            prefix: &str,
+            exports: &HashMap<String, Vec<String>>,
+        ) -> Option<syn::UseTree> {
+            Some(match tree {
+                syn::UseTree::Path(path) => {
+                    let mut path = path.clone();
+                    let prefix = if prefix.is_empty() {
+                        path.ident.to_string().trim_start_matches("r#").to_owned()
+                    } else {
+                        format!(
+                            "{prefix}::{}",
+                            path.ident.to_string().trim_start_matches("r#")
+                        )
+                    };
+                    path.tree = Box::new(resolve(&path.tree, &prefix, exports)?);
+                    syn::UseTree::Path(path)
+                }
+                syn::UseTree::Group(group) => {
+                    let mut group = group.clone();
+                    group.items = group
+                        .items
+                        .iter()
+                        .map(|tree| resolve(tree, prefix, exports))
+                        .collect::<Option<_>>()?;
+                    syn::UseTree::Group(group)
+                }
+                syn::UseTree::Glob(glob) => {
+                    let names = exports.get(prefix)?;
+                    let mut items = syn::punctuated::Punctuated::new();
+                    for name in names {
+                        let ident = syn::parse_str::<syn::Ident>(name)
+                            .or_else(|_| syn::parse_str::<syn::Ident>(&format!("r#{name}")))
+                            .ok()?;
+                        items.push(syn::UseTree::Name(syn::UseName { ident }));
+                    }
+                    syn::UseTree::Group(syn::UseGroup {
+                        brace_token: syn::token::Brace(glob.star_token.span),
+                        items,
+                    })
+                }
+                tree => tree.clone(),
+            })
+        }
+        let resolved = resolve(&item.tree, "", &self.dependency_glob_exports).map(|tree| {
+            let mut item = item.clone();
+            item.tree = tree;
+            item
+        });
+        let item = resolved.as_ref().unwrap_or(item);
         fn glob(tree: &syn::UseTree) -> bool {
             match tree {
                 syn::UseTree::Glob(_) => true,
@@ -1625,19 +1772,21 @@ pub fn local_types(
     path: &Path,
     macro_origins: &HashSet<String>,
 ) -> super::Result<Vec<(String, usize, usize)>> {
-    local_types_with_recipes(path, macro_origins, &ModuleRecipes::new())
+    local_types_with_recipes(path, macro_origins, &ModuleRecipes::new(), &HashMap::new())
 }
 
 pub fn local_types_with_recipes(
     path: &Path,
     macro_origins: &HashSet<String>,
     module_recipes: &ModuleRecipes,
+    dependency_glob_exports: &HashMap<String, Vec<String>>,
 ) -> super::Result<Vec<(String, usize, usize)>> {
     let source = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let syntax = syn::parse_file(&source).map_err(|error| error.to_string())?;
     let mut visitor = LocalTypes {
         verified_macro_origins: macro_origins.clone(),
         module_recipes: module_recipes.clone(),
+        dependency_glob_exports: dependency_glob_exports.clone(),
         generated_provider_file: path
             .ends_with(Path::new("safe-cex-num/src/collation_data/provider.rs"))
             && source.starts_with(
@@ -2124,6 +2273,60 @@ mod tests {
     }
 
     #[test]
+    fn actual_bitrue_local_enum_recipe_has_visible_bounded_effects() {
+        let source = include_str!("../../safe-cex-venue-bitrue/src/binding/classes.rs");
+        assert_eq!(source.matches("enums!(").count(), 3);
+        let mut visitor = verified_test_visitor();
+        visitor.visit_file(&syn::parse_file(source).unwrap());
+        let opaque: Vec<_> = visitor
+            .names
+            .iter()
+            .filter(|row| row.0.starts_with("UNSUPPORTED_LOCAL_MACRO_EFFECTS:"))
+            .collect();
+        assert!(opaque.is_empty(), "actual Bitrue enum recipe: {opaque:?}");
+    }
+
+    #[test]
+    fn literal_expression_local_macro_effects_are_checked_after_substitution() {
+        for source in [
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("impl is inert text", crate::TABLE); }"#,
+            r#"fn owner() { macro_rules! renamed { ($key:literal, $value:expr) => { let _ = $value; let _ = $key; }; } renamed!("side", (1 + 2)); }"#,
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(
+                visitor.names.is_empty(),
+                "bounded effects: {source}: {:?}",
+                visitor.names
+            );
+        }
+        for source in [
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", { impl FromStr for Side {} 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $unused:expr) => { let _ = $label; }; } entries!("x", { impl FromStr for Side {} 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $unused:expr) => { let _ = $label; }; } entries!("x", include!("hidden.rs")); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", { #[vendor::decorate] struct Hidden; 1 }); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { impl FromStr for Side {} let _ = ($label, $rows); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows, $other); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:expr, $rows:expr) => { let _ = ($label, $rows); }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; } entries!(label, 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($same:literal, $same:expr) => { let _ = $same; }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($label:literal, $rows:expr) => { let _ = ($label, $rows); }; () => { 1 }; } entries!("x", 1); }"#,
+            r#"fn owner() { macro_rules! entries { ($($item:expr),*) => { 1 }; } entries!("x", 1); }"#,
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(
+                visitor
+                    .names
+                    .iter()
+                    .any(|row| row.0.starts_with("UNSUPPORTED_")),
+                "opaque effect must stay refused: {source}: {:?}",
+                visitor.names
+            );
+        }
+    }
+
+    #[test]
     fn invoked_local_macro_effects_preserve_helpers_and_refuse_global_or_opaque_items() {
         for source in [
             "fn owner() { macro_rules! helper { () => { #[derive(serde::Deserialize)] struct Hidden { value: bool } }; } helper!(); }",
@@ -2347,6 +2550,47 @@ mod tests {
     }
 
     #[test]
+    fn dependency_globs_preserve_every_exported_binding_guard() {
+        let source = "use domain::*; fn owner() { let _ = vec![1]; }";
+        for names in [None, Some(vec!["vec".into()]), Some(vec!["std".into()])] {
+            let mut visitor = verified_test_visitor();
+            visitor.dependency_glob_exports = names
+                .map(|names| HashMap::from([("domain".into(), names)]))
+                .unwrap_or_default();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(
+                visitor.untrusted_macro_import
+                    || visitor
+                        .names
+                        .iter()
+                        .any(|row| row.0.starts_with("UNSUPPORTED_")),
+                "missing or shadowing exports must be refused"
+            );
+        }
+        let source = "use domain::*; #[derive(Deserialize)] struct Record { value: bool }";
+        let mut visitor = verified_test_visitor();
+        visitor
+            .dependency_glob_exports
+            .insert("domain".into(), vec!["Deserialize".into()]);
+        visitor.visit_file(&syn::parse_file(source).unwrap());
+        assert!(
+            visitor
+                .names
+                .iter()
+                .any(|row| row.0 == "UNSUPPORTED_ATTRIBUTE_IMPORT_SCOPE")
+        );
+        let mut visitor = verified_test_visitor();
+        visitor
+            .dependency_glob_exports
+            .insert("domain".into(), vec!["Order".into(), "ModelField".into()]);
+        visitor.visit_file(
+            &syn::parse_file("use domain::*; fn owner() { let _ = vec![1]; }").unwrap(),
+        );
+        assert!(!visitor.untrusted_macro_import && !visitor.glob_import);
+        assert!(visitor.names.is_empty(), "{:?}", visitor.names);
+    }
+
+    #[test]
     fn verified_import_roots_cannot_rename_opaque_macros_as_expressions() {
         for source in [
             "use std::include as vec; fn owner() { let _ = vec!(\"hidden.rs\"); }",
@@ -2468,7 +2712,7 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect();
-        let names = local_types_with_recipes(&path, &origins, &recipes).unwrap();
+        let names = local_types_with_recipes(&path, &origins, &recipes, &HashMap::new()).unwrap();
         fs::remove_dir_all(&directory).unwrap();
         names
     }

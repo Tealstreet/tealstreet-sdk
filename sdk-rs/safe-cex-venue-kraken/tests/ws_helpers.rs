@@ -35,6 +35,7 @@ fn oracle() -> &'static Value {
 
 fn market(symbol: &str, active: bool) -> Market {
     Market {
+        runtime: Default::default(),
         id: symbol.into(),
         symbol: symbol.into(),
         pretty_symbol: None,
@@ -42,10 +43,13 @@ fn market(symbol: &str, active: bool) -> Market {
         quote: "QUOTE".into(),
         active,
         precision: MarketPrecision {
+            base: None,
+            quote: None,
             amount: 0.125,
             price: 0.25,
         },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount {
                 min: 1.0,
                 max: 10.0,

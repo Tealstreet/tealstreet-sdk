@@ -162,14 +162,21 @@ fn base_market(
     expiring: Option<bool>,
 ) -> Market {
     Market {
+        runtime: Default::default(),
         symbol: id.clone(),
         id,
         base,
         quote,
         active,
         pretty_symbol: None,
-        precision: MarketPrecision { amount, price },
+        precision: MarketPrecision {
+            base: None,
+            quote: None,
+            amount,
+            price,
+        },
         limits: MarketLimits {
+            cost: None,
             amount: MarketLimitsAmount { min, max },
             leverage: MarketLimitsLeverage {
                 min: 1.0,

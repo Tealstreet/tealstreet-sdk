@@ -1,4 +1,7 @@
 use safe_cex_exchange::native_store::DefaultStore;
+#[path = "support/log_observer.rs"]
+mod log_observer;
+
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -117,7 +120,7 @@ impl ExchangeRuntime for Runtime {
         panic!("no detached tasks in account reads")
     }
     fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
-        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let rendered = log_observer::venue_log_text(severity, message);
         let message = rendered.as_str();
         self.logs
             .borrow_mut()

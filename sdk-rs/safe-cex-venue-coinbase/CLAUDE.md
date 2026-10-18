@@ -323,3 +323,52 @@ preserve native balance snapshots plus the venue's error-cause/message carrier.
 The approved JSON error view and JavaScript input-object identity stay separate.
 `portfolio-alias-controls.py` removes production metadata retention, requires a
 compiled native assertion failure and restores the exact source before GREEN.
+
+Seven public-stream aliases retain explicit non-decoder capability roles. The
+finite `scripts/public-stream-alias-contracts.mjs` runner authenticates compiler
+identities and refuses any future Deserialize capability hidden by a role record.
+`public_stream_alias_native` uses constructed Advanced/Spot classes, production
+frame dispatch, the actual TickHost callback adapter and the native book adapter;
+it observes callback/frame/book roots, live iteration, errors and numeric bits.
+`public-stream-alias-controls.py` changes the real dispatch iteration and book
+price projection independently, requires named compiled failures, restores exact
+source bytes and reruns the corresponding witness. This is a finite capability
+census, not full transport or all-callback coverage.
+
+Eight configuration/signing aliases have specific non-decoder role records.
+The finite `config-alias-contracts.mjs` probe authenticates exact current compiler
+identities and refuses a new Deserialize capability. `config_alias_native` uses
+constructed classes and actual request/private-option/account/candle/event
+adapters, inspects shared native input roots and presence flags, imports the
+maintained RFC signing key through CryptoHost, checks cache identity and verifies
+actual websocket tokens with the Node/WebCrypto oracle. Amendment-root fields
+are observed directly; full amendment and remote-signer flows are not claimed.
+`config-alias-controls.py` independently changes actual key-cache identity policy
+and event-array projection, requires named compiled failures, restores exact
+source bytes and reruns the same witnesses.
+
+Lifecycle timer roots retain the original shared-runtime Js Timeout handle.
+The native host passes that exact value from setTimeout to clearTimeout; JSON
+views cannot preserve its cancellation identity. Both Advanced and Spot native
+class witnesses cancel a real timer and retain an independent uncancelled timer.
+`lifecycle-timer-controls.py` restores the JSON-roundtrip defect, requires both
+named native failures, restores exact source bytes and reruns both witnesses.
+The fixed timer alias has a specific non-decoder capability receipt.
+
+The last ten structural data aliases have seven native decoder records and three
+non-decoder collection roles. `data-alias-contracts.mjs` authenticates fresh
+compiler targets and reads decoded contents before reporting; its controls lose
+actual decoded rows and market metadata, require named output mismatches and
+restore the exact observations. `data_alias_native` separately exercises native
+Js decoding, shared item/market/catalog/model roots, rich retained info, candle
+numbers and the production typed-field frame adapter. The projection control
+changes that actual venue adapter, requires its compiled bit assertion to fail
+and restores exact bytes. This finite cohort does not replace underlying model
+contracts or claim every read method or arbitrary input-object identity.
+
+The shared retained/numeric typed decoder now replaces isolated UTF-16 units
+with U+FFFD in materialized String fields instead of rejecting the entire record.
+`tests/string_boundaries.rs` retains the live source corpus and exact unit/path
+pins, measures that accepted typed-view cost, and checks that ignored strings
+leave declared fields intact. Standalone serde_json::Value parsing and the
+separate bounded recursion behavior retain their own explicit checks.
