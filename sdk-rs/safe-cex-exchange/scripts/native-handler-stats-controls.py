@@ -36,6 +36,7 @@ def run(phase):
         if phase == 'red':
             assert result.returncode == 101 and f'{name} ... FAILED' in output, output[-8000:]
             assert 'could not compile' not in output, output[-8000:]
+            assert 'left: Some(false)' in output and 'right: Some(true)' in output, output[-8000:]
         else:
             assert result.returncode == 0 and '1 passed; 0 failed' in output, output[-8000:]
         print(f'{venue}: compiled {phase.upper()}', flush=True)
