@@ -331,11 +331,29 @@ fn read_chosen_boundaries() {
         json!([55296]),
         "source token surrogate acceptance"
     );
-    assert!(
-        serde_json::from_str::<JsNumberInput>(boundary["surrogate"]["raw"].as_str().unwrap())
-            .is_err(),
-        "CHOSEN token UTF8 refusal"
+    let raw = boundary["surrogate"]["raw"].as_str().unwrap();
+    let retained: safe_cex_types::retained_json::RetainedJsonInput =
+        serde_json::from_str(raw).unwrap();
+    assert_eq!(
+        retained
+            .get("result")
+            .unwrap()
+            .get("token")
+            .unwrap()
+            .as_text(),
+        Some([0xd800].as_slice())
     );
+    let response: JsNumberInput = serde_json::from_str(raw).unwrap();
+    let calls = Cell::new(0);
+    let result = complete(reads::fetch_ws_token(|_, _| {
+        calls.set(calls.get() + 1);
+        ready(Ok(Some(response)))
+    }));
+    assert!(
+        result.is_err(),
+        "token Value output still refuses lone units"
+    );
+    assert_eq!(calls.get(), 1, "response narrowing happens after POST");
     assert_eq!(
         boundary["depth"]["result"],
         json!([]),
@@ -584,10 +602,35 @@ fn leverage_chosen_boundary() {
         json!([55296]),
         "source leverage surrogate symbol accepted"
     );
-    assert!(
-        serde_json::from_str::<JsNumberInput>(case["raw"].as_str().unwrap()).is_err(),
-        "CHOSEN leverage UTF8 boundary refusal"
+    let raw = case["raw"].as_str().unwrap();
+    let retained: safe_cex_types::retained_json::RetainedJsonInput =
+        serde_json::from_str(raw).unwrap();
+    assert_eq!(
+        retained
+            .get("leveragePreferences")
+            .unwrap()
+            .as_array()
+            .unwrap()[0]
+            .get("symbol")
+            .unwrap()
+            .as_text(),
+        Some([0xd800].as_slice())
     );
+    let response: JsNumberInput = serde_json::from_str(raw).unwrap();
+    let reports = Cell::new(0);
+    complete(reads::fetch_leverage_settings(
+        |_| Ok(ready(Ok(Some(response)))),
+        || panic!("wire refusal must precede cache clear"),
+        |_, _| panic!("wire refusal must precede cache set"),
+        |prefix, message| {
+            assert_eq!(prefix, "[Kraken] Failed to fetch leverage settings:");
+            assert!(!message.is_empty(), "visible wire refusal");
+            reports.set(reports.get() + 1);
+            Ok(())
+        },
+    ))
+    .unwrap();
+    assert_eq!(reports.get(), 1, "caught wire refusal is reported once");
 }
 
 #[path = "support/history.rs"]

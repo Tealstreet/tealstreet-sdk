@@ -572,3 +572,10 @@ pass after exact source restoration.
 Utility inputs directly own canonical RetainedJsonInput. Ticker info always creates
 both ticker and bookTicker keys, with absent arguments as Undefined. The constructed
 REST regression checks raw UTF-16 units, nonfinite bits and own property presence.
+
+Retained utility inputs admit lone UTF-16 surrogates. Enum and numeric witnesses
+inspect the native units before invoking the actual normalizers; numeric results
+use binary64 bits. Closed String outputs still visibly refuse lone units.
+Ignored surrogate fields reach the fill guard/mapper without narrowing the whole
+record; depth-budget refusal remains separate. The existing source corpus and
+all ordinary ingress-route comparison counts are unchanged.
