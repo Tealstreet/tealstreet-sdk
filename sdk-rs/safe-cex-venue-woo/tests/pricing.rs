@@ -140,3 +140,61 @@ fn pricing_and_errors_match_live_source_including_nonfinite_numbers() {
         }
     }
 }
+
+#[test]
+fn error_guards_native_before_source() {
+    let poison = json!({"toString":null,"valueOf":null});
+    for response in [
+        json!({"status":429}),
+        json!({"data":{"code":-1003}}),
+        json!({"data":{"error_code":90003}}),
+    ] {
+        assert!(
+            is_woo_rate_limit_error(Some(&json!({"response":response,"message":poison}))).unwrap(),
+            "WOO-GUARD native strict numeric short circuit"
+        );
+    }
+    for response in [
+        json!({"status":"429"}),
+        json!({"data":{"code":"-1003"}}),
+        json!({"data":{"error_code":"90003"}}),
+    ] {
+        assert!(!is_woo_rate_limit_error(Some(&json!({"response":response}))).unwrap());
+    }
+    assert!(
+        is_woo_rate_limit_error(Some(
+            &json!({"response":{"data":{"message":0}},"message":"RATE LIMIT"})
+        ))
+        .unwrap()
+    );
+    assert!(
+        !is_woo_rate_limit_error(Some(
+            &json!({"response":{"data":{"message":"other"}},"message":"RATE LIMIT"})
+        ))
+        .unwrap()
+    );
+    assert!(is_woo_position_mode_already_set_error(Some(&json!({"response":{"data":{"message":false}},"message":"POSITION MODE REMAINS UNCHANGED"}))).unwrap());
+    assert!(!is_woo_position_mode_already_set_error(Some(&json!({"response":{"data":{"message":"other"}},"message":"POSITION MODE REMAINS UNCHANGED"}))).unwrap());
+    let error = is_woo_rate_limit_error(Some(&json!({"message":poison}))).unwrap_err();
+    assert_eq!(error.name, "TypeError");
+    assert!(!is_woo_rate_limit_error(Some(&json!({}))).unwrap());
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/pricing-oracle.cjs"
+        ))
+        .arg("--guard-audit")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "WOO-GUARD source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        value["groups"], 2,
+        "WOO-GUARD independently fixed source groups"
+    );
+}

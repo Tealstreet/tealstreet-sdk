@@ -360,11 +360,6 @@ Its identity checks cover every produced object, including indexed algo tails;
 mutable-length and sparse input cases pin the source loops rather than assuming
 array iteration or immutable input.
 
-`v3_request` retains only WooV3RequestInput for the remaining inert builders.
-The unused auth/prepared descriptors, serializer and preparer are retired after
-production caller checks. The shared ticker fixture retains its input record
-and every unrelated quote/ticker case; FIX_AUDIT_LEDGER.md records rows 1–2.
-
 `v3_ws_quotes` declares BBO/Trade records for the inert `v3_ticker` composer;
 it adds no websocket lifecycle or decoder registration. `v3_ticker` combines the
 existing futures-stat mapper with BBO bid/ask and Trade last, preserving validation
@@ -374,38 +369,8 @@ are mutable unlike the source's frozen objects. The five remaining record
 decoders capture numeric input before private map-only Serde companions. The focused source/native target retains the ticker
 and quote controls and native field assertions without roundtrip comparisons.
 
-`decode_woo_v3_regular_place_response_with` accepts a fallible live Set membership
-call after order-ID validation and before later response fields. Its generic
-Membership error retains the caller's original value; the existing slice facade
-delegates to it with ordinary membership. Native decoded fields, callback counts
-and error identity precede five actual-source cases, ending at wrong-request
-refusal. Captured response/output ownership remains a separately declared cost.
 
-The regular mutation decoder returns a validation error for a status outside its
-closed native domain, even when a public caller includes it in the allowed slice.
-The BAD-status witness first reproduced the old unreachable panic. This is a
-native API safeguard; BAD is outside the TypeScript status declaration.
-
-`decode_woo_v3_algo_place_response_with` decodes every row before calling fallible
-known-ID membership. Each call precedes internal duplicate detection, and the
-whole loop precedes positional blocking. Its generic Membership error retains
-the caller's original error; the existing slice facade delegates to this body.
-The caller supplies live Set method lookup and receiver invocation. Nine source
-cases end at a changing has getter; native fields, ordered calls and error
-identity are asserted first. Owned/mutable captured response boundaries remain
-CHOSEN and are observed separately from source shallow freezes and nested aliases.
-
-The account leverage audit observes the existing independent native query/target
-snapshots, mutable typed results and concrete gateway errors against actual
-source aliases/freezes and spread extras. Reversed hedge details retain native
-LONG/SHORT leverage routing before source projection. Separately supplied native
-request/target arguments have a broader construction domain than source ready
-targets; this remains a declared API choice. Eight account rows retain CHOSEN
-with explicit interface rationale; no new dense-data behavior defect was found.
-Lane-wide discovery counts and row identities live in DIVERGENCE_AUDIT_LEDGER.md.
-
-
-The error/validator audit supplements the existing pricing/account corpora with
+The historical error/validator audit supplemented the pricing/account corpora with
 native-first assertions and actual-source `--guard-audit` modes. Its eight-row
 floor stops at requireExactKeys. Four string/key guards have MIXED notes backed
 by materialized D800 observations; native scalar/map refusals are whole-value
@@ -438,10 +403,9 @@ allowed-enum outputs retain D800 in source and have explicit whole-input native
 refusals. Ownership, live-method and fixed-intrinsic costs remain separately priced.
 The ledger tracks cumulative discoveries and each zero-code cohort independently.
 
-The first accepted-set batch reviews 32 V3 string enum owners independently,
+The remaining accepted-set literal cohort reviews 12 V3 string enum owners independently,
 including every declared tag and tagged-object refusal through four native
-entry paths. Twenty older derived enums now use the same String admission and
-private remote schema as `v3_contracts`. See
+entry paths. Each retained enum uses String admission and a private remote schema. See
 [accepted contract review and focused commands](ACCEPTED_CONTRACT_REVIEW.md).
 The focused runner retains full compiler discovery and selected-source scope
 checks; it does not classify the remaining Woo owners or aliases.
@@ -550,3 +514,7 @@ failure. The signed class regression preserves valid sibling fills and error tex
 The inactive V3 sequence function/result and orphan codecs were retired first.
 The remaining six-module V3 websocket island is now retired too; its only callers
 were audit facades. See WS_STATE_GATES.md for the complete caller and native proof.
+
+The inactive V3 account/private-order/write closure and orphan request DTO are
+retired after TS/Rust caller checks. All 12 remaining inactive assigned rows are
+ACCEPT; the ten live rows remain OPEN. See ACCOUNT_WRITE_REVIEW.md.
