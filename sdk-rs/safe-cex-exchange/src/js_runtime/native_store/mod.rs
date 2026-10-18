@@ -314,6 +314,12 @@ impl Store for DefaultStore {
     fn reset(&self) -> Result<(), StoreMutationError> {
         self.invoke("reset", vec![])
     }
+    fn subscribe_native(
+        &self,
+        callback: safe_cex_store::contract::NativeStoreSubscriber,
+    ) -> Box<dyn Fn()> {
+        self.graph.subscribe_native_callback(callback.into())
+    }
     fn subscribe(&self, callback: StoreSubscriber) -> Box<dyn Fn()> {
         self.graph.subscribe_typed(callback.into())
     }
