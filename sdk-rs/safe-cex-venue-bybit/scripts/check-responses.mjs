@@ -28,7 +28,7 @@ const normalCaseCount = cases.length;
 // JS accepts lone UTF-16 surrogate escapes in JSON; Rust String cannot hold them.
 cases.push({raw_response: '{"retMsg":"\\ud800"}'});
 assert.equal(cases.length,8488,'RESPONSES-CARDINALITY source total');
-const run = spawnSync(process.env.CARGO ?? 'cargo', ['run', '--jobs', '1', '--quiet', '--locked', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-venue-bybit', '--example', 'responses'], { cwd: root, encoding: 'utf8', input: JSON.stringify(cases), maxBuffer: 16 * 1024 * 1024 });
+const run = spawnSync(process.env.CARGO ?? 'cargo', ['run', '--jobs', '1', '--quiet', '--locked', '-p', 'safe-cex-venue-bybit', '--example', 'responses'], { cwd: root + 'sdk-rs', encoding: 'utf8', input: JSON.stringify(cases), maxBuffer: 16 * 1024 * 1024 });
 assert.equal(run.status, 0, run.error?.message ?? run.stderr);
 const actual = JSON.parse(run.stdout);
 assert.equal(actual.length,cases.length,'RESPONSES-CARDINALITY expected/native outputs');
