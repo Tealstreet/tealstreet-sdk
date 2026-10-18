@@ -33,8 +33,8 @@ scanner guard or production workflow changes in this cohort.
 The fixture modules supply terminal replies, scheduler and wallet capabilities;
 they do not replace the workflow or binding functions under review. Aster assembly,
 shared globals/client creation and actual private member bodies execute in the
-binding profiles. The existing scheduler allocation is extracted unchanged for
-reuse; existing exchange fixture assertions remain intact.
+binding profiles. The existing master runtime_fixture allocation is reused unchanged; existing
+exchange fixture assertions remain intact.
 
 The maintained references are `asterdex.builder-fee.ts` (maker/rate decisions),
 `asterdex.builder-approval.ts` (approval result literals, address validation,

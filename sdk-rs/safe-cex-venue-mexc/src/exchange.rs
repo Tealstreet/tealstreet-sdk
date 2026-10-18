@@ -75,7 +75,8 @@ fn parse_response_json(body: &RestResponseBody) -> Result<Value, serde_json::Err
                 serde_json::from_slice::<ConsumeArrays>(bytes).map(|value| value.0)
             }
             RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-                serde_json::from_value::<ConsumeArrays>(value.clone()).map(|value| value.0)
+                serde_json::from_value::<ConsumeArrays>(value.clone().into_value()?)
+                    .map(|value| value.0)
             }
         };
     }
@@ -749,7 +750,10 @@ impl MexcExchange {
         let request = RestRequest {
             method: "post".into(),
             url: url.into(),
-            body: Some(safe_cex_transport::RestBody::Untransformed(body)),
+            body: Some(safe_cex_transport::RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
+                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+            )),
             ..Default::default()
         };
         let response = self

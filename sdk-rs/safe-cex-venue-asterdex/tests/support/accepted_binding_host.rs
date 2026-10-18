@@ -24,7 +24,7 @@ pub struct Fixture {
 
 impl Fixture {
     pub fn new(input: &Value) -> Self {
-        let runtime = scheduler::runtime();
+        let runtime = scheduler::runtime_fixture();
         #[expect(clippy::arc_with_non_send_sync)]
         let wire = Arc::new(scheduler::Wire::default());
         let mut options = json!({"key":"","secret":""});

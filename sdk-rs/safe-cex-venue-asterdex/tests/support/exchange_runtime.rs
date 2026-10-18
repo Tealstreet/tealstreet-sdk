@@ -235,12 +235,14 @@ impl RestAdapter for Wire {
                 status,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(data),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap(),
+                ),
             })
         })
     }
 }
-pub fn runtime() -> Rc<Runtime> {
+pub fn runtime_fixture() -> Rc<Runtime> {
     Rc::new(Runtime {
         sleep_wakers: virtual_time::SleepWakers::default(),
         now: Rc::new(Cell::new(1700000000000.0)),
@@ -254,7 +256,6 @@ pub fn runtime() -> Rc<Runtime> {
         http_options: RefCell::default(),
     })
 }
-
 pub fn fixture(
     options: Value,
 ) -> (
@@ -264,7 +265,7 @@ pub fn fixture(
     Arc<Wire>,
 ) {
     use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
-    let runtime = runtime();
+    let runtime = runtime_fixture();
     #[expect(clippy::arc_with_non_send_sync)]
     let wire = Arc::new(Wire::default());
     let store = Rc::new(safe_cex_store::store::DefaultStore::new());

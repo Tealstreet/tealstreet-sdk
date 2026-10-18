@@ -155,7 +155,7 @@ where
                 method: "POST".into(),
                 url: "marketdata".into(),
                 body: Some(RestBody::Untransformed(
-                    json!({"eventTypes":[{"type":"Quote"}],"symbols":symbols,"account":account}),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"eventTypes":[{"type":"Quote"}],"symbols":symbols,"account":account})).map_err(|error|ExchangeError::new(error.to_string()))?,
                 )),
                 ..RestRequest::default()
             })

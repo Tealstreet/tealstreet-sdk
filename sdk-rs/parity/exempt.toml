@@ -7326,6 +7326,26 @@ rs = "safe-cex-num/src/json_stringify.rs::js_retained_truthy"
 reason = "C3: ECMAScript Boolean conversion on canonical retained data before wire JSON projection; retains undefined/nonfinite/signed-zero truthiness. No standalone TypeScript declaration."
 
 [[exempt]]
+rs = "safe-cex-types/src/js_coercion.rs::js_retained_string_utf16"
+reason = "C3: canonical retained-tree String(any) glue for Axios form encoding. Shares existing object refusal and number spelling, preserves UTF-16 text, and has no standalone TypeScript declaration; real native request/signing regressions exercise the consumer."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::response_json_view"
+reason = "C3: explicit legacy Rust Error JSON-view boundary, approved by overseer for phase 2. JSON projection loses native nonfinite values and replaces lone units only in this view; the original RestFailure in ExchangeError.origin remains authoritative. Not a new TypeScript behavior or native-body fallback."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/library.rs::qs_stringify"
+reason = "C3: direct entry to the existing shared native npm qs binding for typed WOO signer composition. WOO and imported runtime calls execute the same implementation; no standalone TypeScript SDK declaration or second query algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/globals.rs::stringify_json"
+reason = "C3: shared native JSON.stringify entry delegates the existing production SerializeJSONProperty implementation without a replacer. MEXC normalization uses it directly so native BigInt throws remain covered without a second serializer or JSON carrier."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue"
+reason = "FFI boundary glue (MANIFEST-SPEC section 5): owned structured data carrier between the JS runtime, native account thread and napi. Retains undefined, binary64 bits, UTF-16 strings/keys and BigInt words without JSON. It is not a separately declared TypeScript SDK model; executable values, cycles and depth beyond 512 are explicitly refused by this approved native tree profile. Real napi lossless-value regressions cover the boundary."
+
+[[exempt]]
 rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue"
 reason = "FFI boundary glue (MANIFEST-SPEC section 5): owned structured data carrier between the JS runtime, native account thread and napi. Retains undefined, binary64 bits, UTF-16 strings/keys and BigInt words without JSON. It is not a separately declared TypeScript SDK model; executable values, cycles and depth beyond 512 are explicitly refused by this approved native tree profile. Real napi lossless-value regressions cover the boundary."
 

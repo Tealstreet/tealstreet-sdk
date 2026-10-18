@@ -25,10 +25,12 @@ fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
     panic!("scripted call must settle");
 }
 fn script(wire: &support::Wire, path: &str, body: Value) {
-    wire.bodies
-        .lock()
-        .unwrap()
-        .insert(path.into(), RestResponseBody::Untransformed(body));
+    wire.bodies.lock().unwrap().insert(
+        path.into(),
+        RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+        ),
+    );
 }
 fn calls(wire: &support::Wire) -> Vec<(String, String)> {
     wire.requests
@@ -206,6 +208,46 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     let trades = drive(&rt, venue.fetch_public_trades("BTC_USDC".into(), None)).unwrap_err();
     assert_eq!(trades.message, "Not implemented");
     assert!(calls(&wire).is_empty(), "inherited rejections send nothing");
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("backpack");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 72);
+    let (venue, runtime, store, _) = support::fixture();
+    let socket = venue.base.get_socket(SocketSlot::Public).unwrap();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("backpack")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            runtime.now.set(runtime.now.get() + 1100.0);
+            runtime.pump();
+            socket
+                .on_message(&SocketFrame::Text(frame.as_str().unwrap().into()))
+                .unwrap();
+            runtime.pump();
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "{:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
 }
 
 #[test]

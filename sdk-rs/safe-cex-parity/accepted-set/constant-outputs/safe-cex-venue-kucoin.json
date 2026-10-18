@@ -88,7 +88,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "9a975bfd8c75ec3e816e72d09ef9c717907c5c59d3c84402d60fe6802eccfc99"
+      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
     },
     "additionalNativeFixture": {
       "file": "safe-cex-parity/accepted-set/kucoin-constant-fixture.rs",
@@ -246,7 +246,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "9a975bfd8c75ec3e816e72d09ef9c717907c5c59d3c84402d60fe6802eccfc99"
+      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
     },
     "additionalNativeFixture": {
       "file": "safe-cex-parity/accepted-set/kucoin-constant-fixture.rs",
@@ -404,7 +404,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "9a975bfd8c75ec3e816e72d09ef9c717907c5c59d3c84402d60fe6802eccfc99"
+      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
     },
     "additionalNativeFixture": {
       "file": "safe-cex-parity/accepted-set/kucoin-constant-fixture.rs",
