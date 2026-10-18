@@ -67,7 +67,7 @@ fn err(e: Thrown) -> ExchangeError {
 /// The `BaseExchange` binding the class extends: the shared JS base over the
 /// Rust core, whose handle is kept for `Exchange::base()`.
 fn base_exchange_class(weak: Weak<Shared>, name: ExchangeName, options: ExchangeOptions) -> Js {
-    let class = Js::constructor("BaseExchange", move |_, a| {
+    let class = Js::constructor("BaseExchange", None, move |_, a| {
         let shared = weak
             .upgrade()
             .ok_or_else(|| Thrown::error("Error", "Lighter scope was dropped"))?;

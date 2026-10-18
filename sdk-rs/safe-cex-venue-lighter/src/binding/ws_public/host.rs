@@ -471,15 +471,9 @@ impl PublicSocketHost for Socket {
         callee: &AccountValue,
         args: &[AccountValue],
     ) -> SigningResult<AccountValue> {
-        let callee = to_js(callee);
-        if !callee.is_callable() {
-            return Err(to_signing(Thrown::type_error(&format!(
-                "{} is not a constructor",
-                callee.to_display()
-            ))));
-        }
-        js(callee.call(Js::Undefined, args.iter().map(to_js).collect())).map(|v| to_account(&v))
+        js(to_js(callee).construct(args.iter().map(to_js).collect(), None)).map(|v| to_account(&v))
     }
+
     fn function(&self, callback: SocketCallback) -> SigningResult<AccountValue> {
         Ok(to_account(&Js::function("", move |_, args| {
             let args: Vec<_> = args.iter().map(to_account).collect();

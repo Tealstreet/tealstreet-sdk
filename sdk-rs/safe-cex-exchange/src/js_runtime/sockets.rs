@@ -185,7 +185,7 @@ fn create_websocket(core: &Rc<SocketCore>, args: &[Js]) -> Result<Js, Thrown> {
         if capable && !supplied.is_nullish() {
             let headers = supplied.get("headers").map_err(core_error)?;
             let headers = if headers.is_callable() {
-                headers.call(Js::Undefined, vec![]).map_err(core_error)?
+                headers.construct(vec![], None).map_err(core_error)?
             } else {
                 headers
             };
@@ -597,7 +597,7 @@ fn base_prototype(context: &Rc<JsSocketContext>) -> Js {
 /// every socket of this context.
 pub fn base_websocket_class(context: &Rc<JsSocketContext>) -> Js {
     let ctx = context.clone();
-    let class = Js::constructor("BaseWebSocket", move |_, a| {
+    let class = Js::constructor("BaseWebSocket", None, move |_, a| {
         Ok(base_websocket(&ctx, arg(&a, 0)))
     });
     let _ = class.define("prototype", base_prototype(context));

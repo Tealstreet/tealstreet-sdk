@@ -416,7 +416,7 @@ impl ClientHost for SdkHost {
 fn construct_api_error(realm: &Realm, args: Vec<Js>) -> Result<Thrown, Thrown> {
     realm
         .global("LighterApiError")?
-        .call(Js::Undefined, args)
+        .construct(args, None)
         .map(Thrown::new)
 }
 
@@ -822,7 +822,7 @@ fn api_class(name: &str, methods: Vec<(&str, Js)>) -> Result<Js, Thrown> {
         prototype.define(key, method)?;
     }
     let instance_proto = prototype.clone();
-    let class = Js::constructor(name, move |_, a| {
+    let class = Js::constructor(name, None, move |_, a| {
         let instance = Js::object(vec![("client", arg(&a, 0))]);
         if let Js::Object(o) = &instance {
             *o.proto.borrow_mut() = Some(instance_proto.clone());
@@ -969,7 +969,7 @@ pub(crate) fn install(realm: &Realm) -> Result<(), Thrown> {
     let globals = &realm.0.globals;
     let error_proto = Js::object(vec![]);
     let error_instance_proto = error_proto.clone();
-    let error_class = Js::constructor("LighterApiError", move |_, a| {
+    let error_class = Js::constructor("LighterApiError", None, move |_, a| {
         lighter_api_error(error_instance_proto.clone(), a)
     });
     error_class.define("prototype", error_proto)?;
@@ -982,7 +982,7 @@ pub(crate) fn install(realm: &Realm) -> Result<(), Thrown> {
     });
     let client_host = sdk.clone();
     // ts: LighterApiClient.constructor
-    let client_class = Js::constructor("LighterApiClient", move |_, a| {
+    let client_class = Js::constructor("LighterApiClient", None, move |_, a| {
         LighterApiClient::new(client_host.clone(), arg(&a, 0)).map(|client| client.receiver)
     });
     client_class.define("prototype", sdk.prototype.clone())?;

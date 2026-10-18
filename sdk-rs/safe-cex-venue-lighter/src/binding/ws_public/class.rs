@@ -128,10 +128,10 @@ impl PublicSocketRealm for SocketRealm {
         let me = js(self.me())?;
         let slot: Rc<OnceCell<Js>> = Rc::default();
         let class_slot = slot.clone();
-        let class = Js::constructor(name, move |_, args| {
+        let class = Js::constructor(name, None, move |target, args| {
             let class = class_slot.get().cloned().unwrap_or(Js::Undefined);
             let args: Vec<_> = args.iter().map(to_account).collect();
-            body(&*me, to_account(&class), to_account(&class), &args)
+            body(&*me, to_account(&class), to_account(&target), &args)
                 .map(|v| to_js(&v))
                 .map_err(to_thrown)
         });

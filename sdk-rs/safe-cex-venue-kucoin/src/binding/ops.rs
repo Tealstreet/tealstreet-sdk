@@ -165,17 +165,27 @@ pub(crate) fn derive_class(
     if let (Js::Object(o), true) = (&proto, base_proto.is_object()) {
         *o.proto.borrow_mut() = Some(base_proto);
     }
-    proto.define("__super", base)?;
-    let target = proto.clone();
-    let class = Js::constructor(name, move |_, a| ctor(target.clone(), target.clone(), a));
+    let superclass = base;
+    let own: Rc<std::cell::OnceCell<Js>> = Rc::default();
+    let slot = own.clone();
+    let class = Js::constructor(name, None, move |target, a| {
+        let active = slot
+            .get()
+            .cloned()
+            .ok_or_else(|| Thrown::type_error("class not initialized"))?;
+        ctor(active, target, a)
+    });
+    own.set(class.clone())
+        .map_err(|_| Thrown::type_error("class already initialized"))?;
     class.define("prototype", proto)?;
+    class.set("__proto__", superclass)?;
     Ok(class)
 }
 
 pub(crate) fn super_construct(base: Js, target: Js, args: Vec<Js>) -> Result<Js, Thrown> {
-    let receiver = base.call(Js::Undefined, args)?;
+    let receiver = base.construct(args, Some(&target))?;
     match &receiver {
-        Js::Object(o) => *o.proto.borrow_mut() = Some(target),
+        Js::Object(o) => *o.proto.borrow_mut() = Some(target.get("prototype")?),
         other => {
             return Err(Thrown::type_error(&format!(
                 "super constructor returned {}",
@@ -189,9 +199,9 @@ pub(crate) fn super_construct(base: Js, target: Js, args: Vec<Js>) -> Result<Js,
 pub(crate) fn construction() -> Rc<ConstructionOps<Js, Thrown>> {
     Rc::new(ConstructionOps {
         derive: Rc::new(|name, base, _, ctor| derive_class(name, base, ctor)),
-        superclass: Rc::new(|active| active.get("__super")),
+        superclass: Rc::new(|active| active.get("__proto__")),
         super_construct: Rc::new(super_construct),
-        construct: Rc::new(|ctor, args| ctor.call(Js::Undefined, args)),
+        construct: Rc::new(|ctor, args| ctor.construct(args, None)),
     })
 }
 

@@ -667,12 +667,12 @@ fn bigint_and_url_search_params_follow_ecmascript() {
     let params = globals
         .get("URLSearchParams")
         .unwrap()
-        .call(
-            Js::Undefined,
+        .construct(
             vec![Js::object(vec![
                 ("a b", Js::str("x y&z")),
                 ("k", Js::str("~*")),
             ])],
+            None,
         )
         .unwrap();
     assert_eq!(
@@ -1980,7 +1980,7 @@ fn performance_now_and_math_random_read_the_runtime() {
 #[test]
 fn map_constructor_adds_entries_from_iterables() {
     let g = library();
-    let new_map = |v: Vec<Js>| g.get("Map").unwrap().call(Js::Undefined, v);
+    let new_map = |v: Vec<Js>| g.get("Map").unwrap().construct(v, None);
     let entry = |k: &str, v: f64| Js::array(vec![Js::str(k), Js::Number(v)]);
     let map = new_map(vec![Js::array(vec![
         entry("a", 1.0),
@@ -2019,7 +2019,7 @@ fn map_constructor_adds_entries_from_iterables() {
     let set = g
         .get("Set")
         .unwrap()
-        .call(Js::Undefined, vec![Js::array(vec![entry("s", 1.0)])])
+        .construct(vec![Js::array(vec![entry("s", 1.0)])], None)
         .unwrap();
     let from_set = new_map(vec![set]).unwrap();
     assert_eq!(

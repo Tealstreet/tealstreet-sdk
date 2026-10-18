@@ -169,7 +169,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         let weak = weak.clone();
         def(
             name,
-            Js::constructor(name, move |_, a| {
+            Js::constructor(name, None, move |_, a| {
                 let rt = scope_of(&weak)?;
                 let classes = rt
                     .shared

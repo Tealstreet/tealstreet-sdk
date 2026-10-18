@@ -186,7 +186,7 @@ impl crate::exchange::ExchangeHost for Rt {
         Ok(Rc::new(self.with_this(r)))
     }
     fn derive(&self, base: Js, m: Vec<(&'static str, Js)>) -> Result<Js, Thrown> {
-        Ok(Js::constructor("PolymarketExchange", move |_, a| {
+        Ok(Js::constructor("PolymarketExchange", None, move |_, a| {
             let r = base.call(Js::Undefined, a)?;
             for (k, v) in &m {
                 if *k == "name" {
@@ -420,7 +420,7 @@ impl crate::classes::ClassHost for Rt {
         b: Option<Js>,
         p: Vec<(&'static str, Js)>,
     ) -> Result<Js, Thrown> {
-        Ok(Js::constructor(n, move |_, a| {
+        Ok(Js::constructor(n, None, move |_, a| {
             let r = match &b {
                 Some(b) => b.call(Js::Undefined, a)?,
                 None => Js::object_with_class(n, vec![]),
@@ -711,7 +711,7 @@ impl AuthHost for Rt {
         self.global(n)
     }
     fn construct(&self, c: Js, a: Vec<Js>) -> Result<Js, Thrown> {
-        c.call(Js::Undefined, a)
+        c.construct(a, None)
     }
     fn clob_auth_types(&self) -> Result<Js, Thrown> {
         self.global("CLOB_AUTH_TYPES")

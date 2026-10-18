@@ -143,11 +143,11 @@ impl PrivateWebsocketRealm<Realm> for Assembly {
         let assembly = self.clone();
         let slot: Rc<OnceCell<Js>> = Rc::default();
         let class_slot = slot.clone();
-        let class = Js::constructor(name, move |_, args| {
+        let class = Js::constructor(name, None, move |target, args| {
             let class = class_slot.get().cloned().unwrap_or(Js::Undefined);
             let class = to_account(&class);
             let args: Vec<_> = args.iter().map(to_account).collect();
-            body(&assembly, class.clone(), class, &args)
+            body(&assembly, class, to_account(&target), &args)
                 .map(|v| to_js(&v))
                 .map_err(to_thrown)
         });

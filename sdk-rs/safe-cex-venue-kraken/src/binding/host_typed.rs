@@ -122,7 +122,7 @@ impl StartupHost for Rt {
         };
         let socket = self
             .global(class)
-            .and_then(|c| c.call(Js::Undefined, vec![self.this.clone()]))
+            .and_then(|c| c.construct(vec![self.this.clone()], None))
             .map_err(ex)?;
         self.this.set(slot, socket.clone()).map_err(ex)?;
         Ok(Rc::new(socket))

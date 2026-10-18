@@ -48,6 +48,13 @@ pub struct FunctionData {
     pub call: NativeFn,
     pub props: RefCell<IndexMap<Str, Prop>>,
     pub proto: RefCell<Option<Js>>,
+    construct: Option<Construct>,
+    realm: Rc<safe_cex_num::PrototypeRealm>,
+}
+
+enum Construct {
+    Native(NativeFn),
+    Bound { target: Js, args: Vec<Js> },
 }
 
 #[derive(Clone)]
@@ -260,7 +267,7 @@ pub fn error_object(name: &str, message: &str) -> Js {
 }
 
 pub(super) fn error_constructor(name: &'static str) -> Js {
-    Js::constructor(name, move |_, args| {
+    let body: NativeFn = Rc::new(move |_, args| {
         let message = arg(&args, 0);
         let message = if message.is_undefined() {
             None
@@ -268,7 +275,22 @@ pub(super) fn error_constructor(name: &'static str) -> Js {
             Some(message.to_js_string()?)
         };
         Ok(make_error_object(name, message))
-    })
+    });
+    let call = body.clone();
+    let constructor = Js::constructor(name, Some(call), move |target, args| {
+        let error = body(Js::Undefined, args)?;
+        let prototype = target.get("prototype")?;
+        if prototype.is_object()
+            && let Js::Object(data) = &error
+        {
+            *data.proto.borrow_mut() = Some(prototype);
+        }
+        Ok(error)
+    });
+    constructor
+        .define("prototype", error_prototype(name).0)
+        .expect("error prototype");
+    constructor
 }
 
 fn error_string(error: &Js) -> Result<Str, Thrown> {
@@ -379,23 +401,105 @@ impl Js {
         }))
     }
     pub fn function(name: &str, call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
+        let realm = safe_cex_num::PrototypeRealm::current();
         Js::Function(Rc::new(FunctionData {
             name: utf16(name),
             call: Rc::new(call),
             props: RefCell::new(IndexMap::new()),
             proto: RefCell::new(
-                safe_cex_num::PrototypeRealm::current()
+                realm
                     .reference(safe_cex_num::ProtoMember::Constructor)
                     .prototype()
                     .map(Js::Builtin),
             ),
+            construct: None,
+            realm,
         }))
     }
     pub fn constructor(
         name: &str,
-        call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static,
+        call: Option<NativeFn>,
+        construct: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static,
     ) -> Js {
-        Self::function(name, call)
+        let class_name = name.to_owned();
+        let mut value = Self::function(name, move |this, args| match &call {
+            Some(call) => call(this, args),
+            None => Err(Thrown::type_error(&format!(
+                "Class constructor {class_name} cannot be invoked without 'new'"
+            ))),
+        });
+        let Js::Function(function) = &mut value else {
+            unreachable!()
+        };
+        Rc::get_mut(function)
+            .expect("unpublished constructor")
+            .construct = Some(Construct::Native(Rc::new(construct)));
+        value
+    }
+
+    pub fn is_constructor(&self) -> bool {
+        matches!(self, Js::Function(function) if function.construct.is_some())
+    }
+
+    /// The native construct body receives original new.target, then arguments.
+    pub fn construct(&self, args: Vec<Js>, new_target: Option<&Js>) -> Result<Js, Thrown> {
+        let Js::Function(function) = self else {
+            return Err(Thrown::type_error("Value is not a constructor"));
+        };
+        let Some(construct) = &function.construct else {
+            return Err(Thrown::type_error("Value is not a constructor"));
+        };
+        let new_target = new_target.unwrap_or(self);
+        if !new_target.is_constructor() {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        }
+        let value = match construct {
+            Construct::Native(body) => body(new_target.clone(), args)?,
+            Construct::Bound {
+                target,
+                args: prefix,
+            } => {
+                let mut combined = prefix.clone();
+                combined.extend(args);
+                let new_target = if new_target.same_reference(self) {
+                    target
+                } else {
+                    new_target
+                };
+                target.construct(combined, Some(new_target))?
+            }
+        };
+        if !value.is_object() {
+            return Err(Thrown::type_error(
+                "Constructor returned a non-object value",
+            ));
+        }
+        Ok(value)
+    }
+
+    /// OrdinaryCreateFromConstructor for native class bodies allocating `this`.
+    pub fn allocate_instance(&self) -> Result<Js, Thrown> {
+        let Js::Function(function) = self else {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        };
+        if !self.is_constructor() {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        }
+        let prototype = self.get("prototype")?;
+        let object = Js::object(vec![]);
+        let Js::Object(data) = &object else {
+            unreachable!()
+        };
+        *data.proto.borrow_mut() = Some(if prototype.is_object() {
+            prototype
+        } else {
+            Js::Builtin(
+                function
+                    .realm
+                    .reference(safe_cex_num::ProtoMember::Prototype),
+            )
+        });
+        Ok(object)
     }
     pub fn new_map() -> Js {
         Js::Map(Rc::default())
@@ -1285,6 +1389,15 @@ impl Js {
                     if let Js::String(target_name) = target_name {
                         name.extend_from_slice(&target_name);
                     }
+                    let construct = this.is_constructor().then(|| Construct::Bound {
+                        target: this.clone(),
+                        args: bound_args.clone(),
+                    });
+                    let realm = match &this {
+                        Js::Function(function) => function.realm.clone(),
+                        Js::Builtin(reference) => reference.realm().clone(),
+                        _ => unreachable!(),
+                    };
                     Ok(Js::Function(Rc::new(FunctionData {
                         name: name.into(),
                         call: Rc::new(move |_, args| {
@@ -1294,6 +1407,8 @@ impl Js {
                         }),
                         props: RefCell::default(),
                         proto: RefCell::new(proto),
+                        construct,
+                        realm,
                     })))
                 }
                 safe_cex_num::BuiltinIdentity::FunctionMethod(

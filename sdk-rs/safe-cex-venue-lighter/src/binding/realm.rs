@@ -109,15 +109,9 @@ impl AccountAccessCall for JsCall {
             .map_err(to_signing)
     }
     fn construct(&self, args: &[AccountValue]) -> SigningResult<AccountValue> {
-        if !self.callee.is_callable() {
-            return Err(to_signing(Thrown::type_error(&format!(
-                "{} is not a constructor",
-                self.callee.to_display()
-            ))));
-        }
         self.callee
-            .call(Js::Undefined, args.iter().map(to_js).collect())
-            .map(|v| to_account(&v))
+            .construct(args.iter().map(to_js).collect(), None)
+            .map(|value| to_account(&value))
             .map_err(to_signing)
     }
 }
@@ -309,10 +303,10 @@ impl ExchangeClassRealm for Realm {
         let realm = self.clone();
         let slot: Rc<std::cell::OnceCell<Js>> = Rc::default();
         let class_slot = slot.clone();
-        let class = Js::constructor(name, move |_, args| {
+        let class = Js::constructor(name, None, move |target, args| {
             let class = class_slot.get().cloned().unwrap_or(Js::Undefined);
             let args: Vec<_> = args.iter().map(to_account).collect();
-            body(&realm, to_account(&class), to_account(&class), &args)
+            body(&realm, to_account(&class), to_account(&target), &args)
                 .map(|v| to_js(&v))
                 .map_err(to_thrown)
         });
@@ -377,7 +371,7 @@ impl ExchangeClassRealm for Realm {
         let _ = class;
         let base = self.global("BaseExchange").map_err(to_signing)?;
         let instance = base
-            .call(Js::Undefined, args.iter().map(to_js).collect())
+            .construct(args.iter().map(to_js).collect(), None)
             .map_err(to_signing)?;
         let prototype = to_js(&new_target).get("prototype").map_err(to_signing)?;
         if let Js::Object(o) = &instance {

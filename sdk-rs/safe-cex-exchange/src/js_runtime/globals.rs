@@ -579,7 +579,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     def(
         "URLSearchParams",
-        Js::constructor("URLSearchParams", |_, a| {
+        Js::constructor("URLSearchParams", None, |_, a| {
             let source = arg(&a, 0);
             let mut pairs = vec![];
             if !source.is_nullish() {
@@ -803,7 +803,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let resolve_rt = rt.clone();
     let reject_rt = rt.clone();
     let constructor_rt = rt.clone();
-    let constructor = Js::constructor("Promise", move |_, args| {
+    let constructor = Js::constructor("Promise", None, move |_, args| {
         construct_promise(
             &scope_of(&constructor_rt)?.exchange_runtime(),
             arg(&args, 0),
@@ -950,11 +950,11 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     def(
         "Map",
-        Js::constructor("Map", |_, a| map_from_entries(&arg(&a, 0))),
+        Js::constructor("Map", None, |_, a| map_from_entries(&arg(&a, 0))),
     );
     def(
         "WsDirectFallback",
-        Js::constructor("WsDirectFallback", |_, a| {
+        Js::constructor("WsDirectFallback", None, |_, a| {
             let max = arg(&a, 0);
             let max = if max.is_undefined() {
                 2.0
@@ -1002,7 +1002,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     def(
         "Set",
-        Js::constructor("Set", |_, a| {
+        Js::constructor("Set", None, |_, a| {
             let set = Js::new_set();
             let values = arg(&a, 0);
             if !values.is_nullish() {

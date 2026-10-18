@@ -20,14 +20,15 @@ pub(crate) fn derive(
 ) -> Result<Js, Thrown> {
     let me: Rc<OnceCell<Js>> = Rc::default();
     let own = me.clone();
-    let class = Js::constructor(name, move |_, args| {
+    let class = Js::constructor(name, None, move |target, args| {
         let class = own
             .get()
             .cloned()
             .ok_or_else(|| Thrown::type_error("class constructor used before definition"))?;
-        constructor(class.clone(), class, args)
+        constructor(class, target, args)
     });
     let _ = me.set(class.clone());
+    class.set("__proto__", superclass.clone())?;
     rt.shared
         .extra
         .classes
@@ -42,13 +43,18 @@ pub(crate) fn derive(
 }
 
 /// `super(...args)` inside `active`'s constructor.
-pub(crate) fn super_construct(rt: &Rt, active: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+pub(crate) fn super_construct(
+    rt: &Rt,
+    active: &Js,
+    target: &Js,
+    args: Vec<Js>,
+) -> Result<Js, Thrown> {
     let record = rt
         .shared
         .extra
         .class(active)
         .ok_or_else(|| Thrown::type_error("super() outside a derived class constructor"))?;
-    let receiver = record.superclass.call(Js::Undefined, args)?;
+    let receiver = record.superclass.construct(args, Some(target))?;
     for (name, member) in record.prototype.borrow().iter() {
         if !receiver.has_own(name) {
             receiver.define(name, member.clone())?;
@@ -81,8 +87,8 @@ pub(crate) fn derive_socket(
     superclass: Js,
     initialize: Initialize,
 ) -> Result<Js, Thrown> {
-    Ok(Js::constructor(name, move |_, args| {
-        let receiver = superclass.call(Js::Undefined, args)?;
+    Ok(Js::constructor(name, None, move |target, args| {
+        let receiver = superclass.construct(args, Some(&target))?;
         initialize(receiver.clone())?;
         Ok(receiver)
     }))
