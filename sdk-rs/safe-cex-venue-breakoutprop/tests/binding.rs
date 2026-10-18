@@ -2284,6 +2284,12 @@ fn async_audit_discarded_start_retains_store_and_polling_continuations() {
     );
     let requests = f.wire.requests.borrow();
     let expected = source["startup"]["requests"].as_array().unwrap();
+    assert_eq!(expected.len(), 8, "maintained startup request floor");
+    assert_eq!(
+        requests.len(),
+        expected.len(),
+        "complete native startup request count"
+    );
     for url in [
         "/login",
         "/users/k",
@@ -2323,7 +2329,13 @@ fn async_audit_discarded_start_retains_store_and_polling_continuations() {
 #[test]
 fn async_audit_discarded_cancel_reaches_later_lots_and_refusal_stops_them() {
     let source = async_audit_source();
-    for case in source["cancellations"].as_array().unwrap() {
+    let cases = source["cancellations"].as_array().unwrap();
+    assert_eq!(
+        cases.len(),
+        3,
+        "success plus both first-settled rejection orders"
+    );
+    for case in cases {
         let f = fixture();
         f.fetch_markets();
         f.wire.requests.borrow_mut().clear();
@@ -2393,10 +2405,16 @@ fn async_audit_discarded_cancel_reaches_later_lots_and_refusal_stops_them() {
             sibling.unwrap().release();
             pump_until(&f, || errors.borrow().len() == 2);
             advance_real_poll(&f);
+            let expected: Vec<_> = case["ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned())
+                .collect();
             assert_eq!(
-                delete_ids(&f).len(),
-                case["ids"].as_array().unwrap().len(),
-                "rejection prevents later lots"
+                delete_ids(&f),
+                expected,
+                "rejection preserves the first lot and prevents later lots"
             );
             assert_eq!(
                 errors.borrow().len(),
