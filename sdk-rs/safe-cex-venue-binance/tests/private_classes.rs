@@ -5099,6 +5099,10 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
     }
 }
 
+#[cfg(feature = "native")]
+#[path = "support/snapshot_aliases.rs"]
+mod snapshot_aliases;
+
 #[test]
 #[cfg(feature = "native")]
 fn production_native_public_rest_future_waits_and_preserves_candles_and_rejection() {
