@@ -852,6 +852,7 @@ impl<'ast> Visit<'ast> for LocalTypes {
         if attr.path().is_ident("derive")
             || attr.path().is_ident("cfg_attr")
             || attr.path().is_ident("wasm_bindgen")
+            || attr.path().is_ident("track_caller")
             || attr.path().segments.len() == 2
                 && attr.path().segments[0].ident == "clippy"
                 && attr.path().segments[1].ident == "msrv"
@@ -1417,6 +1418,11 @@ fn known_attribute(meta: &syn::Meta) -> bool {
     if name == "rustfmt::skip" {
         return matches!(meta, syn::Meta::Path(_));
     }
+    // The compiler builtin only propagates caller locations; it cannot expand
+    // declarations. Accept its bare spelling, never arguments or a qualified path.
+    if name == "track_caller" {
+        return matches!(meta, syn::Meta::Path(path) if path.is_ident("track_caller"));
+    }
     // Known SDK binding macros are compiler-inventoried; arbitrary expansion fails closed.
     matches!(
         name.as_str(),
@@ -1499,6 +1505,8 @@ fn attribute_macro_name(name: &str) -> bool {
             | "TS"
             | "wasm_bindgen"
             | "napi"
+            | "track_caller"
+            | "r#track_caller"
     )
 }
 
@@ -2164,6 +2172,55 @@ mod tests {
         assert!(
             !guards.0,
             "cfg_attr selecting a lint expectation is not doc-dependent"
+        );
+    }
+
+    #[test]
+    fn track_caller_builtin_is_exact_and_keeps_expansion_guards() {
+        for source in [
+            "#[track_caller] fn f() {}",
+            "trait Runtime { #[track_caller] fn spawn(&self); }",
+            "impl Runtime for Host { #[track_caller] fn spawn(&self) {} }",
+            "#[cfg_attr(feature = \"diagnostics\", track_caller)] fn f() {}",
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(visitor.names.is_empty(), "{source}: {:?}", visitor.names);
+        }
+        for source in [
+            "#[track_caller()] fn f() {}",
+            "#[track_caller = true] fn f() {}",
+            "#[::track_caller] fn f() {}",
+            "#[forged::track_caller] fn f() {}",
+            "#[cfg_attr(feature = \"diagnostics\", track_caller(hidden))] fn f() {}",
+            "#[track_caller] #[custom_decoder] fn f() {}",
+            "use forged::track_caller; #[track_caller] fn f() {}",
+            "use forged::r#track_caller; #[track_caller] fn f() {}",
+            "use forged::attribute as track_caller; #[track_caller] fn f() {}",
+            "#[track_caller] fn f() {} use forged::*;",
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(
+                visitor
+                    .names
+                    .iter()
+                    .any(|row| row.0 == "UNSUPPORTED_ATTRIBUTE_IMPORT_SCOPE"
+                        || row.0.starts_with("UNSUPPORTED_ATTRIBUTE_EXPANSION:")),
+                "{source}: {:?}",
+                visitor.names
+            );
+        }
+        let mut visitor = verified_test_visitor();
+        visitor
+            .visit_file(&syn::parse_file("#[track_caller] fn outer() { fn hidden() {} }").unwrap());
+        assert!(
+            visitor
+                .names
+                .iter()
+                .any(|row| row.0 == "LOCAL_FUNCTION:hidden"),
+            "the builtin must not hide nested declarations: {:?}",
+            visitor.names
         );
     }
 
