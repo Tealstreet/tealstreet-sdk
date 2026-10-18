@@ -418,3 +418,17 @@ The four container tests in `adapter_classes.rs` also construct the actual typed
 aliases, including `SigningRecord<Js>`, preserving native nonfinite values, own
 undefined and original cell identity. These observations cover the declared
 instantiations and prepared profiles, not every possible generic value type.
+
+The remaining alias cohort has 13 callable capabilities, five pinned Result
+futures and two nominal option aliases. The existing Rc/Fn family authenticates
+its generic callbacks; exact fixed registrations handle the Result futures and
+one-shot boxed callbacks. These native capabilities are non-decoders. The
+concrete ExchangeOptions alias instead retains its shared strict decoder, while
+the prepared order-option specialization has no raw decoder.
+
+`callable-alias-contracts.mjs` authenticates the full compiler inventory before
+selecting all 20 owners. Native tests in `adapter_classes.rs` invoke the actual
+aliases, preserve arguments/results and shared effects, poll each pending future,
+and execute production native HTTP factory/install and Date.parse callbacks.
+The finite instantiations do not claim every generic argument or JavaScript
+scheduler behavior.
