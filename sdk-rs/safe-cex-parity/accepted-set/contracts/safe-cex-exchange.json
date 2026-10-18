@@ -30621,5 +30621,114 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs; tests/js_write_observers.rs executes the native callback with original receiver, UTF-16 key and assigned referent, publication failures/reentry and capture release. Fresh compiler alias root and conversion-trait probes stay enabled.",
     "reason": "This exact native callback publishes an already completed ordinary-object assignment to typed host readers. It receives existing Js references and key units; it constructs no model, parses no wire representation and is not a deserializer."
+  },
+
+  "safe_cex_exchange::js_runtime::for_in::ForInRecord": {
+    "shape": "observed",
+    "evidence": "safe-cex-exchange/src/js_runtime/for_in.rs; compiler-selected get constructs one retained property enumeration record. Actual native/Node tests pin descriptor shadowing, integer/UTF16 order, deletion before visitation, original undefined presence, function metadata and no getter reads. Direct executed native constructor observations below use maintained Node for-in results; no DTO decode or complete language-runtime claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Construct the actual record on an already native Js referent, then observe its canonical enumeration outputs and terminal state. Independent Node outputs include numeric/string key order, null values and nullish/array/string profiles; no input echo or typed exemption."
+      }
+    ],
+    "call": "{let input=crate::js_runtime::value::from_json($value);let mut record=$type::get(&input);let mut keys=Vec::new();while let Some(key)=record.next_key().expect(\"reviewed canonical descriptor enumeration\"){assert!(keys.len()<10,\"bounded fixture\");keys.push(key.to_vec());}assert!(record.next_key().expect(\"terminal enumeration\").is_none());serde_json::json!(keys)}",
+    "cases": [
+      {
+        "input": {
+          "1": 3,
+          "2": null,
+          "plain": null
+        },
+        "output": [
+          [
+            49
+          ],
+          [
+            50
+          ],
+          [
+            112,
+            108,
+            97,
+            105,
+            110
+          ]
+        ]
+      },
+      {
+        "input": {
+          "z": 2,
+          "a": 1
+        },
+        "output": [
+          [
+            122
+          ],
+          [
+            97
+          ]
+        ]
+      },
+      {
+        "input": [
+          "red",
+          "blue"
+        ],
+        "output": [
+          [
+            48
+          ],
+          [
+            49
+          ]
+        ]
+      },
+      {
+        "input": "abc",
+        "output": [
+          [
+            48
+          ],
+          [
+            49
+          ],
+          [
+            50
+          ]
+        ]
+      },
+      {
+        "input": null,
+        "output": []
+      }
+    ]
   }
 }

@@ -1769,6 +1769,17 @@ is a sink choice. Typed `ExchangeError` diagnostic strings keep their existing
 shape; original UTF-16 name/message fields use the existing retained callback
 cause and are restored only while their diagnostic views remain unchanged.
 
+## Shared for-in record
+
+ForInRecord enumerates original native descriptor names along canonical
+prototype links. Hidden own names suppress inherited enumerables, deleted
+unvisited names are skipped, and enumeration never reads property values.
+Native functions store name/length as ordinary nonenumerable configurable,
+readonly descriptors; redefining/deleting them uses the common property code.
+Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
+this does not widen the public intrinsic descriptor-reflection surface.
+Array descriptor/prototype migration remains the separate single-storage step.
+
 ## ccxt compatibility imports
 
 The shared library installs ccxt-compat numberToString, parsePrecision,
