@@ -21,12 +21,12 @@ fn string(value: Option<&Input>) -> Result<String, ExchangeError> {
 
 fn nullish<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
-        .find_map(|key| row.get(*key).filter(|value| !value.is_nullish()))
+        .find_map(|key| row.get(key).filter(|value| !value.is_nullish()))
 }
 
 fn truthy<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
-        .find_map(|key| row.get(*key).filter(|value| value.is_truthy()))
+        .find_map(|key| row.get(key).filter(|value| value.is_truthy()))
 }
 
 fn number(value: Option<&Input>) -> Result<f64, ExchangeError> {

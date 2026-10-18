@@ -91,8 +91,8 @@ fn project_instrument(inst: &Input) -> Result<Result<Market, ExchangeError>, Exc
         id,
         symbol,
         pretty_symbol: None,
-        base: base.into(),
-        quote: quote.into(),
+        base,
+        quote,
         active: inst.get("ia") != Some(&Input::Bool(false)),
         precision: MarketPrecision {
             amount: min_size,
@@ -138,32 +138,28 @@ pub fn fetch_markets<F: Future<Output = Result<Input, ExchangeError>>>(
             let markets = rows
                 .iter()
                 .enumerate()
-                .map(|(index, inst)| {
-                    project_instrument(inst).map(|result| {
-                        result.map_err(|cause| {
-                            let field = |key| {
-                                inst.get(key).map_or_else(
-                                    || "undefined".into(),
-                                    |value| {
-                                        value
-                                            .json_stringify()
-                                            .ok()
-                                            .flatten()
-                                            .unwrap_or_else(|| "undefined".into())
-                                    },
-                                )
-                            };
-                            format!(
-                                "Refused GRVT market row {index} id={}: base={} quote={}: {}",
-                                field("i"),
-                                field("b"),
-                                field("q"),
-                                cause.message
-                            )
-                        })
-                    })
+                .map(|(index, inst)| match project_instrument(inst)? {
+                    Ok(market) => Ok(Ok(market)),
+                    Err(cause) => {
+                        let field = |key| -> Result<String, ExchangeError> {
+                            match inst.get(key) {
+                                None => Ok("undefined".into()),
+                                Some(value) => value
+                                    .json_stringify()
+                                    .map(|value| value.unwrap_or_else(|| "undefined".into()))
+                                    .map_err(|cause| error(cause.name, cause.message)),
+                            }
+                        };
+                        Ok(Err(format!(
+                            "Refused GRVT market row {index} id={}: base={} quote={}: {}",
+                            field("i")?,
+                            field("b")?,
+                            field("q")?,
+                            cause.message
+                        )))
+                    }
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, ExchangeError>>()?;
             log(
                 &format!("Fetched {} GRVT markets", markets.len()),
                 LogSeverity::Debug,
