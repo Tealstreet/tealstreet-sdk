@@ -591,3 +591,11 @@ dispatch identifiers, not Rust calls. Stream manifest rows map to the live membe
 dispatcher. Preserve constructed book/candle tests and the actual Futures socket
 no-op witness; `scripts/stream-binding-controls.py` requires four compiled named
 failures and exact-source restored passes.
+
+`BOOK_LEVEL_ALIAS_REVIEW.md` records the concrete Level/Levels decoders. Their
+native probes inspect all record field bits before JSON; constructed Futures/Spot
+socket witnesses compare both sorted sides to the unchanged live source emitter.
+`book-level-alias-contracts.mjs` authenticates exact compiler identities and traits;
+`book-level-alias-controls.py` requires two independently compiled consumer faults
+and exact restored native passes. Keep NumericChanges and JS callback-array
+identity separate; these two records do not classify either obligation.
