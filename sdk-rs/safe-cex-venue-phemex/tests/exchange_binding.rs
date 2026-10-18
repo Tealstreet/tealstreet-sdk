@@ -185,7 +185,9 @@ fn bound_chart_history_failure_emits_venue_message_and_returns_no_candles() {
     // TS catch: this.emitter.emit('error', err?.response?.data?.msg || err.message); return [].
     let candles = h.drive(h.venue().fetch_ohlcv(opts)).unwrap();
     assert!(candles.is_empty());
-    assert_eq!(*errors.borrow(), vec![json!("kline backend busy")]);
+    let errors = errors.borrow();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].strict_equals(&Js::str("kline backend busy")));
 }
 #[test]
 fn bound_chart_candles_subscribe_deliver_and_unsubscribe() {
