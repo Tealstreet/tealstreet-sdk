@@ -1,9 +1,9 @@
 //! Native host dispatch against the maintained venues' actual WebSocket listeners.
 #![cfg(not(target_arch = "wasm32"))]
 use futures_util::SinkExt;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::socket_lifecycle::SocketSlot;
 use safe_cex_registry::{native_host, rust_venues};
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc, time::Duration};
