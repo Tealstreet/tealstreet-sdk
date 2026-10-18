@@ -215,3 +215,11 @@ rounding cases pin fields and wire signatures, with immutable artifact hashes.
 The native Contract JSON boundary accepts named objects through a private remote
 companion and the shared object guard. Complete positional arrays are rejected;
 the post-WASM field types and authenticated byte construction stay the same.
+
+The Lighter reviewed shared-types provenance guard hashes the five runtime enum
+declarations consumed by emitted `lighter.types.ts`, with canonical TypeScript
+printing. The pin-name census must equal the actual value-import references.
+Unrelated erased declarations can change; missing pins/declarations and changed
+enum values fail named controls. Fresh captures still verify their recorded full
+source digest before historical provenance normalization. Original generators,
+92-case fixtures, preimages and 24-case field-identity expectations stay pinned.
