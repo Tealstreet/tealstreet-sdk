@@ -86,7 +86,7 @@ Node test was added or renamed, so the fixed parity-test expected list is unchan
 
 Final normal-master integration at `9533bc90fe` preserves all 219 pre-existing
 Binance contracts with exact numeric spellings and adds only these four owners.
-The production source remains byte-identical to the four control restorations.
+At that integration checkpoint the production source remained byte-identical to the four control restorations.
 The ordinary native binding targets pass 12 tests, including both maintained TS
 oracles. Full canonical default/native replay retains all 201 dependency decoder
 owners: four explicitly unexecuted native-gated default rows delegate to four
@@ -96,9 +96,22 @@ all-features cancellation inventory (six pass, one existing opt-in exporter
 ignored), wiring (376 tests), extractor (zero drift), and the rebuilt full parity
 index (7,563 rows / 16,339 public Rust items) all pass.
 
-Two inherited failures remain disclosed and separately owned: the general
+Earlier inherited failures were disclosed and separately owned: the general
 inherited-constant suite stops at old Bitget/GRVT source pins (routed to l89ogr),
-and CI parity stops at Bitget's `allowed-ECONNRESET` retry count (routed to kxakrb).
+and CI parity stopped at Bitget's `allowed-ECONNRESET` retry count (routed to kxakrb).
 The Binance-specific exact-method guard passes all three tests. This cohort
 changes neither production behavior nor those unrelated guards.
 Strict host `--all-targets` Clippy for the parity tooling crate also passes.
+
+A final normal merge of `33d36b9458` retains both distinct CLAUDE notes and
+inherits the removal of obsolete secondary-socket registration outside the four
+controlled bodies. The recorded full-file control SHA identifies the earlier
+control checkpoint; all four deliberately mutated bodies remain unchanged.
+The full index and scoped binding receipts are rechecked on this integrated tree.
+The final merge also inherits #1161, the separately owned Bitget retry repair;
+that earlier CI failure is historical. The refreshed full index passes 7,563 rows
+and 16,341 public Rust items.
+The final refresh passes native binding12 (including both maintained source
+oracles), canonical executed native4/92 with all201 dependency decoders retained,
+and cancellation6 with its one existing explicit exporter ignored. No controlled
+production body, observation, or contract expectation changed during the refresh.
