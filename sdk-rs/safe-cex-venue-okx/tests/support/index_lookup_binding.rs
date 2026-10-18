@@ -178,11 +178,32 @@ fn index_lookup_invokes_the_array_filter_with_original_receiver() {
     let original = rows.clone();
     let sentinel = Js::object(vec![]);
     let result = sentinel.clone();
+    let object = h.exchange.scope.shared.globals.get("Object").unwrap();
     rows.set(
         "filter",
         Js::function("filter", move |this, a| {
             assert!(this.strict_equals(&original));
-            assert!(arg(&a, 0).is_callable());
+            let callback = arg(&a, 0);
+            assert!(callback.is_callable());
+            assert!(
+                callback.get("name")?.strict_equals(&Js::str("")),
+                "source inline arrow is anonymous"
+            );
+            assert!(
+                callback.get("length")?.strict_equals(&Js::Number(1.)),
+                "source inline arrow has one formal parameter"
+            );
+            let descriptor = object.call_method(
+                "getOwnPropertyDescriptor",
+                vec![callback, Js::str("length")],
+            )?;
+            for (key, expected) in [
+                ("writable", false),
+                ("enumerable", false),
+                ("configurable", true),
+            ] {
+                assert!(descriptor.get(key)?.strict_equals(&Js::Bool(expected)));
+            }
             Ok(result.clone())
         }),
     )

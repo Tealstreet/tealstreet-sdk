@@ -66,6 +66,11 @@ const sentinel = {};
 customRows.filter = function(callback) {
   assert.equal(this, customRows);
   assert.equal(typeof callback, 'function');
+  assert.equal(callback.name, '');
+  assert.equal(callback.length, 1);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(callback, 'length'), {
+    value: 1, writable: false, enumerable: false, configurable: true,
+  });
   return sentinel;
 };
 receiver.store = {markets: customRows};
