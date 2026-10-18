@@ -212,7 +212,7 @@ impl IncomeHost for Host {
     fn paginate<'a>(
         &'a self,
         options: Rc<Raw>,
-        page: PageCallback<'a, Self>,
+        page: PageCallback<'static, Self>,
     ) -> Result<impl Future<Output = Result<Rc<Raw>, E>> + 'a, E> {
         self.effect("paginate", vec![("options", options.clone())])?;
         if flag(&self.cfg, "pagerSyncFail") {
@@ -408,24 +408,25 @@ fn check(family: &str, floor: usize) {
     assert_eq!(rows.len(), floor, "independent finite case floor");
     for (i, row) in rows.iter().enumerate() {
         let cfg = row["cfg"].clone();
-        let h = Host::new(&cfg);
+        let owner = Rc::new(Host::new(&cfg));
+        let h = owner.as_ref();
         let input = get(&h.cfg, "input");
         let result = match family {
-            "fills" => account::futures_fills(&h, input).map(|_| Rc::new(Raw::Undefined)),
-            "orders" => account::futures_open_orders(&h, input).map(|_| Rc::new(Raw::Undefined)),
+            "fills" => account::futures_fills(h, input).map(|_| Rc::new(Raw::Undefined)),
+            "orders" => account::futures_open_orders(h, input).map(|_| Rc::new(Raw::Undefined)),
             "positions" => {
-                account::futures_open_positions(&h, input).map(|_| Rc::new(Raw::Undefined))
+                account::futures_open_positions(h, input).map(|_| Rc::new(Raw::Undefined))
             }
-            "balances" => account::futures_balances(&h, input).map(|_| Rc::new(Raw::Undefined)),
-            "parse" => account::spot_parse_order(&h, input),
-            "executions" => account::spot_executions(&h, input).map(|_| Rc::new(Raw::Undefined)),
+            "balances" => account::futures_balances(h, input).map(|_| Rc::new(Raw::Undefined)),
+            "parse" => account::spot_parse_order(h, input),
+            "executions" => account::spot_executions(h, input).map(|_| Rc::new(Raw::Undefined)),
             "range" => run(account::income_range(
-                &h,
+                owner.clone(),
                 get(&input, "start"),
                 get(&input, "end"),
                 get(&input, "type"),
             )),
-            "history" => run(account::income_history(&h, input)),
+            "history" => run(account::income_history(h, input)),
             _ => unreachable!(),
         };
         let label = format!("{family}[{i}] native");

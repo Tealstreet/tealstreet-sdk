@@ -1,3 +1,6 @@
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
+#[allow(dead_code)]
+mod pager_runtime;
 #[path = "support/retained_input.rs"]
 mod retained_input;
 use safe_cex_num::numeric_ingress::{JsNumberOutput, js_from_str, js_from_value};
@@ -270,12 +273,13 @@ fn income_range_returns_native_ids_before_whole_page_refusal() {
     use safe_cex_venue_weex::income_reads::{WeexIncomeRangeRuntime, fetch_income_history_range};
     use std::{
         cell::RefCell,
+        rc::Rc,
         task::{Context, Poll, Waker},
     };
     let mut compared = 0;
     for word in WORDS {
         let record: IncomeRecord=serde_json::from_str(&json!({"symbol":"B/Q","incomeType":"FUNDING_FEE","income":3,"asset":"Q","timestamp":1,"tranId":word}).to_string()).unwrap();
-        let host = RefCell::new((record, 0_usize, Vec::<f64>::new()));
+        let host = Rc::new(RefCell::new((record, 0_usize, Vec::<f64>::new())));
         let runtime = WeexIncomeRangeRuntime {
             fetch_page: |host: &RefCell<(IncomeRecord, usize, Vec<f64>)>, params, _: ()| {
                 assert_eq!(params.limit.to_bits(), 100.0_f64.to_bits());
@@ -297,13 +301,18 @@ fn income_range_returns_native_ids_before_whole_page_refusal() {
             warning: |_, _: (), _| panic!("WEEX unexpected native range warning"),
             iso_date: |_, _| panic!("WEEX unexpected native range date"),
         };
-        let mut future = fetch_income_history_range(&host, &runtime, 1.0, 2.0, ());
+        let executor = Rc::new(pager_runtime::Runtime::default());
+        let mut future =
+            fetch_income_history_range(host.clone(), &runtime, executor.clone(), 1.0, 2.0, ());
         let waker = Waker::noop();
         let mut context = Context::from_waker(waker);
-        let records = (0..32)
+        let records = (0..128)
             .find_map(|_| match future.as_mut().poll(&mut context) {
                 Poll::Ready(value) => Some(value.unwrap()),
-                Poll::Pending => None,
+                Poll::Pending => {
+                    executor.advance(0);
+                    None
+                }
             })
             .expect("WEEX native range poll floor");
         assert_eq!(records.len(), 1, "WEEX native range record floor");
