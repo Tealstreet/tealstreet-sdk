@@ -4,23 +4,23 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../../..');
 const { DefaultStore } = require(path.join(root, 'packages/safe-cex/src/store/store.base.ts'));
 const venue = process.argv[2];
-assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'blofin', 'cryptocom', 'coinbase', 'binance', 'binancepm', 'binancespot', 'polymarket', 'backpack', 'paradex', 'kraken', 'krakenspot', 'mexc', 'okx', 'bingx', 'bitget', 'grvt'].includes(venue), `unsupported ticker corpus ${venue}`);
-const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange', blofin: 'BlofinExchange', cryptocom: 'CryptocomExchange', coinbase: 'CoinbaseExchange', binance: 'BinanceExchange', binancepm: 'BinancePMExchange', binancespot: 'BinanceSpotExchange', polymarket: 'PolymarketExchange', backpack: 'BackpackExchange', paradex: 'ParadexExchange', kraken: 'KrakenExchange', krakenspot: 'KrakenSpotExchange', mexc: 'MexcExchange', okx: 'OKXExchange', bingx: 'BingxExchange', bitget: 'BitgetExchange', grvt: 'GrvtExchange' }[venue];
-const directory = { kucoinspot: 'kucoin', hyperliquidspot: 'hyperliquid', krakenspot: 'kraken', binancepm: 'binance', binancespot: 'binance' }[venue] || venue;
+assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'blofin', 'cryptocom', 'coinbase', 'binance', 'binancepm', 'binancespot', 'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader', 'polymarket', 'backpack', 'paradex', 'kraken', 'krakenspot', 'mexc', 'okx', 'bingx', 'bitget', 'grvt'].includes(venue), `unsupported ticker corpus ${venue}`);
+const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange', blofin: 'BlofinExchange', cryptocom: 'CryptocomExchange', coinbase: 'CoinbaseExchange', binance: 'BinanceExchange', binancepm: 'BinancePMExchange', binancespot: 'BinanceSpotExchange', bybit: 'BybitExchange', bybitdemo: 'BybitExchange', bybitinverse: 'BybitInverseExchange', bybitspot: 'BybitSpotExchange', hyrotrader: 'HyrotraderExchange', polymarket: 'PolymarketExchange', backpack: 'BackpackExchange', paradex: 'ParadexExchange', kraken: 'KrakenExchange', krakenspot: 'KrakenSpotExchange', mexc: 'MexcExchange', okx: 'OKXExchange', bingx: 'BingxExchange', bitget: 'BitgetExchange', grvt: 'GrvtExchange' }[venue];
+const directory = { kucoinspot: 'kucoin', hyperliquidspot: 'hyperliquid', krakenspot: 'kraken', binancepm: 'binance', binancespot: 'binance', bybitdemo: 'bybit', bybitinverse: 'bybit', bybitspot: 'bybit', hyrotrader: 'bybit' }[venue] || venue;
 if (venue === 'mexc') process.env.TZ = 'UTC';
-const Exchange = require(path.join(root, `packages/safe-cex/src/exchanges/${directory}/${venue}.exchange.ts`))[name];
+const Exchange = require(path.join(root, `packages/safe-cex/src/exchanges/${directory}/${venue === 'bybitdemo' ? 'bybit' : venue}.exchange.ts`))[name];
 const fields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'volume', 'quoteVolume', 'fundingRate', 'fundingTime', 'openInterest'];
 if (venue.startsWith('hyperliquid')) fields.push('midPrice');
 const store = new DefaultStore();
 const symbols = ['BTC', 'ETH', 'ADA'];
 const tickers = symbols.map(asset => ({
-  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1), blofin: `${asset}-USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, polymarket: `${asset}-token`, backpack: `${asset}_USDC_PERP`, paradex: `${asset}-USD-PERP`, kraken: `${asset}/USD`, krakenspot: `${asset}-spot-pair`, mexc: `${asset}_USDT`, okx: `${asset}-USDT-SWAP`, bingx: `${asset}-USDT`, bitget: `${asset}-bitget-market`, grvt: `${asset}_USDT_Perp` }[venue],
-  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset, blofin: `${asset}USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, polymarket: `${asset}-Yes`, backpack: `${asset}_USDC_PERP`, paradex: `${asset}-USD-PERP`, kraken: `PF_${asset === 'BTC' ? 'XBT' : asset}USD`, krakenspot: `${asset}/USD`, mexc: `${asset}USDT`, okx: `${asset}USDT`, bingx: `${asset}USDT`, bitget: `${asset}USDT`, grvt: `${asset}_USDT_PERP` }[venue],
+  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1), blofin: `${asset}-USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, bybit: `${asset}USDT`, bybitdemo: `${asset}USDT`, bybitinverse: `${asset}USD`, bybitspot: `${asset}USDT`, hyrotrader: `${asset}USDT`, polymarket: `${asset}-token`, backpack: `${asset}_USDC_PERP`, paradex: `${asset}-USD-PERP`, kraken: `${asset}/USD`, krakenspot: `${asset}-spot-pair`, mexc: `${asset}_USDT`, okx: `${asset}-USDT-SWAP`, bingx: `${asset}-USDT`, bitget: `${asset}-bitget-market`, grvt: `${asset}_USDT_Perp` }[venue],
+  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset, blofin: `${asset}USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, bybit: `${asset}USDT`, bybitdemo: `${asset}USDT`, bybitinverse: `${asset}USD`, bybitspot: `${asset}USDT`, hyrotrader: `${asset}USDT`, polymarket: `${asset}-Yes`, backpack: `${asset}_USDC_PERP`, paradex: `${asset}-USD-PERP`, kraken: `PF_${asset === 'BTC' ? 'XBT' : asset}USD`, krakenspot: `${asset}/USD`, mexc: `${asset}USDT`, okx: `${asset}USDT`, bingx: `${asset}USDT`, bitget: `${asset}USDT`, grvt: `${asset}_USDT_PERP` }[venue],
   ...Object.fromEntries(fields.map((field, index) => [field, 101 + index])),
 }));
 store.update({ tickers: structuredClone(tickers), markets: tickers.map(t => ({ id: t.id, symbol: t.symbol, ...(venue === 'bingx' ? { precision: { amount: .01, price: .25 } } : {}), ...(venue === 'cryptocom' ? { info: { underlyingSymbol: t.id.split('-')[0] } } : {}), ...(venue === 'mexc' ? { contractSize: (symbols.indexOf(t.symbol.replace('USDT', '')) + 1) * .25 } : {}), ...(venue === 'okx' ? { info: { uly: t.id.replace('-SWAP', '') } } : {}) })) });
-const exchange = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture' }, store);
-const socket = venue.startsWith('kraken')
+const exchange = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture', enableInverseMarkets: ['bybit', 'bybitdemo'].includes(venue) }, store);
+const socket = venue === 'bybitinverse' ? exchange.publicInverseWebsocket : venue.startsWith('kraken')
   ? new (require(path.join(root, `packages/safe-cex/src/exchanges/kraken/${venue}.ws-public.ts`))[venue === 'kraken' ? 'KrakenPublicWebsocket' : 'KrakenSpotPublicWebsocket'])(exchange)
   : exchange.publicWebsocket;
 if (venue.startsWith('kraken')) exchange.publicWebsocket = socket;
@@ -74,7 +74,10 @@ const mexcInputs = {
   fundingRate: ['fundingRate'], fundingTime: ['fundingTime', 'nextSettleTime'], volume: ['volume24', 'volume'], quoteVolume: ['amount24', 'quoteVolume'],
 };
 const paradexSummary = ['bid', 'ask', 'last_traded_price', 'last_price', 'last', 'mark_price', 'oracle_price', 'index_price', 'underlying_price', 'price_change_rate_24h', 'volume_24h', 'volume', 'open_interest', 'funding_rate'];
-const channels = venue === 'bingx' ? { contracts: Object.values(aliasInputs.bingx).flat() }
+const bybitInputs = ['bid1Price', 'ask1Price', 'lastPrice', 'markPrice', 'indexPrice', 'price24hPcnt', 'openInterest', 'fundingRate', 'nextFundingTime', 'volume24h', 'turnover24h'];
+const channels = ['bybit', 'bybitdemo'].includes(venue) ? { linear: bybitInputs, inverse: bybitInputs }
+  : ['bybitinverse', 'bybitspot', 'hyrotrader'].includes(venue) ? { tickers: bybitInputs }
+  : venue === 'bingx' ? { contracts: Object.values(aliasInputs.bingx).flat() }
   : venue === 'bitget' ? Object.fromEntries(['primary', 'secondary', 'third'].map(channel => [channel, Object.values(aliasInputs.bitget).flat()]))
   : venue === 'grvt' ? { ...Object.fromEntries(['lite-s', 'lite-d', 'full-s', 'full-d'].map(channel => [channel, Object.values(aliasInputs.grvt).flat()])), ...Object.fromEntries(['mark-zero-lite', 'mark-zero-full', 'mark-stored-lite', 'mark-stored-full'].map(channel => [channel, aliasInputs.grvt.mark])), 'candle-lite': ['c', 'close'], 'candle-full': ['c', 'close'] }
   : venue === 'kraken' ? { ticker: Object.values(krakenInputs).flat() }
@@ -119,10 +122,16 @@ const channels = venue === 'bingx' ? { contracts: Object.values(aliasInputs.bing
     }
     for (const [channel, keys] of Object.entries(channels)) for (const key of keys) for (const [label, value] of numericSamples) {
       const priorLast = channel.startsWith('mark-zero') ? 0 : 103;
-      store.update({ tickers: structuredClone(tickers).map(ticker => ({ ...ticker, last: priorLast })) });
+      const caseTickers = ['bybit', 'bybitdemo'].includes(venue) && channel === 'inverse' ? tickers.map(t => ({ ...t, id: t.id.replace('USDT', 'USD'), symbol: t.symbol.replace('USDT', 'USD') })) : tickers;
+      store.update({ tickers: structuredClone(caseTickers).map(ticker => ({ ...ticker, last: priorLast })) });
       candleCallbacks = 0;
-      let frames = tickers.map((ticker, index) => {
+      let frames = caseTickers.map((ticker, index) => {
         const offset = index * 11;
+        if (['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'].includes(venue)) {
+          const data = { symbol: ticker.symbol, bid1Price: String(29.5 + offset), ask1Price: String(33.75 + offset), lastPrice: String(31.5 + offset), markPrice: String(37.75 + offset), indexPrice: String(38.25 + offset), price24hPcnt: String(.125 + index), openInterest: String(91.25 + offset), fundingRate: String(.0025 + index), nextFundingTime: String(1700000000 + offset), volume24h: String(53.25 + offset), turnover24h: String(1091.75 + offset) };
+          if (index === 0) data[key] = value;
+          return JSON.stringify({ topic: `tickers.${ticker.symbol}`, type: 'delta', data });
+        }
         if (['bingx', 'bitget', 'grvt'].includes(venue)) {
           const groups = aliasInputs[venue];
           const data = {};
@@ -315,7 +324,8 @@ const channels = venue === 'bingx' ? { contracts: Object.values(aliasInputs.bing
       if (venue === 'phemex') frames = [JSON.stringify({ method: 'perp_market24h_pack_p.update', data: [frames[1], frames[0], frames[2]] })];
       if (venue === 'apexomni') frames = [JSON.stringify({ topic: 'instrumentInfo.all', data: [frames[1], frames[0], frames[2]] })];
       for (const frame of frames) {
-        const receiver = venue === 'bitget' && channel === 'secondary' ? exchange.secondsTickersWebsocket
+        const receiver = ['bybit', 'bybitdemo'].includes(venue) && channel === 'inverse' ? exchange.publicWebsocketSecondary
+          : venue === 'bitget' && channel === 'secondary' ? exchange.secondsTickersWebsocket
           : venue === 'bitget' && channel === 'third' ? exchange.thirdTickersWebsocket
           : venue === 'bitunix' && channel === 'price' ? exchange.publicWebsocketSecondary
           : venue.startsWith('binance') && venue !== 'binancespot' && channel !== 'bookTicker' ? socket.marketWebsocket : socket;

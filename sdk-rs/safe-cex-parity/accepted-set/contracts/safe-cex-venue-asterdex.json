@@ -37894,6 +37894,5458 @@
       ]
     }
   },
+  "safe_cex_venue_asterdex::ws_helpers::public_event_data_dispatch": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_event_data_dispatch",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "handler_keys",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "tuple": []
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_asterdex::ws_helpers::PublicEventDataDispatch",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let keys:Vec<_>=$value[\"handlers\"].as_array().unwrap().iter().map(|v|(v.as_str().unwrap(),())).collect(); match $type(&$value[\"data\"],&keys) { Ok(super::PublicEventDataDispatch::Ignore) => serde_json::json!({\"ok\":true,\"kind\":\"ignore\",\"event\":null}), Ok(super::PublicEventDataDispatch::Handlers{event_type,data}) => serde_json::json!({\"ok\":true,\"kind\":\"handlers\",\"event\":event_type,\"data\":data}), Ok(super::PublicEventDataDispatch::InheritedHandlerFailure{event_type,..}) => serde_json::json!({\"ok\":true,\"kind\":\"inherited\",\"event\":event_type}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "e": "kline",
+            "extra": [
+              1,
+              2
+            ]
+          },
+          "handlers": [
+            "kline"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "kind": "handlers",
+          "event": "kline",
+          "data": {
+            "e": "kline",
+            "extra": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "e": "other"
+          },
+          "handlers": [
+            "kline"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "kind": "ignore",
+          "event": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "e": false
+          },
+          "handlers": [
+            "false"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "kind": "ignore",
+          "event": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "e": 42
+          },
+          "handlers": [
+            "42"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "kind": "handlers",
+          "event": "42",
+          "data": {
+            "e": 42
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "e": "constructor"
+          },
+          "handlers": []
+        },
+        "output": {
+          "ok": true,
+          "kind": "inherited",
+          "event": "constructor"
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "handlers": []
+        },
+        "output": {
+          "ok": false,
+          "error": "TypeError"
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts handleEventData reads e, checks truthiness then ordinary object messageHandlers lookup. Actual native discriminant distinguishes own dispatch, absent handler and inherited failure, retains original payload, and refuses null.",
+    "nativeObservation": {
+      "call": "{ let keys:Vec<_>=$value[\"handlers\"].as_array().unwrap().iter().map(|v|(v.as_str().unwrap(),())).collect(); match $type(&$value[\"data\"],&keys) { Ok(super::PublicEventDataDispatch::Ignore) => serde_json::json!({\"ok\":true,\"kind\":\"ignore\",\"event\":null}), Ok(super::PublicEventDataDispatch::Handlers{event_type,data}) => serde_json::json!({\"ok\":true,\"kind\":\"handlers\",\"event\":event_type,\"data\":data}), Ok(super::PublicEventDataDispatch::InheritedHandlerFailure{event_type,..}) => serde_json::json!({\"ok\":true,\"kind\":\"inherited\",\"event\":event_type}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+      "nativeFields": [
+        "kind",
+        "event"
+      ],
+      "cases": [
+        {
+          "input": {
+            "data": {
+              "e": "kline",
+              "extra": [
+                1,
+                2
+              ]
+            },
+            "handlers": [
+              "kline"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "kind": "handlers",
+            "event": "kline",
+            "data": {
+              "e": "kline",
+              "extra": [
+                1,
+                2
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "e": "other"
+            },
+            "handlers": [
+              "kline"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "kind": "ignore",
+            "event": null
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "e": false
+            },
+            "handlers": [
+              "false"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "kind": "ignore",
+            "event": null
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "e": 42
+            },
+            "handlers": [
+              "42"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "kind": "handlers",
+            "event": "42",
+            "data": {
+              "e": 42
+            }
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "e": "constructor"
+            },
+            "handlers": []
+          },
+          "output": {
+            "ok": true,
+            "kind": "inherited",
+            "event": "constructor"
+          }
+        },
+        {
+          "input": {
+            "data": null,
+            "handlers": []
+          },
+          "output": {
+            "ok": false,
+            "error": "TypeError"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_kline_update": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_kline_update",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "callback_streams",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_asterdex::ws_helpers::PublicKlineUpdate",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let streams:Vec<_>=$value[\"callbacks\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap()).collect(); match $type(&$value[\"data\"],&streams) { Ok(None)=>serde_json::json!({\"ok\":true,\"present\":false,\"stream\":null}), Ok(Some(update))=>{let c=update.candle; serde_json::json!({\"ok\":true,\"present\":true,\"stream\":update.stream,\"timestamp\":c.timestamp,\"hasTimestamp\":c.timestamp.is_some(),\"bits\":([c.open,c.high,c.low,c.close,c.volume].map(|n|format!(\"{:016x}\",n.to_bits())))})}, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "s": "BTCUSDT",
+            "k": {
+              "o": "10.25x",
+              "h": "14.5",
+              "l": "8.75",
+              "c": "12.125",
+              "v": "20.5",
+              "i": "1m",
+              "t": 1700000000000
+            }
+          },
+          "callbacks": [
+            "btcusdt@kline_1m"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "stream": "btcusdt@kline_1m",
+          "timestamp": 1700000000000,
+          "hasTimestamp": true,
+          "bits": [
+            "4024800000000000",
+            "402d000000000000",
+            "4021800000000000",
+            "4028400000000000",
+            "4034800000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": "ZERO",
+            "k": {
+              "o": "-0",
+              "h": "Infinity",
+              "l": "-Infinity",
+              "c": "NaN",
+              "v": "1.25",
+              "i": "5m"
+            }
+          },
+          "callbacks": [
+            "zero@kline_5m"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "stream": "zero@kline_5m",
+          "timestamp": null,
+          "hasTimestamp": false,
+          "bits": [
+            "8000000000000000",
+            "7ff0000000000000",
+            "fff0000000000000",
+            "7ff8000000000000",
+            "3ff4000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "k": null
+          },
+          "callbacks": []
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "stream": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": "BTC",
+            "k": {
+              "i": "1m"
+            }
+          },
+          "callbacks": []
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "stream": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": 42,
+            "k": {
+              "i": "1m"
+            }
+          },
+          "callbacks": [
+            "42@kline_1m"
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "callbacks": []
+        },
+        "output": {
+          "ok": false,
+          "error": "TypeError"
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts handleKlineUpdate: lowercase stream/callback admission; missing timestamp remains absent; all five parseFloat fields are observed as native binary64 bits, including NaN, infinities and signed zero. Missing kline/callbacks drop, numeric symbol and null refuse.",
+    "nativeObservation": {
+      "call": "{ let streams:Vec<_>=$value[\"callbacks\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap()).collect(); match $type(&$value[\"data\"],&streams) { Ok(None)=>serde_json::json!({\"ok\":true,\"present\":false,\"stream\":null}), Ok(Some(update))=>{let c=update.candle; serde_json::json!({\"ok\":true,\"present\":true,\"stream\":update.stream,\"timestamp\":c.timestamp,\"hasTimestamp\":c.timestamp.is_some(),\"bits\":([c.open,c.high,c.low,c.close,c.volume].map(|n|format!(\"{:016x}\",n.to_bits())))})}, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+      "nativeFields": [
+        "present",
+        "stream"
+      ],
+      "cases": [
+        {
+          "input": {
+            "data": {
+              "s": "BTCUSDT",
+              "k": {
+                "o": "10.25x",
+                "h": "14.5",
+                "l": "8.75",
+                "c": "12.125",
+                "v": "20.5",
+                "i": "1m",
+                "t": 1700000000000
+              }
+            },
+            "callbacks": [
+              "btcusdt@kline_1m"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "stream": "btcusdt@kline_1m",
+            "timestamp": 1700000000000,
+            "hasTimestamp": true,
+            "bits": [
+              "4024800000000000",
+              "402d000000000000",
+              "4021800000000000",
+              "4028400000000000",
+              "4034800000000000"
+            ]
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": "ZERO",
+              "k": {
+                "o": "-0",
+                "h": "Infinity",
+                "l": "-Infinity",
+                "c": "NaN",
+                "v": "1.25",
+                "i": "5m"
+              }
+            },
+            "callbacks": [
+              "zero@kline_5m"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "stream": "zero@kline_5m",
+            "timestamp": null,
+            "hasTimestamp": false,
+            "bits": [
+              "8000000000000000",
+              "7ff0000000000000",
+              "fff0000000000000",
+              "7ff8000000000000",
+              "3ff4000000000000"
+            ]
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "k": null
+            },
+            "callbacks": []
+          },
+          "output": {
+            "ok": true,
+            "present": false,
+            "stream": null
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": "BTC",
+              "k": {
+                "i": "1m"
+              }
+            },
+            "callbacks": []
+          },
+          "output": {
+            "ok": true,
+            "present": false,
+            "stream": null
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": 42,
+              "k": {
+                "i": "1m"
+              }
+            },
+            "callbacks": [
+              "42@kline_1m"
+            ]
+          },
+          "output": {
+            "ok": false,
+            "error": "TypeError"
+          }
+        },
+        {
+          "input": {
+            "data": null,
+            "callbacks": []
+          },
+          "output": {
+            "ok": false,
+            "error": "TypeError"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_stream_trade_update": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_stream_trade_update",
+      "signature": {
+        "inputs": [
+          [
+            "trade",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_asterdex::types::AsterDEXStreamTrade",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "ticker_entries",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "borrowed_ref": {
+                          "lifetime": "'a",
+                          "is_mutable": false,
+                          "type": {
+                            "resolved_path": {
+                              "path": "safe_cex_types::Ticker",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::ws_helpers::PublicStreamTradeUpdate",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "lifetime": "'a"
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; let trade:crate::types::AsterDEXStreamTrade=serde_json::from_value($value[\"trade\"].clone()).unwrap(); let update=$type(&trade,&entries); let(kind,same)=match update.ticker {safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)),safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.event.symbol,\"side\":update.event.side,\"bits\":([update.event.price,update.event.qty,update.event.timestamp,update.ticker_last].map(|n|format!(\"{:016x}\",n.to_bits())))}) }",
+    "cases": [
+      {
+        "input": {
+          "own": true,
+          "trade": {
+            "e": "aggTrade",
+            "E": 1,
+            "s": "BTC",
+            "a": 2,
+            "p": "12.5x",
+            "q": "2.25",
+            "f": 3,
+            "l": 4,
+            "T": 5.5,
+            "m": true
+          }
+        },
+        "output": {
+          "ok": true,
+          "kind": "own",
+          "same": true,
+          "symbol": "BTC",
+          "side": "SELL",
+          "bits": [
+            "4029000000000000",
+            "4002000000000000",
+            "4016000000000000",
+            "4029000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "own": false,
+          "trade": {
+            "e": "aggTrade",
+            "E": 1,
+            "s": "MISSING",
+            "a": 2,
+            "p": "-0",
+            "q": "Infinity",
+            "f": 3,
+            "l": 4,
+            "T": 5.5,
+            "m": false
+          }
+        },
+        "output": {
+          "ok": true,
+          "kind": "missing",
+          "same": false,
+          "symbol": "MISSING",
+          "side": "BUY",
+          "bits": [
+            "8000000000000000",
+            "7ff0000000000000",
+            "4016000000000000",
+            "8000000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "own": false,
+          "trade": {
+            "e": "aggTrade",
+            "E": 1,
+            "s": "constructor",
+            "a": 2,
+            "p": "NaN",
+            "q": "-0",
+            "f": 3,
+            "l": 4,
+            "T": 5.5,
+            "m": false
+          }
+        },
+        "output": {
+          "ok": true,
+          "kind": "inherited",
+          "same": false,
+          "symbol": "constructor",
+          "side": "BUY",
+          "bits": [
+            "7ff8000000000000",
+            "8000000000000000",
+            "4016000000000000",
+            "7ff8000000000000"
+          ]
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts handleTradeUpdate: ticker lookup preserves reference identity while emitted trade still exists with no own ticker; maker flag determines SELL/BUY. Original price, quantity, timestamp and ticker-last are captured as binary64 bits before serialization.",
+    "nativeObservation": {
+      "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; let trade:crate::types::AsterDEXStreamTrade=serde_json::from_value($value[\"trade\"].clone()).unwrap(); let update=$type(&trade,&entries); let(kind,same)=match update.ticker {safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)),safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.event.symbol,\"side\":update.event.side,\"bits\":([update.event.price,update.event.qty,update.event.timestamp,update.ticker_last].map(|n|format!(\"{:016x}\",n.to_bits())))}) }",
+      "nativeFields": [
+        "kind",
+        "same"
+      ],
+      "cases": [
+        {
+          "input": {
+            "own": true,
+            "trade": {
+              "e": "aggTrade",
+              "E": 1,
+              "s": "BTC",
+              "a": 2,
+              "p": "12.5x",
+              "q": "2.25",
+              "f": 3,
+              "l": 4,
+              "T": 5.5,
+              "m": true
+            }
+          },
+          "output": {
+            "ok": true,
+            "kind": "own",
+            "same": true,
+            "symbol": "BTC",
+            "side": "SELL",
+            "bits": [
+              "4029000000000000",
+              "4002000000000000",
+              "4016000000000000",
+              "4029000000000000"
+            ]
+          }
+        },
+        {
+          "input": {
+            "own": false,
+            "trade": {
+              "e": "aggTrade",
+              "E": 1,
+              "s": "MISSING",
+              "a": 2,
+              "p": "-0",
+              "q": "Infinity",
+              "f": 3,
+              "l": 4,
+              "T": 5.5,
+              "m": false
+            }
+          },
+          "output": {
+            "ok": true,
+            "kind": "missing",
+            "same": false,
+            "symbol": "MISSING",
+            "side": "BUY",
+            "bits": [
+              "8000000000000000",
+              "7ff0000000000000",
+              "4016000000000000",
+              "8000000000000000"
+            ]
+          }
+        },
+        {
+          "input": {
+            "own": false,
+            "trade": {
+              "e": "aggTrade",
+              "E": 1,
+              "s": "constructor",
+              "a": 2,
+              "p": "NaN",
+              "q": "-0",
+              "f": 3,
+              "l": 4,
+              "T": 5.5,
+              "m": false
+            }
+          },
+          "output": {
+            "ok": true,
+            "kind": "inherited",
+            "same": false,
+            "symbol": "constructor",
+            "side": "BUY",
+            "bits": [
+              "7ff8000000000000",
+              "8000000000000000",
+              "4016000000000000",
+              "7ff8000000000000"
+            ]
+          }
+        }
+      ]
+    },
+    "instantiation": "public_stream_trade_update",
+    "monomorphization": "Actual production function; fixed borrowed inputs and callback implementations are inferred from the native observation adapter."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_ticker_update": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_ticker_update",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "ticker_entries",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "borrowed_ref": {
+                          "lifetime": "'a",
+                          "is_mutable": false,
+                          "type": {
+                            "resolved_path": {
+                              "path": "safe_cex_types::Ticker",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_asterdex::ws_helpers::PublicTickerUpdate",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "lifetime": "'a"
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&$value[\"data\"],&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.symbol,\"bits\":[update.patch.last.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.percentage.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.volume.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.quote_volume.map(|n|format!(\"{:016x}\",n.to_bits()))]}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "s": "BTC",
+            "c": "2.5x",
+            "P": "-0",
+            "v": "Infinity",
+            "q": "NaN"
+          },
+          "own": true
+        },
+        "output": {
+          "ok": true,
+          "kind": "own",
+          "same": true,
+          "symbol": "BTC",
+          "bits": [
+            "4004000000000000",
+            "8000000000000000",
+            "7ff0000000000000",
+            "7ff8000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": "BTC",
+            "c": 0,
+            "P": "0",
+            "v": "",
+            "q": false
+          },
+          "own": true
+        },
+        "output": {
+          "ok": true,
+          "kind": "own",
+          "same": true,
+          "symbol": "BTC",
+          "bits": [
+            null,
+            "0000000000000000",
+            null,
+            null
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": "MISSING"
+          },
+          "own": true
+        },
+        "output": {
+          "ok": true,
+          "kind": "missing",
+          "same": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": "constructor"
+          },
+          "own": false
+        },
+        "output": {
+          "ok": true,
+          "kind": "inherited",
+          "same": false,
+          "symbol": "constructor",
+          "bits": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "own": true
+        },
+        "output": {
+          "ok": false,
+          "error": "TypeError"
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts handleTickerUpdate: native table lookup retains the original Ticker reference (pointer equality), inherited member versus missing distinction, truthy optional patches and exact parsed binary64 bits. Funding numeric zero is present while fundingTime zero is omitted.",
+    "nativeObservation": {
+      "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&$value[\"data\"],&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.symbol,\"bits\":[update.patch.last.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.percentage.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.volume.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.quote_volume.map(|n|format!(\"{:016x}\",n.to_bits()))]}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+      "nativeFields": [
+        "kind",
+        "same"
+      ],
+      "cases": [
+        {
+          "input": {
+            "data": {
+              "s": "BTC",
+              "c": "2.5x",
+              "P": "-0",
+              "v": "Infinity",
+              "q": "NaN"
+            },
+            "own": true
+          },
+          "output": {
+            "ok": true,
+            "kind": "own",
+            "same": true,
+            "symbol": "BTC",
+            "bits": [
+              "4004000000000000",
+              "8000000000000000",
+              "7ff0000000000000",
+              "7ff8000000000000"
+            ]
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": "BTC",
+              "c": 0,
+              "P": "0",
+              "v": "",
+              "q": false
+            },
+            "own": true
+          },
+          "output": {
+            "ok": true,
+            "kind": "own",
+            "same": true,
+            "symbol": "BTC",
+            "bits": [
+              null,
+              "0000000000000000",
+              null,
+              null
+            ]
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": "MISSING"
+            },
+            "own": true
+          },
+          "output": {
+            "ok": true,
+            "kind": "missing",
+            "same": false
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": "constructor"
+            },
+            "own": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "inherited",
+            "same": false,
+            "symbol": "constructor",
+            "bits": [
+              null,
+              null,
+              null,
+              null
+            ]
+          }
+        },
+        {
+          "input": {
+            "data": null,
+            "own": true
+          },
+          "output": {
+            "ok": false,
+            "error": "TypeError"
+          }
+        }
+      ]
+    },
+    "instantiation": "public_ticker_update",
+    "monomorphization": "Actual production function; fixed borrowed inputs and callback implementations are inferred from the native observation adapter."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_mark_price_update": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_mark_price_update",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "ticker_entries",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "borrowed_ref": {
+                          "lifetime": "'a",
+                          "is_mutable": false,
+                          "type": {
+                            "resolved_path": {
+                              "path": "safe_cex_types::Ticker",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_asterdex::ws_helpers::PublicMarkPriceUpdate",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "lifetime": "'a"
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&$value[\"data\"],&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.symbol,\"bits\":[update.patch.mark.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.index.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.funding_rate.map(|n|format!(\"{:016x}\",n.to_bits()))],\"fundingTime\":update.patch.funding_time}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "s": "BTC",
+            "p": "-0",
+            "i": "Infinity",
+            "r": "NaN",
+            "T": 12.5
+          },
+          "own": true
+        },
+        "output": {
+          "ok": true,
+          "kind": "own",
+          "same": true,
+          "symbol": "BTC",
+          "bits": [
+            "8000000000000000",
+            "7ff0000000000000",
+            "7ff8000000000000"
+          ],
+          "fundingTime": 12.5
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": "BTC",
+            "p": 0,
+            "i": "",
+            "r": 0,
+            "T": 0
+          },
+          "own": true
+        },
+        "output": {
+          "ok": true,
+          "kind": "own",
+          "same": true,
+          "symbol": "BTC",
+          "bits": [
+            null,
+            null,
+            "0000000000000000"
+          ],
+          "fundingTime": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": "MISSING"
+          },
+          "own": true
+        },
+        "output": {
+          "ok": true,
+          "kind": "missing",
+          "same": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "s": "constructor"
+          },
+          "own": false
+        },
+        "output": {
+          "ok": true,
+          "kind": "inherited",
+          "same": false,
+          "symbol": "constructor",
+          "bits": [
+            null,
+            null,
+            null
+          ],
+          "fundingTime": null
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "own": true
+        },
+        "output": {
+          "ok": false,
+          "error": "TypeError"
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts handleMarkPriceUpdate: native table lookup retains the original Ticker reference (pointer equality), inherited member versus missing distinction, truthy optional patches and exact parsed binary64 bits. Funding numeric zero is present while fundingTime zero is omitted.",
+    "nativeObservation": {
+      "call": "{ let ticker: safe_cex_types::Ticker=serde_json::from_value(serde_json::json!({\"id\":\"ticker-1\",\"symbol\":\"BTC\",\"bid\":1,\"ask\":2,\"last\":3,\"mark\":4,\"index\":5,\"percentage\":6,\"openInterest\":7,\"fundingRate\":8,\"fundingTime\":9,\"volume\":10,\"quoteVolume\":11})).unwrap(); let entries=if $value[\"own\"].as_bool().unwrap() { vec![(\"BTC\",&ticker)] } else { vec![] }; match $type(&$value[\"data\"],&entries) { Ok(None)=>serde_json::json!({\"ok\":true,\"kind\":\"missing\",\"same\":false}), Ok(Some(update))=>{let(kind,same)=match update.ticker { safe_cex_num::TableHit::Mapped(row)=>(\"own\",std::ptr::eq(row,&ticker)), safe_cex_num::TableHit::Inherited(_)=>(\"inherited\",false),safe_cex_num::TableHit::Missing=>(\"missing\",false)}; serde_json::json!({\"ok\":true,\"kind\":kind,\"same\":same,\"symbol\":update.symbol,\"bits\":[update.patch.mark.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.index.map(|n|format!(\"{:016x}\",n.to_bits())),update.patch.funding_rate.map(|n|format!(\"{:016x}\",n.to_bits()))],\"fundingTime\":update.patch.funding_time}) }, Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.name}) } }",
+      "nativeFields": [
+        "kind",
+        "same"
+      ],
+      "cases": [
+        {
+          "input": {
+            "data": {
+              "s": "BTC",
+              "p": "-0",
+              "i": "Infinity",
+              "r": "NaN",
+              "T": 12.5
+            },
+            "own": true
+          },
+          "output": {
+            "ok": true,
+            "kind": "own",
+            "same": true,
+            "symbol": "BTC",
+            "bits": [
+              "8000000000000000",
+              "7ff0000000000000",
+              "7ff8000000000000"
+            ],
+            "fundingTime": 12.5
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": "BTC",
+              "p": 0,
+              "i": "",
+              "r": 0,
+              "T": 0
+            },
+            "own": true
+          },
+          "output": {
+            "ok": true,
+            "kind": "own",
+            "same": true,
+            "symbol": "BTC",
+            "bits": [
+              null,
+              null,
+              "0000000000000000"
+            ],
+            "fundingTime": null
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": "MISSING"
+            },
+            "own": true
+          },
+          "output": {
+            "ok": true,
+            "kind": "missing",
+            "same": false
+          }
+        },
+        {
+          "input": {
+            "data": {
+              "s": "constructor"
+            },
+            "own": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "inherited",
+            "same": false,
+            "symbol": "constructor",
+            "bits": [
+              null,
+              null,
+              null
+            ],
+            "fundingTime": null
+          }
+        },
+        {
+          "input": {
+            "data": null,
+            "own": true
+          },
+          "output": {
+            "ok": false,
+            "error": "TypeError"
+          }
+        }
+      ]
+    },
+    "instantiation": "public_mark_price_update",
+    "monomorphization": "Actual production function; fixed borrowed inputs and callback implementations are inferred from the native observation adapter."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_stream_dispatch": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_stream_dispatch",
+      "signature": {
+        "inputs": [
+          [
+            "stream",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "data_symbol_truthy",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_asterdex::ws_helpers::PublicStreamDispatch",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value[\"stream\"].as_str().unwrap(),$value[\"symbol\"].as_bool().unwrap()) { Ok(super::PublicStreamDispatch::Ignore)=>serde_json::json!({\"ok\":true,\"kind\":\"ignore\",\"assigned\":null}), Ok(super::PublicStreamDispatch::DepthSnapshot{assigned_symbol})=>serde_json::json!({\"ok\":true,\"kind\":\"depth\",\"assigned\":assigned_symbol}), Ok(super::PublicStreamDispatch::Handler{key,assigned_symbol})=>serde_json::json!({\"ok\":true,\"kind\":key,\"assigned\":assigned_symbol}), Err(error)=>serde_json::json!({\"ok\":false,\"error\":error}) } }",
+    "cases": [
+      {
+        "input": {
+          "stream": "btc@ticker",
+          "symbol": false
+        },
+        "output": {
+          "ok": true,
+          "kind": "24hrTicker",
+          "assigned": "BTC"
+        }
+      },
+      {
+        "input": {
+          "stream": "btc@aggTrade",
+          "symbol": true
+        },
+        "output": {
+          "ok": true,
+          "kind": "aggTrade",
+          "assigned": null
+        }
+      },
+      {
+        "input": {
+          "stream": "eth@kline_5m",
+          "symbol": false
+        },
+        "output": {
+          "ok": true,
+          "kind": "kline",
+          "assigned": "ETH"
+        }
+      },
+      {
+        "input": {
+          "stream": "btc@depth20@100ms",
+          "symbol": false
+        },
+        "output": {
+          "ok": true,
+          "kind": "depth",
+          "assigned": "BTC"
+        }
+      },
+      {
+        "input": {
+          "stream": "btc@depth",
+          "symbol": false
+        },
+        "output": {
+          "ok": true,
+          "kind": "ignore",
+          "assigned": null
+        }
+      },
+      {
+        "input": {
+          "stream": "btc@constructor",
+          "symbol": false
+        },
+        "output": {
+          "ok": true,
+          "kind": "ignore",
+          "assigned": null
+        }
+      },
+      {
+        "input": {
+          "stream": "missing",
+          "symbol": false
+        },
+        "output": {
+          "ok": false,
+          "error": "streamType.split is not a function"
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts handleStreamData splits stream, maps event type, conditionally supplies uppercase symbol, and accepts only authoritative partial-depth snapshots. Native enum and assigned-symbol presence are observed before JSON.",
+    "nativeObservation": {
+      "call": "{ match $type($value[\"stream\"].as_str().unwrap(),$value[\"symbol\"].as_bool().unwrap()) { Ok(super::PublicStreamDispatch::Ignore)=>serde_json::json!({\"ok\":true,\"kind\":\"ignore\",\"assigned\":null}), Ok(super::PublicStreamDispatch::DepthSnapshot{assigned_symbol})=>serde_json::json!({\"ok\":true,\"kind\":\"depth\",\"assigned\":assigned_symbol}), Ok(super::PublicStreamDispatch::Handler{key,assigned_symbol})=>serde_json::json!({\"ok\":true,\"kind\":key,\"assigned\":assigned_symbol}), Err(error)=>serde_json::json!({\"ok\":false,\"error\":error}) } }",
+      "nativeFields": [
+        "kind",
+        "assigned"
+      ],
+      "cases": [
+        {
+          "input": {
+            "stream": "btc@ticker",
+            "symbol": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "24hrTicker",
+            "assigned": "BTC"
+          }
+        },
+        {
+          "input": {
+            "stream": "btc@aggTrade",
+            "symbol": true
+          },
+          "output": {
+            "ok": true,
+            "kind": "aggTrade",
+            "assigned": null
+          }
+        },
+        {
+          "input": {
+            "stream": "eth@kline_5m",
+            "symbol": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "kline",
+            "assigned": "ETH"
+          }
+        },
+        {
+          "input": {
+            "stream": "btc@depth20@100ms",
+            "symbol": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "depth",
+            "assigned": "BTC"
+          }
+        },
+        {
+          "input": {
+            "stream": "btc@depth",
+            "symbol": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "ignore",
+            "assigned": null
+          }
+        },
+        {
+          "input": {
+            "stream": "btc@constructor",
+            "symbol": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "ignore",
+            "assigned": null
+          }
+        },
+        {
+          "input": {
+            "stream": "missing",
+            "symbol": false
+          },
+          "output": {
+            "ok": false,
+            "error": "streamType.split is not a function"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::ws_helpers::is_partial_depth_stream": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_partial_depth_stream",
+      "signature": {
+        "inputs": [
+          [
+            "stream",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.as_str().unwrap()))",
+    "cases": [
+      {
+        "input": "btc@depth5",
+        "output": true
+      },
+      {
+        "input": "btc@depth10",
+        "output": true
+      },
+      {
+        "input": "btc@depth20@100ms",
+        "output": true
+      },
+      {
+        "input": "btc@depth5@250ms",
+        "output": true
+      },
+      {
+        "input": "btc@depth10@500ms",
+        "output": true
+      },
+      {
+        "input": "btc@depth",
+        "output": false
+      },
+      {
+        "input": "btc@depth50",
+        "output": false
+      },
+      {
+        "input": "btc@depth20@1ms",
+        "output": false
+      },
+      {
+        "input": "btc@depth20@100ms-extra",
+        "output": false
+      },
+      {
+        "input": "btc@depth5@100ms",
+        "output": true
+      },
+      {
+        "input": "btc@depth5@500ms",
+        "output": true
+      },
+      {
+        "input": "btc@depth10@100ms",
+        "output": true
+      },
+      {
+        "input": "btc@depth10@250ms",
+        "output": true
+      },
+      {
+        "input": "btc@depth20",
+        "output": true
+      },
+      {
+        "input": "btc@depth20@250ms",
+        "output": true
+      },
+      {
+        "input": "btc@depth20@500ms",
+        "output": true
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts PARTIAL_DEPTH_STREAM anchored regex admits only depth5/10/20 with optional 100/250/500ms suffix. Actual private Rust predicate is exercised, including rejected near matches; no replacement regex or dispatcher is used."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::private_on_open": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "private_on_open",
+      "signature": {
+        "inputs": [
+          [
+            "is_disposed",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "reconnecting_websocket_enabled",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "reset_retry_count",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "u32"
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "log",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::runtime::LogSeverity",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "ping",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "fetch_snapshot",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "u32"
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(u32)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "u32"
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&str, LogSeverity)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::runtime::LogSeverity",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<(), ExchangeError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(u32)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "u32"
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let calls=std::cell::RefCell::new(Vec::<String>::new()); let result=$type($value[\"disposed\"].as_bool().unwrap(), $value[\"reconnecting\"].as_bool().unwrap(), |count| calls.borrow_mut().push(format!(\"reset:{count}\")), |message,severity| calls.borrow_mut().push(format!(\"log:{severity:?}:{message}\")), || { calls.borrow_mut().push(\"ping\".into()); if $value[\"fail\"].as_bool().unwrap() { Err(safe_cex_exchange::runtime::ExchangeError::new(\"ping refused\")) } else { Ok(()) } }, |count| calls.borrow_mut().push(format!(\"snapshot:{count}\"))); serde_json::json!({\"ok\":result.is_ok(),\"calls\":calls.into_inner()}) }",
+    "cases": [
+      {
+        "input": {
+          "disposed": false,
+          "reconnecting": false,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": [
+            "reset:0",
+            "log:Info:AsterDEX private WebSocket connected",
+            "ping"
+          ]
+        }
+      },
+      {
+        "input": {
+          "disposed": false,
+          "reconnecting": true,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": [
+            "reset:0",
+            "log:Info:AsterDEX private WebSocket connected",
+            "ping",
+            "snapshot:10"
+          ]
+        }
+      },
+      {
+        "input": {
+          "disposed": true,
+          "reconnecting": true,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": []
+        }
+      },
+      {
+        "input": {
+          "disposed": false,
+          "reconnecting": true,
+          "fail": true
+        },
+        "output": {
+          "ok": false,
+          "calls": [
+            "reset:0",
+            "log:Info:AsterDEX private WebSocket connected",
+            "ping"
+          ]
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts onOpen resets connectRetryCount, logs Info, pings, then conditionally fetches snapshot(10). Native callback trace proves disposed short-circuit, configuration branch and throw cutoff.",
+    "nativeObservation": {
+      "call": "{ let calls=std::cell::RefCell::new(Vec::<String>::new()); let result=$type($value[\"disposed\"].as_bool().unwrap(), $value[\"reconnecting\"].as_bool().unwrap(), |count| calls.borrow_mut().push(format!(\"reset:{count}\")), |message,severity| calls.borrow_mut().push(format!(\"log:{severity:?}:{message}\")), || { calls.borrow_mut().push(\"ping\".into()); if $value[\"fail\"].as_bool().unwrap() { Err(safe_cex_exchange::runtime::ExchangeError::new(\"ping refused\")) } else { Ok(()) } }, |count| calls.borrow_mut().push(format!(\"snapshot:{count}\"))); serde_json::json!({\"ok\":result.is_ok(),\"calls\":calls.into_inner()}) }",
+      "nativeFields": [
+        "calls",
+        "ok"
+      ],
+      "cases": [
+        {
+          "input": {
+            "disposed": false,
+            "reconnecting": false,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": [
+              "reset:0",
+              "log:Info:AsterDEX private WebSocket connected",
+              "ping"
+            ]
+          }
+        },
+        {
+          "input": {
+            "disposed": false,
+            "reconnecting": true,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": [
+              "reset:0",
+              "log:Info:AsterDEX private WebSocket connected",
+              "ping",
+              "snapshot:10"
+            ]
+          }
+        },
+        {
+          "input": {
+            "disposed": true,
+            "reconnecting": true,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": []
+          }
+        },
+        {
+          "input": {
+            "disposed": false,
+            "reconnecting": true,
+            "fail": true
+          },
+          "output": {
+            "ok": false,
+            "calls": [
+              "reset:0",
+              "log:Info:AsterDEX private WebSocket connected",
+              "ping"
+            ]
+          }
+        }
+      ]
+    },
+    "instantiation": "private_on_open",
+    "monomorphization": "Actual production function; fixed borrowed inputs and callback implementations are inferred from the native observation adapter."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::private_listen_key_expired": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "private_listen_key_expired",
+      "signature": {
+        "inputs": [
+          [
+            "log",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::runtime::LogSeverity",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "clear_refresh",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "clear_watchdog",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "reconnect",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(&str, LogSeverity)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::runtime::LogSeverity",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce()",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce()",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce()",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let calls=std::cell::RefCell::new($value[\"before\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect::<Vec<_>>()); $type(|message,severity| calls.borrow_mut().push(format!(\"log:{severity:?}:{message}\")), || calls.borrow_mut().push(\"clear-refresh\".into()), || calls.borrow_mut().push(\"clear-watchdog\".into()), || calls.borrow_mut().push(\"reconnect\".into())); let calls=calls.into_inner(); serde_json::json!({\"ok\":true,\"last\":calls.last(),\"calls\":calls}) }",
+    "cases": [
+      {
+        "input": {
+          "before": []
+        },
+        "output": {
+          "ok": true,
+          "last": "reconnect",
+          "calls": [
+            "log:Warning:AsterDEX private listen key expired event received, reconnecting private stream",
+            "clear-refresh",
+            "clear-watchdog",
+            "reconnect"
+          ]
+        }
+      },
+      {
+        "input": {
+          "before": [
+            "existing-effect"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "last": "reconnect",
+          "calls": [
+            "existing-effect",
+            "log:Warning:AsterDEX private listen key expired event received, reconnecting private stream",
+            "clear-refresh",
+            "clear-watchdog",
+            "reconnect"
+          ]
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts handleListenKeyExpired logs Warning, clears both listen-key timers and reconnects in that order. Actual callback arguments/effects are captured after any prior host effect.",
+    "nativeObservation": {
+      "call": "{ let calls=std::cell::RefCell::new($value[\"before\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect::<Vec<_>>()); $type(|message,severity| calls.borrow_mut().push(format!(\"log:{severity:?}:{message}\")), || calls.borrow_mut().push(\"clear-refresh\".into()), || calls.borrow_mut().push(\"clear-watchdog\".into()), || calls.borrow_mut().push(\"reconnect\".into())); let calls=calls.into_inner(); serde_json::json!({\"ok\":true,\"last\":calls.last(),\"calls\":calls}) }",
+      "nativeFields": [
+        "calls",
+        "last"
+      ],
+      "cases": [
+        {
+          "input": {
+            "before": []
+          },
+          "output": {
+            "ok": true,
+            "last": "reconnect",
+            "calls": [
+              "log:Warning:AsterDEX private listen key expired event received, reconnecting private stream",
+              "clear-refresh",
+              "clear-watchdog",
+              "reconnect"
+            ]
+          }
+        },
+        {
+          "input": {
+            "before": [
+              "existing-effect"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "last": "reconnect",
+            "calls": [
+              "existing-effect",
+              "log:Warning:AsterDEX private listen key expired event received, reconnecting private stream",
+              "clear-refresh",
+              "clear-watchdog",
+              "reconnect"
+            ]
+          }
+        }
+      ]
+    },
+    "instantiation": "private_listen_key_expired",
+    "monomorphization": "Actual production function; fixed borrowed inputs and callback implementations are inferred from the native observation adapter."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::private_ping_with": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "private_ping_with",
+      "signature": {
+        "inputs": [
+          [
+            "is_disposed",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "is_connected",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "mark_ping_sent",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "send",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce()",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Result<(), ExchangeError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let calls=std::cell::RefCell::new(Vec::<String>::new()); let result=$type($value[\"disposed\"].as_bool().unwrap(), $value[\"connected\"].as_bool().unwrap(), || calls.borrow_mut().push(\"mark\".into()), |message| { calls.borrow_mut().push(message.into()); if $value[\"fail\"].as_bool().unwrap() { Err(safe_cex_exchange::runtime::ExchangeError::new(\"send refused\")) } else { Ok(()) } }); serde_json::json!({\"ok\":result.is_ok(),\"calls\":calls.into_inner()}) }",
+    "cases": [
+      {
+        "input": {
+          "disposed": false,
+          "connected": true,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": [
+            "mark",
+            "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}"
+          ]
+        }
+      },
+      {
+        "input": {
+          "disposed": true,
+          "connected": true,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": []
+        }
+      },
+      {
+        "input": {
+          "disposed": false,
+          "connected": false,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": []
+        }
+      },
+      {
+        "input": {
+          "disposed": false,
+          "connected": true,
+          "fail": true
+        },
+        "output": {
+          "ok": false,
+          "calls": [
+            "mark",
+            "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}"
+          ]
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts ping: guard disposed/OPEN, mark monotonic ping time before sending exact LIST_SUBSCRIPTIONS frame id 42. Host callbacks capture the actual production helper ordering and propagate a send refusal; no socket or ping implementation is mocked.",
+    "nativeObservation": {
+      "call": "{ let calls=std::cell::RefCell::new(Vec::<String>::new()); let result=$type($value[\"disposed\"].as_bool().unwrap(), $value[\"connected\"].as_bool().unwrap(), || calls.borrow_mut().push(\"mark\".into()), |message| { calls.borrow_mut().push(message.into()); if $value[\"fail\"].as_bool().unwrap() { Err(safe_cex_exchange::runtime::ExchangeError::new(\"send refused\")) } else { Ok(()) } }); serde_json::json!({\"ok\":result.is_ok(),\"calls\":calls.into_inner()}) }",
+      "nativeFields": [
+        "calls",
+        "ok"
+      ],
+      "cases": [
+        {
+          "input": {
+            "disposed": false,
+            "connected": true,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": [
+              "mark",
+              "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}"
+            ]
+          }
+        },
+        {
+          "input": {
+            "disposed": true,
+            "connected": true,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": []
+          }
+        },
+        {
+          "input": {
+            "disposed": false,
+            "connected": false,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": []
+          }
+        },
+        {
+          "input": {
+            "disposed": false,
+            "connected": true,
+            "fail": true
+          },
+          "output": {
+            "ok": false,
+            "calls": [
+              "mark",
+              "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}"
+            ]
+          }
+        }
+      ]
+    },
+    "instantiation": "private_ping_with",
+    "monomorphization": "Actual production function; fixed borrowed inputs and callback implementations are inferred from the native observation adapter."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_ping_with": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_ping_with",
+      "signature": {
+        "inputs": [
+          [
+            "is_disposed",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "is_connected",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "mark_ping_sent",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "send",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce()",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Result<(), ExchangeError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let calls=std::cell::RefCell::new(Vec::<String>::new()); let result=$type($value[\"disposed\"].as_bool().unwrap(), $value[\"connected\"].as_bool().unwrap(), || calls.borrow_mut().push(\"mark\".into()), |message| { calls.borrow_mut().push(message.into()); if $value[\"fail\"].as_bool().unwrap() { Err(safe_cex_exchange::runtime::ExchangeError::new(\"send refused\")) } else { Ok(()) } }); serde_json::json!({\"ok\":result.is_ok(),\"calls\":calls.into_inner()}) }",
+    "cases": [
+      {
+        "input": {
+          "disposed": false,
+          "connected": true,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": [
+            "mark",
+            "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}"
+          ]
+        }
+      },
+      {
+        "input": {
+          "disposed": true,
+          "connected": true,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": []
+        }
+      },
+      {
+        "input": {
+          "disposed": false,
+          "connected": false,
+          "fail": false
+        },
+        "output": {
+          "ok": true,
+          "calls": []
+        }
+      },
+      {
+        "input": {
+          "disposed": false,
+          "connected": true,
+          "fail": true
+        },
+        "output": {
+          "ok": false,
+          "calls": [
+            "mark",
+            "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}"
+          ]
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts ping: guard disposed/OPEN, mark monotonic ping time before sending exact LIST_SUBSCRIPTIONS frame id -1. Host callbacks capture the actual production helper ordering and propagate a send refusal; no socket or ping implementation is mocked.",
+    "nativeObservation": {
+      "call": "{ let calls=std::cell::RefCell::new(Vec::<String>::new()); let result=$type($value[\"disposed\"].as_bool().unwrap(), $value[\"connected\"].as_bool().unwrap(), || calls.borrow_mut().push(\"mark\".into()), |message| { calls.borrow_mut().push(message.into()); if $value[\"fail\"].as_bool().unwrap() { Err(safe_cex_exchange::runtime::ExchangeError::new(\"send refused\")) } else { Ok(()) } }); serde_json::json!({\"ok\":result.is_ok(),\"calls\":calls.into_inner()}) }",
+      "nativeFields": [
+        "calls",
+        "ok"
+      ],
+      "cases": [
+        {
+          "input": {
+            "disposed": false,
+            "connected": true,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": [
+              "mark",
+              "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}"
+            ]
+          }
+        },
+        {
+          "input": {
+            "disposed": true,
+            "connected": true,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": []
+          }
+        },
+        {
+          "input": {
+            "disposed": false,
+            "connected": false,
+            "fail": false
+          },
+          "output": {
+            "ok": true,
+            "calls": []
+          }
+        },
+        {
+          "input": {
+            "disposed": false,
+            "connected": true,
+            "fail": true
+          },
+          "output": {
+            "ok": false,
+            "calls": [
+              "mark",
+              "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}"
+            ]
+          }
+        }
+      ]
+    },
+    "instantiation": "public_ping_with",
+    "monomorphization": "Actual production function; fixed borrowed inputs and callback implementations are inferred from the native observation adapter."
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_unsubscribe_plan": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_unsubscribe_plan",
+      "signature": {
+        "inputs": [
+          [
+            "connected",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "subscription_id",
+            {
+              "primitive": "u64"
+            }
+          ],
+          [
+            "streams",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "alloc::string::String",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "tuple": [
+                                    {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    },
+                                    {
+                                      "primitive": "u64"
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let streams:Vec<_>=$value[\"streams\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect(); match $type($value[\"connected\"].as_bool().unwrap(),$value[\"id\"].as_u64().unwrap(),&streams) { Ok(None)=>serde_json::json!({\"ok\":true,\"message\":null,\"next\":null}), Ok(Some((message,next)))=>serde_json::json!({\"ok\":true,\"message\":message,\"next\":next}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "connected": false,
+          "id": 1,
+          "streams": [
+            "btc@ticker"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "message": null,
+          "next": null
+        }
+      },
+      {
+        "input": {
+          "connected": true,
+          "id": 7,
+          "streams": [
+            "btc@ticker",
+            "eth@ticker"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "message": "{\"method\":\"UNSUBSCRIBE\",\"params\":[\"btc@ticker\",\"eth@ticker\"],\"id\":7}",
+          "next": 8
+        }
+      },
+      {
+        "input": {
+          "connected": true,
+          "id": 9,
+          "streams": [
+            "é\"\\@kline_1m"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "message": "{\"method\":\"UNSUBSCRIBE\",\"params\":[\"é\\\"\\\\@kline_1m\"],\"id\":9}",
+          "next": 10
+        }
+      },
+      {
+        "input": {
+          "connected": true,
+          "id": 3,
+          "streams": []
+        },
+        "output": {
+          "ok": true,
+          "message": "{\"method\":\"UNSUBSCRIBE\",\"params\":[],\"id\":3}",
+          "next": 4
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts unsubscribe: disconnected calls produce no plan; connected calls retain JSON message property ordering and increment ID once. Subscription topic mutations are captured in actual sequence, including previous topics, depth/kline full names, inherited constructor suppression and missing stream type.",
+    "nativeObservation": {
+      "call": "{ let streams:Vec<_>=$value[\"streams\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect(); match $type($value[\"connected\"].as_bool().unwrap(),$value[\"id\"].as_u64().unwrap(),&streams) { Ok(None)=>serde_json::json!({\"ok\":true,\"message\":null,\"next\":null}), Ok(Some((message,next)))=>serde_json::json!({\"ok\":true,\"message\":message,\"next\":next}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "message",
+        "next"
+      ],
+      "cases": [
+        {
+          "input": {
+            "connected": false,
+            "id": 1,
+            "streams": [
+              "btc@ticker"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "message": null,
+            "next": null
+          }
+        },
+        {
+          "input": {
+            "connected": true,
+            "id": 7,
+            "streams": [
+              "btc@ticker",
+              "eth@ticker"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "message": "{\"method\":\"UNSUBSCRIBE\",\"params\":[\"btc@ticker\",\"eth@ticker\"],\"id\":7}",
+            "next": 8
+          }
+        },
+        {
+          "input": {
+            "connected": true,
+            "id": 9,
+            "streams": [
+              "é\"\\@kline_1m"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "message": "{\"method\":\"UNSUBSCRIBE\",\"params\":[\"é\\\"\\\\@kline_1m\"],\"id\":9}",
+            "next": 10
+          }
+        },
+        {
+          "input": {
+            "connected": true,
+            "id": 3,
+            "streams": []
+          },
+          "output": {
+            "ok": true,
+            "message": "{\"method\":\"UNSUBSCRIBE\",\"params\":[],\"id\":3}",
+            "next": 4
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::ws_helpers::public_subscribe_plan": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "public_subscribe_plan",
+      "signature": {
+        "inputs": [
+          [
+            "connected",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "subscription_id",
+            {
+              "primitive": "u64"
+            }
+          ],
+          [
+            "streams",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "alloc::string::String",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "topics",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::collections::hash::map::HashMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "tuple": [
+                                    {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    },
+                                    {
+                                      "primitive": "u64"
+                                    },
+                                    {
+                                      "resolved_path": {
+                                        "path": "alloc::vec::Vec",
+                                        "args": {
+                                          "angle_bracketed": {
+                                            "args": [
+                                              {
+                                                "type": {
+                                                  "tuple": [
+                                                    {
+                                                      "resolved_path": {
+                                                        "path": "alloc::string::String",
+                                                        "args": null
+                                                      }
+                                                    },
+                                                    {
+                                                      "resolved_path": {
+                                                        "path": "alloc::vec::Vec",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "alloc::string::String",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            ],
+                                            "constraints": []
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let streams:Vec<_>=$value[\"streams\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect(); let topics:std::collections::HashMap<String,Vec<String>>=serde_json::from_value($value[\"topics\"].clone()).unwrap(); match $type($value[\"connected\"].as_bool().unwrap(),$value[\"id\"].as_u64().unwrap(),&streams,&topics) { Ok(None)=>serde_json::json!({\"ok\":true,\"message\":null,\"next\":null,\"mutations\":null}), Ok(Some((message,next,mutations)))=>serde_json::json!({\"ok\":true,\"message\":message,\"next\":next,\"mutations\":mutations}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "connected": false,
+          "id": 1,
+          "streams": [
+            "btc@ticker"
+          ],
+          "topics": {}
+        },
+        "output": {
+          "ok": true,
+          "message": null,
+          "next": null,
+          "mutations": null
+        }
+      },
+      {
+        "input": {
+          "connected": true,
+          "id": 7,
+          "streams": [
+            "btc@ticker",
+            "eth@ticker"
+          ],
+          "topics": {
+            "ticker": [
+              "old"
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "message": "{\"method\":\"SUBSCRIBE\",\"params\":[\"btc@ticker\",\"eth@ticker\"],\"id\":7}",
+          "next": 8,
+          "mutations": [
+            [
+              "ticker",
+              [
+                "old",
+                "btc"
+              ]
+            ],
+            [
+              "ticker",
+              [
+                "old",
+                "btc",
+                "eth"
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "connected": true,
+          "id": 9,
+          "streams": [
+            "btc@depth20@100ms",
+            "eth@kline_1m",
+            "x@constructor",
+            "no-at"
+          ],
+          "topics": {}
+        },
+        "output": {
+          "ok": true,
+          "message": "{\"method\":\"SUBSCRIBE\",\"params\":[\"btc@depth20@100ms\",\"eth@kline_1m\",\"x@constructor\",\"no-at\"],\"id\":9}",
+          "next": 10,
+          "mutations": [
+            [
+              "btc@depth20@100ms",
+              [
+                "btc@depth20@100ms"
+              ]
+            ],
+            [
+              "eth@kline_1m",
+              [
+                "eth@kline_1m"
+              ]
+            ],
+            [
+              "undefined",
+              [
+                "no-at"
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "connected": true,
+          "id": 3,
+          "streams": [],
+          "topics": {}
+        },
+        "output": {
+          "ok": true,
+          "message": "{\"method\":\"SUBSCRIBE\",\"params\":[],\"id\":3}",
+          "next": 4,
+          "mutations": []
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts subscribe: disconnected calls produce no plan; connected calls retain JSON message property ordering and increment ID once. Subscription topic mutations are captured in actual sequence, including previous topics, depth/kline full names, inherited constructor suppression and missing stream type.",
+    "nativeObservation": {
+      "call": "{ let streams:Vec<_>=$value[\"streams\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect(); let topics:std::collections::HashMap<String,Vec<String>>=serde_json::from_value($value[\"topics\"].clone()).unwrap(); match $type($value[\"connected\"].as_bool().unwrap(),$value[\"id\"].as_u64().unwrap(),&streams,&topics) { Ok(None)=>serde_json::json!({\"ok\":true,\"message\":null,\"next\":null,\"mutations\":null}), Ok(Some((message,next,mutations)))=>serde_json::json!({\"ok\":true,\"message\":message,\"next\":next,\"mutations\":mutations}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "message",
+        "next"
+      ],
+      "cases": [
+        {
+          "input": {
+            "connected": false,
+            "id": 1,
+            "streams": [
+              "btc@ticker"
+            ],
+            "topics": {}
+          },
+          "output": {
+            "ok": true,
+            "message": null,
+            "next": null,
+            "mutations": null
+          }
+        },
+        {
+          "input": {
+            "connected": true,
+            "id": 7,
+            "streams": [
+              "btc@ticker",
+              "eth@ticker"
+            ],
+            "topics": {
+              "ticker": [
+                "old"
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "message": "{\"method\":\"SUBSCRIBE\",\"params\":[\"btc@ticker\",\"eth@ticker\"],\"id\":7}",
+            "next": 8,
+            "mutations": [
+              [
+                "ticker",
+                [
+                  "old",
+                  "btc"
+                ]
+              ],
+              [
+                "ticker",
+                [
+                  "old",
+                  "btc",
+                  "eth"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "input": {
+            "connected": true,
+            "id": 9,
+            "streams": [
+              "btc@depth20@100ms",
+              "eth@kline_1m",
+              "x@constructor",
+              "no-at"
+            ],
+            "topics": {}
+          },
+          "output": {
+            "ok": true,
+            "message": "{\"method\":\"SUBSCRIBE\",\"params\":[\"btc@depth20@100ms\",\"eth@kline_1m\",\"x@constructor\",\"no-at\"],\"id\":9}",
+            "next": 10,
+            "mutations": [
+              [
+                "btc@depth20@100ms",
+                [
+                  "btc@depth20@100ms"
+                ]
+              ],
+              [
+                "eth@kline_1m",
+                [
+                  "eth@kline_1m"
+                ]
+              ],
+              [
+                "undefined",
+                [
+                  "no-at"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "input": {
+            "connected": true,
+            "id": 3,
+            "streams": [],
+            "topics": {}
+          },
+          "output": {
+            "ok": true,
+            "message": "{\"method\":\"SUBSCRIBE\",\"params\":[],\"id\":3}",
+            "next": 4,
+            "mutations": []
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::private_stream::text": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value.get(\"value\")) { Ok(text) => { let units = text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "text": "undefined",
+          "units": 9
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "text": "null",
+          "units": 4
+        }
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "text": "false",
+          "units": 5
+        }
+      },
+      {
+        "input": {
+          "value": 12.5
+        },
+        "output": {
+          "ok": true,
+          "text": "12.5",
+          "units": 4
+        }
+      },
+      {
+        "input": {
+          "value": [
+            "a",
+            null,
+            3
+          ]
+        },
+        "output": {
+          "ok": true,
+          "text": "a,,3",
+          "units": 4
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "ok": true,
+          "text": "[object Object]",
+          "units": 15
+        }
+      },
+      {
+        "input": {
+          "value": "é😀"
+        },
+        "output": {
+          "ok": true,
+          "text": "é😀",
+          "units": 3
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 2
+          }
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts handleEventData/handleStreamData bracket lookup and ws-private.ts interpolations apply JavaScript string coercion. Actual production helper is called before capturing text and UTF-16 length; missing, null, arrays, object, Unicode and shadowed toString are separate inputs.",
+    "nativeObservation": {
+      "call": "{ match $type($value.get(\"value\")) { Ok(text) => { let units = text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "text",
+        "units"
+      ],
+      "cases": [
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "text": "undefined",
+            "units": 9
+          }
+        },
+        {
+          "input": {
+            "value": null
+          },
+          "output": {
+            "ok": true,
+            "text": "null",
+            "units": 4
+          }
+        },
+        {
+          "input": {
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "text": "false",
+            "units": 5
+          }
+        },
+        {
+          "input": {
+            "value": 12.5
+          },
+          "output": {
+            "ok": true,
+            "text": "12.5",
+            "units": 4
+          }
+        },
+        {
+          "input": {
+            "value": [
+              "a",
+              null,
+              3
+            ]
+          },
+          "output": {
+            "ok": true,
+            "text": "a,,3",
+            "units": 4
+          }
+        },
+        {
+          "input": {
+            "value": {}
+          },
+          "output": {
+            "ok": true,
+            "text": "[object Object]",
+            "units": 15
+          }
+        },
+        {
+          "input": {
+            "value": "é😀"
+          },
+          "output": {
+            "ok": true,
+            "text": "é😀",
+            "units": 3
+          }
+        },
+        {
+          "input": {
+            "value": {
+              "toString": 2
+            }
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::private_stream::optional_id": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional_id",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value.get(\"value\")) { Ok(id) => serde_json::json!({\"ok\":true,\"present\":id.is_some(),\"text\":id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "present": false,
+          "text": null
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "text": null
+        }
+      },
+      {
+        "input": {
+          "value": 0
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "text": "0"
+        }
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "text": "false"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            "a",
+            null
+          ]
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "text": "a,"
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "text": "[object Object]"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 2
+          }
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts handleOrderTradeUpdate and handleExecutionReport use data.i?.toString(). Missing/null skip conversion; falsy IDs still convert. Own non-callable toString refuses. Native optional presence and exact ID are observed before JSON.",
+    "nativeObservation": {
+      "call": "{ match $type($value.get(\"value\")) { Ok(id) => serde_json::json!({\"ok\":true,\"present\":id.is_some(),\"text\":id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "present",
+        "text"
+      ],
+      "cases": [
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "present": false,
+            "text": null
+          }
+        },
+        {
+          "input": {
+            "value": null
+          },
+          "output": {
+            "ok": true,
+            "present": false,
+            "text": null
+          }
+        },
+        {
+          "input": {
+            "value": 0
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "text": "0"
+          }
+        },
+        {
+          "input": {
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "text": "false"
+          }
+        },
+        {
+          "input": {
+            "value": [
+              "a",
+              null
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "text": "a,"
+          }
+        },
+        {
+          "input": {
+            "value": {}
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "text": "[object Object]"
+          }
+        },
+        {
+          "input": {
+            "value": {
+              "toString": 2
+            }
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::private_stream::parsed": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parsed",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value.get(\"value\")) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits()),\"nan\":number.is_nan()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "value": ""
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "value": "-0"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "value": "2.5x"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4004000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "value": "NaN"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "nan": true
+        }
+      },
+      {
+        "input": {
+          "value": [
+            3.5
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "400c000000000000",
+          "nan": false
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 2
+          }
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts parseFloat(data.z || \"0\") and other private numeric fields: truthy fallback precedes JavaScript String/parseFloat. Exact binary64 bits observe signed zero, prefix parsing, nonfinite numbers and array coercion before projection.",
+    "nativeObservation": {
+      "call": "{ match $type($value.get(\"value\")) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits()),\"nan\":number.is_nan()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "bits",
+        "nan"
+      ],
+      "cases": [
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "value": null
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "value": ""
+          },
+          "output": {
+            "ok": true,
+            "bits": "0000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "value": "-0"
+          },
+          "output": {
+            "ok": true,
+            "bits": "8000000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "value": "2.5x"
+          },
+          "output": {
+            "ok": true,
+            "bits": "4004000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "value": "Infinity"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff0000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "value": "NaN"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff8000000000000",
+            "nan": true
+          }
+        },
+        {
+          "input": {
+            "value": [
+              3.5
+            ]
+          },
+          "output": {
+            "ok": true,
+            "bits": "400c000000000000",
+            "nan": false
+          }
+        },
+        {
+          "input": {
+            "value": {
+              "toString": 2
+            }
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::private_stream::stringify": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "stringify",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value) { Ok(text) => { let units=text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "ok": true,
+          "text": "null",
+          "units": 4
+        }
+      },
+      {
+        "input": {
+          "a": "é😀",
+          "b": 1
+        },
+        "output": {
+          "ok": true,
+          "text": "{\"a\":\"é😀\",\"b\":1}",
+          "units": 17
+        }
+      },
+      {
+        "input": [
+          1,
+          null,
+          "x"
+        ],
+        "output": {
+          "ok": true,
+          "text": "[1,null,\"x\"]",
+          "units": 12
+        }
+      },
+      {
+        "input": {
+          "2": "a",
+          "10": "b"
+        },
+        "output": {
+          "ok": true,
+          "text": "{\"2\":\"a\",\"10\":\"b\"}",
+          "units": 18
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts onMessage and ACCOUNT_UPDATE log JSON.stringify payloads. Native String and UTF-16 length are captured before writing the audit result. Fixtures cover null, arrays, Unicode, numeric spelling and integer-index property ordering; object order follows the production Value map boundary.",
+    "nativeObservation": {
+      "call": "{ match $type($value) { Ok(text) => { let units=text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "text",
+        "units"
+      ],
+      "cases": [
+        {
+          "input": null,
+          "output": {
+            "ok": true,
+            "text": "null",
+            "units": 4
+          }
+        },
+        {
+          "input": {
+            "a": "é😀",
+            "b": 1
+          },
+          "output": {
+            "ok": true,
+            "text": "{\"a\":\"é😀\",\"b\":1}",
+            "units": 17
+          }
+        },
+        {
+          "input": [
+            1,
+            null,
+            "x"
+          ],
+          "output": {
+            "ok": true,
+            "text": "[1,null,\"x\"]",
+            "units": 12
+          }
+        },
+        {
+          "input": {
+            "2": "a",
+            "10": "b"
+          },
+          "output": {
+            "ok": true,
+            "text": "{\"2\":\"a\",\"10\":\"b\"}",
+            "units": 18
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::private_stream::status": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "status",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::OrderStatus",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value.get(\"value\")) { Ok(status) => { let (name, terminal) = match status { safe_cex_types::OrderStatus::Open => (\"open\",false), safe_cex_types::OrderStatus::Closed => (\"closed\",true), safe_cex_types::OrderStatus::Canceled => (\"canceled\",true), other => panic!(\"unexpected native status: {other:?}\") }; serde_json::json!({\"ok\":true,\"status\":name,\"terminal\":terminal}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "value": "NEW"
+        },
+        "output": {
+          "ok": true,
+          "status": "open",
+          "terminal": false
+        }
+      },
+      {
+        "input": {
+          "value": "PARTIALLY_FILLED"
+        },
+        "output": {
+          "ok": true,
+          "status": "open",
+          "terminal": false
+        }
+      },
+      {
+        "input": {
+          "value": "FILLED"
+        },
+        "output": {
+          "ok": true,
+          "status": "closed",
+          "terminal": true
+        }
+      },
+      {
+        "input": {
+          "value": "CANCELED"
+        },
+        "output": {
+          "ok": true,
+          "status": "canceled",
+          "terminal": true
+        }
+      },
+      {
+        "input": {
+          "value": "REJECTED"
+        },
+        "output": {
+          "ok": true,
+          "status": "canceled",
+          "terminal": true
+        }
+      },
+      {
+        "input": {
+          "value": "EXPIRED"
+        },
+        "output": {
+          "ok": true,
+          "status": "canceled",
+          "terminal": true
+        }
+      },
+      {
+        "input": {
+          "value": "unknown"
+        },
+        "output": {
+          "ok": true,
+          "status": "open",
+          "terminal": false
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "status": "open",
+          "terminal": false
+        }
+      },
+      {
+        "input": {
+          "value": "constructor"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 2
+          }
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "evidence": "asterdex.exchange.ts reverseMapOrderStatus maps six uppercase statuses and falls back to open. Private stream applies that map after string coercion. Inherited prototype status is visibly refused at the closed native OrderStatus boundary rather than fabricated as an order state.",
+    "nativeObservation": {
+      "call": "{ match $type($value.get(\"value\")) { Ok(status) => { let (name, terminal) = match status { safe_cex_types::OrderStatus::Open => (\"open\",false), safe_cex_types::OrderStatus::Closed => (\"closed\",true), safe_cex_types::OrderStatus::Canceled => (\"canceled\",true), other => panic!(\"unexpected native status: {other:?}\") }; serde_json::json!({\"ok\":true,\"status\":name,\"terminal\":terminal}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "status",
+        "terminal"
+      ],
+      "cases": [
+        {
+          "input": {
+            "value": "NEW"
+          },
+          "output": {
+            "ok": true,
+            "status": "open",
+            "terminal": false
+          }
+        },
+        {
+          "input": {
+            "value": "PARTIALLY_FILLED"
+          },
+          "output": {
+            "ok": true,
+            "status": "open",
+            "terminal": false
+          }
+        },
+        {
+          "input": {
+            "value": "FILLED"
+          },
+          "output": {
+            "ok": true,
+            "status": "closed",
+            "terminal": true
+          }
+        },
+        {
+          "input": {
+            "value": "CANCELED"
+          },
+          "output": {
+            "ok": true,
+            "status": "canceled",
+            "terminal": true
+          }
+        },
+        {
+          "input": {
+            "value": "REJECTED"
+          },
+          "output": {
+            "ok": true,
+            "status": "canceled",
+            "terminal": true
+          }
+        },
+        {
+          "input": {
+            "value": "EXPIRED"
+          },
+          "output": {
+            "ok": true,
+            "status": "canceled",
+            "terminal": true
+          }
+        },
+        {
+          "input": {
+            "value": "unknown"
+          },
+          "output": {
+            "ok": true,
+            "status": "open",
+            "terminal": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "status": "open",
+            "terminal": false
+          }
+        },
+        {
+          "input": {
+            "value": "constructor"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": {
+              "toString": 2
+            }
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::public_stream::string": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "string",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value.get(\"value\")) { Ok(text) => { let units = text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "text": "undefined",
+          "units": 9
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "text": "null",
+          "units": 4
+        }
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "text": "false",
+          "units": 5
+        }
+      },
+      {
+        "input": {
+          "value": 12.5
+        },
+        "output": {
+          "ok": true,
+          "text": "12.5",
+          "units": 4
+        }
+      },
+      {
+        "input": {
+          "value": [
+            "a",
+            null,
+            3
+          ]
+        },
+        "output": {
+          "ok": true,
+          "text": "a,,3",
+          "units": 4
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "ok": true,
+          "text": "[object Object]",
+          "units": 15
+        }
+      },
+      {
+        "input": {
+          "value": "é😀"
+        },
+        "output": {
+          "ok": true,
+          "text": "é😀",
+          "units": 3
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 2
+          }
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-public.ts handleEventData/handleStreamData bracket lookup and ws-private.ts interpolations apply JavaScript string coercion. Actual production helper is called before capturing text and UTF-16 length; missing, null, arrays, object, Unicode and shadowed toString are separate inputs.",
+    "nativeObservation": {
+      "call": "{ match $type($value.get(\"value\")) { Ok(text) => { let units = text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "text",
+        "units"
+      ],
+      "cases": [
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "text": "undefined",
+            "units": 9
+          }
+        },
+        {
+          "input": {
+            "value": null
+          },
+          "output": {
+            "ok": true,
+            "text": "null",
+            "units": 4
+          }
+        },
+        {
+          "input": {
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "text": "false",
+            "units": 5
+          }
+        },
+        {
+          "input": {
+            "value": 12.5
+          },
+          "output": {
+            "ok": true,
+            "text": "12.5",
+            "units": 4
+          }
+        },
+        {
+          "input": {
+            "value": [
+              "a",
+              null,
+              3
+            ]
+          },
+          "output": {
+            "ok": true,
+            "text": "a,,3",
+            "units": 4
+          }
+        },
+        {
+          "input": {
+            "value": {}
+          },
+          "output": {
+            "ok": true,
+            "text": "[object Object]",
+            "units": 15
+          }
+        },
+        {
+          "input": {
+            "value": "é😀"
+          },
+          "output": {
+            "ok": true,
+            "text": "é😀",
+            "units": 3
+          }
+        },
+        {
+          "input": {
+            "value": {
+              "toString": 2
+            }
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_venue_asterdex::types::AsterDEXMarketResponseFiltersItem": {
     "shape": "map",
     "entrypoints": [],
