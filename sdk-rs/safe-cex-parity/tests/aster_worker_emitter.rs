@@ -83,12 +83,12 @@ fn native_private_order_and_fill_have_source_event_arguments() {
             &venue,
             json!({"e":"ORDER_TRADE_UPDATE","o":{"i":7,"X":"NEW","s":"BTCUSDT","o":"LIMIT","S":"BUY","p":"100","q":"2","z":"0","T":1700000000000u64}}),
         );
-        assert_eq!(store.orders().len(), 1);
+        assert_eq!(store.orders().unwrap().len(), 1);
         frame(
             &venue,
             json!({"e":"ORDER_TRADE_UPDATE","o":{"i":7,"X":"FILLED","s":"BTCUSDT","S":"BUY","q":"2","z":"2","l":"2","L":"101","T":1700000000001u64}}),
         );
-        assert_eq!(store.orders()[0].status, OrderStatus::Closed);
+        assert_eq!(store.orders().unwrap()[0].status, OrderStatus::Closed);
         assert_eq!(
             *fills.borrow(),
             vec![

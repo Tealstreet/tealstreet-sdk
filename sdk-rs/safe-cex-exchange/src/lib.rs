@@ -63,3 +63,6 @@ pub mod cross_trade;
 
 pub mod fill_event_units;
 pub mod how_facade;
+
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod replay_clock;

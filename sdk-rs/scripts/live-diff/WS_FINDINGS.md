@@ -67,3 +67,33 @@ An independent fresh Bitunix read rerun using wdtab1's `e4542a3` / `a7743c55`
 addon confirms all 697 markets and all 697 tickers exactly, including string
 `limits.amount.max`. Report: `.cache/live-diff/bitunix-max-confirmed.json`;
 owner PR #1062 records that live confirmation.
+
+## Drain/clock instrument, 2026-10-19
+
+PR #1082 adds actual per-dial consumed/processed/error/close receipts and physical
+native message/ping/pong/close counters. Pending source Promise work and TS HTTP
+response/listener work prevent drain. Replay advances Date/performance and real
+Store throttle deadlines from the recorded frame timeline, waiting for each
+handler before the next frame. Ordinary native hosts retain no dial history.
+
+The three-ack instrument subset now reports `nativeDrainVerified: true` on both
+native runs, zero pending jobs, and exact full-output repeats within TS and Rust.
+The compiled addon source is `7e855d1df9a766b62ff529c2064744713ef7c61b`, SHA256
+`abe326990675fb35ce8835fd85580eee8e46609b707f016200362f97f003478d`.
+The loaded bytes are copied before child startup to survive collaborating builds
+replacing the source path. The TS probe revision is recorded independently.
+
+This subset establishes no ticker/book/candle or 60-second venue coverage. Exact
+Store observations (`requestStats.ok`, socket-health initialization and own
+undefined fields) are preserved and routed to dwfl8p. The four full tapes above
+remain pending the separately owned native Store hot-path repair; earlier
+command-barrier results remain provisional. The compact receipt evidence is in
+[`ws-drain-instrument-2026-10-19.json`](ws-drain-instrument-2026-10-19.json).
+
+```sh
+node sdk-rs/scripts/live-diff/streams.mjs --venue binance \
+  --replay .cache/live-diff/binance-acks-instrument.bundle.v8 \
+  --addon .cache/live-diff/drain-7e855d1.node \
+  --rust-revision 7e855d1df9a766b62ff529c2064744713ef7c61b \
+  --output .cache/live-diff/binance-drain-clock-verified.json
+```

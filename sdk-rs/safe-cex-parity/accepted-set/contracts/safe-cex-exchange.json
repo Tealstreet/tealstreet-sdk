@@ -35570,5 +35570,70 @@
         "output": "not-json"
       }
     ]
+  },
+  "safe_cex_exchange::runtime::diagnostic_string": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "diagnostic_string",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Terminal Error presentation selector over existing native data descriptors. It returns only stored strings, stops on accessor or non-string shadows, walks prototype references with cycle detection, and renders UTF-16 lossily only for the terminal sink. It does not parse input or admit a domain model; no getter or coercion hook is executed.",
+    "evidence": "tests/native_console_default.rs::native_error_diagnostics_read_data_without_executing_user_hooks executes the production NativeRuntime console sink in a subprocess: inherited hidden data and malformed UTF-16 render, own getter/non-string shadows suppress inherited messages without executing user code, empty names preserve message-only output, and a cyclic chain terminates with the Error fallback."
   }
 }

@@ -247,6 +247,7 @@ fn venue(
         },
         Rc::new(|_, _| panic!("unexpected external data")),
     )
+    .unwrap()
 }
 #[test]
 fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
