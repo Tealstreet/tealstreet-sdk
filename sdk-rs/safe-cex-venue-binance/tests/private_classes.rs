@@ -5269,3 +5269,7 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
         }
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "support/order_throttle_binding.rs"]
+mod order_throttle_binding;
