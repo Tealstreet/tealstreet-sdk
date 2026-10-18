@@ -6,6 +6,9 @@ Error snapshot excludes the self-reference under decision 2; existing owned
 metadata preserves diagnostics, extra/config data and nearest-response authority.
 Executable config capabilities retain the owned-data boundary. Constructed Aster
 and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+The typed REST host recovers owned callback errors through the canonical
+ExchangeError-to-Thrown conversion and attaches the effective request config.
+The Bitget owned-transport regression pins retry eligibility after that boundary.
 
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
