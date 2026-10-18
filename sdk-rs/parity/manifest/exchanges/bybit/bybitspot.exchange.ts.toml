@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/lifecycle.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/lifecycle.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" , "safe-cex-venue-bybit/src/binding/members/markets.rs" ]
 
 [[symbol]]
 ts = "isBybitOrderAlreadyGoneCancelMessage"
@@ -16,7 +16,7 @@ kind = "class"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange"
 status = "divergent"
-note = "CHOSEN: BybitExchange is a discriminated Rust facade carrier shared with the primary class; name Bybitspot selects the distinct Spot receiver, spot public/private protocols, positionsSupported false, fixed leverage and Bybit spot client-ID rule. class_name reports BybitSpotExchange. This API type split does not inherit primary trading/startup bodies: binding/members/spot.rs installs the source Spot members. tests/spot_binding.rs constructs the facade and exercises its trait methods, startup and local order fallback. Renamed Rust carrier: safe-cex-venue-bybit/src/exchange.rs::BybitExchange."
+note = "CHOSEN: BybitExchange is a discriminated Rust facade carrier shared with the primary class; name Bybitspot selects the distinct Spot receiver, spot public/private protocols, positionsSupported false, fixed leverage and Bybit spot client-ID rule. class_name reports BybitSpotExchange. This API type split does not inherit primary trading/startup bodies: binding/members/spot.rs installs the source Spot members. tests/spot_binding.rs constructs the facade and exercises its trait methods, startup and local order fallback. Renamed Rust carrier: safe-cex-venue-bybit/src/exchange.rs::BybitExchange. FIX-audit row36 ACCEPT: the discriminated facade installs the distinct Spot source members. Actual constructed facade witnesses cover class identity, Spot market category/flag, fixed leverage, Spot public/private sockets, empty positions, trading/refusal surfaces and startup; the Rust shared carrier does not select primary behavior."
 
 [[symbol]]
 ts = "BybitSpotExchange#reinitOnThrow"
@@ -136,7 +136,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/binding/members/spot.rs::start"
 status = "divergent"
-note = "CHOSEN: shared js_runtime promises and explicit host polling replace ambient JavaScript microtasks. The executable Spot body preserves clock/external initialization, immediately handled private probe, sequential awaited market/ticker operands, market publication before public connection, parse/disposal guards, private publication and tick. It does not fetch primary account fees or API-key cache. Public-only and private startup E2Es assert loaded flags, requests, spot URL, order-only private subscription and both socket closures. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/spot.rs::start."
+note = "FIX-audit row18: the actual Spot receiver starts the canonical source Promise eagerly, retains its continuation after waiter abandonment and preserves the source sequential awaited markets then tickers operands. The private probe attaches rejection handling at creation; its message and final warning now retain UTF-16 instead of narrowing through UTF-8. Real constructed NativeRuntime receivers and the maintained start members compare held-clock startup, private connection/snapshot/tick order and warning severity; a compiled master baseline exposes D800 becoming FFFD. Public-only loaded flags and the existing real Spot socket/read/write witnesses remain. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/spot.rs::start."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchOrdersPositionsAndBalance"
@@ -246,9 +246,9 @@ note = "BybitSpotExchange: exact eager ticker GET with literal spot category, st
 ts = "BybitSpotExchange.parseTickers"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/exchange_state.rs::parse_spot_tickers"
+rs = ["safe-cex-venue-bybit/src/exchange_state.rs::parse_spot_tickers", "safe-cex-venue-bybit/src/binding/members/markets.rs::parse_tickers"]
 status = "divergent"
-note = "CHOSEN Extracted pure mapper to safe-cex-venue-bybit/src/exchange_state.rs::parse_spot_tickers; spot always returns zero funding fields, independently compared against the spot source. CHOSEN typed owned-market boundary: inherited Object.prototype keys can produce a ticker with missing id/symbol in TypeScript, while Rust skips a symbol absent from the owned market map. This is a key MEMBERSHIP difference, not an ordering or numeric spelling difference; prototype emulation is possible but absent. Source-driven witnesses pin both sides. Numeric values retain NaN, Infinity and signed zero in the returned typed tickers."
+note = "Production primary/Spot receiver parser reads the native indexed list and live marketsBySymbol dictionary directly. Falsy raw input returns the original cached array; unread properties are not serialized. UTF-16 numeric prefixes, NaN, infinity, signed zero, source key lookup and Spot zero-funding semantics survive until the existing typed Ticker boundary. The public extracted JSON mapper remains supplemental finite adapter coverage, including its documented owned-map membership profile. Native receiver and maintained-source witnesses cover both families. Renamed Rust targets: safe-cex-venue-bybit/src/exchange_state.rs::parse_spot_tickers; safe-cex-venue-bybit/src/binding/members/markets.rs::parse_tickers."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchMarkets"
@@ -262,9 +262,9 @@ note = "Preserves one-level native flatten, strict-null failure detection and st
 ts = "BybitSpotExchange.fetchMarketsHelper"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper"
+rs = ["safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper", "safe-cex-venue-bybit/src/binding/members/spot.rs::install"]
 status = "divergent"
-note = "Real HTTP witnesses also retain valid siblings around object/boolean/null/numeric/absent symbols; primitive fee equality preserves TS identity for separately decoded objects/arrays. APPROVED strict-field divergence: id/symbol/base/quote remain strings and invalid asset rows are visibly reported and omitted, keeping valid siblings through production fetch/refresh. Actual binding regressions cover five malformed domains for this family. TS keeps those malformed fields. CHOSEN typed Market boundary: symbol/base/quote must be strings and successful instrument lists must be arrays; TypeScript can pass through non-string fields; inverse can iterate string lists (an empty string produces no rows), while spot invokes list.map. Shared adapted request sequence extracted to safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper with inverse mode false. The caller supplies the existing venue GET operation and error emitter; this maps fetchMarketsHelper, not client construction. Inverse fees and sequential PreLaunch requests preserve failure order; spot skips both. Null sentinel results are retained as None, with complete diagnostics tested. A dropped read cancels only its invocation, leaves no shared latch, and makes no later requests."
+note = "FIX-audit row27: the actual Spot receiver awaits its original xhr operation, retains native HTTP data directly and uses the canonical retained-input market mapper. No whole-response JSON projection precedes info capture; opaque UTF-16, own undefined and nonfinite fields survive. APPROVED decision3 typed string refusal omits only the affected row after source projection, reports field/value and keeps good neighbors through fetch and refresh. The existing real HTTP malformed-asset/symbol corpus and native metadata receiver witness cover that admission. The exported rest_markets helper remains supplemental JSON request-sequence coverage; its cancellation profile does not describe the source Promise on the installed receiver. Renamed Rust targets: safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper; safe-cex-venue-bybit/src/binding/members/spot.rs::install."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchOHLCV"

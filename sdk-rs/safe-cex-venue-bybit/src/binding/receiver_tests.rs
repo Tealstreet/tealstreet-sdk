@@ -1374,3 +1374,438 @@ fn divergence_audit_position_mode_maps_with_the_original_array_and_receiver() {
         }
     });
 }
+
+#[test]
+fn retained_audit_ticker_native_lookup_and_prefix() {
+    run(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+        ] {
+            let exchange = venue(name.clone());
+            let rt = exchange.js.get().unwrap();
+            let cache = Js::array(vec![Js::object(vec![("opaque", Js::utf16(&[0xd800]))])]);
+            let market = Js::object(vec![
+                ("id", Js::str("native")),
+                ("symbol", Js::str("BTC")),
+                ("isInverse", Js::Bool(true)),
+                ("isExpiring", Js::Bool(true)),
+            ]);
+            rt.this
+                .define(
+                    "store",
+                    Js::object(vec![
+                        ("tickers", cache.clone()),
+                        ("marketsBySymbol", Js::object(vec![("BTC", market)])),
+                    ]),
+                )
+                .unwrap();
+            let cached = rt.this.call_method("parseTickers", vec![Js::Null]).unwrap();
+            assert!(
+                cached.strict_equals(&cache),
+                "ticker_cached_identity {name:?}"
+            );
+            let row = Js::object(vec![
+                ("symbol", Js::str("BTC")),
+                ("lastPrice", Js::utf16(&[50, 0xd800])),
+                ("volume24h", Js::str("-0")),
+                ("turnover24h", Js::Number(f64::INFINITY)),
+            ]);
+            row.define_accessor(
+                "unused",
+                Some(Rc::new(|_| panic!("unread ticker field"))),
+                None,
+            )
+            .unwrap();
+            let store = rt.this.get("store").unwrap();
+            row.define_accessor(
+                "lastPrice",
+                Some(Rc::new(move |_| {
+                    store.set(
+                        "marketsBySymbol",
+                        Js::object(vec![(
+                            "ETH",
+                            Js::object(vec![("id", Js::str("next")), ("symbol", Js::str("ETH"))]),
+                        )]),
+                    )?;
+                    Ok(Js::utf16(&[50, 0xd800]))
+                })),
+                None,
+            )
+            .unwrap();
+            let second = Js::object(vec![
+                ("symbol", Js::str("ETH")),
+                ("lastPrice", Js::str("3")),
+                ("volume24h", Js::str("1")),
+            ]);
+            let result = rt
+                .this
+                .call_method("parseTickers", vec![Js::array(vec![row, second])])
+                .unwrap();
+            assert_eq!(
+                result.get("length").unwrap().to_number().unwrap(),
+                2.,
+                "ticker_live_dictionary"
+            );
+            assert!(
+                result
+                    .get("1")
+                    .unwrap()
+                    .get("id")
+                    .unwrap()
+                    .strict_equals(&Js::str("next"))
+            );
+            let ticker = result.get("0").unwrap();
+            assert_eq!(
+                ticker.get("last").unwrap().to_number().unwrap(),
+                2.,
+                "ticker_utf16_prefix"
+            );
+            let spot = name == ExchangeName::Bybitspot;
+            let volume = ticker.get("volume").unwrap().to_number().unwrap();
+            assert_eq!(
+                volume.to_bits(),
+                if spot {
+                    (-0.0f64).to_bits()
+                } else {
+                    f64::INFINITY.to_bits()
+                },
+                "ticker_inverse_volume"
+            );
+            assert_eq!(
+                ticker
+                    .get("quoteVolume")
+                    .unwrap()
+                    .to_number()
+                    .unwrap()
+                    .to_bits(),
+                (-0.0f64).to_bits()
+            );
+            assert!(ticker.get("bid").unwrap().to_number().unwrap().is_nan());
+            assert_eq!(ticker.get("fundingRate").unwrap().to_number().unwrap(), 0.);
+            exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn retained_audit_spot_market_native_info_and_eager_request() {
+    run(async {
+        let exchange = venue(ExchangeName::Bybitspot);
+        let rt = exchange.js.get().unwrap();
+        let info = Js::object(vec![
+            ("symbol", Js::str("BTCUSDT")),
+            ("baseCoin", Js::str("BTC")),
+            ("quoteCoin", Js::str("USDT")),
+            ("status", Js::str("Trading")),
+            (
+                "lotSizeFilter",
+                Js::object(vec![
+                    ("qtyStep", Js::str("0.001")),
+                    ("minOrderQty", Js::str("0.001")),
+                    ("maxOrderQty", Js::str("100")),
+                ]),
+            ),
+            (
+                "priceFilter",
+                Js::object(vec![("tickSize", Js::str("0.1"))]),
+            ),
+            (
+                "opaque",
+                Js::object(vec![
+                    ("missing", Js::Undefined),
+                    ("text", Js::utf16(&[0xd800])),
+                    ("number", Js::Number(f64::INFINITY)),
+                ]),
+            ),
+        ]);
+        let response = Js::object(vec![(
+            "data",
+            Js::object(vec![
+                ("retMsg", Js::str("OK")),
+                ("result", Js::object(vec![("list", Js::array(vec![info]))])),
+            ]),
+        )]);
+        let calls = Rc::new(Cell::new(0));
+        let count = calls.clone();
+        rt.this
+            .define(
+                "xhr",
+                Js::object(vec![(
+                    "get",
+                    Js::function("get", move |_, args| {
+                        assert_eq!(
+                            crate::binding::host::text(&args[0])?,
+                            "/v5/market/instruments-info"
+                        );
+                        assert_eq!(
+                            crate::binding::host::text(&args[1].get("params")?.get("category")?)?,
+                            "spot"
+                        );
+                        count.set(count.get() + 1);
+                        Ok(response.clone())
+                    }),
+                )]),
+            )
+            .unwrap();
+        let pending = rt
+            .this
+            .call_method("fetchMarketsHelper", vec![Js::str("spot")])
+            .unwrap();
+        assert_eq!(calls.get(), 1, "spot_market_eager_request");
+        let markets = await_js(&exchange.base.runtime, pending).await.unwrap();
+        let market = markets.get("0").unwrap();
+        let opaque = market.get("info").unwrap().get("opaque").unwrap();
+        assert_eq!(
+            units(&opaque.get("text").unwrap()),
+            [0xd800],
+            "spot_market_utf16_info"
+        );
+        assert!(opaque.has_own("missing"), "spot_market_own_undefined");
+        assert!(matches!(opaque.get("missing").unwrap(), Js::Undefined));
+        assert_eq!(
+            opaque.get("number").unwrap().to_number().unwrap(),
+            f64::INFINITY
+        );
+        assert_eq!(
+            market
+                .get("limits")
+                .unwrap()
+                .get("leverage")
+                .unwrap()
+                .get("max")
+                .unwrap()
+                .to_number()
+                .unwrap(),
+            1.
+        );
+        exchange.dispose().unwrap();
+    });
+}
+
+#[test]
+fn retained_audit_startup_dropped_waiter_and_native_warning() {
+    run(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitspot] {
+            let options =
+                serde_json::from_value(serde_json::json!({"key":"key", "secret":"secret"}))
+                    .unwrap();
+            let exchange = venue_with_options(name.clone(), options);
+            let rt = exchange.js.get().unwrap();
+            let runtime = exchange.base.runtime.clone();
+            let clock = safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+            let clock_result = clock.clone();
+            rt.global("virtualClock")
+                .unwrap()
+                .define(
+                    "start",
+                    Js::function("start", move |_, _| Ok(Js::Promise(clock_result.clone()))),
+                )
+                .unwrap();
+            rt.this
+                .define(
+                    "initExternalPublicData",
+                    Js::function("external", |_, _| Ok(Js::Bool(true))),
+                )
+                .unwrap();
+            let cache_error = Js::object(vec![("message", Js::utf16(&[0xdfff]))]);
+            let cache_reason = cache_error.clone();
+            rt.this
+                .define(
+                    "fetchAndCacheApiKeyInfo",
+                    Js::function("cache", move |_, _| {
+                        Ok(Js::Promise(
+                            safe_cex_exchange::js_runtime::promise::Promise::settled(
+                                &runtime,
+                                Err(Thrown::new(cache_reason.clone())),
+                            ),
+                        ))
+                    }),
+                )
+                .unwrap();
+            let reports = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let reported = reports.clone();
+            rt.this
+                .define(
+                    "emitAndLogError",
+                    Js::function("report", move |_, args| {
+                        reported.borrow_mut().push(arg(&args, 0));
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+            let reason = Js::object(vec![("message", Js::utf16(&[0xd800, 120]))]);
+            let probe =
+                safe_cex_exchange::js_runtime::promise::Promise::pending(&exchange.base.runtime);
+            let held = probe.clone();
+            rt.this
+                .define(
+                    "fetchMarginAccountInfos",
+                    Js::function("probe", move |_, _| Ok(Js::Promise(held.clone()))),
+                )
+                .unwrap();
+            let messages = Rc::new(RefCell::new(Vec::<Vec<Js>>::new()));
+            let logs = messages.clone();
+            rt.this
+                .define(
+                    "log",
+                    Js::function("log", move |_, args| {
+                        logs.borrow_mut().push(args);
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+            let connected = Rc::new(Cell::new(0));
+            let count = connected.clone();
+            rt.this
+                .define(
+                    "privateWebsocket",
+                    Js::object(vec![(
+                        "connectAndSubscribe",
+                        Js::function("connect", move |_, _| {
+                            count.set(count.get() + 1);
+                            Ok(Js::Undefined)
+                        }),
+                    )]),
+                )
+                .unwrap();
+            rt.this
+                .define(
+                    "fetchOrdersPositionsAndBalance",
+                    Js::function("snapshots", |_, _| Ok(Js::Undefined)),
+                )
+                .unwrap();
+            rt.this
+                .define("tick", Js::function("tick", |_, _| Ok(Js::Undefined)))
+                .unwrap();
+            drop(exchange.start());
+            clock.settle(Ok(Js::Undefined));
+            probe.settle(Err(Thrown::new(reason)));
+            for _ in 0..20 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(connected.get(), 1, "startup_dropped_waiter {name:?}");
+            let logs = messages.borrow();
+            assert_eq!(logs.len(), 1);
+            let mut expected: Vec<u16> =
+                "Bybit market data is ready, but the private API was rejected ("
+                    .encode_utf16()
+                    .collect();
+            expected.extend([0xd800, 120]);
+            expected.extend(") — trading is unavailable".encode_utf16());
+            assert_eq!(
+                units(&logs[0][0]),
+                expected,
+                "startup_native_warning {name:?}"
+            );
+            assert_eq!(
+                units(&logs[0][1]),
+                "warning".encode_utf16().collect::<Vec<_>>()
+            );
+            assert_eq!(
+                reports.borrow().len(),
+                usize::from(name == ExchangeName::Bybit),
+                "startup_cache_failure_visible"
+            );
+            if name == ExchangeName::Bybit {
+                assert!(
+                    reports.borrow()[0].strict_equals(&cache_error),
+                    "startup_cache_failure_identity"
+                );
+            }
+            drop(logs);
+            exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn retained_audit_startup_preserves_family_request_order() {
+    run(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitspot] {
+            let exchange = venue(name.clone());
+            let rt = exchange.js.get().unwrap();
+            let runtime = exchange.base.runtime.clone();
+            rt.global("virtualClock")
+                .unwrap()
+                .define("start", Js::function("start", |_, _| Ok(Js::Undefined)))
+                .unwrap();
+            rt.this
+                .define(
+                    "initExternalPublicData",
+                    Js::function("external", |_, _| Ok(Js::Bool(false))),
+                )
+                .unwrap();
+            let markets = safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+            let held = markets.clone();
+            rt.this
+                .define(
+                    "fetchMarkets",
+                    Js::function("markets", move |_, _| Ok(Js::Promise(held.clone()))),
+                )
+                .unwrap();
+            let requests = Rc::new(Cell::new(0));
+            let calls = requests.clone();
+            let raw = Js::array(vec![]);
+            let raw_result = raw.clone();
+            rt.this
+                .define(
+                    "fetchTickersWithoutParse",
+                    Js::function("raw", move |_, _| {
+                        calls.set(calls.get() + 1);
+                        Ok(raw_result.clone())
+                    }),
+                )
+                .unwrap();
+            let parsed = Rc::new(Cell::new(0));
+            let calls = parsed.clone();
+            rt.this
+                .define(
+                    "parseTickers",
+                    Js::function("parse", move |_, args| {
+                        assert!(args[0].strict_equals(&raw));
+                        calls.set(calls.get() + 1);
+                        Ok(Js::array(vec![]))
+                    }),
+                )
+                .unwrap();
+            for key in ["publicWebsocket", "inversePublicWebsocket"] {
+                rt.this
+                    .define(
+                        key,
+                        Js::object(vec![(
+                            "connectAndSubscribe",
+                            Js::function("connect", |_, _| Ok(Js::Undefined)),
+                        )]),
+                    )
+                    .unwrap();
+            }
+            rt.this
+                .define("log", Js::function("log", |_, _| Ok(Js::Undefined)))
+                .unwrap();
+            let pending = rt.this.call_method("start", vec![]).unwrap();
+            for _ in 0..20 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                requests.get(),
+                usize::from(name == ExchangeName::Bybit),
+                "startup_parallel_vs_sequential"
+            );
+            assert_eq!(parsed.get(), 0);
+            markets.settle(Ok(Js::array(vec![])));
+            await_js(&runtime, pending).await.unwrap();
+            assert_eq!(requests.get(), 1);
+            assert_eq!(parsed.get(), 1);
+            let loaded = rt.this.get("store").unwrap().get("loaded").unwrap();
+            for key in ["markets", "tickers", "balance", "orders", "positions"] {
+                assert!(
+                    loaded.get(key).unwrap().truthy(),
+                    "startup_loaded_flag {key}"
+                );
+            }
+            exchange.dispose().unwrap();
+        }
+    });
+}
