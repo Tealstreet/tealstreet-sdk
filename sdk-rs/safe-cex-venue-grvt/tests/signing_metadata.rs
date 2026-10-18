@@ -35,8 +35,10 @@ fn signing_metadata_matches_actual_source_native_fields() {
     assert_eq!(rows.len(), 3204, "signing metadata corpus count");
     for row in rows {
         let market: serde_json::Value = serde_json::from_str(row["raw"].as_str().unwrap()).unwrap();
-        let result =
-            get_instrument_signing_metadata(market["id"].as_str().unwrap(), market.get("info"));
+        let result = get_instrument_signing_metadata(
+            market["id"].as_str().unwrap(),
+            market.get("info").cloned().map(Into::into).as_ref(),
+        );
         if let Some(error) = row.get("error") {
             assert_eq!(
                 result.expect_err("SIGNING METADATA refused source"),

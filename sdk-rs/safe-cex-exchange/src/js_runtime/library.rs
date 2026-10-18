@@ -57,6 +57,37 @@ fn iteratee(f: &Js, value: Js) -> Result<Js, Thrown> {
     Ok(out)
 }
 
+/// Imported lodash groupBy for native data collections and the existing
+/// function/property iteratee profile. Values remain the original referents.
+pub fn group_by(collection: &Js, by: &Js) -> Result<Js, Thrown> {
+    let result = Js::object(vec![]);
+    if collection.is_nullish() {
+        return Ok(result);
+    }
+    let length = if collection.is_callable() {
+        Js::Undefined
+    } else {
+        collection.get("length")?
+    };
+    let keys: Box<dyn Iterator<Item = Vec<u16>>> = match length {
+        Js::Number(n) if n >= 0.0 && n.fract() == 0.0 && n <= 9_007_199_254_740_991.0 => {
+            Box::new((0..n as usize).map(|index| index.to_string().encode_utf16().collect()))
+        }
+        _ => Box::new(collection.own_keys().into_iter().map(|key| key.to_vec())),
+    };
+    for key in keys {
+        let value = collection.get_key(&key)?;
+        let key = iteratee(by, value.clone())?.to_js_string()?;
+        if result.own_keys().iter().any(|own| **own == *key) {
+            result.get_key(&key)?.call_method("push", vec![value])?;
+        } else {
+            // lodash baseAssignValue defines an own __proto__ data property.
+            result.define_key(&key, Js::array(vec![value]))?;
+        }
+    }
+    Ok(result)
+}
+
 pub fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
     if !obj.is_object() {
         let rhs = if matches!(obj, Js::SymbolIterator) {
@@ -68,17 +99,7 @@ pub fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
             "Cannot use 'in' operator to search for '{key}' in {rhs}"
         )));
     }
-    if obj.has_own(key) {
-        return Ok(true);
-    }
-    match obj {
-        Js::Object(o) => match o.proto.borrow().as_ref() {
-            Some(proto) if !matches!(proto, Js::Null) => in_operator(proto, key),
-            _ => Ok(false),
-        },
-        Js::Array(_) => Ok(key == "length"),
-        _ => Ok(false),
-    }
+    Ok(obj.has_property(&super::value::utf16(key)))
 }
 
 /// lodash compareAscending: undefined, then null, then NaN sort last.
@@ -1325,6 +1346,7 @@ fn define_on(owner: &Js, key: &str, value: Js) {
 
 /// Install the shared utility modules next to `install_builtins`' globals.
 pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
+    super::ccxt::install(g).expect("fresh native import descriptors admit ccxt utilities");
     let def = |k: &str, v: Js| define_on(g, k, v);
     def("times", func("times", |args| lodash_times(&args)));
     let scoped = |name: &'static str, f: fn(&Scope<X>, Vec<Js>) -> Result<Js, Thrown>| -> Js {

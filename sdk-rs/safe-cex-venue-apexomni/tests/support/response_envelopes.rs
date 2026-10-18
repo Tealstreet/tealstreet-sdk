@@ -57,7 +57,7 @@ fn run_envelopes(method: &str, expected_count: usize) {
         host.operations.borrow_mut().clear();
         let actual = futures::executor::block_on(async {
             match method {
-                "getAccount" => exchange.get_account().await,
+                "getAccount" => exchange.get_account().await.map(|v| native::retained(&v)),
                 "fetchPositions" => exchange
                     .fetch_positions()
                     .await
@@ -131,7 +131,7 @@ fn run_envelopes(method: &str, expected_count: usize) {
             &format!("{label} native operation order"),
         );
         native::check_fields(
-            &J::from(store.zk_link_config().as_deref().cloned().unwrap()),
+            &native::retained(store.zk_link_config().as_deref().unwrap()),
             &row["zk"],
             &format!("{label} native config unchanged"),
         );

@@ -95,12 +95,16 @@ siblings independently; the audit and controls live in tests/FIELD_IDENTITY_AUDI
 Builder-error oracle captures canonicalize NaN only and label host architecture;
 finite values and signed zero remain bit-exact.
 
-Signing metadata validation extracts ih/bd/qd from JSON-data info. Hashes require
+Signing metadata validation reads ih/bd/qd directly from retained info. Hashes require
 lowercase 0x, 1..64 hex digits; exponents must be Number safe integers, including
 negative values and signed zero. Actual-method oracle checks native tuple fields
 and Error messages in one Node process per corpus. The mapped
 placeOrder signer and fetchMarkets have separate tests; this validator fixture
 carries no Store notification effects.
+The validated ASCII hash becomes an owned String at the signer API; its original
+UTF-16 units remain in info. Exponent bits and the explicit non-borrowed hash
+observation precede serialization. The native trigger alias selector stays borrowed
+and preserves own undefined/null precedence without constructing a JSON view.
 The source nonnegative-exponent mutation and a compiling Rust bd/qd swap fail
 named SIGNING METADATA assertions; production is restored afterwards. The
 validator returns native fields, so serialization cannot undo a swapped result.
@@ -382,3 +386,7 @@ the real startup/socket regression proves that master failure. The source candle
 subscription uses the actual source WebSocket factory connected to a loopback
 peer, while native frames enter the actual runtime sockets. Candle callbacks,
 and zero/existing-last mark fallback have independent fixed assertions.
+
+Market reads retain the native response before mapping. Signing info always owns
+`ih`, `bd` and `qd`, including missing values as Undefined. The constructed REST /
+Store regression inspects UTF-16 units, nonfinite numbers and signed-zero bits.

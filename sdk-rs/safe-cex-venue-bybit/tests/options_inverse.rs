@@ -75,8 +75,11 @@ fn options_and_inverse_helpers_match_maintained_source() {
             "native option symbol {symbol}"
         );
     }
-    let sol = options::map_bybit_option_instrument(&json!({"status":"Trading",
-        "symbol":"SOL-6NOV26-112d5-P","optionsType":"Put","baseCoin":"SOL"}))
+    let sol = options::map_bybit_option_instrument(
+        &json!({"status":"Trading",
+        "symbol":"SOL-6NOV26-112d5-P","optionsType":"Put","baseCoin":"SOL"})
+        .into(),
+    )
     .unwrap()
     .expect("native tradable put");
     assert_eq!(
@@ -104,7 +107,7 @@ fn options_and_inverse_helpers_match_maintained_source() {
     let rows = source["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 8, "row source floor");
     for (index, case) in rows.iter().enumerate() {
-        let native = options::map_bybit_option_instrument(&case["raw"]).unwrap();
+        let native = options::map_bybit_option_instrument(&case["raw"].clone().into()).unwrap();
         assert_eq!(
             binary64(&serde_json::to_value(&native).unwrap()),
             binary64(&case["market"]),

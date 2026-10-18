@@ -28109,5 +28109,219 @@
     },
     "evidence": "Individually reviewed full utils::drop_prefix body and actual packages/safe-cex/src/exchanges/apexomni/apexomni.utils.ts declaration; internal projection/ASCII indexing helpers were reviewed against their sole source-serving role. tests in utils::accepted_scalar_helper_tests::drop_prefix_native_output directly execute the native API on 8 independently authored cases. Expected outcomes are never obtained through owner serialization or proposal tooling. This body's isolated mutation compiled and failed its exact named native-output assertion at exit101; all three source modules were restored byte-for-byte and all23 native witnesses passed. Its non-decoder receipt remains a classification; the separate native test executes the behavior. The final full restoration passed exact source bytes, all23 native tests, all16 runtime outputs and7 classifications with zero failures. Classification-only receipts are not executed decoder coverage. This covers only the native/default reviewed body; JS heap objects/prototypes/foreign realms, aliases, receivers, other helpers and feature/wasm accepted behavior remain independent obligations.",
     "reason": "Removes one literal lowercase prefix from an already-typed string and returns a borrowed subslice. It does not decode hexadecimal, validate a hash, parse JSON or coerce an input. Native assertions independently preserve unchanged-input pointer identity and the exact two-byte offset for a removed prefix."
+  },
+  "safe_cex_venue_apexomni::ws_private::retained_text": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "retained_text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::AsRef",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "primitive": "str"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl AsRef<str>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::AsRef",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs canonical Text units from an already typed Rust string. There is no serialized input parsing or raw dynamic coercion; the typed string is encoded without inspecting its contents.",
+    "evidence": "Reviewed the complete production helper body and its callers. tests/support/websockets.rs::socket_frame_units_are_observed_before_wire executes the real private owner through SocketHost and observes all8 decoded peer packets before exact wire comparison, including non-ASCII/astral/surrogate args and ignored opaque data. tests/support/retained_info.rs::private_frame_info_keeps_opaque_utf16_and_wire_numbers constructs the actual binding and checks order/position Store info before JSON. All56 binding and72 exchange tests pass; native andWasm all-target strictClippy pass. This is a typed-construction classification, not an executed decoder-coverage claim."
+  },
+  "safe_cex_venue_apexomni::ws_private::retained_object": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "retained_object",
+      "signature": {
+        "inputs": [
+          [
+            "values",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::iter::traits::collect::IntoIterator",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Item",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "tuple": [
+                                      {
+                                        "borrowed_ref": {
+                                          "lifetime": "'static",
+                                          "is_mutable": false,
+                                          "type": {
+                                            "primitive": "str"
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "resolved_path": {
+                                          "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                          "args": null
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl IntoIterator<Item = (&'static str, Input)>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::iter::traits::collect::IntoIterator",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [],
+                            "constraints": [
+                              {
+                                "name": "Item",
+                                "args": null,
+                                "binding": {
+                                  "equality": {
+                                    "type": {
+                                      "tuple": [
+                                        {
+                                          "borrowed_ref": {
+                                            "lifetime": "'static",
+                                            "is_mutable": false,
+                                            "type": {
+                                              "primitive": "str"
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                            "args": null
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Assembles ordered canonical Object entries from typed static field names and already retained Input payloads. It neither decodes nor projects those payloads; upstream parsing and downstream mapped-field admission remain separate owners.",
+    "evidence": "Reviewed the complete production helper body and its callers. tests/support/websockets.rs::socket_frame_units_are_observed_before_wire executes the real private owner through SocketHost and observes all8 decoded peer packets before exact wire comparison, including non-ASCII/astral/surrogate args and ignored opaque data. tests/support/retained_info.rs::private_frame_info_keeps_opaque_utf16_and_wire_numbers constructs the actual binding and checks order/position Store info before JSON. All56 binding and72 exchange tests pass; native andWasm all-target strictClippy pass. This is a typed-construction classification, not an executed decoder-coverage claim."
   }
 }

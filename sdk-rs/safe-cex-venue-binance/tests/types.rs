@@ -249,3 +249,99 @@ fn income_union_accepted_set_matches_live_typescript() {
         format!("unknown variant `unknown`, expected one of {expected}")
     );
 }
+
+#[test]
+#[ignore = "executes the maintained inverse TypeScript module with installed oracle dependencies"]
+fn compiled_inverse_tables_match_live_typescript() {
+    use safe_cex_venue_binance::inverse::types as inverse;
+    let output = std::process::Command::new("node")
+        .arg(format!("{}/scripts/types.mjs", env!("CARGO_MANIFEST_DIR")))
+        .args(["--inverse", "--oracle"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source = js_numbers(serde_json::from_slice(&output.stdout).unwrap());
+    let native = json!({
+        "RECV_WINDOW": inverse::RECV_WINDOW,
+        "BASE_URL": object(inverse::BASE_URL),
+        "BASE_WS_URL": object(inverse::BASE_WS_URL),
+        "ENDPOINTS": object(inverse::ENDPOINTS),
+        "PUBLIC_ENDPOINTS": inverse::PUBLIC_ENDPOINTS,
+        "GRAFANA_ENDPOINTS_EVERY": inverse::GRAFANA_ENDPOINTS_EVERY,
+        "GRAFANA_ENDPOINTS_PERIODIC": inverse::GRAFANA_ENDPOINTS_PERIODIC,
+        "ORDER_TYPE": object(inverse::ORDER_TYPE), "ORDER_SIDE": object(inverse::ORDER_SIDE),
+        "POSITION_SIDE": object(inverse::POSITION_SIDE), "TIME_IN_FORCE": object(inverse::TIME_IN_FORCE),
+        "ORDER_TRIGGER_TYPE": object(inverse::ORDER_TRIGGER_TYPE),
+    });
+    assert_eq!(native.as_object().unwrap().len(), 12);
+    assert_eq!(inverse::ENDPOINTS.len(), 22);
+    assert_eq!(
+        native, source["binanceinverse"],
+        "compiled native inverse constants and wire enum values"
+    );
+}
+
+#[test]
+fn inverse_wire_records_preserve_native_fields_bits_and_object_frontdoors() {
+    use safe_cex_venue_binance::inverse::types::{
+        BinanceIncomeRecord, BinanceInversePositionRisk, GetPositionRiskResponse,
+    };
+    for (numeric, bits) in [
+        ("-0", (-0.0_f64).to_bits()),
+        ("1e400", f64::INFINITY.to_bits()),
+        ("-1e400", f64::NEG_INFINITY.to_bits()),
+    ] {
+        let position = format!(
+            r#"{{"symbol":"BTCUSD_PERP","positionAmt":"-2","entryPrice":"5","markPrice":"6","unRealizedProfit":"7","liquidationPrice":"8","leverage":"9","maxQty":"10","marginType":"isolated","isolatedMargin":"11","positionSide":"SHORT","updateTime":{numeric}}}"#
+        );
+        let decoded: BinanceInversePositionRisk = serde_json::from_str(&position).unwrap();
+        assert_eq!(decoded.symbol, "BTCUSD_PERP");
+        assert_eq!(decoded.position_amt, "-2");
+        assert_eq!(decoded.entry_price, "5");
+        assert_eq!(decoded.mark_price, "6");
+        assert_eq!(decoded.un_realized_profit, "7");
+        assert_eq!(decoded.liquidation_price, "8");
+        assert_eq!(decoded.leverage.as_deref(), Some("9"));
+        assert_eq!(decoded.max_qty.as_deref(), Some("10"));
+        assert_eq!(decoded.margin_type.as_deref(), Some("isolated"));
+        assert_eq!(decoded.isolated_margin, "11");
+        assert_eq!(decoded.position_side, "SHORT");
+        assert_eq!(decoded.update_time.to_bits(), bits);
+        let rows: GetPositionRiskResponse = serde_json::from_str(&format!("[{position}]")).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].update_time.to_bits(), bits);
+        let income = format!(
+            r#"{{"symbol":"BTCUSD_PERP","incomeType":"OPEN_SOURCE_TAG","income":"1","asset":"BTC","info":"raw","time":{numeric},"tranId":"9007199254740993","tradeId":"3"}}"#
+        );
+        let decoded: BinanceIncomeRecord = serde_json::from_str(&income).unwrap();
+        assert_eq!(decoded.symbol, "BTCUSD_PERP");
+        assert_eq!(decoded.income_type, "OPEN_SOURCE_TAG");
+        assert_eq!(decoded.income, "1");
+        assert_eq!(decoded.asset, "BTC");
+        assert_eq!(decoded.info.as_deref(), Some("raw"));
+        assert_eq!(decoded.time.to_bits(), bits);
+        assert_eq!(decoded.tran_id, "9007199254740993");
+        assert_eq!(decoded.trade_id.as_deref(), Some("3"));
+    }
+    let positional = json!([
+        "BTCUSD_PERP",
+        "-2",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "isolated",
+        "11",
+        "SHORT",
+        12
+    ]);
+    assert!(<BinanceInversePositionRisk as serde::Deserialize>::deserialize(positional).is_err());
+    let positional = json!(["BTCUSD_PERP", "COMMISSION", "1", "BTC", "raw", 1, "9", "3"]);
+    assert!(<BinanceIncomeRecord as serde::Deserialize>::deserialize(positional).is_err());
+}

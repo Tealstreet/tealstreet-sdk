@@ -9,6 +9,7 @@ use crate::{
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
 use safe_cex_num::{JsJsonValue, js_string};
 use safe_cex_store::{StoreUpdate, model_patch::ModelPatch};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     AccountValidationError, Balance, Candle, Execution, MarginType, Market, OHLCVOptions, Order,
     Position, StoreDataLoaded, Ticker, ValidateAccountResult,
@@ -180,14 +181,22 @@ impl BitunixVenue {
         })
     }
     /// JS order objects to shared Orders; an unrepresentable row is logged, never dropped silently.
-    pub(crate) fn orders_from(&self, rows: Vec<JsJsonValue>) -> Result<Vec<Order>, ExchangeError> {
+    pub(crate) fn orders_from(
+        &self,
+        rows: Vec<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> Result<Vec<Order>, ExchangeError> {
         let mut orders = Vec::new();
         for row in rows {
-            let value = adapter_json(&row)?;
-            match serde_json::from_value::<Order>(value.clone()) {
+            let value = row;
+            match crate::adapter::from_input::<Order>(value.clone()) {
                 Ok(order) => orders.push(order),
                 Err(e) => self.log(
-                    &format!("Bitunix order row cannot be represented ({e}): {value}"),
+                    &format!(
+                        "Bitunix order row cannot be represented ({e}): {}",
+                        safe_cex_num::js_retained_json_stringify(&value)
+                            .map_err(coercion)?
+                            .unwrap_or("undefined".into())
+                    ),
                     "warning",
                 )?,
             }
@@ -393,10 +402,14 @@ impl BitunixVenue {
                 || Ok(me.base.store.positions().to_vec()),
                 |p: &Position, s| Ok(p.symbol == s),
                 |p, leverage, margin| {
-                    let mut value = to_value(&p)?;
-                    value["leverage"] = leverage.unwrap_or(Value::Null);
-                    value["marginType"] = to_value(&margin)?;
-                    from_value(value)
+                    let mut value = crate::adapter::to_input(&p)?;
+                    *value.get_mut("leverage").expect("native Position leverage") =
+                        leverage.unwrap_or(Value::Null).into();
+                    let fields = value.as_object_mut().expect("native Position object");
+                    let key: Vec<u16> = "marginType".encode_utf16().collect();
+                    fields.retain(|(name, _)| name != &key);
+                    fields.push((key, crate::adapter::to_input(&margin)?));
+                    crate::adapter::from_input(value)
                 },
                 |positions| {
                     me.base
@@ -420,11 +433,11 @@ impl BitunixVenue {
     ) -> ExchangeFuture<'static, Vec<Execution>> {
         let me = self.clone();
         Box::pin(async move {
-            let options = to_value(&options)?;
+            let options = crate::adapter::to_input(&options)?;
             let rows = crate::event_models::fetch_historical_fills(&mut me.fill_frame(), &options)
                 .await
                 .map_err(|e| e.0)?;
-            rows.iter().map(|r| from_value(adapter_json(r)?)).collect()
+            rows.into_iter().map(crate::adapter::from_input).collect()
         })
     }
     fn fill_frame(self: &Rc<Self>) -> FillFrame {
@@ -469,8 +482,8 @@ impl crate::event_models::FillHistoryHost for FillFrame {
     fn public_only(&mut self) -> Result<bool, Fault> {
         Ok(self.venue.public_only())
     }
-    fn market(&mut self, symbol: &Value) -> Result<Option<Value>, Fault> {
-        let symbol = js_string(Some(symbol))?;
+    fn market(&mut self, symbol: &Input) -> Result<Option<Input>, Fault> {
+        let symbol = safe_cex_num::js_retained_string(Some(symbol))?;
         let market = self
             .venue
             .base
@@ -478,15 +491,20 @@ impl crate::event_models::FillHistoryHost for FillFrame {
             .markets_by_symbol()
             .get(&symbol)
             .cloned();
-        Ok(market.map(|m| to_value(&m)).transpose()?)
+        Ok(market.map(|m| crate::adapter::to_input(&m)).transpose()?)
     }
     fn get(
         &mut self,
         endpoint: &'static str,
-        config: JsJsonValue,
-    ) -> impl std::future::Future<Output = Result<Value, Fault>> {
-        let f = self.venue.xhr().get(endpoint, config);
-        async move { f.await.map_err(Fault) }
+        config: Input,
+    ) -> impl std::future::Future<Output = Result<Input, Fault>> {
+        let client = self.venue.xhr();
+        async move {
+            Ok(client
+                .get(endpoint, crate::adapter::request_payload(config)?)
+                .await?
+                .into())
+        }
     }
     fn local_to_utc(&mut self, value: f64) -> f64 {
         value

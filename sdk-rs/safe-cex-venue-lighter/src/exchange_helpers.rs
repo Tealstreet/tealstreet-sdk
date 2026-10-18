@@ -238,22 +238,25 @@ pub fn get_initial_tick_delay(tick_interval: f64) -> f64 {
 
 // ts: LighterExchange.parseMarginMode
 pub fn parse_margin_mode(
-    value: Option<&serde_json::Value>,
+    value: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
 ) -> Result<Option<crate::signer_types::LighterSignerMarginMode>, safe_cex_num::JsCoercionError> {
     use crate::signer_types::LighterSignerMarginMode as Mode;
-    let Some(value) = value.filter(|v| !v.is_null()) else {
+    let Some(value) = value.filter(|v| !v.is_nullish()) else {
         return Ok(None);
     };
-    if value.as_f64() == Some(0.0) || value.as_str() == Some("0") {
+    if value.as_f64() == Some(0.0) || value.text_equals("0") {
         return Ok(Some(Mode::CROSS));
     }
-    if value.as_f64() == Some(1.0) || value.as_str() == Some("1") {
+    if value.as_f64() == Some(1.0) || value.text_equals("1") {
         return Ok(Some(Mode::ISOLATED));
     }
-    let normalized = safe_cex_num::js_string(Some(value))?.to_lowercase();
-    Ok(match normalized.as_str() {
-        "cross" => Some(Mode::CROSS),
-        "isolated" => Some(Mode::ISOLATED),
+    let units = safe_cex_types::js_coercion::js_retained_string_utf16(value)?;
+    let normalized = String::from_utf16(&units)
+        .ok()
+        .map(|text| text.to_lowercase());
+    Ok(match normalized.as_deref() {
+        Some("cross") => Some(Mode::CROSS),
+        Some("isolated") => Some(Mode::ISOLATED),
         _ => None,
     })
 }
@@ -436,15 +439,15 @@ pub fn get_market_configured_margin_mode(
     let value = info
         .and_then(|v| v.get("market_config"))
         .and_then(|v| v.get("market_margin_mode"))
-        .filter(|v| !v.is_null())
+        .filter(|v| !v.is_nullish())
         .or_else(|| {
             info.and_then(|v| v.get("marketConfig"))
                 .and_then(|v| v.get("marketMarginMode"))
-                .filter(|v| !v.is_null())
+                .filter(|v| !v.is_nullish())
         })
         .or_else(|| {
             info.and_then(|v| v.get("market_margin_mode"))
-                .filter(|v| !v.is_null())
+                .filter(|v| !v.is_nullish())
         })
         .or_else(|| info.and_then(|v| v.get("marketMarginMode")));
     parse_margin_mode(value)

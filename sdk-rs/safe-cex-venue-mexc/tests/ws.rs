@@ -158,7 +158,8 @@ fn mexc_public_ticker_handler_patches_only_source_fields() {
         "minVol":3, "maxVol":100000, "minLeverage":4, "maxLeverage":125
     }))
     .unwrap();
-    let market = normalize_market(&market_raw).unwrap();
+    let market =
+        normalize_market(&serde_json::Value::Object((&market_raw).clone()).into()).unwrap();
     let local_to_utc = |value| value;
     let initial_raw: Map<String, Value> = serde_json::from_value(json!({
         "lastPrice":"10", "bid1":"9", "ask1":"11", "symbol":"BTC_USDT"
@@ -276,7 +277,8 @@ fn mexc_public_depth_handler_matches_live_typescript() {
         "minVol":3, "maxVol":100000, "minLeverage":4, "maxLeverage":125
     }))
     .unwrap();
-    let market = normalize_market(&market_raw).unwrap();
+    let market =
+        normalize_market(&serde_json::Value::Object((&market_raw).clone()).into()).unwrap();
     Store::update(
         &store,
         StoreUpdate {
@@ -774,7 +776,8 @@ fn mexc_websocket_store_notifications_propagate_after_commit() {
         "minVol":1, "maxVol":100000, "minLeverage":1, "maxLeverage":100
     }))
     .unwrap();
-    let market = normalize_market(&market_raw).unwrap();
+    let market =
+        normalize_market(&serde_json::Value::Object((&market_raw).clone()).into()).unwrap();
     let initial = normalize_ticker(
         &serde_json::from_value(
             json!({"lastPrice":"10","bid1":"9","ask1":"11","symbol":"BTC_USDT"}),
@@ -961,8 +964,9 @@ fn mexc_private_fill_boundary_native_fields_match_actual_source() {
         }
         let store = DefaultStore::new();
         if let Some(size) = row["contractSize"].as_f64() {
-            let raw=serde_json::from_value(json!({"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","contractSize":1,"volUnit":2,"priceUnit":0.1,"minVol":1,"maxVol":1000,"minLeverage":1,"maxLeverage":100})).unwrap();
-            let mut market = normalize_market(&raw).unwrap();
+            let raw: serde_json::Map<String, Value> = serde_json::from_value(json!({"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","contractSize":1,"volUnit":2,"priceUnit":0.1,"minVol":1,"maxVol":1000,"minLeverage":1,"maxLeverage":100})).unwrap();
+            let mut market =
+                normalize_market(&serde_json::Value::Object((&raw).clone()).into()).unwrap();
             market.contract_size = Some(size);
             Store::update(
                 &store,

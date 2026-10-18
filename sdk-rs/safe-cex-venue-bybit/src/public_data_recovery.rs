@@ -37,7 +37,11 @@ fn truthy(v: &DataValue) -> bool {
 }
 fn prop(v: &DataValue, key: &str) -> DataValue {
     match v {
-        DataValue::Object(f) => f.borrow().get(key).cloned().unwrap_or(DataValue::Undefined),
+        DataValue::Object(f) => f
+            .borrow()
+            .get(&key.encode_utf16().collect::<Vec<_>>())
+            .cloned()
+            .unwrap_or(DataValue::Undefined),
         _ => DataValue::Undefined,
     }
 }
@@ -330,7 +334,7 @@ fn spread_into<E>(
 ) -> Result<(), E> {
     match value {
         DataValue::Array(items) => rows.extend(items.borrow().iter().cloned()),
-        DataValue::String(text) => rows.extend(text.chars().map(|c| DataValue::String(c.into()))),
+        DataValue::String(text) => rows.extend(crate::ticker_readers::string_items(&text)),
         _ => {
             return Err(type_error(
                 "Spread syntax requires ...iterable[Symbol.iterator] to be a function",
@@ -431,11 +435,17 @@ fn to_number(value: &DataValue) -> f64 {
         DataValue::Null => 0.,
         DataValue::Bool(v) => f64::from(u8::from(*v)),
         DataValue::Number(v) => *v,
-        DataValue::String(v) => safe_cex_num::number_from_string(v),
+        DataValue::String(v) => safe_cex_num::js_retained_number(Some(
+            &safe_cex_types::retained_json::RetainedJsonInput::Text(v.clone()),
+        ))
+        .expect("String Number coercion"),
         DataValue::Array(items) => match items.borrow().as_slice() {
             [] => 0.,
             [DataValue::Null | DataValue::Undefined] => 0.,
-            [DataValue::String(v)] => safe_cex_num::number_from_string(v),
+            [DataValue::String(v)] => safe_cex_num::js_retained_number(Some(
+                &safe_cex_types::retained_json::RetainedJsonInput::Text(v.clone()),
+            ))
+            .expect("String Number coercion"),
             [DataValue::Number(v)] => *v,
             _ => f64::NAN,
         },
@@ -453,8 +463,8 @@ fn response_key<E>(
         DataValue::Object(fields) => {
             let fields = fields.borrow();
             Ok(fields
-                .get(key)
-                .or_else(|| fields.get(snake))
+                .get(&key.encode_utf16().collect::<Vec<_>>())
+                .or_else(|| fields.get(&snake.encode_utf16().collect::<Vec<_>>()))
                 .cloned()
                 .unwrap_or(DataValue::Undefined))
         }
@@ -470,7 +480,7 @@ fn primitive_text(value: &DataValue) -> String {
         DataValue::Null => "null".into(),
         DataValue::Bool(v) => v.to_string(),
         DataValue::Number(v) => safe_cex_num::js_number_string(*v),
-        DataValue::String(v) => v.clone(),
+        DataValue::String(v) => String::from_utf16_lossy(v),
         DataValue::Array(_) | DataValue::Object(_) => "[object Object]".into(),
     }
 }
@@ -526,7 +536,7 @@ async fn option_markets_body<E, G: Future<Output = Result<DataValue, E>>>(
     let mut markets = vec![];
     for base_coin in base_coins {
         let mut rows = vec![];
-        let mut cursor = DataValue::String(String::new());
+        let mut cursor = DataValue::String(Vec::new());
         loop {
             let data = get(
                 endpoints["MARKETS"].as_str().unwrap(),
@@ -537,9 +547,7 @@ async fn option_markets_body<E, G: Future<Output = Result<DataValue, E>>>(
             match result_field(&data, "list")? {
                 DataValue::Undefined => {}
                 DataValue::Array(items) => rows.extend(items.borrow().iter().cloned()),
-                DataValue::String(text) => {
-                    rows.extend(text.chars().map(|c| DataValue::String(c.into())))
-                }
+                DataValue::String(text) => rows.extend(crate::ticker_readers::string_items(&text)),
                 _ => {
                     return Err(OptionFailure::Raised(
                         "Spread syntax requires ...iterable[Symbol.iterator] to be a function"
@@ -548,7 +556,7 @@ async fn option_markets_body<E, G: Future<Output = Result<DataValue, E>>>(
                 }
             }
             cursor = match result_field(&data, "nextPageCursor")? {
-                DataValue::Undefined => DataValue::String(String::new()),
+                DataValue::Undefined => DataValue::String(Vec::new()),
                 next => next,
             };
             if !truthy(&cursor) {

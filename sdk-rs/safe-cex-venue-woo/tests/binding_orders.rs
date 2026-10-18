@@ -850,7 +850,7 @@ fn fetch_orders_accepts_documented_null_legacy_metadata_through_the_binding() {
     ] {
         assert_eq!(
             info.get(field),
-            Some(&Value::Null),
+            Some(&safe_cex_types::retained_json::RetainedJsonInput::Null),
             "retained own null {field}"
         );
     }
@@ -957,12 +957,32 @@ fn fetch_positions_reads_open_positions() {
     let positions: Vec<Position> = h
         .drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into()])))
         .expect("positions");
+    assert_eq!(positions.len(), 1);
+    let info = positions[0].info.value().expect("position info");
+    let mut serialized = serde_json::to_value(&positions).unwrap();
+    for (field, expected) in [
+        ("holding", 2.0_f64),
+        ("averageOpenPrice", 95.0),
+        ("leverage", 10.0),
+        ("estLiqPrice", 50.0),
+    ] {
+        assert_eq!(
+            info.get(field).unwrap().as_f64().unwrap().to_bits(),
+            expected.to_bits(),
+            "{field}"
+        );
+        let serialized_number = serialized[0]["info"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field)
+            .unwrap();
+        assert_eq!(serialized_number.as_f64(), Some(expected), "{field}");
+    }
     assert_eq!(
-        serde_json::to_value(&positions).unwrap(),
+        serialized,
         json!([{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":95.0,"notional":200.0,
             "leverage":10.0,"unrealizedPnl":10.0,"contracts":2.0,"liquidationPrice":50.0,
-            "positionMode":"oneway","marginType":"cross","info":{"symbol": "PERP_BTC_USDT", "holding": 2.0,
-            "averageOpenPrice": 95.0, "leverage": 10.0, "estLiqPrice": 50.0, "marginMode": "CROSS"}}]),
+            "positionMode":"oneway","marginType":"cross","info":{"symbol": "PERP_BTC_USDT", "marginMode": "CROSS"}}]),
         "{}",
         log(&h)
     );

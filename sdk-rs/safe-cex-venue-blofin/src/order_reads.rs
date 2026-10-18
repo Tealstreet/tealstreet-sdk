@@ -711,13 +711,19 @@ pub async fn fetch_historical_fills<E: std::fmt::Display>(
     };
     let contract_size = match market.contract_size.filter(|v| *v != 0.0 && !v.is_nan()) {
         Some(value) => value,
-        None => parse_float(
-            &js_string(
-                truth(market.info.as_ref().and_then(|v| v.get("contractValue")))
-                    .or(Some(&json!("1"))),
+        None => {
+            let default =
+                safe_cex_types::retained_json::RetainedJsonInput::Text(vec![u16::from(b'1')]);
+            safe_cex_num::js_retained_parse_float(
+                market
+                    .info
+                    .as_ref()
+                    .and_then(|v| v.get("contractValue"))
+                    .filter(|v| v.is_truthy())
+                    .or(Some(&default)),
             )
-            .map_err(ServiceError::Coercion)?,
-        ),
+            .map_err(ServiceError::Coercion)?
+        }
     };
     let limit = math_min(math_max(opts.limit.unwrap_or(100.0), 1.0), 100.0);
     if !limit.is_finite() {

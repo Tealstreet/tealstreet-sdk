@@ -1,7 +1,8 @@
 #[path = "support/complete_host.rs"]
 mod host;
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 use host::*;
-use safe_cex_num::numeric_ingress::js_value_as_f64;
 use safe_cex_types::*;
 use safe_cex_venue_blofin::{exchange::*, private_stream_data::*, public_stream_data::*};
 use serde_json::{Value, json};
@@ -52,27 +53,6 @@ fn number(n: f64, e: &Value) {
         )
     }
 }
-fn plain(n: &Value, e: &Value) {
-    if e.get("number").is_some() {
-        number(js_value_as_f64(n).unwrap(), e)
-    } else {
-        match (n, e) {
-            (Value::Object(n), Value::Object(e)) => {
-                assert_eq!(n.len(), e.len(), "native object count");
-                for (k, n) in n {
-                    plain(n, &e[k]);
-                }
-            }
-            (Value::Array(n), Value::Array(e)) => {
-                assert_eq!(n.len(), e.len(), "native array count");
-                for (n, e) in n.iter().zip(e) {
-                    plain(n, e);
-                }
-            }
-            _ => assert_eq!(n, e, "native primitive"),
-        }
-    }
-}
 fn effects(n: &Value, e: &Value) {
     match (n, e) {
         (Value::Number(a), Value::Number(b)) => {
@@ -118,7 +98,7 @@ fn native(r: &Runtime, e: &Value) {
         }
         assert_eq!(o.reduce_only, false);
         assert_eq!(o.time_in_force, Some(OrderTimeInForce::GoodTillCancel));
-        plain(o.info.as_ref().unwrap(), &e["info"]);
+        retained_assert::assert_value(o.info.as_ref().unwrap(), &e["info"]);
         let extra = o.extra.as_ref().unwrap();
         number(
             extra.remaining_native.unwrap(),
@@ -148,7 +128,7 @@ fn native(r: &Runtime, e: &Value) {
         ] {
             number(n, &e[k]);
         }
-        plain(p.info.as_ref().unwrap(), &e["info"]);
+        retained_assert::assert_value(p.info.as_ref().unwrap(), &e["info"]);
         number(
             p.extra.as_ref().unwrap().contracts_native.unwrap(),
             &e["extra"]["contractsNative"],
@@ -164,7 +144,7 @@ fn native(r: &Runtime, e: &Value) {
         number(n, &e["balance"][k]);
     }
     match &balance.info {
-        Some(i) => plain(i, &e["balance"]["info"]),
+        Some(i) => retained_assert::assert_value(i, &e["balance"]["info"]),
         None => assert!(e["balance"].get("info").is_none()),
     }
     let fills = r.fills.borrow();
@@ -307,7 +287,18 @@ fn account_native() {
         .unwrap();
     let (r, _, _) = run(e);
     assert_eq!(
-        r.store.balance().info.as_ref().unwrap()["totalEquity"],
+        String::from_utf16(
+            r.store
+                .balance()
+                .info
+                .as_ref()
+                .unwrap()
+                .get("totalEquity")
+                .unwrap()
+                .as_text()
+                .unwrap()
+        )
+        .unwrap(),
         "100",
         "native account info owned copy"
     );

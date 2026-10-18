@@ -149,41 +149,78 @@ fn normalize_starbase_order_live_typescript_contract() {
                 ("ok.value.takeProfit", value.take_profit.unwrap()),
                 (
                     "ok.value.info.price",
-                    value.info.as_ref().unwrap()["price"].as_f64().unwrap(),
+                    value
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("price")
+                        .unwrap()
+                        .as_f64()
+                        .unwrap(),
                 ),
                 (
                     "ok.value.info.averagePrice",
-                    value.info.as_ref().unwrap()["averagePrice"]
+                    value
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("averagePrice")
+                        .unwrap()
                         .as_f64()
                         .unwrap(),
                 ),
                 (
                     "ok.value.info.creationTimestampMs",
-                    value.info.as_ref().unwrap()["creationTimestampMs"]
+                    value
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("creationTimestampMs")
+                        .unwrap()
                         .as_f64()
                         .unwrap(),
                 ),
                 (
                     "ok.value.info.gatewayAmount",
-                    value.info.as_ref().unwrap()["gatewayAmount"]
+                    value
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("gatewayAmount")
+                        .unwrap()
                         .as_f64()
                         .unwrap(),
                 ),
                 (
                     "ok.value.info.gatewayFilledAmount",
-                    value.info.as_ref().unwrap()["gatewayFilledAmount"]
+                    value
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("gatewayFilledAmount")
+                        .unwrap()
                         .as_f64()
                         .unwrap(),
                 ),
                 (
                     "ok.value.info.gatewayContracts",
-                    value.info.as_ref().unwrap()["gatewayContracts"]
+                    value
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("gatewayContracts")
+                        .unwrap()
                         .as_f64()
                         .unwrap(),
                 ),
                 (
                     "ok.value.info.triggerPrice",
-                    value.info.as_ref().unwrap()["triggerPrice"]
+                    value
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("triggerPrice")
+                        .unwrap()
                         .as_f64()
                         .unwrap(),
                 ),
@@ -196,7 +233,17 @@ fn normalize_starbase_order_live_typescript_contract() {
                 case["floatBits"]["ok.value.info.lastUpdateTimestampMs"],
                 "7ff8000000000000"
             );
-            assert!(value.info.as_ref().unwrap()["lastUpdateTimestampMs"].is_null());
+            assert!(
+                value
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("lastUpdateTimestampMs")
+                    .unwrap()
+                    .as_f64()
+                    .unwrap()
+                    .is_nan()
+            );
             numeric_bits_checked = true;
         }
         if case["name"] == "numeric-stop-loss-bits" {
@@ -222,7 +269,17 @@ fn normalize_starbase_order_live_typescript_contract() {
                 panic!("info-identity case should normalize as ready");
             };
             assert_eq!(value.price, 3.0);
-            assert_eq!(value.info.as_ref().unwrap()["price"], 3.0);
+            assert_eq!(
+                value
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .get("price")
+                    .unwrap()
+                    .as_f64()
+                    .unwrap(),
+                3.0
+            );
             info_identity_diverged = true;
         }
         if case["name"] == "extra-own-property" {
@@ -238,7 +295,8 @@ fn normalize_starbase_order_live_typescript_contract() {
                 .unwrap()
                 .as_object()
                 .unwrap()
-                .keys()
+                .iter()
+                .map(|(key, _)| String::from_utf16(key).unwrap())
                 .collect();
             assert_ne!(
                 rust_keys,

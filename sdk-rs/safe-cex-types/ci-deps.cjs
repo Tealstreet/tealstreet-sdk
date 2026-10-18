@@ -15,7 +15,7 @@ fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({
     vitest: JSON.parse(fs.readFileSync(path.join(root, 'packages/safe-cex/package.json'), 'utf8')).devDependencies.vitest,
     typescript: manifest.devDependencies.typescript,
     // Venue signing and exchange oracles execute real hashing, numeric and Axios boundaries.
-    ...Object.fromEntries(['axios', 'qs', 'create-hmac', 'axios-retry', 'nanoid', 'tiny-emitter', 'bignumber.js', '@noble/hashes', '@ethersproject/bignumber', '@noble/ed25519', 'bs58'].map(name => [name,
+    ...Object.fromEntries(['axios', 'qs', 'create-hmac', 'axios-retry', 'axios-rate-limit', 'nanoid', 'tiny-emitter', 'bignumber.js', '@noble/hashes', '@ethersproject/bignumber', '@noble/ed25519', 'bs58'].map(name => [name,
       JSON.parse(fs.readFileSync(path.join(root, 'packages/safe-cex/package.json'), 'utf8')).dependencies[name],
     ])),
     // Store clock oracle uses real dayjs; keep its package selector and lockfile.

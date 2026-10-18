@@ -1036,5 +1036,710 @@
     "category": "non-decoder",
     "evidence": "safe-cex-store/src/risk.rs",
     "reason": "Checks forbidden prototype keys as a guard; produces no parsed domain owner."
+  },
+  "safe_cex_store::contract::StoreUpdate": {
+    "shape": "map",
+    "evidence": "Existing strict StoreUpdate object admission with opaque retained zkLinkConfig. Native decoder observations inspect absent, own undefined, null, number bits, UTF16 keys/values and arrays before serialization. Actual production Store facade set-then-replace cases independently compare source mutation and refusal semantics.",
+    "sample": {
+      "zkLinkConfig": {
+        "probe": 1
+      },
+      "orders": []
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ fn build(v:&serde_json::Value)->safe_cex_types::retained_json::RetainedJsonInput{use safe_cex_types::retained_json::RetainedJsonInput as I;match v[\"kind\"].as_str().unwrap(){\"undefined\"=>I::Undefined,\"null\"=>I::Null,\"bool\"=>I::Bool(v[\"value\"].as_bool().unwrap()),\"number\"=>I::Float(f64::from_bits(u64::from_str_radix(v[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>I::Text(v[\"units\"].as_array().unwrap().iter().map(|n|n.as_u64().unwrap() as u16).collect()),\"array\"=>I::Array(v[\"values\"].as_array().unwrap().iter().map(build).collect()),\"object\"=>I::Object(v[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|n|n.as_u64().unwrap()as u16).collect(),build(&e[\"value\"]))).collect()),_=>panic!(\"authored native input\")}} fn observe(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),I::Null=>serde_json::json!({\"kind\":\"null\"}),I::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),I::Float(value)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:x}\",value.to_bits())}),I::Lexeme(_)=>panic!(\"native values retain bits\"),I::Text(units)=>serde_json::json!({\"kind\":\"text\",\"units\":units}),I::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.iter().map(observe).collect::<Vec<_>>()}),I::Object(entries)=>serde_json::json!({\"kind\":\"object\",\"entries\":entries.iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()})}} let input=build($value);let native=input.decode_native::<$type>(false).expect(\"native Store update\");serde_json::json!({\"ok\":true,\"present\":native.zk_link_config.is_some(),\"value\":native.zk_link_config.as_ref().map(observe)}) }",
+      "nativeFields": [
+        "present",
+        "value"
+      ],
+      "cases": [
+        {
+          "input": {
+            "kind": "object",
+            "entries": []
+          },
+          "output": {
+            "ok": true,
+            "present": false,
+            "value": null
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "undefined"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "undefined"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "null"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "7ff0000000000000"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "number",
+              "bits": "7ff0000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "fff0000000000000"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "number",
+              "bits": "fff0000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "number",
+              "bits": "8000000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "number",
+                  "bits": "0"
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "number",
+              "bits": "0"
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "bool",
+                  "value": false
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "bool",
+              "value": false
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "text",
+                  "units": [
+                    55296
+                  ]
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "text",
+              "units": [
+                55296
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "array",
+                  "values": [
+                    {
+                      "kind": "undefined"
+                    },
+                    {
+                      "kind": "number",
+                      "bits": "7ff8000000000000"
+                    },
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "text",
+                      "units": [
+                        57343
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "array",
+              "values": [
+                {
+                  "kind": "undefined"
+                },
+                {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                },
+                {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                {
+                  "kind": "text",
+                  "units": [
+                    57343
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "object",
+                  "entries": [
+                    {
+                      "key": [
+                        110,
+                        97,
+                        110
+                      ],
+                      "value": {
+                        "kind": "number",
+                        "bits": "7ff8000000000000"
+                      }
+                    },
+                    {
+                      "key": [
+                        105,
+                        110,
+                        102,
+                        105,
+                        110,
+                        105,
+                        116,
+                        121
+                      ],
+                      "value": {
+                        "kind": "number",
+                        "bits": "7ff0000000000000"
+                      }
+                    },
+                    {
+                      "key": [
+                        122,
+                        101,
+                        114,
+                        111
+                      ],
+                      "value": {
+                        "kind": "number",
+                        "bits": "8000000000000000"
+                      }
+                    },
+                    {
+                      "key": [
+                        111,
+                        119,
+                        110,
+                        85,
+                        110,
+                        100,
+                        101,
+                        102,
+                        105,
+                        110,
+                        101,
+                        100
+                      ],
+                      "value": {
+                        "kind": "undefined"
+                      }
+                    },
+                    {
+                      "key": [
+                        57343
+                      ],
+                      "value": {
+                        "kind": "text",
+                        "units": [
+                          55296
+                        ]
+                      }
+                    },
+                    {
+                      "key": [
+                        36,
+                        115,
+                        101,
+                        114,
+                        100,
+                        101,
+                        95,
+                        106,
+                        115,
+                        111,
+                        110,
+                        58,
+                        58,
+                        112,
+                        114,
+                        105,
+                        118,
+                        97,
+                        116,
+                        101,
+                        58,
+                        58,
+                        78,
+                        117,
+                        109,
+                        98,
+                        101,
+                        114
+                      ],
+                      "value": {
+                        "kind": "text",
+                        "units": [
+                          49,
+                          55
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "object",
+              "entries": [
+                {
+                  "key": [
+                    110,
+                    97,
+                    110
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "7ff8000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    105,
+                    110,
+                    102,
+                    105,
+                    110,
+                    105,
+                    116,
+                    121
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "7ff0000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    122,
+                    101,
+                    114,
+                    111
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "8000000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    111,
+                    119,
+                    110,
+                    85,
+                    110,
+                    100,
+                    101,
+                    102,
+                    105,
+                    110,
+                    101,
+                    100
+                  ],
+                  "value": {
+                    "kind": "undefined"
+                  }
+                },
+                {
+                  "key": [
+                    57343
+                  ],
+                  "value": {
+                    "kind": "text",
+                    "units": [
+                      55296
+                    ]
+                  }
+                },
+                {
+                  "key": [
+                    36,
+                    115,
+                    101,
+                    114,
+                    100,
+                    101,
+                    95,
+                    106,
+                    115,
+                    111,
+                    110,
+                    58,
+                    58,
+                    112,
+                    114,
+                    105,
+                    118,
+                    97,
+                    116,
+                    101,
+                    58,
+                    58,
+                    78,
+                    117,
+                    109,
+                    98,
+                    101,
+                    114
+                  ],
+                  "value": {
+                    "kind": "text",
+                    "units": [
+                      49,
+                      55
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "kind": "object",
+            "entries": [
+              {
+                "key": [
+                  122,
+                  107,
+                  76,
+                  105,
+                  110,
+                  107,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ],
+                "value": {
+                  "kind": "object",
+                  "entries": []
+                }
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "value": {
+              "kind": "object",
+              "entries": []
+            }
+          }
+        }
+      ]
+    }
   }
 }

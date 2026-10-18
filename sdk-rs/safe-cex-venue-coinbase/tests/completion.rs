@@ -112,10 +112,14 @@ fn value(a: Option<&Value>, e: &Value, n: &str) {
 }
 fn frame(a: Option<Frame>, e: &Value, n: &str) {
     if e.get("$undefined") == Some(&json!(true)) {
-        assert!(a.is_none(), "{n}: native undefined");
+        assert!(
+            matches!(a, None | Some(Frame::Undefined)),
+            "{n}: native undefined"
+        );
         return;
     }
     match a.expect("native frame") {
+        Frame::Undefined => assert_eq!(e["$undefined"], true, "native undefined"),
         Frame::Null => assert!(e.is_null(), "{n}: null"),
         Frame::Bool(v) => assert_eq!(Some(v), e.as_bool(), "{n}: bool"),
         Frame::Number(v) => num(v, e, n),
@@ -260,7 +264,7 @@ impl OrderEditHost for EditHost {
         &self,
         endpoint: &'static str,
         p: safe_cex_venue_coinbase::types::EditOrderRequest,
-    ) -> EditAsync<Value> {
+    ) -> EditAsync<safe_cex_types::retained_json::RetainedJsonInput> {
         let e = self.trace.next("post");
         assert_eq!(endpoint, e["endpoint"].as_str().unwrap());
         let expected = &e["payload"];
@@ -284,7 +288,7 @@ impl OrderEditHost for EditHost {
             &self.q,
             self.post_error
                 .clone()
-                .map_or_else(|| Ok(self.input["response"].clone()), Err),
+                .map_or_else(|| Ok(self.input["response"].clone().into()), Err),
         ))
     }
     fn schedule_reconciliation(&self, reason: &'static str) -> Result<(), PortfolioFailure> {
@@ -318,7 +322,7 @@ fn order(v: &Value) -> SyncedOrderRoot {
     fields.info = (None).into();
     Rc::new(RefCell::new(SyncedOrder {
         fields,
-        info: Rc::new(RefCell::new(v["info"].clone())),
+        info: Rc::new(RefCell::new(v["info"].clone().into())),
     }))
 }
 #[test]
@@ -1461,13 +1465,13 @@ impl safe_cex_venue_coinbase::portfolios_balances::PortfolioHost for ClassHost {
         match endpoint {
             "/api/v3/brokerage/portfolios" => Promise::resolved(Ok(
                 safe_cex_venue_coinbase::portfolios_balances::PortfolioReply {
-                    data: json!({}),
+                    data: json!({}).into(),
                     portfolios: Some(leaves.portfolios.clone()),
                 },
             )),
             "/api/v3/brokerage/portfolios/{portfolio_uuid}" => Promise::resolved(Ok(
                 safe_cex_venue_coinbase::portfolios_balances::PortfolioReply {
-                    data: json!({}),
+                    data: json!({}).into(),
                     portfolios: None,
                 },
             )),
@@ -2036,7 +2040,7 @@ fn class_policy_reads_live_slots_keeps_captured_base_bodies_and_retains_native_p
         class.support_spot.set(false);
         resolve.resolve(Ok(
             safe_cex_venue_coinbase::portfolios_balances::PortfolioReply {
-                data: json!({}),
+                data: json!({}).into(),
                 portfolios: None,
             },
         ));

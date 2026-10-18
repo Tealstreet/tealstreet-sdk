@@ -14,6 +14,7 @@ pub mod order_records;
 pub mod private_records;
 pub mod protocol;
 pub mod public_records;
+mod response;
 pub mod signer_records;
 pub mod signer_utils;
 pub mod socket_host;

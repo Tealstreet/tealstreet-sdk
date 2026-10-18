@@ -82,3 +82,47 @@ pub fn native_eq(actual: &J, expected: &J, label: &str) {
         _ => assert_eq!(actual, expected, "{label} native value"),
     }
 }
+
+pub fn retained(value: &safe_cex_types::retained_json::RetainedJsonInput) -> J {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    match value {
+        Input::Undefined => J::Undefined,
+        Input::Null => J::Null,
+        Input::Bool(value) => J::Bool(*value),
+        Input::Float(_) | Input::Lexeme(_) => J::Number(value.as_f64().unwrap()),
+        Input::Text(units) => {
+            J::String(String::from_utf16(units).expect("source native observer UTF8 text"))
+        }
+        Input::Array(values) => J::Array(values.iter().map(retained).collect()),
+        Input::Object(values) => J::Object(
+            values
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        String::from_utf16(key).expect("source native observer UTF8 key"),
+                        retained(value),
+                    )
+                })
+                .collect(),
+        ),
+    }
+}
+
+/// Build the existing source fixtures at the native host boundary, without JSON.
+pub fn heap(value: &J) -> safe_cex_exchange::js_runtime::value::Js {
+    use safe_cex_exchange::js_runtime::value::Js;
+    match value {
+        J::Undefined => Js::Undefined,
+        J::Null => Js::Null,
+        J::Bool(v) => Js::Bool(*v),
+        J::Number(v) => Js::Number(*v),
+        J::String(v) => Js::str(v),
+        J::BigInt(v) => Js::BigInt(std::rc::Rc::new(v.clone())),
+        J::Array(v) => Js::array(v.iter().map(heap).collect()),
+        J::Object(v) => Js::object(v.iter().map(|(k, v)| (k.as_str(), heap(v))).collect()),
+    }
+}
+pub fn capture(value: &J) -> safe_cex_types::retained_json::RetainedJsonInput {
+    safe_cex_exchange::js_runtime::value::to_retained_input(&heap(value))
+        .expect("source fixture fits canonical retained response")
+}

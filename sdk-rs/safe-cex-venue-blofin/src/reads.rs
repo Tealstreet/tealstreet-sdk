@@ -4,13 +4,9 @@ use crate::{
     tickers::{TickerInput, format_tickers},
     types::ENDPOINTS,
 };
-use safe_cex_num::{
-    js_truthy,
-    numeric_ingress::{js_from_str, js_from_value_ref},
-};
 use safe_cex_store::Store;
 use safe_cex_transport::{RestAdapter, RestRequest, RestResponseBody};
-use safe_cex_types::Ticker;
+use safe_cex_types::{Ticker, retained_json::RetainedJsonInput as Input};
 use serde_json::Value;
 
 /// An explicit response representation refusal is distinct from a source catch.
@@ -22,15 +18,19 @@ pub enum ReadError<E> {
 }
 
 fn body<E>(body: &RestResponseBody) -> Result<TickerInput, ReadError<E>> {
-    // Encoded bodies use the declared JSON-only profile. Native adapter values
-    // are already data: do not stringify or parse a transformed string again.
+    // Parse only encoded wire bytes. Native transformed data remains canonical
+    // Input through TickerInput and the final model info capture.
     match body {
-        RestResponseBody::Encoded(bytes) => js_from_str(&String::from_utf8_lossy(bytes)),
-        RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => value
-            .clone()
-            .into_value()
-            .and_then(|value| js_from_value_ref(&value)),
+        RestResponseBody::Encoded(bytes) => Input::parse_json(
+            &String::from_utf8_lossy(bytes)
+                .encode_utf16()
+                .collect::<Vec<_>>(),
+        ),
+        RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
+            Ok(value.clone())
+        }
     }
+    .map(TickerInput::from_retained)
     .map_err(ReadError::Ingress)
 }
 
@@ -57,7 +57,9 @@ pub async fn fetch_tickers_raw<E>(
                     .cloned()
                     .map(TickerInput::from_retained));
             }
-            Value::String("Cannot read properties of null (reading 'data')".into())
+            Input::from(Value::String(
+                "Cannot read properties of null (reading 'data')".into(),
+            ))
         }
         Err(error) => {
             let response = error
@@ -68,13 +70,15 @@ pub async fn fetch_tickers_raw<E>(
             response
                 .as_ref()
                 .and_then(|r| r.retained().get("msg"))
-                .filter(|message| js_truthy(Some(message)))
+                .filter(|message| message.is_truthy())
                 .cloned()
-                .unwrap_or(Value::String(error.message))
+                .unwrap_or_else(|| Input::from(Value::String(error.message)))
         }
     };
+    // The existing generic reporter consumes an explicit JSON-view message.
+    let message = message.into_value().map_err(ReadError::Ingress)?;
     emit_and_log_error(&message).map_err(ReadError::Emitter)?;
-    Ok(Some(TickerInput::from_retained(Value::Array(Vec::new()))))
+    Ok(Some(TickerInput::from_retained(Input::Array(Vec::new()))))
 }
 
 pub async fn fetch_tickers<E>(

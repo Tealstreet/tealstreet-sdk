@@ -822,3 +822,13 @@ native/Wasm all-target strict Clippy, all-features cancellation6/1export-ignore,
 override7/1live-TS-ignore, binding gate25, parity7459/16581 and extractor0 pass.
 Logs: /tmp/breakout-amendment-caller-{red,native,control-red,control-restored,
 native-clippy,wasm-clippy,inventories,parity,extract}.log.
+
+## Retained native metadata
+
+Three constructed binding tests cover actual market, ticker, order and position
+reads with nested NaN payload bits, infinities, signed zero, own undefined and
+lone UTF16 text/keys. Market results also cross DefaultStore. Restoring original
+master market/raw/portfolio/quote buffers, with only compiler-required final
+field conversions, compiles and fails all three named tests. Exact production
+byte restoration passes all three. Logs are `/tmp/retained-info-breakout-compiled-red.log`
+and `/tmp/retained-info-breakout-restored-green.log`.

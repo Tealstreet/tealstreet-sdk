@@ -12,9 +12,11 @@ use indexmap::IndexMap;
 use serde_json::Value;
 use std::{cell::RefCell, rc::Rc};
 
-/// Native parsed JSON: primitive clones are copies, object/array clones share identity.
+/// Native data: primitive clones copy, object/array clones share identity.
+/// Undefined is retained at native model boundaries and is never parsed from JSON.
 #[derive(Debug, Clone)]
 pub enum CoinbaseStarbaseFrameValue {
+    Undefined,
     Null,
     Bool(bool),
     Number(f64),

@@ -174,13 +174,16 @@ fn strip_swap_suffix(value: &str) -> String {
 pub fn get_index_ticker_inst_id(
     market: &safe_cex_types::Market,
 ) -> Result<String, safe_cex_num::JsCoercionError> {
-    let underlying = crate::income::truthy_string(
+    let underlying = safe_cex_num::js_retained_string(Some(
         market
             .info
             .as_ref()
             .and_then(|value| value.get("uly"))
-            .unwrap_or(&serde_json::Value::Null),
-    )?;
+            .filter(|value| value.is_truthy())
+            .unwrap_or(&safe_cex_types::retained_json::RetainedJsonInput::Text(
+                Vec::new(),
+            )),
+    ))?;
     Ok(if underlying.is_empty() {
         strip_swap_suffix(&market.id)
     } else {

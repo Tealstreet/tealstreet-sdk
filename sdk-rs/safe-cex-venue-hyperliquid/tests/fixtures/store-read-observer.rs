@@ -115,7 +115,10 @@ impl safe_cex_store::Store for ReadTrace {
     fn update_stark_config(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::update_stark_config(self.inner.as_ref(), data)
     }
-    fn update_zk_link_config(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
+    fn update_zk_link_config(
+        &self,
+        data: Option<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> Result<(), StoreMutationError> {
         safe_cex_store::Store::update_zk_link_config(self.inner.as_ref(), data)
     }
     fn update_user_data(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
@@ -173,7 +176,7 @@ impl safe_cex_store::Store for ReadTrace {
     fn stark_config(&self) -> Option<Ref<'_, Value>> {
         safe_cex_store::Store::stark_config(self.inner.as_ref())
     }
-    fn zk_link_config(&self) -> Option<Ref<'_, Value>> {
+    fn zk_link_config(&self) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>> {
         safe_cex_store::Store::zk_link_config(self.inner.as_ref())
     }
     fn user_data(&self) -> Option<Ref<'_, Value>> {

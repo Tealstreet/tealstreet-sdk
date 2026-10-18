@@ -23,3 +23,8 @@ serde_json.workspace = true
 [dev-dependencies]
 sha2.workspace = true
 syn.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+safe-cex-exchange = { workspace = true, features = ["native"] }
+safe-cex-transport = { workspace = true, features = ["native"] }
+tokio = { workspace = true, features = ["rt", "time"] }

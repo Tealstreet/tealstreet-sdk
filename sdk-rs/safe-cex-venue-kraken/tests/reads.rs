@@ -3,7 +3,7 @@ mod cardinality;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
     JsJsonValue,
-    numeric_ingress::{JsNumberInput, js_from_value, js_value_as_f64},
+    numeric_ingress::{JsNumberInput, js_from_value},
 };
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::{
@@ -64,14 +64,12 @@ fn opt_string(v: &Option<String>) -> Value {
     v.as_ref()
         .map_or_else(|| json!({"undefined":true}), |v| json!(v))
 }
-fn capture(v: &Value) -> Value {
-    match v {
-        Value::Number(_) => number(js_value_as_f64(v).unwrap()),
-        Value::Array(a) => Value::Array(a.iter().map(capture).collect()),
-        Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (k.clone(), capture(v))).collect()),
-        v => v.clone(),
-    }
+#[path = "../../parity/evidence/retained_model_values.rs"]
+pub mod retained_model_values;
+fn capture(value: &(impl serde::Serialize + ?Sized)) -> Value {
+    retained_model_values::observe(value, number)
 }
+
 fn request(params: JsJsonValue) -> Value {
     let JsJsonValue::Object(entries) = params else {
         panic!("query native object")

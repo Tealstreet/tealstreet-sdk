@@ -218,9 +218,16 @@ pub(super) fn market(h: &Host, raw: Js) -> Result<Js, Thrown> {
     match crate::market_data::normalize_market_row(&capture(&raw)?).map_err(utility_error)? {
         Ok(market) => from_typed(&market),
         Err(refusal) => {
-            let received = refusal
-                .value
-                .map_or_else(|| "undefined".into(), |value| value.to_string());
+            let received = refusal.value.map_or_else(
+                || "undefined".into(),
+                |value| {
+                    value
+                        .json_stringify()
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| "undefined".into())
+                },
+            );
             h.warn(Js::str(&format!(
                 "WEEX market row refused: {}; received: {}",
                 refusal.error.message, received
@@ -272,7 +279,12 @@ pub(super) fn execution(h: &Host, raw: Js, market: Js) -> Result<Js, Thrown> {
         Err(crate::fills::ExecutionRowError::Projection(refusal)) => {
             h.warn(Js::str(&format!(
                 "WEEX historical fill row refused: {}; received: {}",
-                refusal.error.message, refusal.value
+                refusal.error.message,
+                refusal
+                    .value
+                    .json_stringify()
+                    .map_err(|cause| Thrown::type_error(&cause.message))?
+                    .unwrap_or_else(|| "undefined".into())
             )))?;
             Ok(Js::Undefined)
         }
