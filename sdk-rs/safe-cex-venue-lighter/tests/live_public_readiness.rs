@@ -573,7 +573,7 @@ fn public_readiness_native_lifecycle_callbacks_clocks_and_identity() {
         "independent per-method floors"
     );
     assert_eq!(
-        oracle["contentHash"], "8f8bdd4dabd92d33bdde9f352002571989223e94686e995453c4ab07bfb19b72",
+        oracle["contentHash"], "d364ae06a488ca6af72ab211e70cfa4b10ee0c4099281d9198c19adb50b8ec49",
         "full source-only corpus pin after every native assertion"
     );
 }
