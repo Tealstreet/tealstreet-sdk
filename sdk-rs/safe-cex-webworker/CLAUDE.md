@@ -703,3 +703,14 @@ The ticker baseline corpus includes four nullable-index actions in addition to
 its original 354 comparisons. Actual maintained worker execution observes an
 updated null baseline without a packed null value; null-to-number emits the
 numeric index delta. This preserves the source typeof-number filter.
+
+TWAP resume/terminate keep their synchronous state/timer prefix and return the
+canonical eager Promise waiter, so even ready/no-op/error results yield before
+an awaiting caller continues. Posting failures preserve earlier state commits
+and stop later cleanup/removal; tests compare actual source instances before
+polling as well as after settlement.
+
+Chaser placement/completion use the canonical eager Promise driver. Caller waiter
+abandonment cannot cancel late-placement cleanup or fill reconciliation. Typed
+leaf results cross source await checkpoints before logs, retries, fills or events;
+ready, failed, no-op and held results are compared with the actual TS manager.
