@@ -184,7 +184,7 @@ fn decoded_nested_and_history_models_pin_native_field_identity() {
     );
     assert_eq!(
         (market.limits.amount.min, market.limits.amount.max),
-        (37.0, 41.0),
+        (37.0, safe_cex_types::NumericValue::Number(41.0)),
         "FIELD-IDENTITY nested amount limits"
     );
     assert_eq!(

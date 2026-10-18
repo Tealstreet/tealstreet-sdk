@@ -443,6 +443,12 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtraHyrotraderMode {
     }
 }
 
+impl JsNumberOutput for safe_cex_types::NumericValue {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, enum { Number(value), Text(value) });
+    }
+}
+
 impl JsNumberOutput for safe_cex_types::MarketRuntime {
     fn check_number_output(&self) {
         crate::js_number_output!(self, struct { kind, spot, swap, future, contract, linear, inverse });

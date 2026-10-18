@@ -221,7 +221,7 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                     cost: None,
                     amount: MarketLimitsAmount {
                         min: parse(row.get("minSize"))? * contract,
-                        max: max_amount,
+                        max: (max_amount).into(),
                     },
                     leverage: MarketLimitsLeverage {
                         min: 1.0,
