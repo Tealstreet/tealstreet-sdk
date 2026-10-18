@@ -567,3 +567,61 @@ fn okx_family_signed_rest_uses_the_authenticated_bigint_tunnel() {
         }
     });
 }
+
+
+async fn native_rest_diagnostics(name: safe_cex_types::ExchangeName) {
+    use safe_cex_exchange::runtime::ExchangeRuntime;
+    use safe_cex_store::venue_rest_diagnostics::{
+        drain_venue_rest_failure_samples, get_venue_rest_stats, reset_venue_rest_diagnostics,
+    };
+    for tunneled in [false, true] {
+        reset_venue_rest_diagnostics();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("ws://{}", listener.local_addr().unwrap());
+        let tunnel = Rc::new(Tunnel::default());
+        tokio::task::spawn_local(serve_tunnel(listener, Rc::new(|_| None), tunnel.clone()));
+        let runtime = native_tealstreet_runtime_with(
+            Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+            Rc::new(LocalTunnel { inner: NativeTunnelHost, origin }),
+        );
+        let h = venue_harness(
+            name.clone(), Rc::new(|_| None),
+            json!({"key":"native-key","secret":SECRET,"tealstreetTunnel":tunneled}),
+            None, runtime.clone(),
+        ).await;
+        h.exchange.validate_account().await.unwrap();
+        let key = serde_json::to_value(&name).unwrap();
+        let stats = get_venue_rest_stats(runtime.now_ms());
+        let stats = stats.get(key.as_str().unwrap()).expect("real native HTTP records venue diagnostics");
+        assert_eq!(stats.requests, 1.0, "one physical request");
+        assert_eq!(stats.ok, if tunneled { 1.0 } else { 0.0 });
+        assert_eq!(stats.failures, if tunneled { 0.0 } else { 1.0 });
+        assert_eq!(stats.tracked_samples, 1);
+        assert!(stats.total_p50_ms.is_some_and(|ms| ms >= 0.0), "request start reaches its response receipt");
+        assert!(stats.last_endpoint.is_some());
+        let samples = drain_venue_rest_failure_samples();
+        if tunneled {
+            assert!(samples.is_empty(), "HOW fulfills even on 404");
+            assert_eq!(tunnel.seen.borrow().len(), 1);
+            assert!(h.seen.borrow().is_empty());
+        } else {
+            assert_eq!(samples.len(), 1);
+            assert_eq!(samples[0].status, Some(404.0));
+            assert!(samples[0].path.as_deref().unwrap().contains(if name == safe_cex_types::ExchangeName::Woo { "account" } else { "info" }));
+            assert_eq!(samples[0].body_kind, "json");
+            assert_eq!(h.seen.borrow().len(), 1);
+            assert!(tunnel.seen.borrow().is_empty());
+        }
+        h.exchange.dispose().unwrap();
+    }
+}
+
+#[test]
+fn typed_native_rest_diagnostics_follow_real_http_receipts() {
+    run_local(native_rest_diagnostics(safe_cex_types::ExchangeName::Bybit));
+}
+
+#[test]
+fn js_factory_rest_diagnostics_follow_real_http_receipts() {
+    run_local(native_rest_diagnostics(safe_cex_types::ExchangeName::Woo));
+}
