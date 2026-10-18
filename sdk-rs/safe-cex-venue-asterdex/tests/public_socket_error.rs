@@ -1,4 +1,4 @@
-//! A public transport error runs the venue's source onClose wrapper and reconnects.
+//! Plain WebSocket errors stop at the base listener; close events reconnect.
 #[path = "support/exchange_data.rs"]
 mod exchange_data;
 #[path = "support/exchange_runtime.rs"]
@@ -6,7 +6,7 @@ mod support;
 use safe_cex_exchange::{exchange::Exchange, websocket::WsEvent};
 use serde_json::json;
 #[test]
-fn public_transport_error_reconnects_before_the_watchdog_timeout() {
+fn public_transport_error_waits_for_close_before_reconnecting() {
     let (venue, rt, _, wire) =
         support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
     exchange_data::script(&wire);
@@ -32,9 +32,22 @@ fn public_transport_error_reconnects_before_the_watchdog_timeout() {
         rt.now.set(rt.now.get() + 100.0);
         rt.pump();
     }
+    assert_eq!(
+        rt.urls.borrow().iter().filter(|url| is_public(url)).count(),
+        before,
+        "base stopImmediatePropagation suppresses the venue error listener"
+    );
+    socket.events.borrow_mut().push_back(WsEvent::Close {
+        code: Some(1001),
+        reason: "server close".into(),
+    });
+    for _ in 0..35 {
+        rt.now.set(rt.now.get() + 100.0);
+        rt.pump();
+    }
     assert!(
         rt.urls.borrow().iter().filter(|url| is_public(url)).count() > before,
-        "public error must run source onClose and native reconnect before the six-second watchdog"
+        "the actual close listener still reconnects"
     );
     assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
     venue.dispose().unwrap();

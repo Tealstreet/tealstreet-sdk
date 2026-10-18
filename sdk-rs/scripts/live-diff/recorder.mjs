@@ -85,7 +85,9 @@ export function isRead(method, url, body) {
   if (url.hostname === 'breakout.prosp.devexperts.com' && url.pathname === '/dxsca-web/marketdata') return true;
   if (
     url.hostname === 'market-data.grvt.io' &&
-    ['/lite/v1/all_instruments', '/lite/v1/ticker', '/lite/v1/mini'].includes(url.pathname)
+    ['/lite/v1/all_instruments', '/lite/v1/ticker', '/lite/v1/mini', '/lite/v1/kline', '/lite/v1/book'].includes(
+      url.pathname,
+    )
   )
     return true;
   return url.hostname === 'api.crypto.com' && url.pathname.startsWith('/exchange/v1/public/get-');
@@ -102,6 +104,16 @@ export function readKey(method, url, body) {
     }
   }
   stable.searchParams.sort();
+  // Crypto.com public POSTs carry a random envelope ID and a clock nonce.
+  // Preserve the method/params and every other body byte in the replay key.
+  if (stable.hostname === 'api.crypto.com' && stable.pathname.startsWith('/exchange/v1/public/get-')) {
+    try {
+      const envelope = JSON.parse(body);
+      delete envelope.id;
+      delete envelope.nonce;
+      body = JSON.stringify(envelope);
+    } catch {}
+  }
   return `${method} ${stable.href}\n${body}`;
 }
 
