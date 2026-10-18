@@ -427,8 +427,10 @@ impl BlofinExchangeHost for NativeHost {
                 return;
             }
             if let Err(error) = callback().await {
-                runtime
-                    .report_exception(&service_error(error), &json!({"operation":"BloFin tick"}));
+                runtime.report_exception(
+                    &service_error(error),
+                    &json!({"operation":"BloFin tick"}).into(),
+                );
             }
         });
         Ok(())
@@ -665,7 +667,7 @@ impl WsParent for Parent {
         &self,
         error: &str,
         message: Option<&str>,
-        extra: Option<&Value>,
+        extra: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         self.live()?
             .emit_and_log_error(ExchangeErrorInput::Message(error.into()), message, extra)
@@ -775,7 +777,7 @@ impl PublicStreamHost for PublicHost {
                 {
                     runtime.report_exception(
                         &public_error(error),
-                        &json!({"operation":"BloFin public close"}),
+                        &json!({"operation":"BloFin public close"}).into(),
                     );
                 }
             }));
@@ -1097,7 +1099,10 @@ impl pc::PrivateStreamHost for PrivateHost {
         let runtime = self.runtime.clone();
         let _ = self.socket.start_message_operation(async move {
             if let Err(error) = snapshot.await {
-                runtime.report_exception(&error, &json!({"operation":"BloFin private snapshot"}));
+                runtime.report_exception(
+                    &error,
+                    &json!({"operation":"BloFin private snapshot"}).into(),
+                );
             }
             Ok(())
         });

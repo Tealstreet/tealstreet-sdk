@@ -180,7 +180,7 @@ impl Host {
     fn report(&self, e: &ExchangeError) {
         self.scope
             .runtime
-            .report_exception(e, &json!({"venue":"bingx"}));
+            .report_exception(e, &json!({"venue":"bingx"}).into());
     }
 }
 impl PublicSocketHost for Host {

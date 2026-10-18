@@ -102,7 +102,7 @@ impl Drop for MarginFetchGuard<'_> {
             );
             self.exchange.base().runtime.report_exception(
                 &error,
-                &serde_json::json!({"method":"handleActiveMarginSymbolChange","symbol":self.symbol}),
+                &serde_json::json!({"method":"handleActiveMarginSymbolChange","symbol":self.symbol}).into(),
             );
         }
     }

@@ -765,7 +765,7 @@ impl Host {
             if let Err(error) = callback() {
                 runtime.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source": "setTimeout"}),
+                    &serde_json::json!({"source": "setTimeout"}).into(),
                 );
             }
         }));
@@ -1021,7 +1021,7 @@ impl ExchangeRuntimeHost for Host {
                 if let Err(error) = callback() {
                     runtime.report_exception(
                         &error.to_exchange_error(),
-                        &serde_json::json!({"source": "loop"}),
+                        &serde_json::json!({"source": "loop"}).into(),
                     );
                 }
                 Ok(Js::Undefined)

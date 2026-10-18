@@ -291,7 +291,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
                 if let Err(error) = instance.host.remove_chaser(chaser.id()) {
                     instance.host.runtime().report_exception(
                         &error,
-                        &serde_json::json!({"method":"scheduleSliceTimeout"}),
+                        &serde_json::json!({"method":"scheduleSliceTimeout"}).into(),
                     );
                     return;
                 }

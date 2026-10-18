@@ -252,7 +252,7 @@ impl BingxExchange {
             if let Err(error) = private.keys.connect_and_subscribe().await {
                 reporter.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"BingX startup private connect"}),
+                    &serde_json::json!({"operation":"BingX startup private connect"}).into(),
                 );
             }
         }));
@@ -392,7 +392,7 @@ async fn join(
                 if let Err(error) = future.as_mut().await {
                     reporter.report_exception(
                         &error,
-                        &serde_json::json!({"operation":"BingX startup sibling"}),
+                        &serde_json::json!({"operation":"BingX startup sibling"}).into(),
                     );
                 }
             }));

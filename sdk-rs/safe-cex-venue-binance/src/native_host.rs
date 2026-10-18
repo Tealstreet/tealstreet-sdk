@@ -1217,7 +1217,7 @@ impl ExchangeImports for NativeImports {
             if let Err(error) = result {
                 reporter.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"binance tick loop"}),
+                    &serde_json::json!({"operation":"binance tick loop"}).into(),
                 );
             }
         }));
@@ -1261,7 +1261,10 @@ fn schedule_timer(
             timers.live.borrow_mut().remove(&(id as u64));
         }
         if let Err(error) = action() {
-            runtime.report_exception(&error, &serde_json::json!({"operation":"binance timer"}));
+            runtime.report_exception(
+                &error,
+                &serde_json::json!({"operation":"binance timer"}).into(),
+            );
         }
     }));
     this.live.borrow_mut().insert(id as u64, task);
@@ -1362,7 +1365,7 @@ impl ListenerHost for NativeListenerOperations {
             if let Err(error) = job.await {
                 runtime.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"binance listener job"}),
+                    &serde_json::json!({"operation":"binance listener job"}).into(),
                 );
             }
         }));
@@ -1672,7 +1675,7 @@ impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData
     fn connect(&self) {
         self.0.report_exception(
             &ExchangeError::new(NO_EXTERNAL),
-            &serde_json::json!({"operation":"external public data"}),
+            &serde_json::json!({"operation":"external public data"}).into(),
         );
     }
     fn dispose(&self) {}

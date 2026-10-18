@@ -21,6 +21,18 @@ async function run(family,kind,input){const api=subject(family),events=[],errors
  let result;try{let value;if(kind==='leverage')value=await api.setLeverage(input.symbol??'BTC',num(input.input));if(kind==='mode')value=await api.changePositionMode(!!input.hedged,input.symbol);if(kind==='helper')value=await api.changePositionModeHelper(!!input.hedged,input.category,input.coin,input.symbol);if(kind==='margin')value=await api.changeMarginType(!!input.isolated,input.symbol);if(kind==='fetch')value=await api.fetchPositionMode('BTC');result={value:observe(value)}}catch(e){result={error:e.name,message:e.message,origin:phases.find(p=>errors[p]===e)??null}};
  return{family,kind,input,result,events,state:observe({fetches,posts,maps,margin,updated,upserted})};}
 async function main(){
+ if(process.argv.includes('--utf16-position-mode')){
+  const rows=[];
+  for(const units of [[0xd800],[0xdc00],[0xd800,120,0xdc00]]){
+   const row=await run('primary','fetch',{data:{retCode:7,retMsg:String.fromCharCode(...units),result:{list:[]}}});
+   assert.deepEqual(row.result,{value:'oneway'});
+   const event=row.events.find(event=>event[0]==='emit');assert(event);
+   const codeUnits=text=>Array.from({length:text.length},(_,i)=>text.charCodeAt(i));
+   rows.push({units,mode:row.result.value,messageUnits:codeUnits(event[1]),retMsgUnits:codeUnits(event[3].retMsg),hasExplicitStatus:event[3].hasExplicitStatus});
+  }
+  process.stdout.write(JSON.stringify(rows));return;
+ }
+
  const leverage=[{},{input:'2'},{input:'-20'},{input:'90'},{input:'NaN'},{input:'Infinity'},{input:'-Infinity'},{input:'-0',min:'-0',max:'0',stored:[{symbol:'BTC',leverage:null}]},{noMarket:true},{stored:[]},{stored:[],fetched:[]},{stored:[{symbol:'OTHER',leverage:4}]},{stored:[{symbol:'BTC',leverage:2},{symbol:'BTC',leverage:4}]},{data:{retMsg:'denied'}},{data:{retMsg:'Leverage not modified',retCode:110043}},{data:{ret_msg:'OK'}},{data:{}},...['market','positions','category','postSync','postAsync','fetchSync','fetchAsync','upsert','emit'].map(phase=>({phase,data:phase==='emit'?{retMsg:'denied'}:undefined})),{symbol:'BTC-25SEP26-130000-C-USDT'}];
  const mode=[{},{hedged:true},{hedged:true,symbol:'BTC'},{symbol:'INVERSE',phase:'helperSync'},{phase:'helperAsync'},{symbol:'BTC-25SEP26-130000-C-USDT'},{hedged:true,symbol:'BTCUSD'}];
  const helper=[{},{hedged:true,category:'inverse',symbol:'BTC'},{hedged:true,category:'linear',coin:'USDT'},{symbol:''},{symbol:'BTC',data:{retMsg:'Partial symbols switched successfully, excluding symbols with open orders or positions.'}},{data:{retMsg:'Partial symbols switched successfully, excluding symbols with open orders or positions.'}},{symbol:'BTC',data:{retMsg:'failed'}},{data:{}},...['postSync','postAsync','fetchSync','fetchAsync','update','upsert','emit'].map(phase=>({phase,symbol:'BTC',data:phase==='emit'?{retMsg:'failed'}:undefined}))];
