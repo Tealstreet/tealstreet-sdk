@@ -264,6 +264,11 @@ fn refusal<T: DeserializeOwned + Serialize + JsNumberOutput>(row: &Value) {
     let name = row["name"].as_str().unwrap();
     let mode = row["mode"].as_str().unwrap();
     let raw = row["raw"].as_str().unwrap();
+    if mode.starts_with("surrogate/") {
+        let decoded = js_from_str::<T>(raw).expect("typed wire surrogate keeps the record");
+        typed_utf16::assert_projection(raw, &decoded);
+        return;
+    }
     assert!(js_from_str::<T>(raw).is_err(), "boundary/{name}/{mode}/raw");
     match serde_json::from_str::<Value>(raw) {
         Ok(input) => {
@@ -464,3 +469,6 @@ fn actual_typescript_wire_corpus() {
         "ORDERLY-COMPARISONS wire/per-type groups"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

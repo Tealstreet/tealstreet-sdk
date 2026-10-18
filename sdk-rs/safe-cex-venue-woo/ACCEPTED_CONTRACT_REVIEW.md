@@ -1,59 +1,42 @@
 # Accepted string-literal declarations
 
-This batch reviews 32 concrete V3 enum decoders against the literal declarations
-in `packages/safe-cex/src/exchanges/woo/`. Their individual contracts are in
-`../safe-cex-parity/accepted-set/contracts/safe-cex-venue-woo.json`.
+The focused runner reviews 31 remaining concrete V3 enum decoders against the
+literal declarations in `packages/safe-cex/src/exchanges/woo/`. Each owner has
+its own unchanged contract in the WOO accepted-set contract shard.
 
 | Rust module | Owners | TypeScript reference |
 | --- | ---: | --- |
 | `v3_contracts` | 12 | `woo.v3.contracts.ts` |
 | `v3_account_writes` | 2 | `woo.v3.account-writes.ts` |
-| `v3_private` | 3 | `woo.v3.private.ts` |
+| `v3_private` | 2 | `woo.v3.private.ts` |
 | `v3_private_orders` | 7 | `woo.v3.private.ts` |
 | `v3_regular_writes` | 5 | `woo.v3.regular-writes.ts` |
 | `v3_algo_writes` | 3 | `woo.v3.algo-writes.ts` |
 
-The contracts list all 140 valid tags independently and match decoded Rust
-variants directly. Each tag has a positive string case and a rejected tagged-null
-object case. Additional cases reject null, booleans, numbers, arrays, objects,
-unknown tags and whitespace-padded tags. The 632 cases execute four actual
-entry paths each: owned Value, borrowed Value, qualified Deserialize and JSON
-text. The text corpus contains ordinary UTF-8 strings; it makes no claim about
-lone-surrogate strings that a serde_json Value cannot carry.
+The unused v3_private account-mode enum is retired with its account-info decoder.
+Only that owner's contract and runner entry are removed. Static registration
+checks confirm the remaining 31 owners, 138 valid tags and 617 cases. Positive
+strings, forbidden tagged-null maps, invalid kinds and unknown/padded tags retain
+all four original Deserialize observations: owned, borrowed, qualified and text.
+The text corpus covers ordinary UTF-8, without a lone-surrogate claim.
 
-The original native run passed the twelve existing strict `v3_contracts` owners
-and failed the other twenty owners because their derives accepted tagged maps.
-Those twenty now use the shared [string-only enum recipe](../safe-cex-parity/accepted-set/MAP-ONLY-INGRESS.md):
-String admission followed by a private remote companion. Existing Serialize,
-variant names, wire renames and numeric-output implementations are retained.
-The private-order module also replaces its protocol glob with the sixteen
-actual imported names so source discovery can authenticate its attributes.
+The runner retains full compiler inventory, Cargo-artifact-authenticated macro
+origins, selected-module source scanning and refusal of omitted methods or trait
+entrypoints. It uses the canonical probes for this finite cohort, without claiming
+whole-package accepted-set clearance or enabling inert V3 routes. The copied-source
+control still removes every remaining owner's string guard and requires a named
+native variant mismatch for each one; original source bytes must stay unchanged.
 
-The maintained focused runner first performs ordinary compiler inventory of the
-whole package, then requires every selected enum to have no omitted methods,
-conversions or trait entrypoints. Actual Cargo artifacts authenticate its macro
-origins, and the source scanner still checks all six selected modules. It runs
-the standard production probes for these 32 owners; it does not claim acceptance
-of the remaining owners or aliases. Current discovery retains 645 owners,
-ten aliases and nine separately reviewed construction obligations.
-
-Run from the repository root:
+Run from sdk-rs with rustdoc artifacts separated from the ordinary target cache:
 
 ```sh
-RUSTC_BOOTSTRAP=1 node sdk-rs/safe-cex-venue-woo/scripts/accepted-literal-contracts.mjs
-RUSTC_BOOTSTRAP=1 node sdk-rs/safe-cex-venue-woo/scripts/accepted-literal-contracts.mjs --control
-RUSTC_BOOTSTRAP=1 node sdk-rs/safe-cex-venue-woo/scripts/accepted-literal-contracts.mjs --target=wasm32-unknown-unknown
+RUSTC_BOOTSTRAP=1 CARGO_TARGET_DIR=target/accepted-inventory node safe-cex-venue-woo/scripts/accepted-literal-contracts.mjs
+RUSTC_BOOTSTRAP=1 CARGO_TARGET_DIR=target/accepted-inventory node safe-cex-venue-woo/scripts/accepted-literal-contracts.mjs --control
+RUSTC_BOOTSTRAP=1 CARGO_TARGET_DIR=target/accepted-inventory node safe-cex-venue-woo/scripts/accepted-literal-contracts.mjs --target=wasm32-unknown-unknown
 ```
 
-The control changes only copied production sources after contract validation:
-it removes each concrete string frontdoor and invokes that owner's remote
-schema directly. All 32 owners must compile and fail their named native
-variant observations when tagged maps enter. A normal run restores the strict
-source behavior. Original production bytes are checked after every run.
-
-Verified results for this batch: all 32 production runtime receipts pass on the
-native target and on `wasm32-unknown-unknown`, with no explicit classifications
-or failed owners. The copied-production control compiles and fails all 32
-owners, with 140 named tagged-map variant mismatches; exact native restoration
-passes again. The runner verifies real production bytes remain unchanged;
-ordinary source and contract guards stay active.
+The original 32-owner batch passed native and wasm production probes and compiled
+all 32 guard-removal controls to named refusals, then passed restoration. Those
+historical runs included the now-retired account-mode owner. They are not relabeled
+as a new 31-owner runtime/control execution; this retirement verifies the preserved
+contract records and scoped compiler/behavior checks separately.

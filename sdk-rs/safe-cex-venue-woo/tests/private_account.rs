@@ -106,109 +106,6 @@ fn inspect_woo_v3_page_meta(v: &WooV3PageMeta, e: &Value) {
         "PRIVATE-ACCOUNT native currentPage",
     );
 }
-fn inspect_woo_v3_account_info(v: &WooV3AccountInfo, e: &Value) {
-    assert_eq!(
-        v.application_id,
-        e["applicationId"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native applicationId"
-    );
-    assert_eq!(
-        v.account,
-        e["account"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native account"
-    );
-    assert_eq!(
-        v.alias,
-        e["alias"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native alias"
-    );
-    assert_eq!(v.otpauth, e["otpauth"].as_bool().unwrap());
-    assert_eq!(
-        v.account_mode,
-        if e["accountMode"] == "MARGIN" {
-            WooV3AccountMode::Margin
-        } else {
-            assert_eq!(e["accountMode"], "SPOT");
-            WooV3AccountMode::Spot
-        }
-    );
-    assert_eq!(v.position_mode, mode(&e["positionMode"]));
-    number_named(
-        v.leverage,
-        &e["leverage"],
-        "PRIVATE-ACCOUNT native leverage",
-    );
-    assert_eq!(
-        v.margin_ratio,
-        e["marginRatio"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native marginRatio"
-    );
-    assert_eq!(
-        v.open_margin_ratio,
-        e["openMarginRatio"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native openMarginRatio"
-    );
-    assert_eq!(
-        v.initial_margin_ratio,
-        e["initialMarginRatio"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native initialMarginRatio"
-    );
-    assert_eq!(
-        v.maintenance_margin_ratio,
-        e["maintenanceMarginRatio"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native maintenanceMarginRatio"
-    );
-    assert_eq!(
-        v.total_collateral,
-        e["totalCollateral"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native totalCollateral"
-    );
-    assert_eq!(
-        v.free_collateral,
-        e["freeCollateral"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native freeCollateral"
-    );
-    assert_eq!(
-        v.total_account_value,
-        e["totalAccountValue"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native totalAccountValue"
-    );
-    assert_eq!(
-        v.total_trading_value,
-        e["totalTradingValue"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native totalTradingValue"
-    );
-    assert_eq!(
-        v.total_vault_value,
-        e["totalVaultValue"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native totalVaultValue"
-    );
-    assert_eq!(
-        v.total_staking_value,
-        e["totalStakingValue"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native totalStakingValue"
-    );
-    assert_eq!(
-        v.total_earn_value,
-        e["totalEarnValue"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native totalEarnValue"
-    );
-    assert_eq!(
-        v.total_launchpad_value,
-        e["totalLaunchpadValue"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native totalLaunchpadValue"
-    );
-    assert_eq!(
-        v.referrer_id,
-        e["referrerID"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native referrerID"
-    );
-    assert_eq!(
-        v.account_type,
-        e["accountType"].as_str().unwrap(),
-        "PRIVATE-ACCOUNT native accountType"
-    );
-}
 fn inspect_woo_v3_asset_balance(v: &WooV3AssetBalance, e: &Value) {
     assert_eq!(
         v.token,
@@ -501,10 +398,9 @@ fn inspect_woo_v3_position_read_model(v: &WooV3PositionReadModel, e: &Value) {
 fn native_declarations() {
     let oracle = source();
     let rows = oracle["declarations"].as_array().unwrap();
-    assert_eq!(rows.len(), 6);
+    assert_eq!(rows.len(), 5);
     let expected = [
         "WooV3PageMeta",
-        "WooV3AccountInfo",
         "WooV3AssetBalance",
         "WooV3AssetBalanceReadModel",
         "WooV3FuturesPosition",
@@ -517,9 +413,6 @@ fn native_declarations() {
         match name {
             "WooV3PageMeta" => {
                 inspect_woo_v3_page_meta(&js_from_str::<WooV3PageMeta>(text).unwrap(), e)
-            }
-            "WooV3AccountInfo" => {
-                inspect_woo_v3_account_info(&js_from_str::<WooV3AccountInfo>(text).unwrap(), e)
             }
             "WooV3AssetBalance" => {
                 inspect_woo_v3_asset_balance(&js_from_str::<WooV3AssetBalance>(text).unwrap(), e)
@@ -538,16 +431,6 @@ fn native_declarations() {
             ),
             _ => unreachable!(),
         }
-    }
-    for (wire, expected) in [
-        ("MARGIN", WooV3AccountMode::Margin),
-        ("SPOT", WooV3AccountMode::Spot),
-    ] {
-        assert_eq!(
-            js_from_str::<WooV3AccountMode>(&format!("\"{wire}\"")).unwrap(),
-            expected,
-            "PRIVATE-ACCOUNT native account mode"
-        );
     }
     for (wire, expected) in [
         ("ONE_WAY", WooV3AccountPositionMode::OneWay),
@@ -569,15 +452,11 @@ fn native_declarations() {
         );
     }
     for bad in ["null", "0", "[]", "{}", "\"bad\""] {
-        assert!(js_from_str::<WooV3AccountMode>(bad).is_err());
         assert!(js_from_str::<WooV3AccountPositionMode>(bad).is_err());
         assert!(js_from_str::<WooV3PositionSide>(bad).is_err());
     }
     for bad in ["null", "[]", "{}"] {
         assert!(js_from_str::<WooV3PageMeta>(bad).is_err());
-    }
-    for bad in ["null", "[]", "{}"] {
-        assert!(js_from_str::<WooV3AccountInfo>(bad).is_err());
     }
     for bad in ["null", "[]", "{}"] {
         assert!(js_from_str::<WooV3AssetBalance>(bad).is_err());
@@ -709,39 +588,6 @@ fn native_helpers_and_numeric_mapping() {
             |(), e| assert_eq!(e, true),
         );
     }
-}
-#[test]
-fn native_account_reads_and_balance() {
-    let o = source();
-    let rows = o["accounts"].as_array().unwrap();
-    assert_eq!(rows.len(), 16);
-    for row in rows {
-        let v = input(row, "input");
-        checked(decode_woo_v3_account_info(v.as_ref()), row, |v, e| {
-            inspect_woo_v3_account_info(&v, e)
-        });
-    }
-    let rows = o["balances"].as_array().unwrap();
-    assert_eq!(rows.len(), 8);
-    for row in rows {
-        let info = js_from_str::<WooV3AccountInfo>(row["info"].as_str().unwrap()).unwrap();
-        let upnl = input(row, "upnl").unwrap().decode::<f64>().unwrap();
-        checked(map_woo_v3_account_balance(&info, upnl), row, |v, e| {
-            number_named(v.free, &e["free"], "PRIVATE-ACCOUNT native free");
-            number_named(v.used, &e["used"], "PRIVATE-ACCOUNT native used");
-            number_named(v.total, &e["total"], "PRIVATE-ACCOUNT native total");
-            number_named(v.upnl, &e["upnl"], "PRIVATE-ACCOUNT native upnl");
-            inspect_woo_v3_account_info(&v.info, &e["info"]);
-        });
-    }
-    let row = &rows[0];
-    let mut info = js_from_str::<WooV3AccountInfo>(row["info"].as_str().unwrap()).unwrap();
-    let mapped = map_woo_v3_account_balance(&info, 0.0).unwrap();
-    info.alias = "later".into();
-    assert_eq!(
-        mapped.info.alias, "alias-9",
-        "PRIVATE-ACCOUNT native owned info snapshot"
-    );
 }
 #[test]
 fn native_asset_reads_and_mapping() {

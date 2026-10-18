@@ -1900,6 +1900,15 @@ nullish values, default separators, nested arrays and custom ToString results.
 
 ## Retained error responses
 
+Local `Thrown` conversions retain the original JS value in the existing opaque
+`ExchangeError.origin`. The retained Thrown's native slot holds the diagnostic
+projection before attaching that origin, avoiding a reference cycle. Recovery
+preserves original identity and numeric/string bits without replaying getters
+while the typed metadata is unchanged. Explicit diagnostic edits and retained
+response authority continue through the existing error materialization path.
+The constructed Backpack trigger-repair witness compares real TS rejection
+identity and stringify with native object, signed-zero, NaN and UTF16 values.
+
 ExchangeError has no cached JSON response field. retained_response_input reads the
 nearest response origin in its cause chain: the original RestFailure for transport
 failures, or the existing RetainedJsonInput inside the API-error origin wrapper.
@@ -1923,6 +1932,17 @@ boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
 
+`native_final_drop(base, venue_cleanup)` is the single native final-handle teardown
+entrypoint. It marks disposed before venue cleanup and always performs shared
+cleanup afterward, silencing Result errors at destruction. The callback must
+finish cancelling venue-owned tasks/state even if an earlier cleanup returns an
+error. Stored timer callbacks must use weak venue ownership so they cannot keep
+the final external handle alive; held venues must still service them normally.
+This accepted lifetime policy has one core override classification and no source
+super-dispose claim. Existing explicit-dispose/source-super guards remain intact.
+`tests/native_final_drop.rs` exercises real NativeRuntime and failing venue/Store
+cleanup, while Backpack/BingX binding probes cover actual sockets/timers.
+
 `REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
 `JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
 materialization follows that source chain and the canonical retained response.
@@ -1934,3 +1954,4 @@ start_eager. Its sleep Promise preserves the source await fence even for ready
 leaves, and waiter drop leaves the continuation alive. Positive infinity disables
 all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
+

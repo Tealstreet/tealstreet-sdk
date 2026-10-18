@@ -298,10 +298,8 @@ fn record<T: DeserializeOwned + Serialize + NativeIdentity>(
                 );
             }
         } else {
-            assert!(
-                result.is_err(),
-                "{name} shared UTF8 representation refusal: {encoded}"
-            );
+            assert!(result.is_err(), "{name} upstream Value refusal: {encoded}");
+            let _: T = typed_utf16::decode(encoded);
             assert!(
                 encoded.contains("\\ud"),
                 "escaped valid JSON surrogate witness"
@@ -907,3 +905,6 @@ fn sdk_common_requires_selected_compiler() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("MODULE_NOT_FOUND"));
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

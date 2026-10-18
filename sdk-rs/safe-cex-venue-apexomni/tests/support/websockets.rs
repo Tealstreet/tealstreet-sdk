@@ -1073,10 +1073,14 @@ fn socket_frame_units_are_observed_before_wire() {
         if !private {
             let ticker = js_from_str::<Ticker>(row["rawTicker"].as_str().unwrap());
             if record_refused {
-                assert!(
-                    ticker.is_err(),
-                    "{marker} whole source Ticker cannot enter shared String id"
+                let ticker = ticker.unwrap();
+                assert_eq!(
+                    ticker.id,
+                    String::from_utf16_lossy(units),
+                    "{marker} typed ticker id"
                 );
+                assert_eq!(ticker.last.to_bits(), 103f64.to_bits());
+                typed_utf16::assert_projection(row["rawTicker"].as_str().unwrap(), &ticker);
             } else {
                 let ticker = ticker.unwrap();
                 assert_eq!(
@@ -1239,3 +1243,6 @@ fn socket_frame_units_are_observed_before_wire() {
         assert_eq!(sent, vec![source], "{marker} native exact positive wire");
     }
 }
+
+#[path = "../../../test-support/typed_utf16.rs"]
+mod typed_utf16;

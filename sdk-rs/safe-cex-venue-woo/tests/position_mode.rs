@@ -336,14 +336,16 @@ fn position_evidence_choices_are_native_before_source() {
             "WOO-MODE-CHOICE native retained ID {section}"
         );
     }
-    assert!(js_from_str::<WooV3SetPositionModeInput>(&raw).is_err());
-    assert!(
-        js_from_str::<WooV3CompletePositionModeEvidence>(
-            &base()["evidence"]
-                .to_string()
-                .replace("audit-23", r"\ud800")
-        )
-        .is_err()
+    typed_utf16::assert_projection(
+        &raw,
+        &js_from_str::<WooV3SetPositionModeInput>(&raw).unwrap(),
+    );
+    let evidence = base()["evidence"]
+        .to_string()
+        .replace("audit-23", r"\ud800");
+    typed_utf16::assert_projection(
+        &evidence,
+        &js_from_str::<WooV3CompletePositionModeEvidence>(&evidence).unwrap(),
     );
     let raw_snapshot = r#"{"source":"decoded-v3-futures-positions-complete-page","reconciliationId":"\ud800","complete":true,"rows":[]}"#;
     assert_eq!(
@@ -825,3 +827,6 @@ fn native_mode_responses() {
         );
     }
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -567,13 +567,18 @@ fn actual_typescript_account_read_state_and_logging() {
         strings[0]["after"],
         "ACCOUNT-READ Unicode native bits"
     );
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<String>(strings[1]["raw"].as_str().unwrap())
-            .is_err(),
-        "account read surrogate ingress refusal"
+    typed_utf16::assert_projection(
+        strings[1]["raw"].as_str().unwrap(),
+        &(safe_cex_num::numeric_ingress::js_from_str::<String>(
+            strings[1]["raw"].as_str().unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
     assert_eq!(
         strings[1]["after"], "4000000000000000",
         "actual surrogate parseFloat result"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
