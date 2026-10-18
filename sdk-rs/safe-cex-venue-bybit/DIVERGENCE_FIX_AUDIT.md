@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. This first batch covers seven rows; the other
-30 remain pending individual production-binding audits.
+`divergence-cluster-rulings.md`. Eight rows are reconciled below; the other
+29 remain pending individual production-binding audits.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
