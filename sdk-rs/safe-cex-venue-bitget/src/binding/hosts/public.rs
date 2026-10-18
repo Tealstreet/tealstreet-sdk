@@ -515,9 +515,11 @@ impl PublicDataHost for Rt {
             Js::Undefined,
             vec![path, Js::object(vec![("params", params)])],
         )?;
-        Ok(Box::pin(
-            async move { await_js(&self.exchange_runtime(), started).await?.get("data") },
-        ))
+        Ok(Box::pin(async move {
+            await_js(&self.exchange_runtime(), started)
+                .await?
+                .get("data")
+        }))
     }
 }
 

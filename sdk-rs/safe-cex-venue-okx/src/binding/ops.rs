@@ -247,14 +247,16 @@ fn js_callback(f: ReadMapper<Js, Thrown>) -> Js {
     Js::function("", move |_, args| f(arg(&args, 0)))
 }
 
-fn await_value(runtime: &std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>, v: Js) -> ReadAwait<Js, Thrown> {
+fn await_value(
+    runtime: &std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
+    v: Js,
+) -> ReadAwait<Js, Thrown> {
     Box::pin(await_js(runtime, v))
 }
 
 pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
     let s = scope.clone();
     let await_runtime = s.exchange_runtime();
-    let return_runtime = await_runtime.clone();
     let cap = s.clone();
     let intr = s.clone();
     let rt = s.clone();
@@ -318,7 +320,10 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
                 let values = xs.into_iter().map(|x| rt.spawn(f(x))).collect();
                 Js::Promise(all(&rt.exchange_runtime(), values))
             });
-            { let runtime = rt.exchange_runtime(); Box::pin(async move { await_js(&runtime, started?).await }) }
+            {
+                let runtime = rt.exchange_runtime();
+                Box::pin(async move { await_js(&runtime, started?).await })
+            }
         }),
         some: Rc::new(|v, f| {
             for x in items(&v)? {
@@ -336,8 +341,6 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
 
 pub(crate) fn lifecycle_ops(scope: &OkxScope) -> Rc<LifecycleOps<Js, Thrown>> {
     let s = scope.clone();
-    let await_runtime = s.exchange_runtime();
-    let return_runtime = await_runtime.clone();
     Rc::new(LifecycleOps {
         value: market_ops(scope),
         spawn: Rc::new(move |fut| Ok(s.spawn(fut))),

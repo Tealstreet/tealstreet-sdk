@@ -167,10 +167,11 @@ impl Host for Frame {
         Ok(settle(&self.rt, self.rt.call_path(name, vec![])?))
     }
     fn recursive_orders(&mut self, endpoint: &str) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(settle(&self.rt, self.rt.call_path(
-            "fetchOrdersRecursively",
-            vec![Js::str(endpoint)],
-        )?))
+        Ok(settle(
+            &self.rt,
+            self.rt
+                .call_path("fetchOrdersRecursively", vec![Js::str(endpoint)])?,
+        ))
     }
     fn delete(
         &mut self,

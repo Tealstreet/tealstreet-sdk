@@ -292,7 +292,8 @@ pub(super) fn create(host: &Host, config: Js) -> Result<Js, Thrown> {
                 &runtime,
                 Box::pin(async move {
                     let config = await_js(&await_runtime, auth?).await?;
-                    await_js(&await_runtime, 
+                    await_js(
+                        &await_runtime,
                         this.get("tdgClient")?
                             .call_method("fundingAccountSummary", vec![config])?,
                     )

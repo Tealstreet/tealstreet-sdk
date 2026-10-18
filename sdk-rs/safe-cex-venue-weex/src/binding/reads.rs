@@ -217,7 +217,7 @@ pub(super) fn income_runtime() -> i::WeexIncomeRuntime<Host, Js, Thrown> {
     i::WeexIncomeRuntime {
         public_only: |h| Ok(h.root("isPublicDataOnly")?.truthy()),
         request_factory: |h| v::method(h, &h.root("xhr")?, "post"),
-        post: |_, post, endpoint, payload| {
+        post: |h, post, endpoint, payload| {
             let pending = post.call(Js::Undefined, std::vec![Js::str(endpoint), payload])?;
             Ok(Box::pin(await_js(&h.0.exchange_runtime(), pending)))
         },
@@ -250,8 +250,12 @@ pub(super) fn range_runtime() -> i::WeexIncomeRangeRuntime<Host, Js> {
                 .call("fetchIncomeHistory", std::vec![opts])
                 .map_err(|e| e.to_exchange_error())?;
             Ok(Box::pin(async move {
-                to_typed(&await_js(&h.0.exchange_runtime(), pending).await.map_err(|e| e.to_exchange_error())?)
-                    .map_err(|e| e.to_exchange_error())
+                to_typed(
+                    &await_js(&h.0.exchange_runtime(), pending)
+                        .await
+                        .map_err(|e| e.to_exchange_error())?,
+                )
+                .map_err(|e| e.to_exchange_error())
             }))
         },
         sleep: |h, ms| Ok(h.0.shared.runtime.sleep(ms.max(0.0) as u64)),

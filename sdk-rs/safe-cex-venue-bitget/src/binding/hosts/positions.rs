@@ -57,7 +57,12 @@ fn endpoint(name: &str) -> Result<&'static str, Thrown> {
 }
 
 /// `client.get(url[, { params }])` started now; the future yields `response.data`.
-fn get_data(rt: &Rt, client: &Js, url: &str, params: Option<Js>) -> Result<JsFuture<'static>, Thrown> {
+fn get_data(
+    rt: &Rt,
+    client: &Js,
+    url: &str,
+    params: Option<Js>,
+) -> Result<JsFuture<'static>, Thrown> {
     let runtime = rt.exchange_runtime();
     let get = client.get("get")?;
     if !get.is_callable() {
@@ -68,9 +73,9 @@ fn get_data(rt: &Rt, client: &Js, url: &str, params: Option<Js>) -> Result<JsFut
         args.push(Js::object(vec![("params", params)]));
     }
     let response = get.call(client.clone(), args)?;
-    Ok(Box::pin(
-        async move { await_js(&runtime, response).await?.get("data") },
-    ))
+    Ok(Box::pin(async move {
+        await_js(&runtime, response).await?.get("data")
+    }))
 }
 
 /// `this.toFiniteNumber(value, fallback)` over the observed typeof branches.
@@ -413,7 +418,9 @@ impl JournalFolder for ReceiverFolder {
                 Box::pin(async move {
                     let call =
                         this.call_method("fetchHistoricalFills", vec![from_typed(&opts)?])?;
-                    Ok(to_typed::<Vec<Execution>>(&await_js(&self.runtime, call).await?)?)
+                    Ok(to_typed::<Vec<Execution>>(
+                        &await_js(&self.runtime, call).await?,
+                    )?)
                 })
             };
             let income_this = this.clone();
@@ -424,7 +431,9 @@ impl JournalFolder for ReceiverFolder {
                         "fetchIncomeHistoryRange",
                         vec![Js::Number(from), Js::Number(to)],
                     )?;
-                    Ok(to_typed::<Vec<IncomeRecord>>(&await_js(&self.runtime, call).await?)?)
+                    Ok(to_typed::<Vec<IncomeRecord>>(
+                        &await_js(&self.runtime, call).await?,
+                    )?)
                 })
             };
             let has_income = this.get("fetchIncomeHistoryRange")?.truthy();
@@ -490,7 +499,11 @@ async fn page_rows(
     cursor: &str,
     params: safe_cex_num::JsJsonValue,
 ) -> Result<(Vec<Value>, Option<String>), Thrown> {
-    let page = await_js(&rt.exchange_runtime(), rt.call_path(member, vec![js_json(params)])?).await?;
+    let page = await_js(
+        &rt.exchange_runtime(),
+        rt.call_path(member, vec![js_json(params)])?,
+    )
+    .await?;
     let rows = page.get("rows")?;
     let rows = rows
         .array_values()
@@ -840,7 +853,8 @@ pub(crate) fn bind(
                         let rt = rt.clone();
                         async move {
                             let data =
-                                get_data(&rt, &rt.this.get("xhr")?, url, Some(js_json(params)))?.await?;
+                                get_data(&rt, &rt.this.get("xhr")?, url, Some(js_json(params)))?
+                                    .await?;
                             optional_json(&data)
                         }
                     },
@@ -856,8 +870,11 @@ pub(crate) fn bind(
                     |opts| {
                         let rt = rt.clone();
                         async move {
-                            let page =
-                                await_js(&rt.exchange_runtime(), rt.call_path("_fetchBillPage", vec![opts])?).await?;
+                            let page = await_js(
+                                &rt.exchange_runtime(),
+                                rt.call_path("_fetchBillPage", vec![opts])?,
+                            )
+                            .await?;
                             to_typed::<Vec<IncomeRecord>>(&page)
                         }
                     },
@@ -912,16 +929,22 @@ pub(crate) fn bind(
                     || {
                         let rt = rt.clone();
                         async move {
-                            await_js(&rt.exchange_runtime(), rt.call_path("ensureAccountTypeDetected", vec![])?).await?;
+                            await_js(
+                                &rt.exchange_runtime(),
+                                rt.call_path("ensureAccountTypeDetected", vec![])?,
+                            )
+                            .await?;
                             Ok(rt.this.get("usesUtaRouting")?.truthy())
                         }
                     },
                     |_| {
                         let rt = rt.clone();
                         async move {
-                            let rows =
-                                await_js(&rt.exchange_runtime(), rt.call_path("_fetchHistoricalUtaFills", vec![original])?)
-                                    .await?;
+                            let rows = await_js(
+                                &rt.exchange_runtime(),
+                                rt.call_path("_fetchHistoricalUtaFills", vec![original])?,
+                            )
+                            .await?;
                             to_typed::<Vec<safe_cex_types::Execution>>(&rows)
                                 .map_err(ExchangeError::from)
                         }
@@ -969,7 +992,8 @@ pub(crate) fn bind(
                         let rt = rt.clone();
                         async move {
                             let data =
-                                get_data(&rt, &rt.this.get("xhr")?, url, Some(js_json(params)))?.await?;
+                                get_data(&rt, &rt.this.get("xhr")?, url, Some(js_json(params)))?
+                                    .await?;
                             optional_json(&data)
                         }
                     },

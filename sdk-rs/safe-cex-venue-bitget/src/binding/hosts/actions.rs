@@ -849,19 +849,24 @@ fn paginate_income_range(rt: Rt, fetch: Js, opts: Js) -> JsFuture<'static> {
             chunk_delay_ms: optional("chunkDelayMs")?,
             max_pages_per_chunk: optional("maxPagesPerChunk")?,
         };
+        let page_runtime = rt.exchange_runtime();
         let mut page = move |p: IncomePageParams| -> safe_cex_exchange::runtime::ExchangeFuture<
             'static,
             Vec<safe_cex_types::IncomeRecord>,
         > {
             let fetch = fetch.clone();
-            Box::pin(async move {
-                let request = Js::object(vec![
-                    ("startTime", Js::Number(p.start_time)),
-                    ("endTime", Js::Number(p.end_time)),
-                    ("limit", Js::Number(p.limit)),
-                ]);
-                let rows = await_js(&rt.exchange_runtime(), invoke_value(&fetch, vec![request])?).await?;
-                Ok(to_typed(&rows)?)
+            Box::pin({
+                let await_runtime = page_runtime.clone();
+                async move {
+                    let request = Js::object(vec![
+                        ("startTime", Js::Number(p.start_time)),
+                        ("endTime", Js::Number(p.end_time)),
+                        ("limit", Js::Number(p.limit)),
+                    ]);
+                    let rows =
+                        await_js(&await_runtime, invoke_value(&fetch, vec![request])?).await?;
+                    Ok(to_typed(&rows)?)
+                }
             })
         };
         let runtime = rt.exchange_runtime();
@@ -1397,14 +1402,17 @@ async fn order_plan_type_and_amount(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
     let resolve = |symbol: &str, side: PositionSide| {
         let symbol = symbol.to_owned();
         let chosen = &chosen;
-        async move {
-            let value = rt.call_path(
-                "resolvePositionsForPlanType",
-                vec![Js::str(&symbol), enum_js(&side)?],
-            )?;
-            let value = await_js(&rt.exchange_runtime(), value).await?;
-            *chosen.borrow_mut() = value.clone();
-            to_typed::<Vec<Position>>(&value)
+        {
+            let await_runtime = rt.exchange_runtime();
+            async move {
+                let value = rt.call_path(
+                    "resolvePositionsForPlanType",
+                    vec![Js::str(&symbol), enum_js(&side)?],
+                )?;
+                let value = await_js(&await_runtime, value).await?;
+                *chosen.borrow_mut() = value.clone();
+                to_typed::<Vec<Position>>(&value)
+            }
         }
     };
     let select = |_: order_logic::PlanSelectionOptions<'_>, _: &[Position]| -> Result<Js, Thrown> {

@@ -98,7 +98,8 @@ async fn fetch_balance(weak: W, receiver: Js) -> Result<Js, Thrown> {
         },
         || (h.capture)("this.apiMarginCoin"),
         |request: Js, params| -> Result<JsFuture<'static>, Thrown> {
-            Ok(Box::pin(await_js(&scope_of(&weak)?.exchange_runtime(), 
+            Ok(Box::pin(await_js(
+                &scope_of(&weak)?.exchange_runtime(),
                 request.call(Js::Undefined, vec![params])?,
             )))
         },

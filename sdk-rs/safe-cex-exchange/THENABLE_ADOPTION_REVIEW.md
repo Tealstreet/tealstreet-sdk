@@ -2,10 +2,11 @@
 
 The canonical resolver from #909 already serves the installed Promise constructor,
 Promise.resolve and serial iteration helpers. Direct `await_js`, async-body return
-adoption and combinators currently bypass it for ordinary thenables.
+adoption and combinators now reuse it for ordinary thenables.
 
-Preparation is test-only. Production changes wait for #901 and the preceding
-reporter-context/Bybit migration to merge, followed by a normal master merge.
+The production cutover follows the merged reporter-context/Bybit migration #928
+and a normal master merge. Every await explicitly receives its owning runtime;
+returned futures retain that runtime without borrowing the caller.
 
 The approved cutover uses an explicit owning runtime argument for `await_js` and
 one wait boundary after canonical resolution. Async return resolves its existing
@@ -51,9 +52,15 @@ node safe-cex-exchange/tests/js_thenable_adoption_oracle.cjs
 cargo test -p safe-cex-exchange --features native --test js_thenable_adoption --jobs 1
 ```
 
-The final compiled baseline has ten named failing groups across 108 engine cases. Canonical resolve
-and scalar/native await FIFO positive controls pass (two named groups). The source and native
-observations must remain unchanged through the production cutover. Existing
+The original compiled baseline had nine semantic failing groups and two passing
+controls. Its tenth failure was a fixture setup error: Symbol-keyed
+Object.defineProperty was unsupported before reaching the combinator. The corrected
+fixture uses an actual array iterator with supplied next/return methods in both
+Node and Rust. Restoring eager iteration now compiles and fails that named group
+on the next/get ordering assertion. Exact restoration passes all twelve groups
+across 108 engine cases, including canonical resolve and scalar/native FIFO controls.
+The Symbol descriptor support census is routed separately; this fixture does not
+claim that capability. Source observations remain unchanged through the cutover. Existing
 constructor, serial-helper, iterable, microtask and client regressions remain
 required. Any changed cancellation/override producer pin must be reviewed and
 refreshed in the implementation PR before READY.

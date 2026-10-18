@@ -452,7 +452,11 @@ impl ReadHost for Rt {
         } else {
             xhr.call_method("get", vec![Js::str(endpoint)])?
         };
-        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?.get("data")?)) })
+        Ok(async move {
+            Ok(h(await_js(&self.exchange_runtime(), promise)
+                .await?
+                .get("data")?))
+        })
     }
     fn fetch_balance(
         &self,
@@ -684,7 +688,11 @@ impl TradingHost for Rt {
             Method::Put => "put",
         };
         let promise = xhr.call_method(verb, vec![Js::str(endpoint), (*body).clone()])?;
-        Ok(async move { Ok(h(await_js(&self.exchange_runtime(), promise).await?.get("data")?)) })
+        Ok(async move {
+            Ok(h(await_js(&self.exchange_runtime(), promise)
+                .await?
+                .get("data")?))
+        })
     }
     fn derive(&self, options: Vec<Handle<Self>>) -> ReadResult<Self, Handle<Self>> {
         let opts: Vec<safe_cex_types::PlaceOrderOpts> = options
@@ -929,19 +937,22 @@ impl ApiHost for Rt {
                 Js::function(verb, move |_, a| {
                     let promise = original.call(owner.clone(), a)?;
                     let state = state.clone();
-                    Ok(spawn_body(&rt, async move {
-                        match await_js(&self.exchange_runtime(), promise).await {
-                            Ok(v) => Ok(v),
-                            Err(e) => {
-                                let own = state
-                                    .success_errors
-                                    .borrow()
-                                    .iter()
-                                    .any(|x| x.same_reference(&e.value));
-                                if own {
-                                    Err(e)
-                                } else {
-                                    Ok((*state.api.rejected(e).await?).clone())
+                    Ok(spawn_body(&rt, {
+                        let await_runtime = rt.exchange_runtime();
+                        async move {
+                            match await_js(&await_runtime, promise).await {
+                                Ok(v) => Ok(v),
+                                Err(e) => {
+                                    let own = state
+                                        .success_errors
+                                        .borrow()
+                                        .iter()
+                                        .any(|x| x.same_reference(&e.value));
+                                    if own {
+                                        Err(e)
+                                    } else {
+                                        Ok((*state.api.rejected(e).await?).clone())
+                                    }
                                 }
                             }
                         }

@@ -369,10 +369,13 @@ async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Re
         let domain_hash = domain_hash(contract, chain.to_number()? as u64)?;
         types["TypedDataSign"] = serde_json::json!([{"name":"contents","type":"Order"},{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"},{"name":"salt","type":"bytes32"}]);
         let value = serde_json::json!({"contents":message,"name":"DepositWallet","version":"1","chainId":chain.to_number()?,"verifyingContract":message["signer"],"salt":ZERO});
-        let inner = await_js(&runtime, signer.call_method(
-            "_signTypedData",
-            vec![from_json(&domain), from_json(&types), from_json(&value)],
-        )?)
+        let inner = await_js(
+            &runtime,
+            signer.call_method(
+                "_signTypedData",
+                vec![from_json(&domain), from_json(&types), from_json(&value)],
+            )?,
+        )
         .await?;
         format!(
             "0x{}{}{}{}00ba",
@@ -383,10 +386,13 @@ async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Re
         )
     } else {
         text(
-            &await_js(&runtime, signer.call_method(
-                "_signTypedData",
-                vec![from_json(&domain), from_json(&types), from_json(&message)],
-            )?)
+            &await_js(
+                &runtime,
+                signer.call_method(
+                    "_signTypedData",
+                    vec![from_json(&domain), from_json(&types), from_json(&message)],
+                )?,
+            )
             .await?,
         )?
     };

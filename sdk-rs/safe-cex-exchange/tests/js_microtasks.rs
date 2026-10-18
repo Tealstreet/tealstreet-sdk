@@ -469,7 +469,11 @@ const trace=[];const a=Promise[method](values).then(()=>trace.push('all'));const
             Js::str("first"),
         )));
         rows.push(vec![
-            await_js(&runtime, combined).await.unwrap_err().value.to_display(),
+            await_js(&runtime, combined)
+                .await
+                .unwrap_err()
+                .value
+                .to_display(),
         ]);
         assert_eq!(rows, expected);
     });

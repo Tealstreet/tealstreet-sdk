@@ -109,10 +109,13 @@ fn check(method: &str) {
                     Ok(Js::array(actual))
                 }),
             );
-        let actual = tokio::time::timeout(Duration::from_secs(5), await_js(&runtime, Js::Promise(actual)))
-            .await
-            .unwrap()
-            .unwrap();
+        let actual = tokio::time::timeout(
+            Duration::from_secs(5),
+            await_js(&runtime, Js::Promise(actual)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let actual = to_json(&actual).unwrap();
         let actual = actual.as_array().unwrap();
         assert_eq!(actual.len(), expected.len());
@@ -218,10 +221,13 @@ rows.push(trace);
                 Ok(Js::array(rows))
             }),
         );
-        let actual = tokio::time::timeout(Duration::from_secs(5), await_js(&runtime, Js::Promise(actual)))
-            .await
-            .unwrap()
-            .unwrap();
+        let actual = tokio::time::timeout(
+            Duration::from_secs(5),
+            await_js(&runtime, Js::Promise(actual)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(to_json(&actual).unwrap(), expected);
     });
 }

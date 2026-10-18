@@ -72,7 +72,8 @@ impl ApiBridge {
         if let Some(value) = request.timeout_ms {
             config.define("timeout", Js::Number(value)).map_err(error)?;
         }
-        let response = await_js(&self.host.scope.http.runtime(), 
+        let response = await_js(
+            &self.host.scope.http.runtime(),
             self.host
                 .client()
                 .call_method("request", vec![config])
@@ -263,7 +264,8 @@ impl ApexApiHost for ApiHost {
     fn request_retry(&self, config: Js) -> ExchangeFuture<'_, Js> {
         Box::pin(async move {
             // Native response/config retains the original adapter and serializer.
-            let response = await_js(&self.scope.http.runtime(), 
+            let response = await_js(
+                &self.scope.http.runtime(),
                 self.client()
                     .call_method("request", vec![config])
                     .map_err(error)?,

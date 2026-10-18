@@ -33,10 +33,13 @@ fn fields(value: &Js) -> Result<Vec<Js>, Thrown> {
         .collect()
 }
 async fn get(rt: &Rt, endpoint: &str, params: Js) -> Result<Js, Thrown> {
-    await_js(&rt.exchange_runtime(), rt.this.get("xhr")?.call_method(
-        "get",
-        vec![Js::str(endpoint), Js::object(vec![("params", params)])],
-    )?)
+    await_js(
+        &rt.exchange_runtime(),
+        rt.this.get("xhr")?.call_method(
+            "get",
+            vec![Js::str(endpoint), Js::object(vec![("params", params)])],
+        )?,
+    )
     .await?
     .get("data")
 }
@@ -129,10 +132,13 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let hedged = arg(&a, 0);
         Ok(rt.clone().spawn(Box::pin(async move {
             // Source deliberately discards symbol and changes linear USDT.
-            await_js(&rt.exchange_runtime(), rt.this.call_method(
-                "changePositionModeHelper",
-                vec![hedged, Js::str("linear"), Js::str("USDT")],
-            )?)
+            await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method(
+                    "changePositionModeHelper",
+                    vec![hedged, Js::str("linear"), Js::str("USDT")],
+                )?,
+            )
             .await
         })))
     })?;
@@ -158,7 +164,8 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                         .call_method("getSettleCoinsForCategory", vec![category.clone()])?,
                 )? {
                     out.extend(fields(
-                        &await_js(&rt.exchange_runtime(), 
+                        &await_js(
+                            &rt.exchange_runtime(),
                             rt.this
                                 .call_method("fetchOrdersHelper", vec![category.clone(), coin])?,
                         )
@@ -174,7 +181,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(rt.clone().spawn(Box::pin(async move {
             let symbols = arg(&a, 0);
             if symbols.truthy() && symbols.get("length")?.to_number()? > 0. {
-                return await_js(&rt.exchange_runtime(), rt.this.call_method("fetchPositionsHelper", vec![symbols])?).await;
+                return await_js(
+                    &rt.exchange_runtime(),
+                    rt.this.call_method("fetchPositionsHelper", vec![symbols])?,
+                )
+                .await;
             }
             let mut out = vec![];
             for category in fields(&rt.this.get("supportedCategories")?)? {
@@ -183,10 +194,13 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                         .call_method("getSettleCoinsForCategory", vec![category.clone()])?,
                 )? {
                     out.extend(fields(
-                        &await_js(&rt.exchange_runtime(), rt.this.call_method(
-                            "fetchPositionsHelper",
-                            vec![Js::Undefined, category.clone(), coin],
-                        )?)
+                        &await_js(
+                            &rt.exchange_runtime(),
+                            rt.this.call_method(
+                                "fetchPositionsHelper",
+                                vec![Js::Undefined, category.clone(), coin],
+                            )?,
+                        )
                         .await?,
                     )?);
                 }
@@ -253,7 +267,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "fetchTickersWithoutParse", |rt, _| {
         Ok(rt.clone().spawn(Box::pin(async move {
-            let raw = await_js(&rt.exchange_runtime(), rt.this.call_method("fetchTickersRaw", vec![])?).await?;
+            let raw = await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("fetchTickersRaw", vec![])?,
+            )
+            .await?;
             if rt.this.get("isDisposed")?.truthy() {
                 Ok(Js::array(vec![]))
             } else {
@@ -263,7 +281,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "fetchTickers", |rt, _| {
         Ok(rt.clone().spawn(Box::pin(async move {
-            let raw = await_js(&rt.exchange_runtime(), rt.this.call_method("fetchTickersRaw", vec![])?).await?;
+            let raw = await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("fetchTickersRaw", vec![])?,
+            )
+            .await?;
             if rt.this.get("isDisposed")?.truthy() {
                 rt.this.get("store")?.get("tickers")
             } else {
@@ -301,7 +323,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
 fn fetch_and_cache_api_key_info(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
     Ok(rt.clone().spawn(Box::pin(async move {
         let result = async {
-            await_js(&rt.exchange_runtime(), rt.this.call_method("fetchApiKeyInfo", vec![])?).await?;
+            await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("fetchApiKeyInfo", vec![])?,
+            )
+            .await?;
             if rt.this.get("apiKeyInfo")?.truthy() {
                 super::startup::update_batch_limit_based_on_vip_level(&rt)?;
                 // Same typed user-data channel as the primary cache adapter.

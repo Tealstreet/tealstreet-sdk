@@ -475,7 +475,9 @@ impl crate::virtual_clock::ClockHttp for ClockHttp {
         let promise = Promise::spawn(&runtime, pending);
         Box::pin(async move {
             Ok(to_json(
-                &await_js(&runtime, Js::Promise(promise)).await?.get("data")?,
+                &await_js(&runtime, Js::Promise(promise))
+                    .await?
+                    .get("data")?,
             )?)
         })
     }

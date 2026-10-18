@@ -138,7 +138,10 @@ impl Host for Frame {
         Ok(Box::pin(async move { response.await?.get("data") }))
     }
     fn post(&mut self, endpoint: &str, body: Fields) -> Result<Task<(), Thrown>, Thrown> {
-        let response = awaited(&self.rt, self.xhr("post", vec![Js::str(endpoint), fields_js(body)])?);
+        let response = awaited(
+            &self.rt,
+            self.xhr("post", vec![Js::str(endpoint), fields_js(body)])?,
+        );
         Ok(Box::pin(async move { response.await.map(|_| ()) }))
     }
     fn object(&mut self, v: &Js) -> bool {
@@ -213,15 +216,17 @@ impl Host for Frame {
     }
     fn sleep(&mut self, delay: u64) -> Result<Task<(), Thrown>, Thrown> {
         let sleep = self.rt.global("sleep")?;
-        let done = awaited(&self.rt, invoke(
-            &sleep,
-            Js::Undefined,
-            vec![Js::Number(delay as f64)],
-        )?);
+        let done = awaited(
+            &self.rt,
+            invoke(&sleep, Js::Undefined, vec![Js::Number(delay as f64)])?,
+        );
         Ok(Box::pin(async move { done.await.map(|_| ()) }))
     }
     fn fetch_positions(&mut self) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(awaited(&self.rt, call_member(&self.rt, "fetchPositions", vec![])?))
+        Ok(awaited(
+            &self.rt,
+            call_member(&self.rt, "fetchPositions", vec![])?,
+        ))
     }
     fn update_positions(&mut self, positions: Js) -> Result<(), Thrown> {
         let store = self.rt.this.get("store")?;
@@ -234,7 +239,10 @@ impl Host for Frame {
         .map(|_| ())
     }
     fn account_info(&mut self) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(awaited(&self.rt, call_member(&self.rt, "fetchAccountInfo", vec![])?))
+        Ok(awaited(
+            &self.rt,
+            call_member(&self.rt, "fetchAccountInfo", vec![])?,
+        ))
     }
     fn position_mode(&mut self) -> Result<Task<PositionMode, Thrown>, Thrown> {
         self.sync()?;
@@ -245,11 +253,14 @@ impl Host for Frame {
         let _ = Promise::spawn(&self.rt.exchange_runtime(), deferred(request));
     }
     fn confirm_mode(&mut self, mode: PositionMode) -> Result<Task<(), Thrown>, Thrown> {
-        let done = awaited(&self.rt, call_member(
+        let done = awaited(
             &self.rt,
-            "confirmPositionModeAndRefreshPositions",
-            vec![mode_js(mode)],
-        )?);
+            call_member(
+                &self.rt,
+                "confirmPositionModeAndRefreshPositions",
+                vec![mode_js(mode)],
+            )?,
+        );
         Ok(Box::pin(async move { done.await.map(|_| ()) }))
     }
 }

@@ -261,9 +261,11 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
                     safe_cex_exchange::js_runtime::promise::Promise::spawn(
                         &promise.runtime(),
                         Box::pin(async move {
-                            await_js(&runtime, Js::Promise(promise)).await.inspect_err(|e| {
-                                tags.borrow_mut().push((e.value.clone(), index));
-                            })
+                            await_js(&runtime, Js::Promise(promise))
+                                .await
+                                .inspect_err(|e| {
+                                    tags.borrow_mut().push((e.value.clone(), index));
+                                })
                         }),
                     ),
                 ))
@@ -299,10 +301,12 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
                     for (fulfilled, rejected) in handlers {
                         outcome = match outcome {
                             Ok(value) => {
-                                await_js(&runtime, fulfilled.call(Js::Undefined, vec![value])?).await
+                                await_js(&runtime, fulfilled.call(Js::Undefined, vec![value])?)
+                                    .await
                             }
                             Err(error) if rejected.is_callable() => {
-                                await_js(&runtime, rejected.call(Js::Undefined, vec![error.value])?).await
+                                await_js(&runtime, rejected.call(Js::Undefined, vec![error.value])?)
+                                    .await
                             }
                             Err(error) => Err(error),
                         };

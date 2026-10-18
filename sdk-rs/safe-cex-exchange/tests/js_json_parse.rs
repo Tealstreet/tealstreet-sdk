@@ -128,7 +128,8 @@ fn real_http_json_response_retains_lone_surrogate_fields_and_rows() {
         write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
     });
     run(async {
-        let runtime: std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = native_runtime();
+        let runtime: std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
+            native_runtime();
         let host = client::rest_http_host(
             runtime.clone(),
             Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),

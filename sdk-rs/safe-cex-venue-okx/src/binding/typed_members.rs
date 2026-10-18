@@ -309,56 +309,71 @@ fn market_shape(scope: &OkxScope, variant: Variant) {
 fn account(scope: &OkxScope, variant: Variant) {
     if variant.is_eu() {
         async_member(scope, "validateAccount", |s, _| {
-            Box::pin(async move {
-                let xhr = s.this.get("xhr")?;
-                rest_reads::validate_eu_account(
-                    |name| {
-                        let p =
-                            xhr.call_method("get", vec![s.global(&format!("ENDPOINTS.{name}"))?])?;
-                        Ok(await_js(&s.exchange_runtime(), p))
-                    },
-                    || capture(&s, "this.emitAndLogError"),
-                    |e, mode| {
-                        if mode == "message" {
-                            optional(&e.value, "message")
-                        } else {
-                            response_or_message(e)
-                        }
-                    },
-                    |emitter, message| call(&emitter, vec![message]).map(|_| ()),
-                    Js::truthy,
-                    Js::str,
-                    |fields| Js::object(fields),
-                )
-                .await
+            Box::pin({
+                let await_runtime = s.exchange_runtime();
+                async move {
+                    let xhr = s.this.get("xhr")?;
+                    rest_reads::validate_eu_account(
+                        |name| {
+                            let p = xhr.call_method(
+                                "get",
+                                vec![s.global(&format!("ENDPOINTS.{name}"))?],
+                            )?;
+                            Ok(await_js(&await_runtime, p))
+                        },
+                        || capture(&s, "this.emitAndLogError"),
+                        |e, mode| {
+                            if mode == "message" {
+                                optional(&e.value, "message")
+                            } else {
+                                response_or_message(e)
+                            }
+                        },
+                        |emitter, message| call(&emitter, vec![message]).map(|_| ()),
+                        Js::truthy,
+                        Js::str,
+                        |fields| Js::object(fields),
+                    )
+                    .await
+                }
             })
         });
     } else {
         async_member(scope, "validateAccount", |s, _| {
-            Box::pin(async move {
-                let xhr = s.this.get("xhr")?;
-                rest_reads::validate_account(
-                    |name| {
-                        let p =
-                            xhr.call_method("get", vec![s.global(&format!("ENDPOINTS.{name}"))?])?;
-                        Ok(await_js(&s.exchange_runtime(), p))
-                    },
-                    || Ok(await_js(&s.exchange_runtime(), this_call(&s, "fetchBalance", vec![])?)),
-                    || capture(&s, "this.emitAndLogError"),
-                    |e, mode| {
-                        if mode == "message" {
-                            optional(&e.value, "message")
-                        } else {
-                            response_or_message(e)
-                        }
-                    },
-                    |emitter, message| call(&emitter, vec![message]).map(|_| ()),
-                    Js::truthy,
-                    Js::str,
-                    || Js::Undefined,
-                    |fields| Js::object(fields),
-                )
-                .await
+            Box::pin({
+                let await_runtime = s.exchange_runtime();
+                async move {
+                    let xhr = s.this.get("xhr")?;
+                    rest_reads::validate_account(
+                        |name| {
+                            let p = xhr.call_method(
+                                "get",
+                                vec![s.global(&format!("ENDPOINTS.{name}"))?],
+                            )?;
+                            Ok(await_js(&await_runtime, p))
+                        },
+                        || {
+                            Ok(await_js(
+                                &await_runtime,
+                                this_call(&s, "fetchBalance", vec![])?,
+                            ))
+                        },
+                        || capture(&s, "this.emitAndLogError"),
+                        |e, mode| {
+                            if mode == "message" {
+                                optional(&e.value, "message")
+                            } else {
+                                response_or_message(e)
+                            }
+                        },
+                        |emitter, message| call(&emitter, vec![message]).map(|_| ()),
+                        Js::truthy,
+                        Js::str,
+                        || Js::Undefined,
+                        |fields| Js::object(fields),
+                    )
+                    .await
+                }
             })
         });
         async_member(scope, "fetchAccountMarketOverlay", |_, _| {
@@ -370,31 +385,45 @@ fn account(scope: &OkxScope, variant: Variant) {
         });
     }
     async_member(scope, "fetchTickers", |s, _| {
-        Box::pin(async move {
-            rest_reads::fetch_tickers(
-                |name| Ok(await_js(&s.exchange_runtime(), this_call(&s, name, vec![])?)),
-                |raw| this_call(&s, "parseTickers", vec![raw]),
-            )
-            .await
+        Box::pin({
+            let await_runtime = s.exchange_runtime();
+            async move {
+                rest_reads::fetch_tickers(
+                    |name| Ok(await_js(&await_runtime, this_call(&s, name, vec![])?)),
+                    |raw| this_call(&s, "parseTickers", vec![raw]),
+                )
+                .await
+            }
         })
     });
     async_member(scope, "fetchPositions", |s, a| {
-        Box::pin(async move {
-            rest_reads::fetch_positions(
-                arg(&a, 0),
-                |name, symbols| Ok(await_js(&s.exchange_runtime(), this_call(&s, name, vec![symbols])?)),
-                |response, key| response.get(key),
-            )
-            .await
+        Box::pin({
+            let await_runtime = s.exchange_runtime();
+            async move {
+                rest_reads::fetch_positions(
+                    arg(&a, 0),
+                    |name, symbols| {
+                        Ok(await_js(
+                            &await_runtime,
+                            this_call(&s, name, vec![symbols])?,
+                        ))
+                    },
+                    |response, key| response.get(key),
+                )
+                .await
+            }
         })
     });
     async_member(scope, "fetchBalance", |s, _| {
-        Box::pin(async move {
-            rest_reads::fetch_balance(
-                |name| Ok(await_js(&s.exchange_runtime(), this_call(&s, name, vec![])?)),
-                |response, key| response.get(key),
-            )
-            .await
+        Box::pin({
+            let await_runtime = s.exchange_runtime();
+            async move {
+                rest_reads::fetch_balance(
+                    |name| Ok(await_js(&await_runtime, this_call(&s, name, vec![])?)),
+                    |response, key| response.get(key),
+                )
+                .await
+            }
         })
     });
 }
@@ -409,42 +438,45 @@ fn cache_field(name: &str) -> &'static str {
 
 fn position_mode(scope: &OkxScope) {
     async_member(scope, "getOrFetchPositionModeAndAccLevel", |s, a| {
-        Box::pin(async move {
-            let force = (!a.is_empty() && !arg(&a, 0).is_undefined()).then(|| arg(&a, 0));
-            let this = s.this.clone();
-            let xhr = this.get("xhr")?;
-            rest_reads::get_or_fetch_position_mode_and_account_level(
-                force,
-                Js::Bool,
-                |name| this.get(cache_field(name)),
-                Js::truthy,
-                |name| {
-                    let p =
-                        xhr.call_method("get", vec![s.global(&format!("ENDPOINTS.{name}"))?])?;
-                    Ok(await_js(&s.exchange_runtime(), p))
-                },
-                // const { data: { data: [{ posMode, acctLv }] } } = response
-                |response| {
-                    let first = response.get("data")?.get("data")?.get("0")?;
-                    Ok((first.get("posMode")?, first.get("acctLv")?))
-                },
-                |v, text| v.strict_equals(&Js::str(text)),
-                |name, value| this.set(cache_field(name), value),
-                |v| Ok(Js::Number(v.parse_float()?)),
-                Js::str,
-                |fields| Js::object(fields),
-                |name| {
-                    if name == "Error" {
-                        s.global(name)
-                    } else {
-                        capture(&s, &format!("this.{name}"))
-                    }
-                },
-                response_or_message,
-                |emitter, message| call(&emitter, vec![message]).map(|_| ()),
-                |ctor, message| Ok(Thrown::new(call(&ctor, vec![message])?)),
-            )
-            .await
+        Box::pin({
+            let await_runtime = s.exchange_runtime();
+            async move {
+                let force = (!a.is_empty() && !arg(&a, 0).is_undefined()).then(|| arg(&a, 0));
+                let this = s.this.clone();
+                let xhr = this.get("xhr")?;
+                rest_reads::get_or_fetch_position_mode_and_account_level(
+                    force,
+                    Js::Bool,
+                    |name| this.get(cache_field(name)),
+                    Js::truthy,
+                    |name| {
+                        let p =
+                            xhr.call_method("get", vec![s.global(&format!("ENDPOINTS.{name}"))?])?;
+                        Ok(await_js(&await_runtime, p))
+                    },
+                    // const { data: { data: [{ posMode, acctLv }] } } = response
+                    |response| {
+                        let first = response.get("data")?.get("data")?.get("0")?;
+                        Ok((first.get("posMode")?, first.get("acctLv")?))
+                    },
+                    |v, text| v.strict_equals(&Js::str(text)),
+                    |name, value| this.set(cache_field(name), value),
+                    |v| Ok(Js::Number(v.parse_float()?)),
+                    Js::str,
+                    |fields| Js::object(fields),
+                    |name| {
+                        if name == "Error" {
+                            s.global(name)
+                        } else {
+                            capture(&s, &format!("this.{name}"))
+                        }
+                    },
+                    response_or_message,
+                    |emitter, message| call(&emitter, vec![message]).map(|_| ()),
+                    |ctor, message| Ok(Thrown::new(call(&ctor, vec![message])?)),
+                )
+                .await
+            }
         })
     });
     // Both read their half of getOrFetchPositionModeAndAccLevel(force).
@@ -454,10 +486,13 @@ fn position_mode(scope: &OkxScope) {
             "getOrFetchPositionModeAndAccLevel",
             vec![Js::Bool(force)],
         );
-        async move {
-            let value = await_js(&s.exchange_runtime(), pending?).await?;
-            let mode: PositionMode = to_typed(&value.get("positionMode")?)?;
-            Ok::<_, Thrown>((mode, value.get("accountLevel")?.to_number()?))
+        {
+            let await_runtime = s.exchange_runtime();
+            async move {
+                let value = await_js(&await_runtime, pending?).await?;
+                let mode: PositionMode = to_typed(&value.get("positionMode")?)?;
+                Ok::<_, Thrown>((mode, value.get("accountLevel")?.to_number()?))
+            }
         }
     };
     async_member(scope, "getOrFetchPositionMode", move |s, a| {

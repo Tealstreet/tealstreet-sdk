@@ -28,16 +28,19 @@ impl ContextHost for Host {
         currency: &'static str,
         s: Js,
     ) -> Result<Js, Thrown> {
-        await_js(&self.rt.exchange_runtime(), c.call_method(
-            "get",
-            vec![
-                Js::str(e),
-                Js::object(vec![(
-                    "params",
-                    Js::object(vec![("currency", Js::str(currency)), ("symbol", s)]),
-                )]),
-            ],
-        )?)
+        await_js(
+            &self.rt.exchange_runtime(),
+            c.call_method(
+                "get",
+                vec![
+                    Js::str(e),
+                    Js::object(vec![(
+                        "params",
+                        Js::object(vec![("currency", Js::str(currency)), ("symbol", s)]),
+                    )]),
+                ],
+            )?,
+        )
         .await
     }
     fn raw_rows(&mut self, r: Js) -> Result<Js, Thrown> {
@@ -183,14 +186,17 @@ impl SettingsHost for Host {
             p.push(("targetPosMode", Js::str(m)));
         }
         p.extend(leverages.into_iter().map(|(k, v)| (k, Js::Number(v))));
-        await_js(&self.rt.exchange_runtime(), c.call_method(
-            "put",
-            vec![
-                Js::str(e),
-                Js::Undefined,
-                Js::object(vec![("params", Js::object(p))]),
-            ],
-        )?)
+        await_js(
+            &self.rt.exchange_runtime(),
+            c.call_method(
+                "put",
+                vec![
+                    Js::str(e),
+                    Js::Undefined,
+                    Js::object(vec![("params", Js::object(p))]),
+                ],
+            )?,
+        )
         .await
     }
     fn zero_code(&mut self, r: &Js, opt: bool) -> Result<bool, Thrown> {

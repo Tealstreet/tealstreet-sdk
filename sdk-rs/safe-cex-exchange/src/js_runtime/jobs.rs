@@ -329,4 +329,3 @@ pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
         jobs.drain();
     }
 }
-

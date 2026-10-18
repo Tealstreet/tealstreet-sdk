@@ -35,13 +35,16 @@ pub(crate) fn fetch_api_key_info(rt: &Rt) -> Result<Js, Thrown> {
                     .this
                     .get("xhr")
                     .and_then(|xhr| xhr.call_method("get", vec![Js::str(endpoint)]));
-                async move {
-                    let response = await_js(&rt.exchange_runtime(), request.map_err(to_error)?)
-                        .await
-                        .map_err(to_error)?;
-                    Ok(Rc::new(
-                        to_json(&response.get("data").map_err(to_error)?).map_err(to_error)?,
-                    ))
+                {
+                    let await_runtime = rt.exchange_runtime();
+                    async move {
+                        let response = await_js(&await_runtime, request.map_err(to_error)?)
+                            .await
+                            .map_err(to_error)?;
+                        Ok(Rc::new(
+                            to_json(&response.get("data").map_err(to_error)?).map_err(to_error)?,
+                        ))
+                    }
                 }
             },
             |message| {
@@ -110,7 +113,15 @@ pub(crate) fn fetch_and_cache_api_key_info(rt: &Rt) -> Result<Js, Thrown> {
                     .this
                     .call_method("fetchApiKeyInfo", vec![])
                     .map_err(to_error)?;
-                Ok(async move { await_js(&rt.exchange_runtime(), pending).await.map(|_| ()).map_err(to_error) })
+                Ok({
+                    let await_runtime = rt.exchange_runtime();
+                    async move {
+                        await_js(&await_runtime, pending)
+                            .await
+                            .map(|_| ())
+                            .map_err(to_error)
+                    }
+                })
             },
             cached,
             || update_batch_limit_based_on_vip_level(&rt).map_err(to_error),

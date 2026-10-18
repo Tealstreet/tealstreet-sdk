@@ -473,7 +473,9 @@ async fn dispatch(rt: Rt, n: &str, a: Vec<Js>, c: Vec<Js>) -> Result<Js, Thrown>
                     let promise = rt
                         .this
                         .call_method("fetchIncomeHistory", vec![from_typed(&opts)?])?;
-                    Ok::<_, Thrown>(async move { to_typed(&await_js(&rt.exchange_runtime(), promise).await?) })
+                    Ok::<_, Thrown>(async move {
+                        to_typed(&await_js(&rt.exchange_runtime(), promise).await?)
+                    })
                 },
             )
             .await?;
@@ -584,7 +586,8 @@ fn describe(rt: &Rt, e: &Thrown) -> Result<Option<String>, Thrown> {
     }
 }
 async fn data(rt: Rt, endpoint: &str) -> Result<Option<serde_json::Value>, Thrown> {
-    let result = await_js(&rt.exchange_runtime(), 
+    let result = await_js(
+        &rt.exchange_runtime(),
         rt.this
             .get("xhr")?
             .call_method("get", vec![Js::str(endpoint)])?,
@@ -640,7 +643,8 @@ async fn orders(rt: &Rt) -> Result<Js, Thrown> {
         |endpoint| {
             let rt = rt.clone();
             Ok::<_, Thrown>(async move {
-                let response = await_js(&rt.exchange_runtime(), 
+                let response = await_js(
+                    &rt.exchange_runtime(),
                     rt.this
                         .get("xhr")?
                         .call_method("get", vec![Js::str(endpoint)])?,

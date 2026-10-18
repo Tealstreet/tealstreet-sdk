@@ -27,7 +27,8 @@ fn error(message: &Js) -> Result<Thrown, Thrown> {
     ))
 }
 async fn post(rt: &Rt, name: &str, request: Js) -> Result<Js, Thrown> {
-    await_js(&rt.exchange_runtime(), 
+    await_js(
+        &rt.exchange_runtime(),
         rt.this
             .get("xhr")?
             .call_method("post", vec![rt.global("ENDPOINTS")?.get(name)?, request])?,
@@ -133,7 +134,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 "marginType",
                 Js::str(if isolated { "isolated" } else { "cross" }),
             )?;
-            let positions = await_js(&rt.exchange_runtime(), rt.this.call_method("fetchPositions", vec![])?).await?;
+            let positions = await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("fetchPositions", vec![])?,
+            )
+            .await?;
             rt.this
                 .get("store")?
                 .call_method("update", vec![Js::object(vec![("positions", positions)])])?;

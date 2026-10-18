@@ -314,9 +314,11 @@ impl CancellationHost for Rt {
         }
         let client = self.path("unlimitedXHR")?;
         let response = client.call_method("post", vec![Js::str(endpoint), body])?;
-        Ok(Box::pin(
-            async move { await_js(&self.exchange_runtime(), response).await.map(|_| ()) },
-        ))
+        Ok(Box::pin(async move {
+            await_js(&self.exchange_runtime(), response)
+                .await
+                .map(|_| ())
+        }))
     }
     fn schedule_write_check(&self) -> Result<(), Thrown> {
         self.call_path("schedulePrivateStreamWriteCheck", vec![])
@@ -525,9 +527,11 @@ impl OrderReadsHost for Rt {
             return Err(Thrown::type_error("this.xhr.get is not a function"));
         }
         let response = get.call(client, vec![url, Js::object(vec![("params", params)])])?;
-        Ok(Box::pin(
-            async move { await_js(&self.exchange_runtime(), response).await?.get("data") },
-        ))
+        Ok(Box::pin(async move {
+            await_js(&self.exchange_runtime(), response)
+                .await?
+                .get("data")
+        }))
     }
     fn promise_function(&self, settled: bool) -> Result<Js, Thrown> {
         promise_member(self, if settled { "allSettled" } else { "all" })

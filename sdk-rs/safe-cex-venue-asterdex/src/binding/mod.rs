@@ -126,7 +126,10 @@ pub(crate) fn assemble(
     let rt = rt.with_this(this);
     let adapter = |key| -> Result<Rc<dyn safe_cex_transport::RestAdapter>, ExchangeError> {
         Ok(Rc::new(
-            safe_cex_exchange::js_runtime::client::JsRestAdapter::new(rt.exchange_runtime(), rt.this.get(key)?),
+            safe_cex_exchange::js_runtime::client::JsRestAdapter::new(
+                rt.exchange_runtime(),
+                rt.this.get(key)?,
+            ),
         ))
     };
     let _ = rt.shared.extra.account.set(Rc::new(AccountFetch::new(

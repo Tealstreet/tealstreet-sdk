@@ -191,7 +191,9 @@ impl BinanceInverseExchange {
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let pending = self.scope.this.call_method(member, args).map_err(fail);
         Box::pin(async move {
-            await_js(&self.scope.exchange_runtime(), pending?).await.map_err(fail)?;
+            await_js(&self.scope.exchange_runtime(), pending?)
+                .await
+                .map_err(fail)?;
             Ok(())
         })
     }

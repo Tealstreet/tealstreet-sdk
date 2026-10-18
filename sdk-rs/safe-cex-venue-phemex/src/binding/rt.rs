@@ -35,7 +35,10 @@ impl Host {
     }
     pub(crate) fn invoke(&self, name: &str, args: Vec<Js>) -> JsFuture<'static> {
         let result = self.call(name, args);
-        Box::pin(async move { await_js(&self.rt.exchange_runtime(), result?).await })
+        Box::pin({
+            let await_runtime = self.rt.exchange_runtime();
+            async move { await_js(&await_runtime, result?).await }
+        })
     }
     pub(crate) fn global(&self, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {
         self.rt.global(name)?.call(Js::Undefined, args)
@@ -52,7 +55,10 @@ impl Host {
             a.extend(args);
             self.get(client)?.call_method(verb, a)
         })();
-        Box::pin(async move { await_js(&self.rt.exchange_runtime(), result?).await })
+        Box::pin({
+            let await_runtime = self.rt.exchange_runtime();
+            async move { await_js(&await_runtime, result?).await }
+        })
     }
     pub(crate) fn emit(&self, message: Js) -> Result<(), Thrown> {
         self.call("emitAndLogError", vec![message])?;

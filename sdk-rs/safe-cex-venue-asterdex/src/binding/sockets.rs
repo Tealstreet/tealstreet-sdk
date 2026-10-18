@@ -160,11 +160,14 @@ impl crate::private_repairs::RepairParent for Parent {
         let rt = self.rt();
         Box::pin(async move {
             let rt = rt?;
-            let result = safe_cex_exchange::js_runtime::promise::await_js(&rt.exchange_runtime(), members::invoke(
-                &rt,
-                "reconcileBalanceAfterPrivateUpdate",
-                vec![Js::Number(version)],
-            )?)
+            let result = safe_cex_exchange::js_runtime::promise::await_js(
+                &rt.exchange_runtime(),
+                members::invoke(
+                    &rt,
+                    "reconcileBalanceAfterPrivateUpdate",
+                    vec![Js::Number(version)],
+                )?,
+            )
             .await?;
             Ok(to_typed(&result)?)
         })

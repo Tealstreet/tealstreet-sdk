@@ -483,19 +483,22 @@ impl Depth {
         let flight = SnapshotFlight(state.clone());
         rt.clone().spawn(Box::pin(async move {
             let result = async {
-                let result = await_js(&rt.exchange_runtime(), rt.call_path(
-                    "parent.publicXhr.get",
-                    vec![
-                        rt.global("ENDPOINTS.ORDERBOOK")?,
-                        Js::object(vec![(
-                            "params",
-                            Js::object(vec![
-                                ("symbol", state.symbol.clone()),
-                                ("limit", Js::Number(1000.)),
-                            ]),
-                        )]),
-                    ],
-                )?)
+                let result = await_js(
+                    &rt.exchange_runtime(),
+                    rt.call_path(
+                        "parent.publicXhr.get",
+                        vec![
+                            rt.global("ENDPOINTS.ORDERBOOK")?,
+                            Js::object(vec![(
+                                "params",
+                                Js::object(vec![
+                                    ("symbol", state.symbol.clone()),
+                                    ("limit", Js::Number(1000.)),
+                                ]),
+                            )]),
+                        ],
+                    )?,
+                )
                 .await?;
                 let data = result.get("data")?;
                 if flag(&rt, "isDisposed")? {

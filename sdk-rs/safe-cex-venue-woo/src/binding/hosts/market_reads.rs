@@ -102,7 +102,10 @@ impl Host for Frame {
         }
     }
     fn invoke(&mut self, call: Js) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(awaited(&self.rt, invoke(&call, self.rt.this.clone(), vec![])?))
+        Ok(awaited(
+            &self.rt,
+            invoke(&call, self.rt.this.clone(), vec![])?,
+        ))
     }
     fn invoke_parse(&mut self, call: Js, rows: Js) -> Result<Js, Thrown> {
         invoke(&call, self.rt.this.clone(), vec![rows])
@@ -114,7 +117,10 @@ impl Host for Frame {
             Transport::Secondary => "_secondaryXhr",
         })?;
         let get = client.get("get")?;
-        Ok(awaited(&self.rt, invoke(&get, client, vec![Js::str(endpoint)])?))
+        Ok(awaited(
+            &self.rt,
+            invoke(&get, client, vec![Js::str(endpoint)])?,
+        ))
     }
     fn field(&mut self, value: &Js, key: &str) -> Result<Js, Thrown> {
         value.get(key)

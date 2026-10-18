@@ -216,7 +216,12 @@ fn private_connect(s: &OkxScope, business: bool) -> Result<(), Thrown> {
 async fn private_open(s: OkxScope, business: bool) -> Result<Js, Thrown> {
     let this = s.this.clone();
     let disposed = || Ok(this.get("isDisposed")?.truthy());
-    let auth = || Ok(await_js(&s.exchange_runtime(), this.call_method("auth", vec![])?));
+    let auth = || {
+        Ok(await_js(
+            &s.exchange_runtime(),
+            this.call_method("auth", vec![])?,
+        ))
+    };
     let emit_error =
         |e: &Thrown| unit(this.call_method("emitAndLogError", vec![as_error(&e.value)?]));
     let invoke = |name: &str| {
@@ -297,7 +302,12 @@ async fn private_auth(s: OkxScope, business: bool) -> Result<Js, Thrown> {
             &format!("unknown OKX auth capability {other}"),
         )),
     };
-    let sign = |signer: Js, request: Js| Ok(await_js(&s.exchange_runtime(), signer.call(Js::Undefined, vec![request])?));
+    let sign = |signer: Js, request: Js| {
+        Ok(await_js(
+            &s.exchange_runtime(),
+            signer.call(Js::Undefined, vec![request])?,
+        ))
+    };
     let get = |v: &Js, key: &str| v.get(key);
     let template = |v: &Js| units(v);
     let string = |u: Vec<u16>| Js::utf16(&u);

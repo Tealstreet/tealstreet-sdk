@@ -164,8 +164,9 @@ impl Host {
             }
             client.call_method(method, args).map_err(from_thrown)
         });
+        let runtime = self.runtime();
         self.promise(async move {
-            let response = await_js(&self.runtime(), invoked?).await.map_err(from_thrown)?;
+            let response = await_js(&runtime, invoked?).await.map_err(from_thrown)?;
             let data = response.get("data").map_err(from_thrown)?;
             safe_cex_exchange::js_runtime::value::to_retained_input(&data).map_err(from_thrown)
         })

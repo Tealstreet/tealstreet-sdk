@@ -260,7 +260,7 @@ fn resolve_promise(promise: Promise, value: Js) {
 pub fn await_js(
     runtime: &Rc<dyn ExchangeRuntime>,
     value: Js,
-) -> impl std::future::Future<Output = Result<Js, Thrown>> + 'static {
+) -> impl std::future::Future<Output = Result<Js, Thrown>> + 'static + use<> {
     let runtime = runtime.clone();
     async move { Promise::resolve(&runtime, value).wait().await }
 }

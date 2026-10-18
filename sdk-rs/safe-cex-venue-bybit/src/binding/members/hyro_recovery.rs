@@ -237,7 +237,11 @@ async fn submit_one(rt: &Rt, owner: Js, create: Js, brand: Js) -> Result<Js, Thr
     while !owner.call_method("isDisposed", vec![])?.truthy() {
         if create.get("uncertain")?.truthy() {
             let boundary = owner.call_method("getPublicationBoundary", vec![])?;
-            let found = match await_js(&rt.exchange_runtime(), owner.call_method("findOrder", vec![payload.clone()])?).await
+            let found = match await_js(
+                &rt.exchange_runtime(),
+                owner.call_method("findOrder", vec![payload.clone()])?,
+            )
+            .await
             {
                 Ok(found) => found,
                 Err(error) => return Err(unknown(rt, payload, error.value)?),

@@ -153,7 +153,11 @@ impl WsHost for Host {
 }
 impl AccountReadHost for Host {
     async fn await_value(&self, value: V) -> R<V> {
-        Ok(v(await_js(&self.rt()?.exchange_runtime(), (*value).clone()).await?))
+        Ok(v(await_js(
+            &self.rt()?.exchange_runtime(),
+            (*value).clone(),
+        )
+        .await?))
     }
     fn error_value(&self, error: &Thrown) -> V {
         v(error.value.clone())

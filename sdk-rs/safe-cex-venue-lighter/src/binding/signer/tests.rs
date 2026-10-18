@@ -167,8 +167,11 @@ pub(super) fn classifier_host() -> (Realm, super::Host) {
     (realm, host)
 }
 
-fn settle(runtime: &Runtime, value: Js) -> Result<Js, Thrown> {
-    let mut future = Box::pin(await_js(value));
+fn settle(runtime: &Rc<Runtime>, value: Js) -> Result<Js, Thrown> {
+    let mut future = Box::pin(await_js(
+        &(runtime.clone() as Rc<dyn ExchangeRuntime>),
+        value,
+    ));
     for _ in 0..10_000 {
         if let Poll::Ready(result) = future
             .as_mut()

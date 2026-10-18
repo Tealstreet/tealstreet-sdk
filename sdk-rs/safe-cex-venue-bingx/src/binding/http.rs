@@ -130,7 +130,8 @@ impl ReadTransport for Transport {
                 )
                 .map_err(error)?;
             let response = loop {
-                match await_js(&self.runtime, 
+                match await_js(
+                    &self.runtime,
                     self.client
                         .call_method("request", vec![config.clone()])
                         .map_err(error)?,

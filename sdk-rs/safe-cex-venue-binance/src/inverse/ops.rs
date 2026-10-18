@@ -63,9 +63,12 @@ pub(crate) async fn request(
     let path = rt.global("ENDPOINTS")?.get(endpoint)?;
     let mut args = vec![path];
     args.extend(extra);
-    await_js(&rt.exchange_runtime(), rt.this.get(client)?.call_method(method, args)?)
-        .await?
-        .get("data")
+    await_js(
+        &rt.exchange_runtime(),
+        rt.this.get(client)?.call_method(method, args)?,
+    )
+    .await?
+    .get("data")
 }
 pub(crate) fn require_array(endpoint: &Js, data: Js) -> Result<Vec<Js>, Thrown> {
     if let Some(rows) = data.array_values() {

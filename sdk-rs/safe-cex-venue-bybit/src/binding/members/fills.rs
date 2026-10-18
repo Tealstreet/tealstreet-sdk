@@ -86,7 +86,9 @@ async fn fetch_order_fills(
                 Js::object(vec![("params", Js::object(params))]),
             ],
         )?;
-        let data = await_js(&rt.exchange_runtime(), request).await?.get("data")?;
+        let data = await_js(&rt.exchange_runtime(), request)
+            .await?
+            .get("data")?;
         let ret_msg = get_key(&data, "retMsg")?;
         let ret_msg = if ret_msg.truthy() {
             text(&ret_msg)?

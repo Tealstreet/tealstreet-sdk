@@ -21,7 +21,7 @@ pub(super) fn invoke(_: &Host, function: Js, args: Vec<Js>) -> Result<Js, Thrown
     function.call(Js::Undefined, args)
 }
 pub(super) fn invoke_async<'a>(
-    _: &'a Host,
+    h: &'a Host,
     function: Js,
     args: Vec<Js>,
 ) -> Result<JsFuture<'a>, Thrown> {

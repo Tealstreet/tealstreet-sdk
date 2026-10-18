@@ -44,7 +44,8 @@ fn request_target(params: Js) -> String {
         .build()
         .unwrap();
     tokio::task::LocalSet::new().block_on(&executor, async move {
-        let runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = native_runtime();
+        let runtime: std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
+            native_runtime();
         let terminal = Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap());
         let host = client::rest_http_host(runtime.clone(), terminal);
         let xhr = client::create(

@@ -41,7 +41,11 @@ async fn request(
     args: Vec<Js>,
 ) -> Result<serde_json::Value, ExchangeError> {
     let result = async {
-        let v = await_js(&h.0.exchange_runtime(), h.0.this.get(slot)?.call_method(member, args)?).await?;
+        let v = await_js(
+            &h.0.exchange_runtime(),
+            h.0.this.get(slot)?.call_method(member, args)?,
+        )
+        .await?;
         to_json(&v.get("data")?)
     }
     .await;
@@ -50,7 +54,8 @@ async fn request(
 async fn endpoint(h: Host) -> Result<serde_json::Value, ExchangeError> {
     let result = async {
         to_json(
-            &await_js(&h.0.exchange_runtime(), 
+            &await_js(
+                &h.0.exchange_runtime(),
                 h.0.this
                     .get("grvtClient")?
                     .call_method("authenticatedEndpoint", vec![])?,
@@ -69,7 +74,8 @@ async fn tdg(
 ) -> Result<serde_json::Value, ExchangeError> {
     let result = async {
         to_json(
-            &await_js(&h.0.exchange_runtime(), 
+            &await_js(
+                &h.0.exchange_runtime(),
                 h.0.this
                     .get("grvtClient")?
                     .get("tdgClient")?
@@ -204,17 +210,22 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                             let response = h.0.this.get("xhr").and_then(|xhr| {
                                 xhr.call_method("post", vec![Js::str(path), from_json(&body)])
                             });
-                            async move {
-                                let response =
-                                    await_js(&h.0.exchange_runtime(), response.map_err(|cause| cause.to_exchange_error())?)
-                                        .await
-                                        .map_err(|cause| cause.to_exchange_error())?;
-                                to_retained_input(
-                                    &response
-                                        .get("data")
-                                        .map_err(|cause| cause.to_exchange_error())?,
-                                )
-                                .map_err(|cause| cause.to_exchange_error())
+                            {
+                                let await_runtime = h.0.exchange_runtime();
+                                async move {
+                                    let response = await_js(
+                                        &await_runtime,
+                                        response.map_err(|cause| cause.to_exchange_error())?,
+                                    )
+                                    .await
+                                    .map_err(|cause| cause.to_exchange_error())?;
+                                    to_retained_input(
+                                        &response
+                                            .get("data")
+                                            .map_err(|cause| cause.to_exchange_error())?,
+                                    )
+                                    .map_err(|cause| cause.to_exchange_error())
+                                }
                             }
                         },
                         |text, level| log(&h, text, level),
@@ -263,11 +274,17 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                     h.0.shared.store.as_ref(),
                     || {
                         let result = call(&h, "fetchMarkets", vec![]);
-                        async move {
-                            let v = await_js(&h.0.exchange_runtime(), result.map_err(|e| e.to_exchange_error())?)
+                        {
+                            let await_runtime = h.0.exchange_runtime();
+                            async move {
+                                let v = await_js(
+                                    &await_runtime,
+                                    result.map_err(|e| e.to_exchange_error())?,
+                                )
                                 .await
                                 .map_err(|e| e.to_exchange_error())?;
-                            to_typed(&v).map_err(|e| e.to_exchange_error())
+                                to_typed(&v).map_err(|e| e.to_exchange_error())
+                            }
                         }
                     },
                     |event, changes| {
@@ -348,21 +365,30 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                     |order| {
                         let result =
                             from_typed(order).and_then(|v| call(&h, "cancelOrder", vec![v]));
-                        async move {
-                            await_js(&h.0.exchange_runtime(), result.map_err(|e| e.to_exchange_error())?)
-                                .await
-                                .map(|_| ())
-                                .map_err(|e| e.to_exchange_error())
+                        {
+                            let await_runtime = h.0.exchange_runtime();
+                            async move {
+                                await_js(&await_runtime, result.map_err(|e| e.to_exchange_error())?)
+                                    .await
+                                    .map(|_| ())
+                                    .map_err(|e| e.to_exchange_error())
+                            }
                         }
                     },
                     |order| {
                         let result =
                             from_typed(&order).and_then(|v| call(&h, "placeOrder", vec![v]));
-                        async move {
-                            let v = await_js(&h.0.exchange_runtime(), result.map_err(|e| e.to_exchange_error())?)
+                        {
+                            let await_runtime = h.0.exchange_runtime();
+                            async move {
+                                let v = await_js(
+                                    &await_runtime,
+                                    result.map_err(|e| e.to_exchange_error())?,
+                                )
                                 .await
                                 .map_err(|e| e.to_exchange_error())?;
-                            to_typed(&v).map_err(|e| e.to_exchange_error())
+                                to_typed(&v).map_err(|e| e.to_exchange_error())
+                            }
                         }
                     },
                     |text, level| log(&h, text, level),
@@ -530,11 +556,14 @@ fn cancel(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, Thrown> {
                     |order| {
                         let result =
                             from_typed(order).and_then(|v| call(&h, "cancelOrder", vec![v]));
-                        async move {
-                            await_js(&h.0.exchange_runtime(), result.map_err(|e| e.to_exchange_error())?)
-                                .await
-                                .map(|_| ())
-                                .map_err(|e| e.to_exchange_error())
+                        {
+                            let await_runtime = h.0.exchange_runtime();
+                            async move {
+                                await_js(&await_runtime, result.map_err(|e| e.to_exchange_error())?)
+                                    .await
+                                    .map(|_| ())
+                                    .map_err(|e| e.to_exchange_error())
+                            }
                         }
                     },
                     logger,
@@ -564,30 +593,34 @@ fn place_orders(h: Host, input: Js) -> Result<Js, Thrown> {
                 let pending = from_typed(order).and_then(|v| call(&h, "placeOrder", vec![v]));
                 let host = h.clone();
                 let original = original.clone();
-                async move {
-                    let result = async { to_typed(&await_js(&h.0.exchange_runtime(), pending?).await?) }.await;
-                    result.map_err(|cause: Thrown| {
-                        if crate::trading_runtime::TradingHost::is_builder_error(
-                            &host,
-                            &cause.value,
-                        ) {
-                            let v = &cause.value;
-                            let builder = crate::builder::GrvtBuilderUnauthorizedError::new(
-                                to_typed(&v.get("reason").unwrap_or(Js::Undefined)).unwrap_or(
-                                    crate::types::GrvtBuilderUnauthorizedReason::Unauthorized,
-                                ),
-                                v.get("requiredRaw")
-                                    .and_then(|v| v.to_number())
-                                    .unwrap_or(f64::NAN),
-                                v.get("authorizedRaw").ok().and_then(|v| v.as_f64()),
-                                None,
-                            );
-                            *original.borrow_mut() = Some(cause);
-                            BatchOrderError::Builder(builder)
-                        } else {
-                            BatchOrderError::Exchange(cause.to_exchange_error())
-                        }
-                    })
+                {
+                    let await_runtime = h.0.exchange_runtime();
+                    async move {
+                        let result =
+                            async { to_typed(&await_js(&await_runtime, pending?).await?) }.await;
+                        result.map_err(|cause: Thrown| {
+                            if crate::trading_runtime::TradingHost::is_builder_error(
+                                &host,
+                                &cause.value,
+                            ) {
+                                let v = &cause.value;
+                                let builder = crate::builder::GrvtBuilderUnauthorizedError::new(
+                                    to_typed(&v.get("reason").unwrap_or(Js::Undefined)).unwrap_or(
+                                        crate::types::GrvtBuilderUnauthorizedReason::Unauthorized,
+                                    ),
+                                    v.get("requiredRaw")
+                                        .and_then(|v| v.to_number())
+                                        .unwrap_or(f64::NAN),
+                                    v.get("authorizedRaw").ok().and_then(|v| v.as_f64()),
+                                    None,
+                                );
+                                *original.borrow_mut() = Some(cause);
+                                BatchOrderError::Builder(builder)
+                            } else {
+                                BatchOrderError::Exchange(cause.to_exchange_error())
+                            }
+                        })
+                    }
                 }
             },
             |text, level| log(&h, text, level),

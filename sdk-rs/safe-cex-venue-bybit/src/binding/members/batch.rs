@@ -90,24 +90,28 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "getOrderPositionIdx", |rt, a| {
         let opts = arg(&a, 0);
-        Ok(rt.clone().spawn(Box::pin(async move {
-            let mode = await_js(&rt.exchange_runtime(), 
-                rt.this
-                    .call_method("fetchPositionMode", vec![opts.get("symbol")?])?,
-            )
-            .await?;
-            if mode.strict_equals(&Js::str("oneway")) {
-                return Ok(Js::Number(0.));
+        Ok(rt.clone().spawn(Box::pin({
+            let await_runtime = rt.exchange_runtime();
+            async move {
+                let mode = await_js(
+                    &await_runtime,
+                    rt.this
+                        .call_method("fetchPositionMode", vec![opts.get("symbol")?])?,
+                )
+                .await?;
+                if mode.strict_equals(&Js::str("oneway")) {
+                    return Ok(Js::Number(0.));
+                }
+                let mut index = if opts.get("side")?.strict_equals(&Js::str("buy")) {
+                    1.
+                } else {
+                    2.
+                };
+                if opts.get("reduceOnly")?.truthy() {
+                    index = if index == 1. { 2. } else { 1. };
+                }
+                Ok(Js::Number(index))
             }
-            let mut index = if opts.get("side")?.strict_equals(&Js::str("buy")) {
-                1.
-            } else {
-                2.
-            };
-            if opts.get("reduceOnly")?.truthy() {
-                index = if index == 1. { 2. } else { 1. };
-            }
-            Ok(Js::Number(index))
         })))
     })?;
     method(rt, "placeOrders", place_orders)?;
@@ -139,162 +143,188 @@ fn place_orders(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
 }
 fn place_orders_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
     let orders = arg(&a, 0);
-    Ok(rt.clone().spawn(Box::pin(async move {
-        if orders.get("length")?.strict_equals(&Js::Number(0.)) {
-            return Ok(Js::array(vec![]));
-        }
-        rt.this
-            .call_method("assertCallerClientOrderIds", vec![orders.clone()])?;
-        for order in items(&orders)? {
-            if primary && crate::options::is_bybit_option_symbol(&text(&order.get("symbol")?)?) {
-                rt.this
-                    .call_method("assertOptionOrderPlaceable", vec![order])?;
-            } else {
-                rt.this
-                    .call_method("getOrderExecutionParams", vec![order])?;
+    Ok(rt.clone().spawn(Box::pin({
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            if orders.get("length")?.strict_equals(&Js::Number(0.)) {
+                return Ok(Js::array(vec![]));
             }
-        }
-        let mut special = vec![];
-        let mut regular = vec![];
-        for order in items(&orders)? {
-            let kind = order.get("type")?;
-            let opposite = rt
-                .this
-                .call_method(
-                    "_hasFullSizedPositionOppositeSide",
-                    vec![
-                        order.get("symbol")?,
-                        order.get("side")?,
-                        order.get("amount")?,
-                    ],
-                )?
-                .truthy();
-            let opts: BybitPlaceOrderOpts = to_typed(&order)?;
-            let base: &safe_cex_types::PlaceOrderOpts = opts.borrow();
-            if (opposite
-                && (kind.strict_equals(&Js::str("stop_market"))
-                    || kind.strict_equals(&Js::str("take_profit_market"))))
-                || kind.strict_equals(&Js::str("trailing_stop_market"))
-                || crate::order_params::has_bybit_single_order_params(&opts)
-                || (primary && crate::options::is_bybit_option_symbol(&base.symbol))
-            {
-                special.push(order);
-            } else {
-                regular.push(order);
-            }
-        }
-        let mut ids = vec![];
-        for order in special {
-            let result =
-                async { await_js(&rt.exchange_runtime(), rt.this.call_method("placeOrder", vec![order])?).await }.await;
-            match result {
-                Ok(values) => append(&mut ids, values)?,
-                Err(failure) => emit(
-                    &rt,
-                    Js::str(&format!(
-                        "Failed to place special order: {}",
-                        caught_message(&failure)?
-                    )),
-                )?,
-            }
-        }
-        if !regular.is_empty() {
-            append(
-                &mut ids,
-                await_js(&rt.exchange_runtime(), 
+            rt.this
+                .call_method("assertCallerClientOrderIds", vec![orders.clone()])?;
+            for order in items(&orders)? {
+                if primary && crate::options::is_bybit_option_symbol(&text(&order.get("symbol")?)?)
+                {
                     rt.this
-                        .call_method("placeBatchOrders", vec![Js::array(regular)])?,
-                )
-                .await?,
-            )?;
+                        .call_method("assertOptionOrderPlaceable", vec![order])?;
+                } else {
+                    rt.this
+                        .call_method("getOrderExecutionParams", vec![order])?;
+                }
+            }
+            let mut special = vec![];
+            let mut regular = vec![];
+            for order in items(&orders)? {
+                let kind = order.get("type")?;
+                let opposite = rt
+                    .this
+                    .call_method(
+                        "_hasFullSizedPositionOppositeSide",
+                        vec![
+                            order.get("symbol")?,
+                            order.get("side")?,
+                            order.get("amount")?,
+                        ],
+                    )?
+                    .truthy();
+                let opts: BybitPlaceOrderOpts = to_typed(&order)?;
+                let base: &safe_cex_types::PlaceOrderOpts = opts.borrow();
+                if (opposite
+                    && (kind.strict_equals(&Js::str("stop_market"))
+                        || kind.strict_equals(&Js::str("take_profit_market"))))
+                    || kind.strict_equals(&Js::str("trailing_stop_market"))
+                    || crate::order_params::has_bybit_single_order_params(&opts)
+                    || (primary && crate::options::is_bybit_option_symbol(&base.symbol))
+                {
+                    special.push(order);
+                } else {
+                    regular.push(order);
+                }
+            }
+            let mut ids = vec![];
+            for order in special {
+                let result = async {
+                    await_js(
+                        &await_runtime,
+                        rt.this.call_method("placeOrder", vec![order])?,
+                    )
+                    .await
+                }
+                .await;
+                match result {
+                    Ok(values) => append(&mut ids, values)?,
+                    Err(failure) => emit(
+                        &rt,
+                        Js::str(&format!(
+                            "Failed to place special order: {}",
+                            caught_message(&failure)?
+                        )),
+                    )?,
+                }
+            }
+            if !regular.is_empty() {
+                append(
+                    &mut ids,
+                    await_js(
+                        &await_runtime,
+                        rt.this
+                            .call_method("placeBatchOrders", vec![Js::array(regular)])?,
+                    )
+                    .await?,
+                )?;
+            }
+            Ok(Js::array(ids))
         }
-        Ok(Js::array(ids))
     })))
 }
 
 // ts: BybitExchange.placeBatchOrders (also the exact standalone Inverse body)
 fn place_batch_orders(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
-    Ok(rt.clone().spawn(Box::pin(async move {
-        let grouped = Js::object(vec![]);
-        for order in items(&arg(&a, 0))? {
-            let category = rt
-                .this
-                .call_method("getCategoryForSymbol", vec![order.get("symbol")?])?;
-            let key = category.to_js_string()?;
-            if !grouped.get_key(&key)?.truthy() {
-                grouped.set_key(&key, Js::array(vec![]))?;
+    Ok(rt.clone().spawn(Box::pin({
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            let grouped = Js::object(vec![]);
+            for order in items(&arg(&a, 0))? {
+                let category = rt
+                    .this
+                    .call_method("getCategoryForSymbol", vec![order.get("symbol")?])?;
+                let key = category.to_js_string()?;
+                if !grouped.get_key(&key)?.truthy() {
+                    grouped.set_key(&key, Js::array(vec![]))?;
+                }
+                grouped.get_key(&key)?.push(order)?;
             }
-            grouped.get_key(&key)?.push(order)?;
+            let mut ids = vec![];
+            for (category, orders) in grouped.own_entries()? {
+                append(
+                    &mut ids,
+                    await_js(
+                        &await_runtime,
+                        rt.this.call_method(
+                            "placeBatchOrdersForCategory",
+                            vec![Js::String(category), orders],
+                        )?,
+                    )
+                    .await?,
+                )?;
+            }
+            Ok(Js::array(ids))
         }
-        let mut ids = vec![];
-        for (category, orders) in grouped.own_entries()? {
-            append(
-                &mut ids,
-                await_js(&rt.exchange_runtime(), rt.this.call_method(
-                    "placeBatchOrdersForCategory",
-                    vec![Js::String(category), orders],
-                )?)
-                .await?,
-            )?;
-        }
-        Ok(Js::array(ids))
     })))
 }
 
 // ts: BybitExchange.placeBatchOrdersForCategory (also the exact Inverse body)
 fn place_batch_orders_for_category(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
-    Ok(rt.clone().spawn(Box::pin(async move {
-        let category = arg(&a, 0);
-        let batches = rt
-            .global("chunk")?
-            .call(Js::Undefined, vec![arg(&a, 1), rt.this.get("batchLimit")?])?;
-        let mut ids = vec![];
-        for (index, batch) in items(&batches)?.into_iter().enumerate() {
-            if index > 0 {
-                await_js(&rt.exchange_runtime(), 
-                    rt.global("sleep")?
-                        .call(Js::Undefined, vec![Js::Number(1200.)])?,
-                )
-                .await?;
-            }
-            let result = async {
-                await_js(&rt.exchange_runtime(), 
-                    rt.this
-                        .call_method("processBatch", vec![category.clone(), batch.clone()])?,
-                )
-                .await
-            }
-            .await;
-            match result {
-                Ok(values) => append(&mut ids, values)?,
-                Err(failure) => {
-                    emit(
-                        &rt,
-                        Js::str(&format!(
-                            "Failed to place batch orders: {}",
-                            caught_message(&failure)?
-                        )),
-                    )?;
-                    for order in items(&batch)? {
-                        let result = async {
-                            await_js(&rt.exchange_runtime(), rt.this.call_method("placeOrder", vec![order])?).await
-                        }
-                        .await;
-                        match result {
-                            Ok(values) => append(&mut ids, values)?,
-                            Err(failure) => emit(
-                                &rt,
-                                Js::str(&format!(
-                                    "Failed to place individual order: {}",
-                                    caught_message(&failure)?
-                                )),
-                            )?,
+    Ok(rt.clone().spawn(Box::pin({
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            let category = arg(&a, 0);
+            let batches = rt
+                .global("chunk")?
+                .call(Js::Undefined, vec![arg(&a, 1), rt.this.get("batchLimit")?])?;
+            let mut ids = vec![];
+            for (index, batch) in items(&batches)?.into_iter().enumerate() {
+                if index > 0 {
+                    await_js(
+                        &await_runtime,
+                        rt.global("sleep")?
+                            .call(Js::Undefined, vec![Js::Number(1200.)])?,
+                    )
+                    .await?;
+                }
+                let result = async {
+                    await_js(
+                        &await_runtime,
+                        rt.this
+                            .call_method("processBatch", vec![category.clone(), batch.clone()])?,
+                    )
+                    .await
+                }
+                .await;
+                match result {
+                    Ok(values) => append(&mut ids, values)?,
+                    Err(failure) => {
+                        emit(
+                            &rt,
+                            Js::str(&format!(
+                                "Failed to place batch orders: {}",
+                                caught_message(&failure)?
+                            )),
+                        )?;
+                        for order in items(&batch)? {
+                            let result = async {
+                                await_js(
+                                    &await_runtime,
+                                    rt.this.call_method("placeOrder", vec![order])?,
+                                )
+                                .await
+                            }
+                            .await;
+                            match result {
+                                Ok(values) => append(&mut ids, values)?,
+                                Err(failure) => emit(
+                                    &rt,
+                                    Js::str(&format!(
+                                        "Failed to place individual order: {}",
+                                        caught_message(&failure)?
+                                    )),
+                                )?,
+                            }
                         }
                     }
                 }
             }
+            Ok(Js::array(ids))
         }
-        Ok(Js::array(ids))
     })))
 }
 
@@ -309,11 +339,14 @@ fn process_batch_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
             let request = rt
                 .this
                 .call_method("formatOrderForBatch", vec![order.clone()]);
-            pending.push(rt.clone().spawn(Box::pin(async move {
-                Ok(Js::object(vec![
-                    ("order", order),
-                    ("request", await_js(&rt.exchange_runtime(), request?).await?),
-                ]))
+            pending.push(rt.clone().spawn(Box::pin({
+                let await_runtime = rt.exchange_runtime();
+                async move {
+                    Ok(Js::object(vec![
+                        ("order", order),
+                        ("request", await_js(&await_runtime, request?).await?),
+                    ]))
+                }
             })));
         }
         let all = rt
@@ -332,16 +365,19 @@ fn process_batch_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
             .iter()
             .map(|v| v.get("request"))
             .collect::<Result<Vec<_>, _>>()?;
-        let data = await_js(&rt.exchange_runtime(), rt.this.get("xhr")?.call_method(
-            "post",
-            vec![
-                rt.global("ENDPOINTS")?.get("CREATE_BATCH_ORDER")?,
-                Js::object(vec![
-                    ("category", arg(&a, 0)),
-                    ("request", Js::array(request)),
-                ]),
-            ],
-        )?)
+        let data = await_js(
+            &rt.exchange_runtime(),
+            rt.this.get("xhr")?.call_method(
+                "post",
+                vec![
+                    rt.global("ENDPOINTS")?.get("CREATE_BATCH_ORDER")?,
+                    Js::object(vec![
+                        ("category", arg(&a, 0)),
+                        ("request", Js::array(request)),
+                    ]),
+                ],
+            )?,
+        )
         .await?
         .get("data")?;
         if !data.get("retMsg")?.strict_equals(&Js::str("OK")) {
@@ -411,67 +447,71 @@ fn format_order_for_batch(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
     format_order_body(rt, a, true)
 }
 fn format_order_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
-    Ok(rt.clone().spawn(Box::pin(async move {
-        let body = async {
-            let opts = arg(&a, 0);
-            let typed: safe_cex_types::PlaceOrderOpts = to_typed(&opts)?;
-            let market = venue(&rt)?
-                .base
-                .store
-                .markets()
-                .iter()
-                .find(|m| m.symbol == typed.symbol)
-                .cloned();
-            let Some(market) = market else {
-                emit(&rt, Js::str(&format!("Market {} not found", typed.symbol)))?;
-                return Ok(Js::Null);
-            };
-            let position_opts = if typed.r#type == safe_cex_types::OrderType::Conditional {
-                let next = opts.spread_object()?;
-                next.set("reduceOnly", Js::Bool(false))?;
-                next
-            } else {
-                opts
-            };
-            let index = await_js(&rt.exchange_runtime(), 
-                rt.this
-                    .call_method("getOrderPositionIdx", vec![position_opts])?,
-            )
-            .await?
-            .to_number()?;
-            let ticker = venue(&rt)?
-                .base
-                .store
-                .tickers()
-                .iter()
-                .find(|t| t.symbol == typed.symbol)
-                .cloned();
-            let formatter = if primary {
-                crate::order_format::format_order_for_batch
-            } else {
-                crate::order_format::format_inverse_order_for_batch
-            };
-            match formatter(&typed, Some(&market), ticker.as_ref(), index) {
-                Ok(request) => Ok(from_json(&request)),
-                Err(message) => {
-                    // The pure body already prefixes caught format failures.
-                    emit(&rt, Js::str(&message))?;
-                    Ok(Js::Null)
+    Ok(rt.clone().spawn(Box::pin({
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            let body = async {
+                let opts = arg(&a, 0);
+                let typed: safe_cex_types::PlaceOrderOpts = to_typed(&opts)?;
+                let market = venue(&rt)?
+                    .base
+                    .store
+                    .markets()
+                    .iter()
+                    .find(|m| m.symbol == typed.symbol)
+                    .cloned();
+                let Some(market) = market else {
+                    emit(&rt, Js::str(&format!("Market {} not found", typed.symbol)))?;
+                    return Ok(Js::Null);
+                };
+                let position_opts = if typed.r#type == safe_cex_types::OrderType::Conditional {
+                    let next = opts.spread_object()?;
+                    next.set("reduceOnly", Js::Bool(false))?;
+                    next
+                } else {
+                    opts
+                };
+                let index = await_js(
+                    &await_runtime,
+                    rt.this
+                        .call_method("getOrderPositionIdx", vec![position_opts])?,
+                )
+                .await?
+                .to_number()?;
+                let ticker = venue(&rt)?
+                    .base
+                    .store
+                    .tickers()
+                    .iter()
+                    .find(|t| t.symbol == typed.symbol)
+                    .cloned();
+                let formatter = if primary {
+                    crate::order_format::format_order_for_batch
+                } else {
+                    crate::order_format::format_inverse_order_for_batch
+                };
+                match formatter(&typed, Some(&market), ticker.as_ref(), index) {
+                    Ok(request) => Ok(from_json(&request)),
+                    Err(message) => {
+                        // The pure body already prefixes caught format failures.
+                        emit(&rt, Js::str(&message))?;
+                        Ok(Js::Null)
+                    }
                 }
             }
-        }
-        .await;
-        match body {
-            Ok(value) => Ok(value),
-            Err(failure) => {
-                emit(
-                    &rt,
-                    Js::str(&format!(
-                        "Failed to format order for batch: {}",
-                        caught_message(&failure)?
-                    )),
-                )?;
-                Ok(Js::Null)
+            .await;
+            match body {
+                Ok(value) => Ok(value),
+                Err(failure) => {
+                    emit(
+                        &rt,
+                        Js::str(&format!(
+                            "Failed to format order for batch: {}",
+                            caught_message(&failure)?
+                        )),
+                    )?;
+                    Ok(Js::Null)
+                }
             }
         }
     })))

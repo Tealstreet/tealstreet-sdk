@@ -331,7 +331,10 @@ impl ApiHost for ClientFactory {
             &exchange.base,
         )?;
         *self.xhr.borrow_mut() = Some(xhr.clone());
-        Ok(Rc::new(Wire { runtime: self.http.runtime(), xhr }))
+        Ok(Rc::new(Wire {
+            runtime: self.http.runtime(),
+            xhr,
+        }))
     }
     fn install_network_retry(
         &self,
@@ -500,8 +503,11 @@ impl ApiWire for Wire {
                 if let Some(timeout) = request.timeout_ms {
                     fields.push(("timeout", Js::Number(timeout as f64)));
                 }
-                let response =
-                    await_js(&runtime, xhr.call_method("request", vec![Js::object(fields)])?).await?;
+                let response = await_js(
+                    &runtime,
+                    xhr.call_method("request", vec![Js::object(fields)])?,
+                )
+                .await?;
                 to_typed::<JsNumberInput>(&response.get("data")?)
             }
             .await;
