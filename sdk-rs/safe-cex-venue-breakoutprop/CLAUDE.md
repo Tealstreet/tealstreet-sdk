@@ -213,8 +213,8 @@ form encoding. Authentication and provider construction remain separate rows.
 
 The source ignores limit and maps every event. Native fields are observed directly
 before JSON. Original request/reporter errors retain complete ExchangeError
-metadata. Declared response validation, UTF-8 refusal, owned input options and
-borrowed future cancellation are witnessed CHOSEN boundaries. The ISO fixture
+metadata. Final Candle field projection, owned input options and borrowed future
+cancellation retain their independently witnessed boundaries. The ISO fixture
 adapter proves forwarding and error propagation, not native ISO implementation.
 The 28-case main corpus runs in one Node subprocess with three supplements for
 NaN bounds, an ignored lone surrogate and discarded Promise continuation.
@@ -318,3 +318,25 @@ its virtual timer. `tests/binding_scheduling_source.cjs` executes the five actua
 BaseExchange rejection bodies and the maintained loop/sleep bodies: rejection
 needs no timer, and a complete ready-turn drain includes the loop's zero-delay
 callback. Clock/state/handle assertions remain native and unchanged.
+
+
+Retained-input boundary witnesses admit lone UTF-16 units before consuming them.
+Raw reads and instrument joins retain those units; ignored account metadata does
+not prevent account selection. Closed model String fields still refuse at their actual consumer, while a typed requested
+symbol list cannot represent a lone surrogate. Source case inputs and censuses
+remain unchanged. Native info comparisons inspect binary64 bits, own-key order,
+field presence and text units rather than comparing Lexeme/Float storage variants.
+
+Position ticker lookup compares UTF-16 property-key units against Store keys
+before final model projection. A lone-surrogate symbol misses the ticker and uses
+entry price, matching TypeScript; balance reductions and retained info complete
+without projecting a Position symbol. The real binding/source regression in
+`tests/binding.rs` checks Store balance bits, retained symbol units, zero error
+events and both actual portfolio HTTP reads.
+
+
+Candle reads map only source-consumed date/OHLCV fields from retained events;
+unused symbol/type/candleType declarations do not validate live responses.
+Declared CandleResponse codecs remain declaration-only. Actual binding and
+maintained-source witnesses retain two candles with an ignored surrogate symbol,
+all six numeric fields, limit=1, the original request and zero error events.
