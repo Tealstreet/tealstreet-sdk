@@ -268,6 +268,7 @@ fn private_receiver_forwards_native_strings_hmac_and_members() {
     let split = PrivateHost::split(h, Js::str("first:second:"), ":")
         .unwrap()
         .array_values()
+        .expect("fixture array property reads")
         .unwrap();
     assert_eq!(
         split.into_iter().map(text).collect::<Vec<_>>(),
@@ -346,6 +347,7 @@ fn private_receiver_forwards_native_strings_hmac_and_members() {
         h.global("listenKeyRetryDelays")
             .unwrap()
             .array_values()
+            .expect("fixture array property reads")
             .unwrap()
             .into_iter()
             .map(bits)
@@ -381,10 +383,12 @@ fn composition_receiver_uses_live_factories_and_lexical_members() {
     let every = CompositionHost::grafana(h, "every")
         .unwrap()
         .array_values()
+        .expect("fixture array property reads")
         .unwrap();
     let periodic = CompositionHost::grafana(h, "periodic")
         .unwrap()
         .array_values()
+        .expect("fixture array property reads")
         .unwrap();
     assert_eq!(
         every.into_iter().map(text).collect::<Vec<_>>(),

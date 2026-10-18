@@ -10048,7 +10048,7 @@
       }
     },
     "evidence": "Production constructor and DefaultStore seed independent market/position rows; inspect actual facade rows, not a replacement Store mock. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let v=$type(&witness::rt(&h),$value[\"key\"].as_str().unwrap()).unwrap();serde_json::json!({\"len\":v.array_values().unwrap().len(),\"id\":v.get(\"0\").unwrap().get(\"id\").unwrap().to_display()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let v=$type(&witness::rt(&h),$value[\"key\"].as_str().unwrap()).unwrap();serde_json::json!({\"len\":v.array_values().expect(\"array property reads\").unwrap().len(),\"id\":v.get(\"0\").unwrap().get(\"id\").unwrap().to_display()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -11821,7 +11821,7 @@
       }
     },
     "evidence": "Actual signed client, HTTP transform, shared Promise and response-data selection execute before observing native decoded numbers; no Value-first projection. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.http.encoded(\"GET\",\"/dapi/v1/openOrders\",$value[\"raw\"].as_str().unwrap().as_bytes());let rt=witness::rt(&h);let result=h.drive(Box::pin(async move {Ok($type(&rt,\"xhr\",\"get\",\"OPEN_ORDERS\",vec![]).await)})).unwrap().unwrap();serde_json::json!({\"len\":result.array_values().unwrap().len(),\"first\":witness::number(result.get(\"0\").unwrap().as_f64().unwrap()),\"second\":witness::number(result.get(\"1\").unwrap().as_f64().unwrap()),\"requests\":h.http.calls(\"/dapi/v1/openOrders\").len()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.http.encoded(\"GET\",\"/dapi/v1/openOrders\",$value[\"raw\"].as_str().unwrap().as_bytes());let rt=witness::rt(&h);let result=h.drive(Box::pin(async move {Ok($type(&rt,\"xhr\",\"get\",\"OPEN_ORDERS\",vec![]).await)})).unwrap().unwrap();serde_json::json!({\"len\":result.array_values().expect(\"array property reads\").unwrap().len(),\"first\":witness::number(result.get(\"0\").unwrap().as_f64().unwrap()),\"second\":witness::number(result.get(\"1\").unwrap().as_f64().unwrap()),\"requests\":h.http.calls(\"/dapi/v1/openOrders\").len()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -23283,50 +23283,8 @@
               {
                 "type": {
                   "resolved_path": {
-                    "path": "core::cell::RefCell",
-                    "args": {
-                      "angle_bracketed": {
-                        "args": [
-                          {
-                            "type": {
-                              "resolved_path": {
-                                "path": "alloc::vec::Vec",
-                                "args": {
-                                  "angle_bracketed": {
-                                    "args": [
-                                      {
-                                        "type": {
-                                          "resolved_path": {
-                                            "path": "core::option::Option",
-                                            "args": {
-                                              "angle_bracketed": {
-                                                "args": [
-                                                  {
-                                                    "type": {
-                                                      "resolved_path": {
-                                                        "path": "safe_cex_exchange::js_runtime::value::Js",
-                                                        "args": null
-                                                      }
-                                                    }
-                                                  }
-                                                ],
-                                                "constraints": []
-                                              }
-                                            }
-                                          }
-                                        }
-                                      }
-                                    ],
-                                    "constraints": []
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        ],
-                        "constraints": []
-                      }
-                    }
+                    "path": "safe_cex_exchange::js_runtime::value::array::ArrayData",
+                    "args": null
                   }
                 }
               }
@@ -23337,7 +23295,7 @@
       }
     },
     "evidence": "Individual source-role review: safe-cex-venue-binance/src/private_event_value.rs::EventArray. Authenticated acceptedAliasContext plus the actual native Deserialize/conversion probes in scripts/private-order-alias-contracts.mjs decide this exact alias classification. Separate production behavior is exercised through native_dependencies, real owner/HTTP/socket/Store and primitive terminal ports in tests/private_classes.rs::private_order_aliases::native_private_handler_and_event_array_keep_numeric_fields_before_transport; scripts/private-order-alias-controls.py requires a compiled named fault and exact-restoration pass for this alias. This finite native/default evidence does not exempt argument/result DTOs, arbitrary callbacks or other feature combinations.",
-    "reason": "Rc/RefCell handle for sparse native runtime graph rows, rather than a Serde DTO. Actual private parent orders reads return a handle whose rows retain native field kinds/bits and Rc cloning identity. Typed Store snapshots do not claim mutable aliases back into Store."
+    "reason": "Rc handle to the canonical sparse ArrayData owner for native runtime graph rows, rather than a Serde DTO. Actual private parent orders reads return a handle whose rows retain native field kinds/bits and Rc cloning identity. Typed Store snapshots do not claim mutable aliases back into Store. Indexed and named descriptors, holes, virtual length and extensibility share that owner; array-element/iteration failures propagate through the existing Failure boundary."
   },
   "safe_cex_venue_binance::private_events::PrivateHandler": {
     "category": "non-decoder",
@@ -25497,7 +25455,7 @@
       }
     },
     "evidence": "Private REST source-owned native graph operation. Direct production calls observe native units, binary64 bits, own undefined, array length or original referent identity before finite reporting. Actual native dependencies/ExchangeOwner/signed HTTP behavior is covered by private_classes::private_rest_native; existing private-rest live-source corpus covers mapping and reconciliation order. This finite contract does not claim arbitrary executable graphs or whole-venue parity.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } let input=witness::input($value); let seen=std::cell::RefCell::new(Vec::new()); let output=super::map(input.clone(),\"rows\",|row|{seen.borrow_mut().push(witness::observe(&row)); if $value[\"append\"]==true {input.push(crate::private_event_value::string(\"later\")).unwrap();} Ok(row)}); let identity=output.as_ref().ok().and_then(|v|v.array_values()).zip(input.array_values()).is_some_and(|(a,b)|a.iter().zip(b.iter()).all(|(a,b)|a.strict_equals(b))); serde_json::json!({\"output\":witness::result(output),\"visited\":seen.into_inner(),\"identity\":identity}) }",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); } let input=witness::input($value); let seen=std::cell::RefCell::new(Vec::new()); let output=super::map(input.clone(),\"rows\",|row|{seen.borrow_mut().push(witness::observe(&row)); if $value[\"append\"]==true {input.push(crate::private_event_value::string(\"later\")).unwrap();} Ok(row)}); let identity=output.as_ref().ok().and_then(|v|v.array_values().expect(\"array property reads\")).zip(input.array_values().expect(\"array property reads\")).is_some_and(|(a,b)|a.iter().zip(b.iter()).all(|(a,b)|a.strict_equals(b))); serde_json::json!({\"output\":witness::result(output),\"visited\":seen.into_inner(),\"identity\":identity}) }",
     "cases": [
       {
         "input": {
@@ -40844,7 +40802,7 @@
       }
     },
     "evidence": "Executed finite native collection-output contract. Dense arrays retain native leaf bits/units, own undefined and original object references; nonarray guards preserve the selected source expression/method TypeError. This helper implements the cancel/filter/map collection boundary, not Order DTO admission. Actual native cancellation invokes it before signed HTTP and before Store status effects; typed/array-hole and executable-property profiles are not widened.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nmatch $type(&input,\"orders\",\"filter\") { Ok(rows) => { let rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\n serde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error))}) } }",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nmatch $type(&input,\"orders\",\"filter\") { Ok(rows) => { let rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().expect(\"array property reads\").unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\n serde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error))}) } }",
     "cases": [
       {
         "input": {
@@ -41534,7 +41492,7 @@
       }
     },
     "evidence": "Executed finite native map contract: observes every dense native result and callback input before serialization, initial-length behavior during append, live replacement at a later index, fresh result array, object identity, own undefined, binary64 bits and UTF16 units. A callback rejection must retain the original Rc identity and abort later visits. Actual native cancel/update tests supply the production class/Store/HTTP witnesses. Sparse/executable arrays remain outside this configured dense-array boundary.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nlet seen = std::cell::RefCell::new(Vec::new());\nlet sentinel = std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::new(\"visitor sentinel\"));\nlet result = $type(&input,\"orders\",|row| { seen.borrow_mut().push(witness::observe(&row));\nif source_case[\"profile\"] == \"throw-first\" { return Err(sentinel.clone()); }\nif seen.borrow().len()==1 { if let Js::Array(array)=&input { if source_case[\"profile\"]==\"append\" { array.borrow_mut().push(Some(Js::Number(99.0))); } if source_case[\"profile\"]==\"replace\" { array.borrow_mut()[1]=Some(Js::Number(42.0)); } } }\nOk(row) });\nlet input_length=input.array_items().map(|rows|rows.len());\nmatch result { Ok(output) => { let rows=output.array_items().unwrap().into_iter().map(|row|row.expect(\"dense output\")).collect::<Vec<_>>();\nlet rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\nserde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity,\"freshArray\":!output.same_reference(&input),\"visited\":*seen.borrow(),\"inputLength\":input_length}) }, Err(error) => { let same_error=std::rc::Rc::ptr_eq(&error,&sentinel); serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error)),\"sameError\":same_error,\"visited\":*seen.borrow(),\"inputLength\":input_length}) } } }",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nlet seen = std::cell::RefCell::new(Vec::new());\nlet sentinel = std::rc::Rc::new(safe_cex_exchange::runtime::ExchangeError::new(\"visitor sentinel\"));\nlet result = $type(&input,\"orders\",|row| { seen.borrow_mut().push(witness::observe(&row));\nif source_case[\"profile\"] == \"throw-first\" { return Err(sentinel.clone()); }\nif seen.borrow().len()==1 { if matches!(&input,Js::Array(_)) { if source_case[\"profile\"]==\"append\" { input.push(Js::Number(99.0)).expect(\"append native array\"); } if source_case[\"profile\"]==\"replace\" { input.set(\"1\",Js::Number(42.0)).expect(\"replace native array\"); } } }\nOk(row) });\nlet input_length=input.array_items().expect(\"array property reads\").map(|rows|rows.len());\nmatch result { Ok(output) => { let rows=output.array_items().expect(\"array property reads\").unwrap().into_iter().map(|row|row.expect(\"dense output\")).collect::<Vec<_>>();\nlet rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().expect(\"array property reads\").unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\nserde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity,\"freshArray\":!output.same_reference(&input),\"visited\":*seen.borrow(),\"inputLength\":input_length}) }, Err(error) => { let same_error=std::rc::Rc::ptr_eq(&error,&sentinel); serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error)),\"sameError\":same_error,\"visited\":*seen.borrow(),\"inputLength\":input_length}) } } }",
     "cases": [
       {
         "input": {
@@ -49215,7 +49173,7 @@
       }
     },
     "evidence": "Finite native dense-array response output: cardinality, binary64 bits, UTF16 leaves, own undefined, retained child referents and exact map guards before observation encoding. Separate real batch placement executes the live receiver. No sparse/executable profile or Order DTO admission claim.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nmatch $type(&input,\"payloads\",\"map\") { Ok(rows) => { let rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\n serde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error))}) } }",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/private-rest-observers.rs\")); }\nuse safe_cex_exchange::js_runtime::value::Js;\nlet source_case = $value;\nlet input = if source_case[\"profile\"] == \"native-dense\" { Js::array(vec![Js::Number(-0.0), Js::Number(f64::NAN), Js::Number(f64::INFINITY), Js::Undefined, Js::utf16(&[0xdc00]), Js::object(vec![(\"keep\",Js::Number(17.0))]), Js::object(vec![(\"keep\",Js::Undefined)])]) } else { witness::input(source_case) };\nmatch $type(&input,\"payloads\",\"map\") { Ok(rows) => { let rows_value = rows.iter().map(witness::observe).collect::<Vec<_>>();\nlet keeps = rows.iter().map(|row| { if matches!(row,Js::Object(_)) { serde_json::json!({\"present\":row.has_own(\"keep\"),\"value\":witness::observe(&row.get(\"keep\").unwrap())}) } else { serde_json::json!({\"present\":false,\"value\":witness::observe(&Js::Undefined)}) } }).collect::<Vec<_>>();\nlet originals = input.array_items().expect(\"array property reads\").unwrap();\nlet object_identity = rows.iter().zip(originals.iter()).all(|(row, original)| !matches!(row,Js::Object(_)|Js::Array(_)) || original.as_ref().is_some_and(|original| row.same_reference(original)));\n serde_json::json!({\"ok\":true,\"rows\":rows_value,\"keeps\":keeps,\"objectIdentity\":object_identity}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":witness::result(Err(error))}) } }",
     "cases": [
       {
         "input": {

@@ -54,7 +54,7 @@ impl NativeStartup {
         let prepare = || {
             match op {
                 StoreWorkerOp::Error => {
-                    let args = data.array_values().expect("worker error args");
+                    let args = data.array_values()?.expect("worker error args");
                     let sentry = args[1].get("sentryData")?;
                     sentry.get("tags")?.define("account", account)?;
                     if let Some((error, message)) = original {

@@ -376,7 +376,7 @@ impl body::Host for Frame {
         iterate(v)
     }
     fn next(&mut self, i: &mut Iter) -> Result<Option<Js>, Thrown> {
-        Ok(next(i))
+        next(i)
     }
     fn close_iterator(&mut self, _: &mut Iter) -> Result<(), Thrown> {
         Ok(())

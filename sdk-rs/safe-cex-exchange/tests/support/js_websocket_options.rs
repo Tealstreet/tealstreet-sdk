@@ -122,7 +122,7 @@ fn socket_options_match_source_and_auth_preparation_precedes_every_dial() {
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 #[test]
 fn native_header_auth_dials_plain_socket_and_refuses_headerless_wrapper_requests() {
-    use safe_cex_exchange::websocket::{WebSocketConnectionOptions, WsRuntime};
+    use safe_cex_exchange::websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime};
     use safe_cex_transport::relay::UpgradeHeaders;
     use std::{net::TcpListener, thread};
     use tokio_tungstenite::tungstenite::{
@@ -196,6 +196,13 @@ fn native_header_auth_dials_plain_socket_and_refuses_headerless_wrapper_requests
                 !socket.is_reconnecting(),
                 "the core retains native reconnect ownership"
             );
+            assert!(matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(5), socket.next_event())
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                WsEvent::Open
+            ));
             socket.close();
         }
         assert_eq!(count.get(), 2, "ws_options::native_fresh_headers");

@@ -237,7 +237,7 @@ pub(crate) async fn fetch_executions_fallback_from_order_history(
         }
         fallback_page(rt, &opts, window, Js::Undefined, 0, &executions).await?;
     }
-    let mut rows = executions.array_values().unwrap();
+    let mut rows = executions.array_values()?.unwrap();
     rows.sort_by(|a, b| {
         b.get("timestamp")
             .unwrap()

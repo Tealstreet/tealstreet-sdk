@@ -58,15 +58,13 @@ impl Realm {
             Js::Bool(value) => Value::Bool(*value),
             Js::Number(value) => Value::Number(*value),
             Js::String(value) => Value::String(value.clone()),
-            Js::Array(values) => self.new_array(
-                values
-                    .borrow()
+            Js::Array(_) => self.new_array(
+                value
+                    .array_values()
+                    .map_err(|error| self.typed_error(error))?
+                    .expect("array variant")
                     .iter()
-                    .map(|value| {
-                        value.as_ref().map_or(Ok(Value::Undefined), |value| {
-                            self.restore_typed_value(value)
-                        })
-                    })
+                    .map(|value| self.restore_typed_value(value))
                     .collect::<Result<_, _>>()?,
             ),
             Js::Object(_) => {

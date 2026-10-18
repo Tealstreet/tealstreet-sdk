@@ -21,7 +21,9 @@ fn put(v: &V, k: &str, value: V) {
     v.set(k, value).expect("fixture Set");
 }
 fn items(v: &V) -> Vec<V> {
-    v.array_values().expect("fixture array")
+    v.array_values()
+        .expect("fixture array property reads")
+        .expect("fixture array")
 }
 fn text(v: &V) -> String {
     String::from_utf16_lossy(&v.to_js_string().expect("fixture String"))

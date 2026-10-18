@@ -41,10 +41,7 @@ fn spread_uses_shared_iterators_and_rejects_invalid_later_groups() {
     let receiver = object(vec![]);
     let set = Js::new_set();
     set.call_method("add", vec![s("set")]).unwrap();
-    let holey = Js::Array(std::rc::Rc::new(std::cell::RefCell::new(vec![
-        None,
-        Some(n(-0.)),
-    ])));
+    let holey = Js::holey_array(vec![None, Some(n(-0.))]);
     let result = intrinsic(
         receiver.clone(),
         "array-spread",

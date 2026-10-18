@@ -61,7 +61,7 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
         Js::function("omit", |_, args| {
             let request = arg(&args, 0).spread_object()?;
             for paths in args.iter().skip(1) {
-                for key in paths.array_values().unwrap_or_else(|| vec![paths.clone()]) {
+                for key in paths.array_values()?.unwrap_or_else(|| vec![paths.clone()]) {
                     request.delete(&key.to_js_string()?)?;
                 }
             }
