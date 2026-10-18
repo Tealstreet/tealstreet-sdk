@@ -76,9 +76,13 @@ Shared socket entrypoints also require an eager prefix. BaseWebSocket now starts
 preparation/dial through the existing OwnedTasks registry and canonical
 `eager::start_eager`; Bitget secondary and Backpack public prove the real ready
 host prefix. This is a core dial boundary, not a new venue SDK wrapper family.
-It does not close native CONNECTING-handle presence during a held handshake;
-that independently compiled Bitget finding remains open. See
-`safe-cex-venue-bitget/EAGER_DIAL_AUDIT.md` for scope and controls.
+The shared native plain-socket boundary additionally exposes one CONNECTING
+handle while its owned eager handshake is pending. Actual native Bitget
+onMarketsChanged observes that handle, preserves the source topic and follows
+the existing send/reconnect Error/Close path before upgrade completion. This
+closes the separately compiled held-handshake finding; it adds no per-venue
+scheduler. See `safe-cex-venue-bitget/EAGER_DIAL_AUDIT.md` and exchange-core's
+WS_CONTRACT.md for source/native witnesses and independent controls.
 
 ## Native final-handle destruction
 
