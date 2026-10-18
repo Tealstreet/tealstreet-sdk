@@ -73,6 +73,19 @@ fn no_wallet() -> AsterBuilderApprovalResult {
     )
 }
 
+#[cfg(test)]
+mod accepted_no_wallet {
+    #[test]
+    fn no_wallet_returns_the_source_failure_record() {
+        let result = super::no_wallet();
+        assert!(!result.success);
+        assert_eq!(
+            result.message,
+            "No browser wallet detected. Please install MetaMask or another wallet."
+        );
+    }
+}
+
 async fn wallet_request(host: &dyn ApprovalHost, request: Value) -> Result<Value, ApprovalFailure> {
     let wallet = host.wallet().ok_or_else(|| {
         ApprovalFailure::error("Cannot read properties of undefined (reading 'request')")

@@ -14850,16 +14850,32 @@
           [
             "opts",
             {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "safe_cex_types::PlaceOrderOpts",
-                    "args": null
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
                   }
                 }
-              }
+              ]
             }
           ],
           [
@@ -14901,7 +14917,43 @@
         "is_c_variadic": false
       },
       "generics": {
-        "params": [],
+        "params": [
+          {
+            "name": "impl Into<safe_cex_types::PreparedOrderOpts>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
         "where_predicates": []
       }
     },
@@ -15041,7 +15093,7 @@
         "output": false
       }
     ],
-    "evidence": "asterdex.builder-fee.ts isAsterMakerOnlyOrder: actual native enum inputs, limit/type conjunction, strict postOnly true and PostOnly time-in-force alternatives. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission."
+    "evidence": "asterdex.builder-fee.ts isAsterMakerOnlyOrder: actual native enum inputs, limit/type conjunction, strict postOnly true and PostOnly time-in-force alternatives. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission. Fresh native/default compiler API includes Into<PreparedOrderOpts>; retained original runtime cases are executed by accepted-builder-binding-contracts.mjs. Fresh native/default compiler API includes Into<PreparedOrderOpts>; retained original runtime cases are executed by accepted-builder-binding-contracts.mjs."
   },
   "safe_cex_venue_asterdex::builder::get_aster_builder_fee_rate_for_order": {
     "category": "decoder",
@@ -15053,16 +15105,32 @@
           [
             "opts",
             {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "safe_cex_types::PlaceOrderOpts",
-                    "args": null
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
                   }
                 }
-              }
+              ]
             }
           ],
           [
@@ -15145,6 +15213,41 @@
             "kind": {
               "lifetime": {
                 "outlives": []
+              }
+            }
+          },
+          {
+            "name": "impl Into<safe_cex_types::PreparedOrderOpts>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
               }
             }
           }
@@ -15704,7 +15807,7 @@
         "output": "0.00"
       }
     ],
-    "evidence": "asterdex.builder-fee.ts getAsterBuilderFeeRateForOrder: maker/taker selection and only exact string \"0\" omission; \"0.0\" remains present, preserving the source behavior. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission."
+    "evidence": "asterdex.builder-fee.ts getAsterBuilderFeeRateForOrder: maker/taker selection and only exact string \"0\" omission; \"0.0\" remains present, preserving the source behavior. Expectations independently authored after reviewing the maintained TS body; JSON fixtures adapt the actual typed function. Native/default selection only, with no local or full-package permission. Fresh native/default compiler API includes Into<PreparedOrderOpts>; retained original runtime cases are executed by accepted-builder-binding-contracts.mjs. Fresh native/default compiler API includes Into<PreparedOrderOpts>; retained original runtime cases are executed by accepted-builder-binding-contracts.mjs."
   },
   "safe_cex_venue_asterdex::builder::resolve_aster_builder_fee_config": {
     "category": "decoder",
@@ -43345,6 +43448,2060 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_asterdex::builder::present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "present",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type::<_, String>($value.clone()) { Ok(value)=>serde_json::json!({\"accepted\":true,\"value\":value}), Err(_)=>serde_json::json!({\"accepted\":false}) } }",
+    "cases": [
+      {
+        "input": "text",
+        "output": {
+          "accepted": true,
+          "value": "text"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "accepted": true,
+          "value": ""
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "accepted": false
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "accepted": false
+        }
+      }
+    ],
+    "evidence": "builder.rs present preserves a present T as Some and propagates T deserialization failure; concrete String witnesses distinguish present empty text from null and boolean refusal. No optional-field shape exemption."
+  },
+  "safe_cex_venue_asterdex::builder::build_aster_approval_request": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "build_aster_approval_request",
+      "signature": {
+        "inputs": [
+          [
+            "target_url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "base_url",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "registry",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::registry::TransportRegistry",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "resolved_path": {
+                            "path": "alloc::collections::btree::map::BTreeMap",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_approval_host.rs\")); } let registry=safe_cex_transport::TransportRegistry::default(); let (headers,url)=boundary::ready($type($value[\"target\"].as_str().unwrap(),$value[\"base\"].as_str(),&registry)).unwrap(); serde_json::json!({\"headers\":headers,\"url\":url}) }",
+    "cases": [
+      {
+        "input": {
+          "target": "https://fapi.asterdex.com/fapi/v3/builder",
+          "base": null
+        },
+        "output": {
+          "headers": {},
+          "url": "https://fapi.asterdex.com/fapi/v3/builder"
+        }
+      },
+      {
+        "input": {
+          "target": "https://custom.example/approve",
+          "base": "https://custom.example"
+        },
+        "output": {
+          "headers": {},
+          "url": "https://custom.example/approve"
+        }
+      }
+    ],
+    "evidence": "asterdex.builder-approval.ts buildAsterApprovalRequest: explicit baseURL bypass and absent private-proxy capability preserve the exact target and empty headers. Calls actual async Rust with the real default TransportRegistry; no fetch substitute."
+  },
+  "safe_cex_venue_asterdex::builder_approval::result": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "result",
+      "signature": {
+        "inputs": [
+          [
+            "success",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::builder::AsterBuilderApprovalResult",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ serde_json::to_value($type($value[\"success\"].as_bool().unwrap(),$value[\"message\"].as_str().unwrap())).unwrap() }",
+    "cases": [
+      {
+        "input": {
+          "success": true,
+          "message": "ready"
+        },
+        "output": {
+          "success": true,
+          "message": "ready"
+        }
+      },
+      {
+        "input": {
+          "success": false,
+          "message": ""
+        },
+        "output": {
+          "success": false,
+          "message": ""
+        }
+      }
+    ],
+    "evidence": "Typed approval-result constructor; native output observes both fields and empty failure text as in maintained workflow return objects. JSON is only the authored probe adapter, not a new production input API."
+  },
+  "safe_cex_venue_asterdex::builder_approval::no_wallet": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "no_wallet",
+      "signature": {
+        "inputs": [],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::builder::AsterBuilderApprovalResult",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "This zero-argument function only constructs the fixed unsuccessful no-browser-wallet result; it accepts no input, performs no parsing or schema admission, and reads no provider/environment. It is not a classification for other approval helpers.",
+    "evidence": "The direct native no_wallet_returns_the_source_failure_record unit witness asserts both exact fields. Executed switch/approve no-wallet contracts separately exercise the actual call path against maintained TS no-wallet outcomes."
+  },
+  "safe_cex_venue_asterdex::builder_approval::check_result": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "check_result",
+      "signature": {
+        "inputs": [
+          [
+            "address",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "status",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_asterdex::builder::AsterBuilderApprovalStatus",
+                "args": null
+              }
+            }
+          ],
+          [
+            "error",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "rate",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::builder::AsterBuilderApprovalCheckResult",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let status=serde_json::from_value($value[\"status\"].clone()).unwrap(); serde_json::to_value($type($value[\"address\"].as_str().unwrap().into(),status,$value[\"error\"].as_str().map(str::to_owned),$value[\"rate\"].as_str().map(str::to_owned))).unwrap() }",
+    "cases": [
+      {
+        "input": {
+          "address": "builder",
+          "status": "approved",
+          "rate": "0.0001"
+        },
+        "output": {
+          "approved": true,
+          "approvalStatus": "approved",
+          "builderAddress": "builder",
+          "maxFeeRate": "0.0001"
+        }
+      },
+      {
+        "input": {
+          "address": "",
+          "status": "unverified",
+          "error": ""
+        },
+        "output": {
+          "approved": false,
+          "approvalStatus": "unverified",
+          "builderAddress": "",
+          "error": ""
+        }
+      }
+    ],
+    "evidence": "Actual typed check-result construction derives approved only from the Approved variant and preserves Option presence including a present empty error; output matches the maintained checkAsterBuilderApproved return fields."
+  },
+  "safe_cex_venue_asterdex::builder_approval::form_component": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "form_component",
+      "signature": {
+        "inputs": [
+          [
+            "s",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ serde_json::json!($type($value.as_str().unwrap())) }",
+    "cases": [
+      {
+        "input": "a b~",
+        "output": "a+b%7E"
+      },
+      {
+        "input": "é/x",
+        "output": "%C3%A9%2Fx"
+      },
+      {
+        "input": "!*()-._",
+        "output": "%21*%28%29-._"
+      }
+    ],
+    "evidence": "Native form encoder used by approveAsterBuilderFeeWithBrowserWallet; independent URLSearchParams source expectations cover space/tilde, UTF8 and reserved punctuation. This tests encoding, not JSON coercion."
+  },
+  "safe_cex_venue_asterdex::builder_approval::normalize_address": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalize_address",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_asterdex::builder_approval::ApprovalFailure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value[\"address\"].as_str().unwrap(),$value[\"field\"].as_str().unwrap()) { Ok(value)=>serde_json::json!({\"value\":value}), Err(error)=>serde_json::json!({\"error\":error.error_message.unwrap()}) } }",
+    "cases": [
+      {
+        "input": {
+          "address": "0x1111111111111111111111111111111111111111",
+          "field": "Builder"
+        },
+        "output": {
+          "value": "0x1111111111111111111111111111111111111111"
+        }
+      },
+      {
+        "input": {
+          "address": "bad",
+          "field": "Builder"
+        },
+        "output": {
+          "error": "Builder must be an EVM address"
+        }
+      },
+      {
+        "input": {
+          "address": "0x0000000000000000000000000000000000000000",
+          "field": "User"
+        },
+        "output": {
+          "error": "User cannot be the zero address"
+        }
+      }
+    ],
+    "evidence": "Maintained normalizeAddress admits a valid EVM address, applies checksum normalization, and rejects malformed/zero addresses with the supplied field label. Native assertions execute the actual validator and shared checksum primitive."
+  },
+  "safe_cex_venue_asterdex::builder_approval::wallet_request": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "wallet_request",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_venue_asterdex::builder_approval::ApprovalHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "request",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_asterdex::builder_approval::ApprovalFailure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_approval_host.rs\")); } let host=boundary::Fixture::new($value); let result=match boundary::ready($type(&host,$value[\"request\"].clone())) { Ok(value)=>serde_json::json!({\"value\":value}), Err(error)=>serde_json::json!({\"error\":error.value,\"message\":error.error_message}) }; host.observe(result) }",
+    "cases": [
+      {
+        "input": {
+          "request": {
+            "method": "eth_requestAccounts"
+          },
+          "wallet": [
+            {
+              "value": [
+                "account"
+              ]
+            }
+          ]
+        },
+        "output": {
+          "result": {
+            "value": [
+              "account"
+            ]
+          },
+          "walletMethods": [
+            "eth_requestAccounts"
+          ],
+          "fetchMethods": []
+        }
+      },
+      {
+        "input": {
+          "request": {
+            "method": "eth_signTypedData_v4"
+          },
+          "wallet": [
+            {
+              "reject": {
+                "code": 4001,
+                "message": "declined"
+              },
+              "isError": true
+            }
+          ]
+        },
+        "output": {
+          "result": {
+            "error": {
+              "code": 4001,
+              "message": "declined"
+            },
+            "message": "declined"
+          },
+          "walletMethods": [
+            "eth_signTypedData_v4"
+          ],
+          "fetchMethods": []
+        }
+      },
+      {
+        "input": {
+          "request": {
+            "method": "eth_requestAccounts"
+          },
+          "noWallet": true
+        },
+        "output": {
+          "result": {
+            "error": {
+              "message": "Cannot read properties of undefined (reading 'request')"
+            },
+            "message": "Cannot read properties of undefined (reading 'request')"
+          },
+          "walletMethods": [],
+          "fetchMethods": []
+        }
+      }
+    ],
+    "evidence": "Actual wallet_request forwards the authored request to the current EIP1193 host and preserves success/rejection data; missing wallet rejects before a host call. Boundary fixture supplies replies only; the production helper is called directly."
+  },
+  "safe_cex_venue_asterdex::builder_approval::switch_to_aster_signature_chain": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "switch_to_aster_signature_chain",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_venue_asterdex::builder_approval::ApprovalHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::builder::AsterBuilderApprovalResult",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_approval_host.rs\")); } let host=boundary::Fixture::new($value); let result=boundary::ready($type(&host)); host.observe(serde_json::to_value(result).unwrap()) }",
+    "cases": [
+      {
+        "input": {
+          "wallet": [
+            {
+              "value": null
+            }
+          ]
+        },
+        "output": {
+          "result": {
+            "success": true,
+            "message": "Wallet network ready"
+          },
+          "walletMethods": [
+            "wallet_switchEthereumChain"
+          ],
+          "fetchMethods": []
+        }
+      },
+      {
+        "input": {
+          "wallet": [
+            {
+              "reject": {
+                "code": 4902
+              }
+            },
+            {
+              "value": null
+            }
+          ]
+        },
+        "output": {
+          "result": {
+            "success": true,
+            "message": "Wallet network ready"
+          },
+          "walletMethods": [
+            "wallet_switchEthereumChain",
+            "wallet_addEthereumChain"
+          ],
+          "fetchMethods": []
+        }
+      },
+      {
+        "input": {
+          "wallet": [
+            {
+              "reject": {
+                "code": 4001
+              }
+            }
+          ]
+        },
+        "output": {
+          "result": {
+            "success": false,
+            "message": "Aster builder approval was rejected by user"
+          },
+          "walletMethods": [
+            "wallet_switchEthereumChain"
+          ],
+          "fetchMethods": []
+        }
+      },
+      {
+        "input": {
+          "noWallet": true
+        },
+        "output": {
+          "result": {
+            "success": false,
+            "message": "No browser wallet detected. Please install MetaMask or another wallet."
+          },
+          "walletMethods": [],
+          "fetchMethods": []
+        }
+      }
+    ],
+    "evidence": "Maintained switchToAsterSignatureChain; actual native workflow witnesses successful switch, 4902 add-chain sequencing, user rejection and no-wallet early return. Actual source workflow oracle independently pins these outcomes and complete requests."
+  },
+  "safe_cex_venue_asterdex::builder_approval::check_aster_builder_approved": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "check_aster_builder_approved",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_venue_asterdex::builder_approval::ApprovalHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_asterdex::builder_approval::CheckParams",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_asterdex::builder::AsterBuilderApprovalCheckResult",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_asterdex::builder_approval::ApprovalFailure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_approval_host.rs\")); } let host=boundary::Fixture::new($value); let params=serde_json::from_value($value[\"params\"].clone()).unwrap(); let result=boundary::ready($type(&host,&params)).expect(\"planned check outcome\"); host.observe(serde_json::to_value(result).unwrap()) }",
+    "cases": [
+      {
+        "input": {
+          "params": {
+            "builderAddress": "0x0000000000000000000000000000000000000002",
+            "userAddress": "0x0000000000000000000000000000000000000001",
+            "signerAddress": "0x0000000000000000000000000000000000000001",
+            "signerPrivateKey": "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "requiredFeeRate": "0.0001"
+          },
+          "now": 1016000,
+          "fetch": [
+            {
+              "payload": [
+                {
+                  "builderAddress": "0x0000000000000000000000000000000000000002",
+                  "maxFeeRate": "0.0001"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "result": {
+            "approved": true,
+            "approvalStatus": "approved",
+            "builderAddress": "0x0000000000000000000000000000000000000002",
+            "maxFeeRate": "0.0001"
+          },
+          "walletMethods": [],
+          "fetchMethods": [
+            "GET"
+          ]
+        }
+      },
+      {
+        "input": {
+          "params": {
+            "builderAddress": "0x0000000000000000000000000000000000000002",
+            "userAddress": "0x0000000000000000000000000000000000000001",
+            "signerAddress": "0x0000000000000000000000000000000000000001",
+            "signerPrivateKey": "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "requiredFeeRate": "0.0001"
+          },
+          "now": 1018000,
+          "fetch": [
+            {
+              "payload": [
+                {
+                  "builderAddress": "0x0000000000000000000000000000000000000002",
+                  "maxFeeRate": "0.00009"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "result": {
+            "approved": false,
+            "approvalStatus": "insufficient_fee_cap",
+            "builderAddress": "0x0000000000000000000000000000000000000002",
+            "maxFeeRate": "0.00009"
+          },
+          "walletMethods": [],
+          "fetchMethods": [
+            "GET"
+          ]
+        }
+      }
+    ],
+    "evidence": "Maintained checkAsterBuilderApproved approved and insufficient-cap cases: production address/key validation, native signing, transport selection, fetch and fee comparison all execute. Host supplies only planned HTTP replies. Existing 36-case live_builder_workflows retains full signed-wire/source comparisons."
+  },
+  "safe_cex_venue_asterdex::builder_approval::approve_aster_builder_fee_with_browser_wallet": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "approve_aster_builder_fee_with_browser_wallet",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_venue_asterdex::builder_approval::ApprovalHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_asterdex::builder_approval::ApproveParams",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_asterdex::builder::AsterBuilderApprovalResult",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_asterdex::builder_approval::ApprovalFailure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_approval_host.rs\")); } let host=boundary::Fixture::new($value); let params=serde_json::from_value($value[\"params\"].clone()).unwrap(); let result=boundary::ready($type(&host,&params)).expect(\"planned approval outcome\"); host.observe(serde_json::to_value(result).unwrap()) }",
+    "cases": [
+      {
+        "input": {
+          "params": {
+            "builderAddress": "0x0000000000000000000000000000000000000002",
+            "userAddress": "0x0000000000000000000000000000000000000001",
+            "maxFeeRate": "0.0001",
+            "builderName": "name ~☃ +&="
+          },
+          "now": 1044000,
+          "wallet": [
+            {
+              "value": null
+            },
+            {
+              "value": [
+                "0x0000000000000000000000000000000000000001"
+              ]
+            },
+            {
+              "value": "0x1234"
+            }
+          ],
+          "fetch": [
+            {
+              "payload": {
+                "code": 200
+              }
+            }
+          ]
+        },
+        "output": {
+          "result": {
+            "success": true,
+            "message": "Aster builder approval submitted successfully"
+          },
+          "walletMethods": [
+            "wallet_switchEthereumChain",
+            "eth_requestAccounts",
+            "eth_signTypedData_v4"
+          ],
+          "fetchMethods": [
+            "POST"
+          ]
+        }
+      },
+      {
+        "input": {
+          "params": {
+            "builderAddress": "bad",
+            "userAddress": "0x0000000000000000000000000000000000000001",
+            "maxFeeRate": "0.0001",
+            "builderName": "name ~☃ +&="
+          }
+        },
+        "output": {
+          "result": {
+            "success": false,
+            "message": "Builder address must be an EVM address"
+          },
+          "walletMethods": [],
+          "fetchMethods": []
+        }
+      },
+      {
+        "input": {
+          "params": {
+            "builderAddress": "0x0000000000000000000000000000000000000002",
+            "userAddress": "0x0000000000000000000000000000000000000001",
+            "maxFeeRate": "0.0001",
+            "builderName": "name ~☃ +&="
+          },
+          "noWallet": true
+        },
+        "output": {
+          "result": {
+            "success": false,
+            "message": "No browser wallet detected. Please install MetaMask or another wallet."
+          },
+          "walletMethods": [],
+          "fetchMethods": []
+        }
+      }
+    ],
+    "evidence": "Maintained approveAsterBuilderFeeWithBrowserWallet success and early refusal: real native validation, nonce, network switch, account selection, typed-data request, form encoding and fetch execute; the fixture supplies wallet/HTTP capabilities, never the workflow. Existing live source corpus checks the complete bodies."
+  },
+  "safe_cex_venue_asterdex::binding::members::primitive_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "primitive_error",
+      "signature": {
+        "inputs": [
+          [
+            "(name, message)",
+            {
+              "tuple": [
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                },
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let error=$type(($value[\"name\"].as_str().unwrap(),$value[\"message\"].as_str().unwrap().to_owned())); serde_json::json!({\"name\":safe_cex_exchange::js_runtime::value::to_json(&error.value.get(\"name\").unwrap()).unwrap(),\"message\":safe_cex_exchange::js_runtime::value::to_json(&error.value.get(\"message\").unwrap()).unwrap()}) }",
+    "cases": [
+      {
+        "input": {
+          "name": "TypeError",
+          "message": "bad type"
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "bad type"
+        }
+      },
+      {
+        "input": {
+          "name": "RangeError",
+          "message": ""
+        },
+        "output": {
+          "name": "RangeError",
+          "message": ""
+        }
+      }
+    ],
+    "evidence": "Native primitive-error projection preserves the supplied error subtype/name and empty or nonempty message through the actual shared Thrown factory. It does not stringify a caught raw payload."
+  },
+  "safe_cex_venue_asterdex::binding::members::optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ use safe_cex_exchange::js_runtime::value::{Js,from_json}; let native_value=match $value[\"kind\"].as_str() {Some(\"undefined\")=>Js::Undefined,Some(\"nan\")=>Js::Number(f64::NAN),Some(\"negativeZero\")=>Js::Number(-0.0),_=>from_json(&$value[\"value\"])}; if $value[\"profile\"]==\"number\" {match $type::<f64>(native_value) {Ok(Some(n))=>serde_json::json!({\"present\":true,\"bits\":format!(\"{:016x}\",n.to_bits())}),Ok(None)=>serde_json::json!({\"present\":false}),Err(_)=>serde_json::json!({\"accepted\":false})}} else {match $type::<String>(native_value) {Ok(Some(s))=>serde_json::json!({\"present\":true,\"value\":s}),Ok(None)=>serde_json::json!({\"present\":false}),Err(_)=>serde_json::json!({\"accepted\":false})}} }",
+    "cases": [
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "present": false
+        }
+      },
+      {
+        "input": {
+          "value": ""
+        },
+        "output": {
+          "present": true,
+          "value": ""
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "accepted": false
+        }
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": {
+          "accepted": false
+        }
+      },
+      {
+        "input": {
+          "profile": "number",
+          "kind": "nan"
+        },
+        "output": {
+          "present": true,
+          "bits": "7ff8000000000000"
+        }
+      },
+      {
+        "input": {
+          "profile": "number",
+          "kind": "negativeZero"
+        },
+        "output": {
+          "present": true,
+          "bits": "8000000000000000"
+        }
+      }
+    ],
+    "evidence": "Actual generic optional decoder: undefined bypasses typed decoding; present empty string survives, null/boolean refuse under String, and native number instantiation retains NaN and signed-zero bits. Uses actual Js/to_typed without a JSON hop for native numbers."
+  },
+  "safe_cex_venue_asterdex::binding::members::path": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "path",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_asterdex::binding::State",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_binding_host.rs\")); } let host=boundary::Fixture::new($value); serde_json::json!($type(&host.rt,$value[\"endpoint\"].as_str().unwrap())) }",
+    "cases": [
+      {
+        "input": {
+          "version": "v1",
+          "endpoint": "account"
+        },
+        "output": "/fapi/v1/account"
+      },
+      {
+        "input": {
+          "version": "v3",
+          "endpoint": "order"
+        },
+        "output": "/fapi/v3/order"
+      }
+    ],
+    "evidence": "Actual private binding path reads the real assembled Aster version and delegates to the maintained getFapiPath body. Native constructor/globals/factory assembly executes; only terminal HTTP/scheduler are fixture capabilities."
+  },
+  "safe_cex_venue_asterdex::binding::members::invoke": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "invoke",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_asterdex::binding::State",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "a",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_binding_host.rs\")); } let host=boundary::Fixture::new($value); let result=if $value[\"operation\"]==\"path\" {$type(&host.rt,\"getFapiPath\",vec![safe_cex_exchange::js_runtime::value::Js::str(\"order\")]).unwrap()} else {$type(&host.rt,\"markBalanceStateUpdatedByWebsocket\",vec![]).unwrap()}; if $value[\"operation\"]==\"balance\" { let safe_cex_exchange::js_runtime::value::Js::Number(n)=&result else {panic!(\"native balance version must be numeric\")}; assert_eq!(n.to_bits(),1.0f64.to_bits()); } if let safe_cex_exchange::js_runtime::value::Js::Number(n)=result {serde_json::json!({\"numberBits\":format!(\"{:016x}\",n.to_bits())})} else {safe_cex_exchange::js_runtime::value::to_json(&result).unwrap()} }",
+    "cases": [
+      {
+        "input": {
+          "version": "v1",
+          "operation": "path"
+        },
+        "output": "/fapi/v1/order"
+      },
+      {
+        "input": {
+          "version": "v3",
+          "operation": "path"
+        },
+        "output": "/fapi/v3/order"
+      },
+      {
+        "input": {
+          "version": "v1",
+          "operation": "balance"
+        },
+        "output": {
+          "numberBits": "3ff0000000000000"
+        }
+      }
+    ],
+    "evidence": "Production member dispatcher called directly on actual assembled native scope: V1/V3 getFapiPath and state-changing balance version branches. This is bounded dispatch evidence, not a claim that every member decoder is covered by these cases. The numeric balance version is observed as native f64 bits before any JSON projection."
+  },
+  "safe_cex_venue_asterdex::binding::members::request": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "request",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_asterdex::binding::State",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "client",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "url",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_binding_host.rs\")); } let host=boundary::Fixture::new($value); host.wire.responses.borrow_mut().insert(\"/fapi/v1/probe\".into(),$value[\"response\"].clone()); let result=host.drive($type(&host.rt,\"publicAPI\",\"get\",\"/fapi/v1/probe\".into(),Some(serde_json::json!({\"symbol\":\"BTCUSDT\"})))).unwrap(); if $value[\"response\"].is_array() {assert_eq!(result[0].as_f64().unwrap().to_bits(),1.0f64.to_bits());assert_eq!(result[1].as_f64().unwrap().to_bits(),2.0f64.to_bits());} let requests=host.wire.requests.borrow(); assert_eq!(requests.len(),1); assert_eq!(requests[0].method.to_lowercase(),\"get\"); let observed=if result.is_array() {serde_json::json!({\"numberBits\":result.as_array().unwrap().iter().map(|n|format!(\"{:016x}\",n.as_f64().unwrap().to_bits())).collect::<Vec<_>>()})} else {result}; serde_json::json!({\"data\":observed,\"requests\":requests.len()}) }",
+    "cases": [
+      {
+        "input": {
+          "response": {
+            "price": "2"
+          }
+        },
+        "output": {
+          "data": {
+            "price": "2"
+          },
+          "requests": 1
+        }
+      },
+      {
+        "input": {
+          "response": [
+            1,
+            2
+          ]
+        },
+        "output": {
+          "data": {
+            "numberBits": [
+              "3ff0000000000000",
+              "4000000000000000"
+            ]
+          },
+          "requests": 1
+        }
+      }
+    ],
+    "evidence": "Actual binding request helper runs its assembled public JS client, shared factory and terminal adapter, awaits the response and reads data. Authored object/array payloads and exact one-GET count prove the real bridge, not an invented return stub. Numeric responses are observed as exact native f64 bit strings, avoiding arbitrary-precision JSON integer/float lexical inequality."
+  },
+  "safe_cex_venue_asterdex::binding::members::listen": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "listen",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_asterdex::binding::State",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "a",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod boundary { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/tests/support/accepted_binding_host.rs\")); } use safe_cex_exchange::js_runtime::value::{Js,from_json}; let host=boundary::Fixture::new($value); let cleanup=$type(&host.rt,\"listenOHLCV\",vec![from_json(&$value[\"options\"]),Js::function(\"callback\",|_,_|panic!(\"no frame delivered in registration witness\"))]).unwrap(); assert!(cleanup.is_callable()); let value=cleanup.call(Js::Undefined,vec![]).unwrap(); serde_json::json!({\"cleanup\":cleanup.is_callable(),\"resultUndefined\":value.is_undefined()}) }",
+    "cases": [
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "interval": "1m"
+          }
+        },
+        "output": {
+          "cleanup": true,
+          "resultUndefined": true
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "ETHUSDT",
+            "interval": "1h"
+          }
+        },
+        "output": {
+          "cleanup": true,
+          "resultUndefined": true
+        }
+      }
+    ],
+    "evidence": "Actual listener adapter validates typed OHLCV options and wraps its real cleanup capability. Scope is the constructor phase before optional public websocket installation; both registration and cleanup match the source optional socket path. Existing exchange_trait stream proofs retain ready-venue delivery/unsubscribe coverage."
   },
   "safe_cex_venue_asterdex::types::AsterDEXMarketResponseFiltersItem": {
     "shape": "map",
