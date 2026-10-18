@@ -575,7 +575,10 @@ fn private_auth_error_without_message_logs_js_json_stringify_text() {
     h.venue().base().on(
         "log",
         std::rc::Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut().push(Value::String(
+                String::from_utf16(value.as_str().expect("source log message"))
+                    .expect("fixture log UTF16"),
+            ));
             Ok(())
         }),
     );
@@ -1038,11 +1041,23 @@ fn constructed_private_fill_frame_updates_order_and_emits_fill() {
     let fills = fills.borrow();
     assert_eq!(fills.len(), 1);
     let fill = &fills[0];
-    assert_eq!(fill["id"], "o-1");
-    assert_eq!(fill["symbol"], SYMBOL);
-    assert_eq!(fill["side"], "buy");
-    assert_eq!(fill["amount"].as_f64(), Some(0.25));
-    assert_eq!(fill["price"].as_f64(), Some(30002.0));
+    assert!(
+        fill.get("id")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("o-1"))
+    );
+    assert!(
+        fill.get("symbol")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(SYMBOL))
+    );
+    assert!(
+        fill.get("side")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("buy"))
+    );
+    assert_eq!(fill.get("amount").unwrap().as_f64(), Some(0.25));
+    assert_eq!(fill.get("price").unwrap().as_f64(), Some(30002.0));
 }
 #[test]
 fn constructed_private_position_frame_updates_store() {
@@ -1206,10 +1221,25 @@ fn constructed_spot_private_fill_updates_store_and_emits_original_payload() {
         (0.75, 2.25)
     );
     assert_eq!(h.store.orders()[0].status, OrderStatus::Open);
-    assert_eq!(
-        &*fills.borrow(),
-        &[json!({"side":"buy","symbol":"XBT/USD","price":30002.0,"amount":0.25})]
-    );
+    let fills = fills.borrow();
+    assert_eq!(fills.len(), 1);
+    let fill = &fills[0];
+    assert_eq!(fill.own_keys().len(), 4);
+    for (key, expected) in [("side", "buy"), ("symbol", "XBT/USD")] {
+        assert!(fill.has_own(key));
+        assert!(
+            fill.get(key)
+                .unwrap()
+                .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(expected))
+        );
+    }
+    for (key, expected) in [("price", 30002.0_f64), ("amount", 0.25_f64)] {
+        assert!(fill.has_own(key));
+        assert_eq!(
+            fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+            expected.to_bits()
+        );
+    }
 }
 
 #[test]
@@ -1428,4 +1458,95 @@ fn constructed_public_book_frames_keep_source_string_iterables() {
         cleanup().unwrap();
         h.venue().dispose().unwrap();
     }
+}
+
+#[test]
+fn constructed_spot_candles_keep_source_date_input_coercion() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/stream-updates-oracle.cjs"
+        ))
+        .arg("--date-inputs")
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["dates"].as_array().unwrap();
+    assert_eq!(cases.len(), 11);
+    let h = harness(ExchangeName::Krakenspot, options(), |http| {
+        http.ok(
+            "GET",
+            "/0/public/AssetPairs",
+            json!({"error":[],"result":{
+                "XXBTZUSD":{"wsname":"BTC/USD","pair_decimals":1,"lot_decimals":8,
+                "ordermin":"0.0001","status":"online","altname":"XBTUSD"}
+            }}),
+        );
+        http.ok("GET", "/0/public/Ticker", json!({"error":[],"result":{}}));
+    });
+    loaded(&h);
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let sink = candles.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTC/USD","interval":"1m"})).unwrap(),
+            Rc::new(move |candle| sink.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    h.runtime.advance(100.0);
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(socket.sent.borrow().iter().any(|wire| {
+        let wire: Value = serde_json::from_str(wire).unwrap();
+        wire["params"] == json!({"channel":"ohlc","symbol":["BTC/USD"],"interval":1})
+    }));
+    for (index, case) in cases.iter().enumerate() {
+        assert!(case["failure"].is_null(), "{case}");
+        let expected = &case["trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["kind"] == "candle")
+            .unwrap()["fields"];
+        let frame = json!({"channel":"ohlc","type":"update","data":[{
+            "symbol":"BTC/USD","interval":1,"interval_begin":case["input"],
+            "open":"17.25tail","high":19.5,"low":23.75,"close":29.125,"volume":31.5
+        }]});
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+        h.runtime.pump();
+        let candles = candles.borrow();
+        assert_eq!(candles.len(), index + 1, "source delivers {case}");
+        let candle = &candles[index];
+        for (name, actual) in [
+            ("timestamp", candle.timestamp),
+            ("open", candle.open),
+            ("high", candle.high),
+            ("low", candle.low),
+            ("close", candle.close),
+            ("volume", candle.volume),
+        ] {
+            let bits = u64::from_str_radix(expected[name]["number"].as_str().unwrap(), 16).unwrap();
+            if f64::from_bits(bits).is_nan() {
+                assert!(actual.is_nan(), "{name}: input={}", case["input"]);
+            } else {
+                assert_eq!(actual.to_bits(), bits, "{name}: input={}", case["input"]);
+            }
+        }
+    }
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
 }

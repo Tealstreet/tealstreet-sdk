@@ -3,7 +3,7 @@
 #[path = "support/binding_runtime.rs"]
 mod host;
 use host::{Host, Routes};
-use safe_cex_exchange::{exchange::Exchange, runtime::ExchangeSigners};
+use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js, runtime::ExchangeSigners};
 use safe_cex_store::store::DefaultStore;
 use safe_cex_venue_hyperliquid::{
     binding::{HyperliquidDependencies, RuntimeClock},
@@ -524,7 +524,7 @@ fn private_frame(f: &Fixture, wire: &host::Wire, value: Value) {
     );
 }
 
-fn observe_private_fills(f: &Fixture) -> Rc<std::cell::RefCell<Vec<Value>>> {
+fn observe_private_fills(f: &Fixture) -> Rc<std::cell::RefCell<Vec<Js>>> {
     let values = Rc::new(std::cell::RefCell::new(vec![]));
     let saved = values.clone();
     f.exchange.base().on(
@@ -595,10 +595,23 @@ fn private_spot_live_fills_emit_exact_payload_and_refresh_real_balance() {
             "isSnapshot":false,"user":address(),"fills":[fill]
         }}),
     );
-    assert_eq!(
-        &*fills.borrow(),
-        &[json!({"id":"123","side":"buy","symbol":"PURR/USDC","price":1.375,"amount":0.25})]
-    );
+    {
+        let fills = fills.borrow();
+        assert_eq!(fills.len(), 1);
+        let fill = &fills[0];
+        assert_eq!(fill.own_keys().len(), 5);
+        for (key, expected) in [("id", "123"), ("side", "buy"), ("symbol", "PURR/USDC")] {
+            assert!(fill.has_own(key));
+            assert!(fill.get(key).unwrap().strict_equals(&Js::str(expected)));
+        }
+        for (key, expected) in [("price", 1.375_f64), ("amount", 0.25_f64)] {
+            assert!(fill.has_own(key));
+            assert_eq!(
+                fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+                expected.to_bits()
+            );
+        }
+    }
     assert_eq!(f.routes.count("info:spotClearinghouseState"), before + 1);
     assert_eq!(
         (
@@ -681,4 +694,59 @@ fn private_spot_asset_data_updates_closed_position_configuration() {
         safe_cex_types::PositionMode::OneWay
     );
     assert!(fills.borrow().is_empty());
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("hyperliquidspot");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 8);
+    let f = started();
+    for wire in f.host.sockets.borrow().iter() {
+        wire.push(WsEvent::Open);
+    }
+    f.host.settle();
+    let wire = f
+        .host
+        .sockets
+        .borrow()
+        .iter()
+        .find(|wire| {
+            wire.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text)
+                    .is_ok_and(|v| v["subscription"]["type"] == "allMids")
+            })
+        })
+        .expect("constructed public subscription")
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.exchange.base().store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("hyperliquidspot")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            wire.push(WsEvent::Message(SocketFrame::Text(
+                frame.as_str().unwrap().into(),
+            )));
+            f.host.settle();
+        }
+        ticker_coercion::assert_native(&f.exchange.base().store.tickers(), case);
+    }
+    assert!(
+        f.host.reports.borrow().is_empty(),
+        "{:?}",
+        f.host.reports.borrow()
+    );
+    f.exchange.dispose().unwrap();
 }

@@ -31,6 +31,10 @@ fn connection_failure_notice_preserves_both_listener_arguments() {
     venue.base().on_args(
         "warning",
         Rc::new(move |_, args| {
+            let args: Vec<serde_json::Value> = args
+                .iter()
+                .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                .collect();
             seen.borrow_mut().push(args.to_vec());
             Ok(())
         }),

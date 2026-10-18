@@ -2,6 +2,28 @@ use crate::routing::{ResolvedRouting, RoutingOptions};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
+#[derive(Clone)]
+pub struct TransportErrorOrigin(Arc<dyn std::error::Error + Send + Sync>);
+impl TransportErrorOrigin {
+    pub fn new(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self(Arc::new(error))
+    }
+    pub fn error(&self) -> &(dyn std::error::Error + 'static) {
+        self.0.as_ref()
+    }
+}
+impl std::fmt::Debug for TransportErrorOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransportErrorOrigin")
+            .finish_non_exhaustive()
+    }
+}
+impl PartialEq for TransportErrorOrigin {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
 // Host futures need not be Send: browser transports may retain JS handles.
 pub type TransportFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, TransportError>> + 'a>>;
 
@@ -10,6 +32,7 @@ pub enum TransportError {
     DirectRoutingRequested(ExchangeName),
     UnavailableTransport(String),
     Host(String),
+    Rejected(TransportErrorOrigin),
     Timeout,
     Network(NetworkFailure),
     JavaScript(safe_cex_num::JsCoercionError),
@@ -28,12 +51,20 @@ impl std::fmt::Display for TransportError {
             }
             Self::UnavailableTransport(message) | Self::Host(message) => f.write_str(message),
             Self::Network(error) => f.write_str(&error.message),
+            Self::Rejected(origin) => std::fmt::Display::fmt(origin.error(), f),
             Self::JavaScript(error) => f.write_str(error.message),
             Self::Timeout => f.write_str("TradeTunnelTimeoutError"),
         }
     }
 }
-impl std::error::Error for TransportError {}
+impl std::error::Error for TransportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Rejected(origin) => Some(origin.error()),
+            _ => None,
+        }
+    }
+}
 
 /// Originating network error evidence. Retry eligibility is never caller supplied.
 #[derive(Debug, Clone, PartialEq, Eq)]

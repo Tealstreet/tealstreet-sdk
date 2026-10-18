@@ -407,3 +407,11 @@ stripping; order-type limit objects and undefined fields retain their identities
 The separate prepared signing API keeps its documented typed snapshot boundary.
 The actual constructed Exchange placement regression and native/source import
 matrix cover this adapter; no shared body or Realm carrier migration is implied.
+
+The constructed native ticker census tests in `binding` and `spot_binding`
+compare all Ticker numbers, including optional midPrice, with the maintained
+constructed TS exchanges and real DefaultStores. Futures covers eight mids
+and sixteen compressed fast-context frames; Spot covers eight mids frames.
+Malformed input sits between distinct good rows, with finite Store resets.
+The shared control runner misroutes midPrice independently in both live socket
+bodies and requires compiled native failures followed by exact-restored passes.

@@ -589,15 +589,12 @@ impl CandleUpdateHost for SocketHost {
         Ok(())
     }
     fn date_ms(&self, value: &Js) -> Result<f64, ExchangeError> {
-        let n = match value {
-            Js::String(s) => safe_cex_num::js_date_parse(&lossy(s), |n| n),
+        let primitive = safe_cex_exchange::js_runtime::ops::to_primitive(value).map_err(ex)?;
+        let n = match primitive {
+            Js::String(s) => safe_cex_num::js_date_parse_utf16(&s, |n| n),
             other => other.to_number().map_err(ex)?,
         };
-        Ok(if !n.is_finite() || n.abs() > 8_640_000_000_000_000.0 {
-            f64::NAN
-        } else {
-            n.trunc() + 0.0
-        })
+        Ok(safe_cex_num::js_time_clip(n))
     }
     fn candle_for_each(
         &self,
