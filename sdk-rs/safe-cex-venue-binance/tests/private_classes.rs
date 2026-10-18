@@ -5609,3 +5609,141 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
         owner.dispose().unwrap();
     }
 }
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    struct CandleSocket {
+        events: Rc<RefCell<std::collections::VecDeque<WsEvent>>>,
+        sent: RefCell<Vec<String>>,
+    }
+    impl WsSocket for CandleSocket {
+        fn ready_state(&self) -> u8 {
+            1
+        }
+        fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+            let events = self.events.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                events
+                    .borrow_mut()
+                    .pop_front()
+                    .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+            }))
+        }
+        fn send(&self, text: &str) -> Result<(), ExchangeError> {
+            self.sent.borrow_mut().push(text.into());
+            Ok(())
+        }
+        fn close(&self) {}
+        fn terminate(&self) {}
+        fn reconnect(&self) {}
+        fn is_reconnecting(&self) -> bool {
+            false
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let runtime = Rc::new(Runtime::default());
+        let socket = Rc::new(CandleSocket {
+            events: Rc::new(RefCell::new(std::collections::VecDeque::from([
+                WsEvent::Open,
+            ]))),
+            sent: RefCell::default(),
+        });
+        *runtime.dial_socket.borrow_mut() = Some(socket.clone());
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            std::sync::Arc::new(IdOnlyAdapter),
+            Rc::new(|_, _| panic!("no external candle provider configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(match venue {
+                Venue::Futures => "binance",
+                Venue::PM => "binancepm",
+                Venue::Spot => "binancespot",
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            dependencies,
+        )
+        .unwrap();
+        let receiver = owner.public.market_websocket.get().unwrap_or(&owner.public);
+        receiver.connect_and_subscribe().unwrap();
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        let seen = Rc::new(RefCell::new(Vec::<safe_cex_types::Candle>::new()));
+        let capture = seen.clone();
+        let cleanup = owner
+            .public
+            .listen_ohlcv(
+                EventValue::from_json(json!({"symbol":"BTCUSDT","interval":"1m"})),
+                Rc::new(move |candle| {
+                    capture.borrow_mut().push(candle);
+                    Ok(())
+                }),
+            )
+            .unwrap();
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|wire| wire.contains("SUBSCRIBE") && wire.contains("btcusdt@kline_1m"))
+        );
+        let wire = r#"{"e":"kline","s":"BTCUSDT","k":{"s":"BTCUSDT","i":"1m","t":120000,"o":"-0","h":"9.5","l":"-2","c":"4.25","v":"3.125"}}"#;
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(wire.into())));
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        {
+            let rows = seen.borrow();
+            assert_eq!(rows.len(), 1, "native candle delegation callback {venue:?}");
+            let c = &rows[0];
+            for (key, actual, expected) in [
+                ("timestamp", c.timestamp, 120.0_f64),
+                ("open", c.open, -0.0),
+                ("high", c.high, 9.5),
+                ("low", c.low, -2.0),
+                ("close", c.close, 4.25),
+                ("volume", c.volume, 3.125),
+            ] {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "native candle {venue:?} {key}"
+                );
+            }
+            assert!(c.last_side.is_none());
+        }
+        cleanup().unwrap();
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|wire| wire.contains("UNSUBSCRIBE") && wire.contains("btcusdt@kline_1m"))
+        );
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(wire.into())));
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "native candle cleanup removes parser {venue:?}"
+        );
+        owner.dispose().unwrap();
+    }
+}
