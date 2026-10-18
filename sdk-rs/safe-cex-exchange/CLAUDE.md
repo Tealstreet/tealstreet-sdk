@@ -1761,3 +1761,14 @@ native account identity reads with the maintained TS constructor's shared option
 and checks reentry, exact references/bits, capture release and refusal behavior.
 Missing-publication and premature-publication production mutations must compile,
 fail the named source-visible assertions, restore exact bytes and pass.
+
+## ccxt compatibility imports
+
+The shared library installs ccxt-compat numberToString, parsePrecision,
+five-argument decimalToPrecision, safeString and precision mode constants.
+The decimal formatter follows functions/number.ts, including strict mode
+comparisons and source coercion order; it is distinct from safe-cex-num's
+one-argument precision-count helper. The installed native/source tests cover
+123 scalar cases, UTF16 results, original value/throw identity, repeated property
+reads and precision operand coercion. The separate Realm implementation is
+removed only with the atomic Hyperliquid family consolidation.
