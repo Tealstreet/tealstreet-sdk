@@ -113,7 +113,7 @@ pub fn assert_refusals(reports: &str, case: &Value) {
                     "Refused WOO ticker row symbol={symbol:?}: {field}={value}: expected number"
                 ),
                 "asterdex" => format!(
-                    "AsterDEX ticker {symbol} typed field {field} requires a number; received {value}"
+                    "AsterDEX ticker {symbol} typed field {field} requires a number; received {value} error"
                 ),
                 "orderly" => format!(
                     "Orderly ticker {symbol} typed field {field} requires a number; received {value}"
