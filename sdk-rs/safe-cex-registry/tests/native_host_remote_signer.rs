@@ -553,7 +553,10 @@ fn okx_native_order_reads_handle_rejection_after_successful_aggregation() {
             restored, orders,
             "TS catch returns the existing Store orders"
         );
-        assert_eq!(&*errors.borrow(), &[json!("Exchange Error: native order read refused")]);
+        assert_eq!(
+            &*errors.borrow(),
+            &[json!("Exchange Error: native order read refused")]
+        );
         assert_eq!(
             h.seen
                 .borrow()
