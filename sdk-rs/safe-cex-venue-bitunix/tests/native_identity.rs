@@ -611,6 +611,10 @@ fn retained_standalone_utf16_trigger_matches_source() {
 }
 #[test]
 fn retained_standalone_undefined_position_does_not_match_unrelated_sibling() {
+    retained_standalone_info(3);
+}
+#[test]
+fn retained_standalone_utf16_execution_kind_matches_source() {
     retained_standalone_info(2);
 }
 fn retained_standalone_info(selected: usize) {
@@ -632,7 +636,7 @@ fn retained_standalone_info(selected: usize) {
     );
     let source: Value = serde_json::from_slice(&output.stdout).unwrap();
     let cases = source["rows"].as_array().unwrap();
-    assert_eq!(cases.len(), 3);
+    assert_eq!(cases.len(), 4);
     fn decode(value: &Value) -> Js {
         if value.get("$undefined").is_some() {
             Js::Undefined

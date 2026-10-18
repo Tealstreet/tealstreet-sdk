@@ -88,7 +88,11 @@ pub fn get_bitunix_reduce_only(
     let cached = if matches!(client_id, None | Some(Input::Undefined | Input::Null)) {
         None
     } else {
-        cache.get(&js_retained_string(client_id)?).copied()
+        let units = safe_cex_types::js_coercion::js_retained_string_utf16(client_id.unwrap())?;
+        cache
+            .iter()
+            .find(|(key, _)| key.encode_utf16().eq(units.iter().copied()))
+            .map(|(_, value)| *value)
     };
     Ok(cached.unwrap_or(fallback))
 }

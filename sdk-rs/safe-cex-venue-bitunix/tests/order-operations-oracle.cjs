@@ -85,6 +85,7 @@ if(selected==='retainedInfo') {
  const specs=[
   {order:{info:{...tp.info,id:{$undefined:true},orderId:'retained-raw'}}},
   {order:{tpTriggerType:'last_price',info:{...tp.info,type:{$units:[0xD800]},tpStopType:{$units:[0xDC00]}}}},
+  {order:{info:{...tp.info,tpOrderType:{$units:[0xD800]}}}},
   {order:{info:{id:'TARGET',positionId:{$undefined:true},tpPrice:'120.5',tpQty:'2.5',tpOrderType:'MARKET',tpStopType:'MARK'}},orders:[{...sl,info:{...sl.info,id:'OTHER',positionId:{$undefined:true}}}]},
  ];
  for(const fixture of specs)await modelRun('updateStandaloneTpslOrder',{...fixture,market:JSON.parse(process.argv[3])});

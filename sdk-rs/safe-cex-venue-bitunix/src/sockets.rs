@@ -1766,14 +1766,15 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
             .emit_ws_diagnostic_receive(&Value::String(raw.clone()), &Default::default())?)
     }
     fn parse(&mut self, raw: String) -> Result<Input, Fault> {
-        Ok(Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>())
-            .map_err(|error| Fault(ExchangeError::new(error.to_string())))?)
+        // Source jsonParse maps malformed websocket text to null.
+        Ok(Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap_or(Input::Null))
     }
     fn balance_notice(&mut self, json: &Input) -> Result<(), Fault> {
         self.venue()?.runtime.console(
             "info",
             &format!(
-                "bitunix: received balance message, but we will fetch it from the exchange {json:?}"
+                "bitunix: received balance message, but we will fetch it from the exchange {}",
+                safe_cex_num::js_retained_json_stringify(json)?.unwrap_or("undefined".into())
             ),
         );
         Ok(())

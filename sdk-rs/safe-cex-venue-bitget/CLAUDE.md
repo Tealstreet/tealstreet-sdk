@@ -397,3 +397,8 @@ Position freshness reads canonical retained info directly. Nullish aliases skip 
 undefined, while a present NaN blocks later aliases. The constructed private-receiver
 regression compares nine source timestamp cases across all three variants, including
 parseFloat prefixes before unpaired UTF-16 surrogates and signed-zero bits.
+
+Unknown UTF-16 plan metadata follows the source typed-order fallback after String
+coercion. Only exact table keys select TableHit; an unpaired unit cannot match an
+ASCII key. The constructed exchange control checks eight source cases across
+Classic, USDC and inverse variants without projecting Order.info through JSON.

@@ -14,7 +14,7 @@ pub struct TpslLegSnapshot {
     pub price: f64,
     pub qty: f64,
     pub stop_type: &'static str,
-    pub order_type: String,
+    pub order_type: Input,
     pub order_price: f64,
 }
 fn info<'a>(order: &'a Order, key: &str) -> Option<&'a Input> {
@@ -112,12 +112,21 @@ pub fn get_tpsl_leg_snapshot(
         price,
         qty,
         stop_type: get_bitunix_trigger_type(trigger, field(stop_key))?,
-        order_type: if raw_type.is_some_and(Input::is_truthy) {
-            safe_cex_num::js_retained_string(raw_type)?
-        } else {
-            "MARKET".into()
-        }
-        .to_uppercase(),
+        order_type: {
+            let value = raw_type
+                .filter(|value| value.is_truthy())
+                .cloned()
+                .unwrap_or_else(|| Input::Text("MARKET".encode_utf16().collect()));
+            let units = safe_cex_types::js_coercion::js_retained_string_utf16(&value)?;
+            let kind = safe_cex_exchange::js_runtime::value::Js::utf16(&units)
+                .call_method("toUpperCase", vec![])
+                .expect("stock String.toUpperCase cannot throw");
+            Input::Text(
+                kind.as_str()
+                    .expect("String uppercase returns text")
+                    .to_vec(),
+            )
+        },
         order_price: retained_finite(field(order_price_key), f64::NAN)?,
     }))
 }

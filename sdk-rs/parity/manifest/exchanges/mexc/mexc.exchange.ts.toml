@@ -392,7 +392,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-mexc/src/exchange_helpers.rs::get_replacement_order_amount"
 status = "ported"
-note = "Stateless helper extracted from the maintained TypeScript class into a free function; live source oracle preserves helper dependencies and shared typed inputs. Adapted as safe-cex-venue-mexc/src/exchange_helpers.rs::get_replacement_order_amount."
+note = "Stateless helper extracted from the maintained TypeScript class into a free function; canonical retained info preserves nullish alias precedence, native numeric values and UTF-16 parseFloat prefixes. Six maintained-source cases drive real cancel/replacement HTTP and distinguish undefined/null volume from NaN/Infinity/empty/signed-zero volume. No info JSON projection. Adapted as safe-cex-venue-mexc/src/exchange_helpers.rs::get_replacement_order_amount."
 
 [[symbol]]
 ts = "MexcExchange.cancelOrders"

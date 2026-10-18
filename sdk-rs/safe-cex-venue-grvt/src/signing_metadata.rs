@@ -3,9 +3,9 @@
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 
 /// The source returns decimal exponents unchanged, including negative zero.
-pub fn get_instrument_signing_metadata<'a>(
+pub fn get_instrument_signing_metadata(
     market_id: &str,
-    info: Option<&'a Input>,
+    info: Option<&Input>,
 ) -> Result<(String, f64, f64), String> {
     let hash = info
         .and_then(|value| value.get("ih"))

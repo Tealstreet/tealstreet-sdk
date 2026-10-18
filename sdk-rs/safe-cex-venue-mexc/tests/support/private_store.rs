@@ -6,6 +6,7 @@ use safe_cex_store::{
     store::DefaultStore,
 };
 use safe_cex_types::*;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Map, Value};
 use std::cell::{Cell, Ref, RefCell};
 type Subscriber = StoreSubscriber;
@@ -142,7 +143,7 @@ impl Store for ObservedStore {
     fn update_stark_config(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
         Store::update_stark_config(&self.inner, data)
     }
-    fn update_zk_link_config(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
+    fn update_zk_link_config(&self, data: Option<Input>) -> Result<(), StoreMutationError> {
         Store::update_zk_link_config(&self.inner, data)
     }
     fn update_user_data(&self, data: Option<Value>) -> Result<(), StoreMutationError> {
@@ -199,7 +200,7 @@ impl Store for ObservedStore {
     fn stark_config(&self) -> Option<Ref<'_, Value>> {
         Store::stark_config(&self.inner)
     }
-    fn zk_link_config(&self) -> Option<Ref<'_, Value>> {
+    fn zk_link_config(&self) -> Option<Ref<'_, Input>> {
         Store::zk_link_config(&self.inner)
     }
     fn user_data(&self) -> Option<Ref<'_, Value>> {

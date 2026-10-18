@@ -175,9 +175,25 @@ fn private_handlers_reread_live_markets_and_name_owned_info_snapshot_cost() {
                     "private native caller changed nested producer"
                 );
                 let marker = if kind == "position" {
-                    store.positions()[0].info.as_ref().unwrap()["probe"]["marker"].clone()
+                    store.positions()[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("probe")
+                        .unwrap()
+                        .get("marker")
+                        .unwrap()
+                        .clone()
                 } else {
-                    store.orders()[0].info.as_ref().unwrap()["probe"]["marker"].clone()
+                    store.orders()[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("probe")
+                        .unwrap()
+                        .get("marker")
+                        .unwrap()
+                        .clone()
                 };
                 assert_eq!(
                     marker.as_f64(),
