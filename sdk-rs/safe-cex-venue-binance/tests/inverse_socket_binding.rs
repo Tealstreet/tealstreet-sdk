@@ -119,7 +119,7 @@ fn public_wire_topics_and_all_three_ticker_streams_reach_real_store() {
         assert_eq!(t.volume, 9.);
         assert_eq!(t.quote_volume, 450184.5);
         assert_eq!(t.mark, 50010.);
-        assert_eq!(t.index, 50011.);
+        assert_eq!(t.index, Some(50011.));
         assert_eq!(t.bid, 50009.);
         assert_eq!(t.ask, 50012.);
     }

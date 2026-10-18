@@ -340,7 +340,7 @@ impl PublicStream {
                 "ask" => retained.ask = number,
                 "last" => retained.last = number,
                 "mark" => retained.mark = number,
-                "index" => retained.index = number,
+                "index" => retained.index = Some(number),
                 "percentage" => retained.percentage = number,
                 "volume" => retained.volume = number,
                 "quoteVolume" => retained.quote_volume = number,

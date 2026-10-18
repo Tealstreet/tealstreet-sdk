@@ -48,7 +48,7 @@ fn run(row: &Value) -> Value {
     ticker.ask = number(&row["prices"][1]);
     ticker.last = number(&row["prices"][2]);
     ticker.mark = ticker.last;
-    ticker.index = ticker.last;
+    ticker.index = Some(ticker.last);
     let availability = row["availability"].as_str().unwrap();
     let store = Rc::new(DefaultStore::new());
     let mut markets = if availability == "ticker" || availability == "none" {
@@ -68,7 +68,7 @@ fn run(row: &Value) -> Value {
         ticker.ask = 85.0;
         ticker.last = 82.0;
         ticker.mark = 82.0;
-        ticker.index = 82.0;
+        ticker.index = Some(82.0);
         tickers.push(ticker);
     }
     let runtime = Rc::new(Runtime::default());

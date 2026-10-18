@@ -97,7 +97,7 @@ fn ticker(n: &Ticker, e: &Value) {
         (n.ask, "ask"),
         (n.last, "last"),
         (n.mark, "mark"),
-        (n.index, "index"),
+        (n.index.unwrap(), "index"),
         (n.percentage, "percentage"),
         (n.open_interest, "openInterest"),
         (n.funding_rate, "fundingRate"),

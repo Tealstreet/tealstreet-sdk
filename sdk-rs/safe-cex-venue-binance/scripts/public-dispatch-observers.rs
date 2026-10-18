@@ -42,7 +42,7 @@ fn retained(value: &Input) -> Value {
 fn ticker(row: &Ticker) -> Value {
     json!({
         "id":row.id,"symbol":row.symbol,"bid":bits(row.bid),"ask":bits(row.ask),
-        "last":bits(row.last),"mark":bits(row.mark),"index":bits(row.index),
+        "last":bits(row.last),"mark":bits(row.mark),"index":bits(row.index.expect("numeric ticker source profile")),
         "percentage":bits(row.percentage),"volume":bits(row.volume),
         "quoteVolume":bits(row.quote_volume),"openInterest":bits(row.open_interest),
         "fundingRate":bits(row.funding_rate),"fundingTime":bits(row.funding_time),

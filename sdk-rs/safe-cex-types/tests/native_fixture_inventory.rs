@@ -104,6 +104,7 @@ fn dynamic_bucket(function: &str) -> &'static str {
     match function {
         "decoded_task_snapshots_use_distinct_dimensions_and_one_hot_flags"
         | "record"
+        | "nullable_index_ticker_fixture"
         | "roundtrip"
         | "ticker_derivative_sentinels_are_required_and_preserve_fractional_numbers"
         | "recursive_balances_and_execution_legs_keep_absence_distinct_from_zero"
@@ -230,7 +231,7 @@ fn parse_native_test_fixtures_and_bit_comparison_functions() {
     assert_eq!(
         inventory.dynamic_buckets,
         BTreeMap::from([
-            ("decoded-record", 18),
+            ("decoded-record", 19),
             ("effect-observation", 19),
             ("numeric-observation", 12),
             ("operation-result", 16),

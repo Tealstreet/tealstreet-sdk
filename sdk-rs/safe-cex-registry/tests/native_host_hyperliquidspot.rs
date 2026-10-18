@@ -60,7 +60,7 @@ fn hyperliquidspot_registry_bootstraps_places_and_cancels_over_native_http() {
             h.exchange.start().await.expect("Spot production start");
             assert!(h.store.loaded().markets && h.store.loaded().tickers);
             assert_eq!(h.store.markets()[0].symbol,"PURR/USDC");
-            assert!(h.store.tickers()[0].index.is_nan());
+            assert!(h.store.tickers()[0].index.unwrap().is_nan());
             eventually("both native Spot sockets connect",||h.peers.borrow().len()==2).await;
             let opts:PlaceOrderOpts=serde_json::from_value(json!({"symbol":"PURR/USDC","type":"limit","side":"buy","amount":1,"price":1.2,"clientOrderId":"0x11111111111111111111111111111111"})).unwrap();
             let ids=h.exchange.base().place_order(h.exchange.as_ref(),opts).await.unwrap();

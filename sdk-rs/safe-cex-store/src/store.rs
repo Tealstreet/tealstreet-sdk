@@ -1077,7 +1077,13 @@ impl StoreState {
                 let value = match value {
                     crate::model_patch::PatchValueRef::Number(value) => Some(value),
                     crate::model_patch::PatchValueRef::Native(value) => {
-                        value.downcast_ref::<f64>().copied()
+                        value.downcast_ref::<f64>().copied().or_else(|| {
+                            if field == "index" {
+                                value.downcast_ref::<Option<f64>>().copied().flatten()
+                            } else {
+                                None
+                            }
+                        })
                     }
                     crate::model_patch::PatchValueRef::Json(Value::Number(value)) => {
                         Some(safe_cex_num::number_from_string(&value.to_string()))
@@ -1413,7 +1419,7 @@ fn set_ticker_number(ticker: &mut Ticker, field: &str, value: f64) {
         "ask" => ticker.ask = value,
         "last" => ticker.last = value,
         "mark" => ticker.mark = value,
-        "index" => ticker.index = value,
+        "index" => ticker.index = Some(value),
         "percentage" => ticker.percentage = value,
         "openInterest" => ticker.open_interest = value,
         "fundingRate" => ticker.funding_rate = value,

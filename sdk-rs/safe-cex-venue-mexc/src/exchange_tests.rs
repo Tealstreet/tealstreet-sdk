@@ -1541,7 +1541,7 @@ fn mexc_fetch_tickers_matches_live_source() {
                 "ask": bits(ticker.ask),
                 "last": bits(ticker.last),
                 "mark": bits(ticker.mark),
-                "index": bits(ticker.index),
+                "index": bits(ticker.index.expect("numeric ticker source profile")),
                 "percentage": bits(ticker.percentage),
                 "openInterest": bits(ticker.open_interest),
                 "fundingRate": bits(ticker.funding_rate),

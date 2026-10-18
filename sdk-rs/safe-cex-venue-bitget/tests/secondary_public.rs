@@ -282,7 +282,7 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
             (t.ask, 22.5),
             (t.last, 33.75),
             (t.mark, 44.5),
-            (t.index, 55.25),
+            (t.index.unwrap(), 55.25),
             (t.percentage, 66.5),
             (t.open_interest, 7001.5),
             (t.funding_rate, 0.00775),

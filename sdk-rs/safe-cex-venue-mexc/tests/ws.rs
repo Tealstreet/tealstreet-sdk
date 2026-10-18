@@ -187,7 +187,7 @@ fn mexc_public_ticker_handler_patches_only_source_fields() {
     assert_eq!(ticker.bid, 11.0);
     assert_eq!(ticker.ask, 13.0);
     assert_eq!(ticker.mark, 12.5);
-    assert_eq!(ticker.index, 12.25);
+    assert_eq!(ticker.index, Some(12.25));
     assert_eq!(ticker.percentage, 10.0);
     assert_eq!(ticker.open_interest, 0.0025);
     assert_eq!(ticker.funding_rate, 0.001);

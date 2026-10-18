@@ -215,7 +215,7 @@ pub fn fetch_tickers(
             ask: 0.0,
             last: 0.0,
             mark: 0.0,
-            index: 0.0,
+            index: Some(0.0),
             mid_price: None,
             timestamp: None,
             percentage: 0.0,

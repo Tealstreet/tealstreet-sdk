@@ -274,7 +274,7 @@ fn ticker(actual: &Ticker, expected: &Value, label: &str) {
         ("ask", actual.ask),
         ("last", actual.last),
         ("mark", actual.mark),
-        ("index", actual.index),
+        ("index", actual.index.unwrap()),
         ("percentage", actual.percentage),
         ("openInterest", actual.open_interest),
         ("fundingRate", actual.funding_rate),

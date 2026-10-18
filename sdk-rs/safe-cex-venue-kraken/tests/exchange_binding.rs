@@ -100,7 +100,7 @@ fn fetch_tickers_reads_the_rest_snapshot_for_known_markets() {
     assert_eq!(tickers.len(), 1);
     assert_eq!(tickers[0].symbol, SYMBOL);
     assert_eq!(tickers[0].mark, 30000.25);
-    assert_eq!(tickers[0].index, 30000.1);
+    assert_eq!(tickers[0].index, Some(30000.1));
 }
 
 #[test]

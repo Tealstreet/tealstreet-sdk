@@ -77,7 +77,7 @@ fn ticker(symbol: &str, last: f64) -> Ticker {
         ask: 0.0,
         last,
         mark: 0.0,
-        index: 0.0,
+        index: Some(0.0),
         mid_price: None,
         timestamp: None,
         percentage: 0.0,

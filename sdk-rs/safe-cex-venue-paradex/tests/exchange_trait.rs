@@ -88,7 +88,7 @@ fn public_socket_subscribes_and_delivers_throttled_source_tickers() {
         "latest source update delivered at trailing edge"
     );
     assert_eq!(store.tickers()[0].ask, 123.75);
-    assert_eq!(store.tickers()[0].index, 121.125);
+    assert_eq!(store.tickers()[0].index, Some(121.125));
     assert!(
         runtime.errors.borrow().is_empty(),
         "feed callback errors: {:?}",

@@ -69,7 +69,7 @@ fn project(data: &TickerInput, store: &dyn Store) -> Result<Vec<Ticker>, JsCoerc
             ask: number(row.get("askPrice"))?,
             last,
             mark: last,
-            index: last,
+            index: Some(last),
             mid_price: None,
             timestamp: None,
             percentage,

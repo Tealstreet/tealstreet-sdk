@@ -433,7 +433,7 @@ impl BingxDataReads {
                 ask,
                 last,
                 mark: float(alias(price, "markPrice")?)?,
-                index: float(alias(price, "indexPrice")?)?,
+                index: Some(float(alias(price, "indexPrice")?)?),
                 percentage: float(alias(daily, "priceChangePercent")?)?,
                 funding_rate: float(alias(price, "lastFundingRate")?)? / 100.0,
                 funding_time: float(alias(price, "nextFundingTime")?)?,

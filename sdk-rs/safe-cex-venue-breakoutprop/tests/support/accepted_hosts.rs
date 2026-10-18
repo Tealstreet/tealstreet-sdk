@@ -141,7 +141,7 @@ pub fn ticker(symbol: String, bid: f64, ask: f64) -> Ticker {
         ask,
         last: bid,
         mark: bid,
-        index: bid,
+        index: Some(bid),
         mid_price: None,
         percentage: 0.0,
         open_interest: 0.0,

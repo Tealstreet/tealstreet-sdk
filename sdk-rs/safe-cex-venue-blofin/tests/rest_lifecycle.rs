@@ -235,7 +235,7 @@ fn ticker(a: &Ticker, e: &Value) {
         (a.ask, "ask"),
         (a.last, "last"),
         (a.mark, "mark"),
-        (a.index, "index"),
+        (a.index.unwrap(), "index"),
         (a.percentage, "percentage"),
         (a.funding_rate, "fundingRate"),
         (a.volume, "volume"),

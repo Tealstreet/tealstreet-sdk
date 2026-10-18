@@ -564,7 +564,7 @@ fn public_classes_native_ticker_bindings_before_actual_source() {
             "native Spot mark bound to Spot body"
         );
         assert_eq!(
-            ticker.index,
+            ticker.index.unwrap(),
             if kind == PublicKind::SpotPublic {
                 4.2
             } else {
@@ -586,7 +586,7 @@ fn public_classes_native_ticker_bindings_before_actual_source() {
         assert_eq!(stats[event].had_handlers, Some(true));
         drop(stats);
         input.push(json!({"kind":format!("{kind:?}")}));
-        native.push(json!({"kind":format!("{kind:?}"),"keys":keys,"sibling":sibling,"frames":*socket.sent.borrow(),"book":{"updates":inner.updates.borrow().len(),"loaded":inner.snapshot_loaded.get()},"ticker":{"id":ticker.id,"symbol":ticker.symbol,"last":ticker.last,"mark":ticker.mark,"index":ticker.index,"percentage":ticker.percentage,"volume":ticker.volume,"quoteVolume":ticker.quote_volume,"fundingRate":ticker.funding_rate,"fundingTime":ticker.funding_time,"bid":ticker.bid,"ask":ticker.ask},"stats":[event]}));
+        native.push(json!({"kind":format!("{kind:?}"),"keys":keys,"sibling":sibling,"frames":*socket.sent.borrow(),"book":{"updates":inner.updates.borrow().len(),"loaded":inner.snapshot_loaded.get()},"ticker":{"id":ticker.id,"symbol":ticker.symbol,"last":ticker.last,"mark":ticker.mark,"index":ticker.index.unwrap(),"percentage":ticker.percentage,"volume":ticker.volume,"quoteVolume":ticker.quote_volume,"fundingRate":ticker.funding_rate,"fundingTime":ticker.funding_time,"bid":ticker.bid,"ask":ticker.ask},"stats":[event]}));
     }
     assert_eq!(input.len(), 5, "independent public class floor");
     use std::io::Write;

@@ -49,6 +49,12 @@ pub(crate) fn stock(key: &str) -> TickerSymbolLookup {
     }
 }
 pub(crate) fn prototype_field(ticker: &Ticker, key: &str) -> TickerSymbolLookup {
+    if key == "index" && ticker.index.is_none() {
+        return TickerSymbolLookup::PrototypeField {
+            truthy: false,
+            id: None,
+        };
+    }
     let numeric = numeric_field(ticker, key);
     if let Some(value) = numeric {
         return TickerSymbolLookup::PrototypeField {
@@ -87,7 +93,7 @@ fn numeric_field(ticker: &Ticker, key: &str) -> Option<f64> {
         "ask" => Some(ticker.ask),
         "last" => Some(ticker.last),
         "mark" => Some(ticker.mark),
-        "index" => Some(ticker.index),
+        "index" => ticker.index,
         "percentage" => Some(ticker.percentage),
         "openInterest" => Some(ticker.open_interest),
         "fundingRate" => Some(ticker.funding_rate),

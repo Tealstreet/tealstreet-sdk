@@ -1150,7 +1150,7 @@ fn public_frames_preserve_partial_depth_and_candle_semantics() {
         assert_eq!(
             (
                 ticker.mark,
-                ticker.index,
+                ticker.index.unwrap(),
                 ticker.funding_rate,
                 ticker.funding_time
             ),
