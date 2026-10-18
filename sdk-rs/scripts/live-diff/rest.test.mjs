@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { deserialize, serialize } from 'node:v8';
-import { publicRestPlan, resultStatus, tickerCoverage, qualifyUpstream } from './rest-plan.mjs';
+import { publicRestPlan, resultStatus, tickerCoverage, qualifyTiming, qualifyUpstream } from './rest-plan.mjs';
 import { readKey, isRead } from './recorder.mjs';
 import { restVenueHosts } from './rest-venues.mjs';
 
@@ -197,5 +197,18 @@ test('later matching clocks cannot qualify Store snapshots after a different boo
   assert.deepEqual(
     qualifyUpstream(checks).map((c) => c.status),
     ['CLOCK_DIFF', 'UPSTREAM_BLOCKED', 'UPSTREAM_BLOCKED', 'PASS'],
+  );
+});
+test('matching coarse clock traces do not prove HTTP completion timing for timestamp-only diffs', () => {
+  const check = {
+    status: 'DIFF',
+    clockTraces: { ts: [0, 1000] },
+    diffs: [{ path: '$.value.0.timestamp', ts: 1000, rust: 0 }],
+  };
+  assert.equal(qualifyTiming(check).status, 'CLOCK_DIFF');
+  assert.equal(qualifyTiming({ ...check, clockTraces: { ts: [0] } }).status, 'DIFF');
+  assert.equal(
+    qualifyTiming({ ...check, diffs: [...check.diffs, { path: '$.value.0.price', ts: 1, rust: 2 }] }).status,
+    'DIFF',
   );
 });

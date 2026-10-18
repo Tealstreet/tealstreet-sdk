@@ -9,7 +9,7 @@ import { driveOperation } from './rest-clock-driver.mjs';
 import { differences } from './compare.mjs';
 import { hash, makeCA, recordingProxy } from './recorder.mjs';
 import { restVenueHosts as venueHosts } from './rest-venues.mjs';
-import { publicRestPlan, resultStatus, tickerCoverage, qualifyUpstream } from './rest-plan.mjs';
+import { publicRestPlan, resultStatus, tickerCoverage, qualifyTiming, qualifyUpstream } from './rest-plan.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url)),
   root = resolve(here, '../../..');
@@ -365,7 +365,7 @@ try {
       report.checks.push(check);
       console.log(`${exchange} ${spec.label}: ${check.status}`);
     }
-    report.checks = qualifyUpstream(report.checks);
+    report.checks = qualifyUpstream(report.checks.map(qualifyTiming));
     report.status = report.checks.some((c) => c.status === 'DIFF')
       ? 'DIFF'
       : report.checks.some((c) =>

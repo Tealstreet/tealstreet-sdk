@@ -150,6 +150,25 @@ export function tickerCoverage(reply) {
   );
 }
 
+// Equal coarse traces do not identify the HTTP continuation's clock reading.
+export function qualifyTiming(check) {
+  if (
+    check.status === 'DIFF' &&
+    check.clockTraces?.ts?.length > 1 &&
+    check.diffs?.length &&
+    check.diffs.every(({ path }) => path.endsWith('.timestamp'))
+  ) {
+    return {
+      ...check,
+      unqualifiedStatus: check.status,
+      status: 'CLOCK_DIFF',
+      reason:
+        'HTTP parsing/completion is not fenced relative to clock advances; timestamp-only differences remain provisional',
+    };
+  }
+  return check;
+}
+
 // Store snapshots and derived option/leverage reads inherit bootstrap timing.
 // Matching clocks at the later read do not establish the same startup state.
 export function qualifyUpstream(checks) {

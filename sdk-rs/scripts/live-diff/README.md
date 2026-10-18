@@ -255,8 +255,11 @@ operation is pending and terminal HTTP is idle. This progresses native limiter
 windows; freezing its monotonic clock while keeping real sleeps can otherwise
 manufacture a liveness failure. Each operation's clock trace is retained and
 must repeat within each side and match across sides. A `CLOCK_DIFF` is
-unqualified input timing evidence, even when mapper values match. This runner
-does not establish WS handler drain. `--realtime-clock` is an explicit liveness
+unqualified input timing evidence, even when mapper values match. The runner
+also retains timestamp-only differences as `CLOCK_DIFF` if an operation needed
+clock advances: matching coarse traces do not fence HTTP parsing/completion
+relative to those advances. No timestamp is removed from the exact artifacts.
+The REST runner does not establish WS handler drain. `--realtime-clock` is an explicit liveness
 diagnostic with uncontrolled clock inputs, not a controlled-clock parity run.
 Legacy V1 bundles lack capture clock traces; fresh V2 captures are required for
 final clock qualification.
