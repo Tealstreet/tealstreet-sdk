@@ -139,14 +139,16 @@ fn string_hint_observes_source_order_live_methods_and_native_utf16() {
             }
             "first-getter-throws" => {
                 let events = events.clone();
-                value.define_accessor(
-                    "toString",
-                    Some(Rc::new(move |_| {
-                        events.borrow_mut().push("get-toString".into());
-                        Err(Thrown::error("SyntaxError", "get-toString"))
-                    })),
-                    None,
-                );
+                value
+                    .define_accessor(
+                        "toString",
+                        Some(Rc::new(move |_| {
+                            events.borrow_mut().push("get-toString".into());
+                            Err(Thrown::error("SyntaxError", "get-toString"))
+                        })),
+                        None,
+                    )
+                    .expect("test accessor target permits definition");
             }
             "first-getter" | "second-getter" => {
                 let (key, result, event) = if label == "first-getter" {
@@ -157,22 +159,26 @@ fn string_hint_observes_source_order_live_methods_and_native_utf16() {
                 };
                 let method = named(&value, key, result, events.clone(), false);
                 let events = events.clone();
-                value.define_accessor(
-                    key,
-                    Some(Rc::new(move |_| {
-                        events.borrow_mut().push(event.into());
-                        Ok(method.clone())
-                    })),
-                    None,
-                );
+                value
+                    .define_accessor(
+                        key,
+                        Some(Rc::new(move |_| {
+                            events.borrow_mut().push(event.into());
+                            Ok(method.clone())
+                        })),
+                        None,
+                    )
+                    .expect("test accessor target permits definition");
             }
             "second-getter-unreached" => {
                 first(Js::str("done"));
-                value.define_accessor(
-                    "valueOf",
-                    Some(Rc::new(|_| panic!("string_hint::unreached"))),
-                    None,
-                );
+                value
+                    .define_accessor(
+                        "valueOf",
+                        Some(Rc::new(|_| panic!("string_hint::unreached"))),
+                        None,
+                    )
+                    .expect("test accessor target permits definition");
             }
             "mutate-second" | "delete-second" => {
                 second(Js::str("stale"));

@@ -88,7 +88,10 @@ impl AccountHost for Rt {
         Ok(())
     }
     fn resolve(&self, v: Js) -> Result<Rc<Operation>, Thrown> {
-        let promise = Promise::spawn(&self.exchange_runtime(), Box::pin(await_js(v)));
+        let promise = Promise::spawn(
+            &self.exchange_runtime(),
+            Box::pin(await_js(&self.exchange_runtime(), v)),
+        );
         Ok(Rc::new(Operation {
             waiter: std::cell::RefCell::new(promise.wait()),
             promise,
@@ -198,7 +201,7 @@ impl crate::exchange::ExchangeHost for Rt {
                             k,
                             Some(Rc::new(move |recv| f.call(recv.clone(), vec![]))),
                             None,
-                        );
+                        )?;
                     } else {
                         r.define(k, v.clone())?;
                     }

@@ -176,7 +176,11 @@ async fn request_list(rt: &Rt, endpoint: &str, config: Option<Js>) -> Result<Js,
     if let Some(config) = config {
         args.push(config);
     }
-    let response = await_js(rt.this.get("xhr")?.call_method("get", args)?).await?;
+    let response = await_js(
+        &rt.exchange_runtime(),
+        rt.this.get("xhr")?.call_method("get", args)?,
+    )
+    .await?;
     let data = response.get("data")?;
     if get_key(&data, "retCode")?.to_number()? != 0. {
         return Err(Thrown::new(

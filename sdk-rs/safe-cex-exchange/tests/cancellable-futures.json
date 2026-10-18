@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "227 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "225 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1582,9 +1582,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "aae033d4d3dacc8f373f25e215e6160b77d91fe130de0befb2abc66403eacb5d",
+      "producer_sha256": "d3d4b079fff88fb5b95a38c66862daae2f43446fcd9c5d2ebeed64bb7eb96269",
       "classification": "no-owned-latch",
-      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention. Reviewed direct source-field initializer cutover: the callback and isSpot/isDemo getter reads complete synchronously before Rc publication and before external provider construction. Failure returns the original throw before callbacks are installed. All twelve existing async/await boundaries are unchanged; no new future, task, waiter or slot is introduced. Reviewed native emitter forwarding and error-code materialization within the existing factory: all async/socket/worker setup boundaries and task ownership remain unchanged. Reviewed synchronous emitter removal: live function-alias getters run outside listener borrows; a successful filter commits the captured rows, while a getter throw preserves its side effects and propagates. Existing async boundaries and lifecycle ownership are unchanged. Reviewed Raw(Js) facade: the synchronous emitAndLogError callback passes the original Js instead of eager Error/JSON projection. All twelve async/await boundaries and existing task, socket, worker-RPC and provider ownership are unchanged. Async facade review: fallible snapshot/order/position preparation runs inside its existing eager Promise body. Only owned arguments and weak socket context are newly captured; public/disposed snapshot exits precede tries coercion. No new latch or registry. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged."
+      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention. Reviewed direct source-field initializer cutover: the callback and isSpot/isDemo getter reads complete synchronously before Rc publication and before external provider construction. Failure returns the original throw before callbacks are installed. All twelve existing async/await boundaries are unchanged; no new future, task, waiter or slot is introduced. Reviewed native emitter forwarding and error-code materialization within the existing factory: all async/socket/worker setup boundaries and task ownership remain unchanged. Reviewed synchronous emitter removal: live function-alias getters run outside listener borrows; a successful filter commits the captured rows, while a getter throw preserves its side effects and propagates. Existing async boundaries and lifecycle ownership are unchanged. Reviewed Raw(Js) facade: the synchronous emitAndLogError callback passes the original Js instead of eager Error/JSON projection. All twelve async/await boundaries and existing task, socket, worker-RPC and provider ownership are unchanged. Async facade review: fallible snapshot/order/position preparation runs inside its existing eager Promise body. Only owned arguments and weak socket context are newly captured; public/disposed snapshot exits precede tries coercion. No new latch or registry. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run. Reviewed fallible native accessor installation: four synchronous definitions now propagate original descriptor failures before receiver publication. Existing async boundaries, task ownership, runtime captures and cancellation guards are unchanged."
     },
     {
       "owner": "src/js_runtime/base_exchange.rs::js_remote_signer",
@@ -1614,9 +1614,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "cbbb17ce3188524bcae1eb6b2d26d007ecb4110b45d23de8a57a21fdc231a13e",
+      "producer_sha256": "67ab10984efcfc62f56e6877b9ab2e8a21a76d56399f36561971025900d2b79f",
       "classification": "no-owned-latch",
-      "reason": "Spawns a js_runtime Promise body: it runs eagerly to its first suspension and the runtime owns the rest, independently of awaiters, as a JS async function does. Locals belong to the body; no latch or registration spans an await."
+      "reason": "Spawns a js_runtime Promise body: it runs eagerly to its first suspension and the runtime owns the rest, independently of awaiters, as a JS async function does. Locals belong to the body; no latch or registration spans an await. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run."
     },
     {
       "owner": "src/js_runtime/builtins.rs::promise_member",
@@ -1646,9 +1646,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "f71cf9275673b9522d067a5958828a32e0fd20e7e1a9e6c6514a0f1134ca1780",
+      "producer_sha256": "b45c6c349c4d7fd91216571722d8b23358a9bcdb52f572d05c9f3673e25113f6",
       "classification": "no-owned-latch",
-      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added. RetainedJsonInput restoration replaces JSON projection synchronously before the same await; local config values own no new task, borrow, reservation or cancellation registration. Reviewed retained-body cutover: synchronous native body restoration replaces early wire JSON projection; the same xhr child Promise is awaited with no new waiter, task, timer or owned latch."
+      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added. RetainedJsonInput restoration replaces JSON projection synchronously before the same await; local config values own no new task, borrow, reservation or cancellation registration. Reviewed retained-body cutover: synchronous native body restoration replaces early wire JSON projection; the same xhr child Promise is awaited with no new waiter, task, timer or owned latch. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run."
     },
     {
       "owner": "src/js_runtime/client.rs::RestHttpHost as JsHttpHost::send",
@@ -1669,9 +1669,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "bda8589aabf7d246e20269c01a67453a2eb68b3954c5386bfb9c96ab30fde135",
+      "producer_sha256": "8b1af597f4c4914d0b3fc787ed594cca69cc43070e3b42324e5f78db7a047bfe",
       "classification": "no-owned-latch",
-      "reason": "One caller-owned interceptor link awaits an optional JS callback and its returned promise. It owns the settlement value; no waiter registry, latch or reservation is added. Dropping it delegates a Promise wait to PromiseWait cleanup."
+      "reason": "One caller-owned interceptor link awaits an optional JS callback and its returned promise. It owns the settlement value; no waiter registry, latch or reservation is added. Dropping it delegates a Promise wait to PromiseWait cleanup. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run."
     },
     {
       "owner": "src/js_runtime/client.rs::create",
@@ -1693,9 +1693,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "f6c314fd58ff39a13828edbab73984a23289092d8dfff23f81146512b9b2e7bf",
+      "producer_sha256": "35d50780cd0aee5cb83b18e10fc8705e6dc623a9866f8bddcfad897a6da46d89",
       "classification": "no-owned-latch",
-      "reason": "Configured retry loop owns its effective config, counter, delay and timestamps. Options are cloned out of client state before send_once, asynchronous condition and host-sleep awaits; no RefCell borrow, waiter registration or independent latch spans those awaits. Dropping dispatch releases the local config and current child future. The existing Promise owns producer continuation independently of observers, measured by client_retry::dropping_retry_observer_keeps_owned_timer_and_replay_alive; failed host sleep preserves its native error and sends nothing early."
+      "reason": "Configured retry loop owns its effective config, counter, delay and timestamps. Options are cloned out of client state before send_once, asynchronous condition and host-sleep awaits; no RefCell borrow, waiter registration or independent latch spans those awaits. Dropping dispatch releases the local config and current child future. The existing Promise owns producer continuation independently of observers, measured by client_retry::dropping_retry_observer_keeps_owned_timer_and_replay_alive; failed host sleep preserves its native error and sends nothing early. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run."
     },
     {
       "owner": "src/js_runtime/client.rs::dispatch_request",
@@ -1704,9 +1704,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "77e8723e6add1784439b75d6089c53c58a1d4fcfab2e6f18ed42b21b6bb248bb",
+      "producer_sha256": "994fabe09e8a67613878dad42b54946e054f783437077810203ebcf17de809e0",
       "classification": "no-owned-latch",
-      "reason": "The adapter attempt now awaits only the selected callable adapter Promise or host send. Rate waiting moved to its source registration point in the request interceptor chain. This function owns config and settlement, with no reservation, waiter registration or RefCell borrow across either await. Configured response transforms run synchronously after adapter settlement, adding no future or cancellation latch. Reviewed master custom-adapter settlement: its local boolean and conditional status rejection add no awaits or ownership; HOW fulfillment and default-host rejection retain both existing child futures."
+      "reason": "The adapter attempt now awaits only the selected callable adapter Promise or host send. Rate waiting moved to its source registration point in the request interceptor chain. This function owns config and settlement, with no reservation, waiter registration or RefCell borrow across either await. Configured response transforms run synchronously after adapter settlement, adding no future or cancellation latch. Reviewed master custom-adapter settlement: its local boolean and conditional status rejection add no awaits or ownership; HOW fulfillment and default-host rejection retain both existing child futures. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run."
     },
     {
       "owner": "src/js_runtime/client.rs::send_once",
@@ -1716,9 +1716,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "5f287e2cb191a5d72934c9bcfe661ec720c3eb89976478c5e3924769d7e4d8d4",
+      "producer_sha256": "cd1048d9eb66649b8e5bb382e6850bade8097d7786a1866a3ac71b7376706293",
       "classification": "no-owned-latch",
-      "reason": "Owns a snapshot of interceptor callbacks and the current settlement while awaiting each chain_step and adapter. The adapter call no longer takes client state; the registered rate-limit callback runs at its Axios LIFO position. No independent latch or waiter registry is introduced."
+      "reason": "Owns a snapshot of interceptor callbacks and the current settlement while awaiting each chain_step and adapter. The adapter call no longer takes client state; the registered rate-limit callback runs at its Axios LIFO position. No independent latch or waiter registry is introduced. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run."
     },
     {
       "owner": "src/js_runtime/client.rs::spawn",
@@ -1766,11 +1766,11 @@
       ],
       "producer_sha256": "f817e196a48d2508b97d7dd87717bbfc5b1786e2f6e0c7deb281d68104f72850",
       "classification": "guarded",
-      "reason": "The detached OwnedTasks driver owns the queue while suspended. Driver::drop takes every queued job outside the registry borrow, clears its waker and running flag, and releases pending captures on host discard. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged.",
+      "reason": "The detached OwnedTasks driver owns the queue while suspended. Driver::drop takes every queued job outside the registry borrow, clears its waker and running flag, and releases pending captures on host discard. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: the obsolete yield/adopt helpers are removed; Driver/OwnedTasks and PromiseWait registration/Drop bodies remain unchanged. Canonical resolver jobs retain the existing runtime owner; scoped native observer-drop and host-discard witnesses pass.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "9fe994ecb06cff1c1ca21ef93f73684b886a89929220653506a1fad981f6a134"
+          "sha256": "a20ae3530f9ebf67583909eb67e3399b99bcfbb87430a83b1bc464c8a7d8366c"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1778,7 +1778,7 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "658c93b7ecc64e7202136973b3bf9885c2f3a8090841d7e899b8ba206c4b2bf1"
+          "sha256": "ec4cb11abd408fcf1c0e7f5b88a0448d05f1339756706f4806893abe189d5517"
         }
       ],
       "witnesses": [
@@ -1800,11 +1800,11 @@
       ],
       "producer_sha256": "9bebf021f3754b4f9996de1597b53217ef5e078f871bb932e0740a9679fea446",
       "classification": "guarded",
-      "reason": "Registers the future once, eagerly polls only when requested with its real readiness waker, and retains pending work in the queue. Driver::drop releases all work on host discard; Task::cancel removes the selected timer and wakes an idle driver. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged.",
+      "reason": "Registers the future once, eagerly polls only when requested with its real readiness waker, and retains pending work in the queue. Driver::drop releases all work on host discard; Task::cancel removes the selected timer and wakes an idle driver. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: the obsolete yield/adopt helpers are removed; Driver/OwnedTasks and PromiseWait registration/Drop bodies remain unchanged. Canonical resolver jobs retain the existing runtime owner; scoped native observer-drop and host-discard witnesses pass.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "9fe994ecb06cff1c1ca21ef93f73684b886a89929220653506a1fad981f6a134"
+          "sha256": "a20ae3530f9ebf67583909eb67e3399b99bcfbb87430a83b1bc464c8a7d8366c"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1812,7 +1812,7 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "658c93b7ecc64e7202136973b3bf9885c2f3a8090841d7e899b8ba206c4b2bf1"
+          "sha256": "ec4cb11abd408fcf1c0e7f5b88a0448d05f1339756706f4806893abe189d5517"
         }
       ],
       "witnesses": [
@@ -1896,17 +1896,6 @@
       "reason": "Private scoped accessor declares one std::thread_local slot and synchronously invokes its caller. It initializes only weak queue lookup or scoped current-job storage; no future, task or waiter is created."
     },
     {
-      "owner": "src/js_runtime/jobs.rs::yield_current",
-      "boundaries": [
-        "async-function",
-        "await",
-        "poll-fn"
-      ],
-      "producer_sha256": "9f0defebde4faadc8af7914edb8faa1affffc02c77928dcdf6177226f6974238",
-      "classification": "no-owned-latch",
-      "reason": "The future queues only its current job waker and a local boolean. Dropping it leaves no waiter registration; queue ownership and host-discard cleanup remain in Driver."
-    },
-    {
       "owner": "src/js_runtime/library.rs::QsOptions::encode",
       "boundaries": [
         "opaque-macro-review"
@@ -1927,9 +1916,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "65f247f28868aed108244c3e402c7b2693e937e0623268cbe1885378890a278d",
+      "producer_sha256": "cc23f5984da44dc43b6d81a1d3c92fa52614c706418bd60510c75caad6296ee3",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to the existing Promise/Jobs owner; no exchange in-flight slot or shared borrow spans an await. The serial repair adds one awaited input before the existing callback-result await, for eight syntactic async boundaries. Each serial invocation retains its original input/callback/receiver and local output; the scope privately roots the module while exported functions capture it weakly. Canonical Promise.resolve owns thenable jobs through the existing FIFO driver. Existing throttle timer ownership remains delegated to Scope.set_timeout/clear_timeout. Native installed-package and module-release witnesses verify settlement, escaped exports and absence of scope/module cycles. Reviewed ccxt import registration adds only synchronous native functions/constants; existing future creators, async boundaries, owner latches and cancellation delegation remain unchanged. BigNumber now registers explicit synchronous call and construct bodies over the same decimal conversion; neither captures a scope, starts work or changes any async boundary or cancellation owner."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to the existing Promise/Jobs owner; no exchange in-flight slot or shared borrow spans an await. The serial repair adds one awaited input before the existing callback-result await, for eight syntactic async boundaries. Each serial invocation retains its original input/callback/receiver and local output; the scope privately roots the module while exported functions capture it weakly. Canonical Promise.resolve owns thenable jobs through the existing FIFO driver. Existing throttle timer ownership remains delegated to Scope.set_timeout/clear_timeout. Native installed-package and module-release witnesses verify settlement, escaped exports and absence of scope/module cycles. Reviewed ccxt import registration adds only synchronous native functions/constants; existing future creators, async boundaries, owner latches and cancellation delegation remain unchanged. BigNumber now registers explicit synchronous call and construct bodies over the same decimal conversion; neither captures a scope, starts work or changes any async boundary or cancellation owner. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",
@@ -1958,13 +1947,13 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "bc78c9feff8d698f837025580deeed6e292cf29f8efe9da1894a88ee9134ce08",
+      "producer_sha256": "98e5bd940513d99f2e30b169abe60ecfe207dad902214bbedac43fd46cffd6fd",
       "classification": "guarded",
-      "reason": "The queue eagerly polls the body with its actual readiness waker, then independently owns its continuation and settlement. Dropping the observer preserves execution; host driver discard releases polled and unpolled captures. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged.",
+      "reason": "The queue eagerly polls the body with its actual readiness waker, then independently owns its continuation and settlement. Dropping the observer preserves execution; host driver discard releases polled and unpolled captures. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: explicit runtime ownership uses the existing canonical resolver and its runtime-owned jobs; no new shared reservation or borrow spans await. Native observer-drop, host-discard, waiter-release and FIFO witnesses pass in the scoped 149-test run.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "9fe994ecb06cff1c1ca21ef93f73684b886a89929220653506a1fad981f6a134"
+          "sha256": "a20ae3530f9ebf67583909eb67e3399b99bcfbb87430a83b1bc464c8a7d8366c"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1972,7 +1961,7 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "658c93b7ecc64e7202136973b3bf9885c2f3a8090841d7e899b8ba206c4b2bf1"
+          "sha256": "ec4cb11abd408fcf1c0e7f5b88a0448d05f1339756706f4806893abe189d5517"
         }
       ],
       "witnesses": [
@@ -2006,14 +1995,14 @@
       ],
       "producer_sha256": "eff35b2f043324da15e43a0e30a4dae28fc50e5d44f2ecb8191177d84255a707",
       "classification": "guarded",
-      "reason": "Each PromiseWait owns one id-keyed waker registration. Drop removes only that registration and destroys the removed waker after releasing the state borrow. Settled values queue one continuation without adding a pending waiter. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged.",
+      "reason": "Each PromiseWait owns one id-keyed waker registration. Drop removes only that registration and destroys the removed waker after releasing the state borrow. Settled values queue one continuation without adding a pending waiter. Reviewed canonical resolver relocation: existing Promise producers, waiters, queue ownership and guard/Drop bodies are byte-unchanged; the source dependency changes only for the moved resolver and its synchronous resolve entrypoint. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged. Reviewed thenable cutover: the obsolete yield/adopt helpers are removed; Driver/OwnedTasks and PromiseWait registration/Drop bodies remain unchanged. Canonical resolver jobs retain the existing runtime owner; scoped native observer-drop and host-discard witnesses pass.",
       "witnesses": [
         "tests/js_runtime.rs::dropped_promise_wait_releases_its_waker"
       ],
       "source_dependencies": [
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "658c93b7ecc64e7202136973b3bf9885c2f3a8090841d7e899b8ba206c4b2bf1"
+          "sha256": "ec4cb11abd408fcf1c0e7f5b88a0448d05f1339756706f4806893abe189d5517"
         }
       ],
       "guards": [
@@ -2024,28 +2013,16 @@
       ]
     },
     {
-      "owner": "src/js_runtime/promise.rs::adopt",
-      "boundaries": [
-        "async-function",
-        "future-signature",
-        "await",
-        "await",
-        "await"
-      ],
-      "producer_sha256": "c634d68b635fdc254517d8dbd87eda6aa9db782108f54cb7e9c6af6817844694",
-      "classification": "no-owned-latch",
-      "reason": "Owns the async body and any adopted inner PromiseWait. A returned promise gets its separate resolution job before the inner reaction; dropping the owner drops its current wait registration."
-    },
-    {
       "owner": "src/js_runtime/promise.rs::await_js",
       "boundaries": [
-        "async-function",
-        "await",
+        "future-signature",
+        "future-return",
+        "async-block",
         "await"
       ],
-      "producer_sha256": "a92502a6baa366c011ea2faf5a5657eb10524452d9a15e083f4e4b4c42a94c69",
+      "producer_sha256": "0592399c66b32f8882e809589a5ee5734ecc8eb6573da0caff6f2ddc3ceaeac9",
       "classification": "no-owned-latch",
-      "reason": "Primitive await queues the current job once; promise await uses its owned PromiseWait. Dropping either future leaves no independent shared reservation."
+      "reason": "Clones its explicit owning runtime, then resolves the input through canonical Promise::resolve and awaits one owned PromiseWait. Dropping this future releases its waiter through the unchanged PromiseWait Drop; thenable jobs remain runtime-owned. Scalar/native-Promise FIFO and observer/host-discard witnesses pass."
     },
     {
       "owner": "src/js_runtime/promise.rs::combine",
@@ -2053,9 +2030,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "e344ccc80a8cd3b9f4fc2b00d0f1fe352c9c12bee7714050dbca12d138cbd8aa",
+      "producer_sha256": "4acbdc5bcaa71a1ea3af3a4813cf35f9e758f77bedd09146be1d15de61a9140b",
       "classification": "delegated",
-      "reason": "Registers every input reaction synchronously through Promise::spawn. Input jobs own their PromiseWait and shared output slots; the queue releases them on host discard independently of the aggregate observer.",
+      "reason": "Consumes and resolves each iterator input before advancing. A local count sentinel prevents premature aggregate settlement; the existing Promise::spawn jobs own their PromiseWait and output slots. Iterator failure settles the aggregate with the original error while previously registered jobs remain runtime-owned; no independent latch or waiter registry is introduced.",
       "delegate": "js_runtime Jobs queue / Promise::spawn / OwnedTasks driver"
     },
     {

@@ -1680,10 +1680,13 @@ keeps original thrown values. Object.freeze preserves accessor setters while
 locking configuration and data writes; preventExtensions blocks new own fields.
 Descriptor reflection reads stored functions without invoking them. Integrity
 operations on array/collection storage await the separate storage cutover.
-The native define_accessor helper remains a host bootstrap installer with its
-existing ABI; it bypasses source descriptor validation and must not implement
-user descriptor operations. Its fallible callsite migration is separately held
-until the approved model-info cutover. Source definitions use define_property.
+The native define_accessor helper returns Result<(), Thrown> and delegates to
+canonical define_property with explicit get/set and enumerable/configurable flags.
+Its internal descriptor has a null prototype; omitted closures clear old slots.
+Integrity violations return TypeError. Supplied receivers propagate failures;
+fresh host construction asserts its extensible-object invariant. Native/Node
+checks in tests/js_native_accessor_refusals.rs cover refusal, replacement, original
+receiver and thrown-value identity, NaN payload bits and signed zero.
 tests/js_property_descriptors.rs executes both maintained Hyperliquid frozen
 configuration initializers and compares accessors with Node, including getter
 identity, strict writes, setter receivers, validation order and JS stringify.
@@ -1723,11 +1726,17 @@ that same scope-owned root. `tests/js_series_iteration.rs` compares forty-eight 
 installed-package cases and checks escaped exports, signed-zero stringify and
 scope/module release; its three compiled mutation controls restore exact source.
 
-Promise.resolve and the installed Promise constructor share the core thenable
-resolution operation. Serial helpers use it before awaiting input and callback
-results, preserving synchronous then lookup, deferred invocation, first-call
-settlement and original rejection identity. General direct await/async-return
-and combinator adoption remains a separately recorded follow-up after #901.
+Promise.resolve, the installed Promise constructor, direct await and async-return
+adoption share the core thenable resolution operation. `await_js` receives the
+owning runtime explicitly and returns a future that retains it; REST adapters and
+venue hosts pass their existing runtime through that boundary. Serial helpers use
+it before awaiting input and callback results. Promise.all/allSettled resolve and
+register each yielded input before the next IteratorRecord step. Synchronous then
+lookup, deferred invocation, first-call settlement, original rejection identity
+and scalar/native-Promise FIFO behavior remain intact. The real NativeRuntime
+matrix in `tests/js_thenable_adoption.rs` compares 108 cases with Node; its iterator
+ordering control restores eager consumption, compiles, and fails the ordering
+assertion before exact restoration passes. See THENABLE_ADOPTION_REVIEW.md.
 
 Ordinary Js objects, including host-resource objects, allocate with the active
 PrototypeRealm's real Object.prototype reference. A None prototype slot is null,
@@ -1813,3 +1822,8 @@ thrown values. Native builtin adapters keep their existing separate surfaces.
 `js_builtins_native` compares eight actual NativeRuntime operator hook cases with
 Node; the unchanged Dayjs, Breakout, Kraken candle and Paradex ticker consumers
 cover malformed objects reaching their source Date/arithmetic branches.
+
+Native exception reporting retains its context through the reporter capability,
+then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
+Serialization errors stay visible; `native_console_default` checks both paths
+against Node and verifies that reporting leaves the retained input unchanged.

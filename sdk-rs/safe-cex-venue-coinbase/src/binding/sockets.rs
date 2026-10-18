@@ -519,8 +519,9 @@ impl PrivateStreamHost for SocketHost {
                     let invoked = remote
                         .call_method("sign", vec![request])
                         .map_err(from_thrown);
+                    let runtime = host.runtime();
                     Ok(host.promise(async move {
-                        let result = await_js(invoked?).await.map_err(from_thrown)?;
+                        let result = await_js(&runtime, invoked?).await.map_err(from_thrown)?;
                         if result.is_undefined() {
                             Ok(None)
                         } else {

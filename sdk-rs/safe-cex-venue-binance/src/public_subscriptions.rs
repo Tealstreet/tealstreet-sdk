@@ -1,40 +1,9 @@
 use safe_cex_num::{js_number_string, js_own_keys};
 use serde_json::Value;
 
-// ts: BinanceMarketWebsocket.subscribe
-pub fn subscribe_binance_market<E>(
-    keys: impl IntoIterator<Item = String>,
-    count: impl FnMut(&str) -> Option<f64>,
-    send: impl FnMut(&str) -> Result<(), E>,
-) -> Result<(), E> {
-    subscribe(keys, count, send)
-}
-// ts: BinancePublicWebsocket.subscribe
+// ts: all five concrete Binance public/market subscribe methods
+// PublicState::subscribe binds this shared production route.
 pub fn subscribe_binance_public<E>(
-    keys: impl IntoIterator<Item = String>,
-    count: impl FnMut(&str) -> Option<f64>,
-    send: impl FnMut(&str) -> Result<(), E>,
-) -> Result<(), E> {
-    subscribe(keys, count, send)
-}
-// ts: BinancePMMarketWebsocket.subscribe
-pub fn subscribe_binance_pm_market<E>(
-    keys: impl IntoIterator<Item = String>,
-    count: impl FnMut(&str) -> Option<f64>,
-    send: impl FnMut(&str) -> Result<(), E>,
-) -> Result<(), E> {
-    subscribe(keys, count, send)
-}
-// ts: BinancePMPublicWebsocket.subscribe
-pub fn subscribe_binance_pm_public<E>(
-    keys: impl IntoIterator<Item = String>,
-    count: impl FnMut(&str) -> Option<f64>,
-    send: impl FnMut(&str) -> Result<(), E>,
-) -> Result<(), E> {
-    subscribe(keys, count, send)
-}
-// ts: BinancePublicWebsocket.subscribe (binancespot.ws-public.ts)
-pub fn subscribe_binance_spot_public<E>(
     keys: impl IntoIterator<Item = String>,
     count: impl FnMut(&str) -> Option<f64>,
     send: impl FnMut(&str) -> Result<(), E>,

@@ -120,9 +120,10 @@ pub(crate) type Runtime = Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>;
 
 pub(crate) fn lifecycle(weak: Weak<Shared>, runtime: Runtime) -> Rc<LifecycleOps<Js, Thrown>> {
     let imports = weak.clone();
+    let await_runtime = runtime.clone();
     Rc::new(LifecycleOps {
         value: canonical(weak),
-        await_value: Rc::new(|v| Box::pin(await_js(v))),
+        await_value: Rc::new(move |v| Box::pin(await_js(&await_runtime, v))),
         promise: Rc::new(move |task| Js::Promise(Promise::spawn(&runtime, task))),
         import: Rc::new(move |name| rt(&imports)?.global(name)),
         spread_object: Rc::new(|v, fields| {

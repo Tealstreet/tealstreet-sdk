@@ -120,8 +120,8 @@ pub(crate) fn iterate(value: &Js) -> Result<Vec<Js>, Thrown> {
     }
 }
 
-pub(crate) fn settle(value: Js) -> Task<Js, Thrown> {
-    Box::pin(await_js(value))
+pub(crate) fn settle(rt: &Rt, value: Js) -> Task<Js, Thrown> {
+    Box::pin(await_js(&rt.exchange_runtime(), value))
 }
 
 pub(crate) struct Frame {
@@ -156,7 +156,7 @@ impl Host for Frame {
         }
     }
     fn await_element(&mut self, v: Js) -> Task<Js, Thrown> {
-        settle(v)
+        settle(&self.rt, v)
     }
     fn call(&mut self, call: Call) -> Result<Task<Js, Thrown>, Thrown> {
         let name = match call {
@@ -164,13 +164,14 @@ impl Host for Frame {
             Call::AlgoOrders => "fetchAlgoOrders",
             Call::PositionMode => "getPositionMode",
         };
-        Ok(settle(self.rt.call_path(name, vec![])?))
+        Ok(settle(&self.rt, self.rt.call_path(name, vec![])?))
     }
     fn recursive_orders(&mut self, endpoint: &str) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(settle(self.rt.call_path(
-            "fetchOrdersRecursively",
-            vec![Js::str(endpoint)],
-        )?))
+        Ok(settle(
+            &self.rt,
+            self.rt
+                .call_path("fetchOrdersRecursively", vec![Js::str(endpoint)])?,
+        ))
     }
     fn delete(
         &mut self,
@@ -184,7 +185,7 @@ impl Host for Frame {
             Options::Params => vec![endpoint, Js::object(vec![("params", body)])],
             Options::Data => vec![endpoint, Js::object(vec![("data", body)])],
         };
-        let pending = settle(call.call(&self.rt, args)?);
+        let pending = settle(&self.rt, call.call(&self.rt, args)?);
         Ok(Box::pin(async move { pending.await.map(|_| ()) }))
     }
     fn field(&mut self, v: &Js, key: &str) -> Result<Js, Thrown> {
@@ -270,7 +271,7 @@ impl Host for Frame {
         self.rt.path("store.orders")
     }
     fn place_positional(&mut self, call: Callee, opts: Js) -> Result<Task<(), Thrown>, Thrown> {
-        let pending = settle(call.call(&self.rt, vec![opts])?);
+        let pending = settle(&self.rt, call.call(&self.rt, vec![opts])?);
         Ok(Box::pin(async move { pending.await.map(|_| ()) }))
     }
     fn update_canceled(&mut self, call: Callee, id: Js) -> Result<(), Thrown> {

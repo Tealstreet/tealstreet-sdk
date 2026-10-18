@@ -1476,10 +1476,11 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             .enumerate()
             .map(|(i, v)| call(&f, vec![v, Js::Number(i as f64), array.clone()]))
             .collect();
+        let runtime = s.exchange_runtime();
         Ok(s.spawn(Box::pin(async move {
             let mut out = vec![];
             for r in started {
-                out.push(await_js(r?).await?);
+                out.push(await_js(&runtime, r?).await?);
             }
             Ok(Js::array(out))
         })))
@@ -1520,9 +1521,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                     let key = index.to_string();
                     if in_operator(&array, &key)? {
                         let call = callback.get("call")?;
-                        let value =
-                            await_js(Js::Promise(Promise::resolve(&runtime, array.get(&key)?)))
-                                .await?;
+                        let value = await_js(&runtime, array.get(&key)?).await?;
                         let pending = call.call(
                             callback.clone(),
                             vec![
@@ -1532,8 +1531,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                                 array.clone(),
                             ],
                         )?;
-                        let value =
-                            await_js(Js::Promise(Promise::resolve(&runtime, pending))).await?;
+                        let value = await_js(&runtime, pending).await?;
                         if collect {
                             out.set(&key, value)?;
                         }
@@ -1891,7 +1889,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             let slept = sleep_promise(s, interval);
             let scope = s.clone();
             Ok(s.spawn(Box::pin(async move {
-                await_js(slept).await?;
+                await_js(&scope.exchange_runtime(), slept).await?;
                 scope.set_timeout(Rc::new(move || call(&f, vec![]).map(|_| ())), 0.0);
                 Ok(Js::Undefined)
             })))

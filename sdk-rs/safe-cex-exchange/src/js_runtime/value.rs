@@ -1522,25 +1522,29 @@ impl Js {
                 .is_some_and(|parent| parent.has_property(key)),
         }
     }
-    pub fn define_accessor(&self, key: &str, getter: Option<Getter>, setter: Option<Setter>) {
-        if let Some(props) = self.own_props() {
-            let get = getter.map(|get| Js::function("get", move |this, _| get(&this)));
-            let set = setter.map(|set| {
-                Js::function("set", move |this, args| {
-                    set(&this, arg(&args, 0))?;
-                    Ok(Js::Undefined)
-                })
-            });
-            props.borrow_mut().insert(
-                utf16(key),
-                Prop::Accessor {
-                    get,
-                    set,
-                    enumerable: true,
-                    configurable: true,
-                },
-            );
-        }
+    pub fn define_accessor(
+        &self,
+        key: &str,
+        getter: Option<Getter>,
+        setter: Option<Setter>,
+    ) -> Result<(), Thrown> {
+        let get = getter.map_or(Js::Undefined, |get| {
+            Js::function("get", move |this, _| get(&this))
+        });
+        let set = setter.map_or(Js::Undefined, |set| {
+            Js::function("set", move |this, args| {
+                set(&this, arg(&args, 0))?;
+                Ok(Js::Undefined)
+            })
+        });
+        let descriptor = Js::object(vec![
+            ("get", get),
+            ("set", set),
+            ("enumerable", Js::Bool(true)),
+            ("configurable", Js::Bool(true)),
+        ]);
+        descriptor.set_prototype(Js::Null)?;
+        self.define_property(&utf16(key), &descriptor)
     }
     pub fn delete(&self, key: &[u16]) {
         match self {

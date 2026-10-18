@@ -35,7 +35,10 @@ impl Host {
         invoked: Result<Js, PortfolioFailure>,
         project: impl FnOnce(Js) -> Result<T, PortfolioFailure> + 'static,
     ) -> Promise<Result<T, PortfolioFailure>> {
-        self.promise(async move { project(await_js(invoked?).await.map_err(from_thrown)?) })
+        let runtime = self.runtime();
+        self.promise(
+            async move { project(await_js(&runtime, invoked?).await.map_err(from_thrown)?) },
+        )
     }
     pub(super) fn loaded(&self) -> Result<Frame, PortfolioFailure> {
         frame(&*self.shared.store.loaded())

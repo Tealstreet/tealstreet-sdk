@@ -179,7 +179,9 @@ fn fetch_tickers(rt: Rt, _: Vec<Js>) -> JsFuture<'static> {
                 requests.push(xhr.call_method("get", vec![endpoints.get(key)?])?);
             }
             let all = global(&rt, "Promise.all", vec![Js::array(requests)])?;
-            let data = safe_cex_exchange::js_runtime::promise::await_js(all).await?;
+            let data =
+                safe_cex_exchange::js_runtime::promise::await_js(&rt.exchange_runtime(), all)
+                    .await?;
             let daily = require_array(&endpoints.get("TICKERS_24H")?, data.get("0")?.get("data")?)?;
             let books =
                 require_array(&endpoints.get("TICKERS_BOOK")?, data.get("1")?.get("data")?)?;

@@ -96,7 +96,13 @@ fn constructor_thenable_jobs_share_fifo_with_promise_reactions() {
                 })],
             )
             .unwrap();
-        assert_eq!(await_js(promise).await.unwrap().as_f64(), Some(1.));
+        assert_eq!(
+            await_js(&scope.exchange_runtime(), promise)
+                .await
+                .unwrap()
+                .as_f64(),
+            Some(1.)
+        );
         assert_eq!(
             serde_json::to_value(&*trace.borrow()).unwrap(),
             oracle()["mixedTrace"],
@@ -127,7 +133,10 @@ fn constructor_runs_executor_synchronously_and_first_settlement_wins() {
             oracle()["firstTrace"]
         );
         assert_eq!(
-            await_js(promise).await.unwrap().as_f64(),
+            await_js(&scope.exchange_runtime(), promise)
+                .await
+                .unwrap()
+                .as_f64(),
             oracle()["firstValue"].as_f64()
         );
         let error = Js::object(vec![("marker", Js::str("executor throw"))]);
@@ -137,7 +146,7 @@ fn constructor_runs_executor_synchronously_and_first_settlement_wins() {
             Js::function("throws", move |_, _| Err(Thrown::new(original.clone()))),
         );
         assert!(
-            await_js(promise)
+            await_js(&scope.exchange_runtime(), promise)
                 .await
                 .unwrap_err()
                 .value
@@ -192,7 +201,12 @@ fn constructor_resolvers_survive_return_and_lock_before_pending_adoption() {
         );
         let value = Js::object(vec![("marker", Js::Number(42.))]);
         inner.settle(Ok(value.clone()));
-        assert!(await_js(promise).await.unwrap().same_reference(&value));
+        assert!(
+            await_js(&scope.exchange_runtime(), promise)
+                .await
+                .unwrap()
+                .same_reference(&value)
+        );
     });
 }
 #[test]
@@ -202,22 +216,24 @@ fn constructor_resolves_thenables_after_return_with_live_getter_and_first_call_r
         let thenable = Js::object(vec![]);
         let expected_this = thenable.clone();
         let calls = trace.clone();
-        thenable.define_accessor(
-            "then",
-            Some(Rc::new(move |_| {
-                calls.borrow_mut().push("get then");
-                let calls = calls.clone();
-                let expected_this = expected_this.clone();
-                Ok(Js::function("then", move |this, args| {
-                    assert!(this.same_reference(&expected_this));
-                    calls.borrow_mut().push("call then");
-                    arg(&args, 0).call(Js::Undefined, vec![Js::Number(11.)])?;
-                    arg(&args, 1).call(Js::Undefined, vec![Js::str("ignored")])?;
-                    Err(Thrown::new(Js::str("also ignored")))
-                }))
-            })),
-            None,
-        );
+        thenable
+            .define_accessor(
+                "then",
+                Some(Rc::new(move |_| {
+                    calls.borrow_mut().push("get then");
+                    let calls = calls.clone();
+                    let expected_this = expected_this.clone();
+                    Ok(Js::function("then", move |this, args| {
+                        assert!(this.same_reference(&expected_this));
+                        calls.borrow_mut().push("call then");
+                        arg(&args, 0).call(Js::Undefined, vec![Js::Number(11.)])?;
+                        arg(&args, 1).call(Js::Undefined, vec![Js::str("ignored")])?;
+                        Err(Thrown::new(Js::str("also ignored")))
+                    }))
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
         let calls = trace.clone();
         let promise = construct(
             &scope,
@@ -234,7 +250,10 @@ fn constructor_resolves_thenables_after_return_with_live_getter_and_first_call_r
             oracle()["beforeJob"]
         );
         assert_eq!(
-            await_js(promise).await.unwrap().as_f64(),
+            await_js(&scope.exchange_runtime(), promise)
+                .await
+                .unwrap()
+                .as_f64(),
             oracle()["adoptedValue"].as_f64()
         );
         assert_eq!(
@@ -260,7 +279,7 @@ fn constructor_rejects_self_resolution_and_preserves_then_getter_error() {
             .call(Js::Undefined, vec![promise.clone()])
             .unwrap();
         assert_eq!(
-            await_js(promise)
+            await_js(&scope.exchange_runtime(), promise)
                 .await
                 .unwrap_err()
                 .value
@@ -272,11 +291,13 @@ fn constructor_rejects_self_resolution_and_preserves_then_getter_error() {
         let error = Js::object(vec![("marker", Js::str("get then throws"))]);
         let thrown = error.clone();
         let thenable = Js::object(vec![]);
-        thenable.define_accessor(
-            "then",
-            Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
-            None,
-        );
+        thenable
+            .define_accessor(
+                "then",
+                Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+                None,
+            )
+            .expect("test accessor target permits definition");
         let promise = construct(
             &scope,
             Js::function("executor", move |_, args| {
@@ -284,7 +305,7 @@ fn constructor_rejects_self_resolution_and_preserves_then_getter_error() {
             }),
         );
         assert!(
-            await_js(promise)
+            await_js(&scope.exchange_runtime(), promise)
                 .await
                 .unwrap_err()
                 .value
