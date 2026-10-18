@@ -27,3 +27,6 @@ pub mod api_factory;
 pub mod classes;
 
 pub mod binding;
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_polymarket;

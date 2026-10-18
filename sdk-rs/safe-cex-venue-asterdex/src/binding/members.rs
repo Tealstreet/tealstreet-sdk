@@ -63,7 +63,7 @@ pub(super) async fn request(
             ),
         ]
     };
-    let response = await_js(xhr.call_method(method, args)?).await?;
+    let response = await_js(&rt.exchange_runtime(), xhr.call_method(method, args)?).await?;
     Ok(to_json(&response.get("data")?)?)
 }
 
@@ -245,7 +245,7 @@ pub(super) fn invoke(rt: &Rt, name: &'static str, a: Vec<Js>) -> Result<Js, Thro
             }
             "pollOpenInterest" => { orders(&rt).poll_open_interest().await.map_err(error)?; Ok(Js::Undefined) },
             "fetchOpenInterestMap" => {
-                let adapter=safe_cex_exchange::js_runtime::client::JsRestAdapter::new(rt.this.get("publicAPI")?);
+                let adapter=safe_cex_exchange::js_runtime::client::JsRestAdapter::new(rt.exchange_runtime(), rt.this.get("publicAPI")?);
                 let symbols:Option<Vec<String>>=if first.is_undefined(){None}else{optional(first.get("symbols")?)?};
                 let fallback=if first.is_undefined(){Js::Undefined}else{first.get("allowPerSymbolFallback")?};
                 let fallback=if fallback.is_undefined(){true}else{fallback.truthy()};

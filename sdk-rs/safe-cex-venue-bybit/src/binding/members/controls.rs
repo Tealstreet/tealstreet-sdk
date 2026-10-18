@@ -42,11 +42,14 @@ fn post(
             vec![Js::str(endpoint), from_json(&Value::Object(payload))],
         )
         .map_err(to_error)?;
-    Ok(async move {
-        let response = await_js(pending).await.map_err(to_error)?;
-        Ok(Rc::new(
-            to_json(&response.get("data").map_err(to_error)?).map_err(to_error)?,
-        ))
+    Ok({
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            let response = await_js(&await_runtime, pending).await.map_err(to_error)?;
+            Ok(Rc::new(
+                to_json(&response.get("data").map_err(to_error)?).map_err(to_error)?,
+            ))
+        }
     })
 }
 
@@ -62,7 +65,10 @@ fn fetch(
         .this
         .call_method("fetchPositions", vec![symbols])
         .map_err(to_error)?;
-    Ok(async move { await_js(pending).await.map_err(to_error) })
+    Ok({
+        let await_runtime = rt.exchange_runtime();
+        async move { await_js(&await_runtime, pending).await.map_err(to_error) }
+    })
 }
 
 fn store_call(rt: &Rt, member: &str, value: Js) -> Result<(), Error> {
@@ -111,107 +117,117 @@ pub(crate) fn set_inverse_leverage(rt: &Rt, symbol: Js, leverage: Js) -> Result<
 
 fn set_leverage_body(rt: &Rt, symbol: Js, leverage: Js, primary: bool) -> Result<Js, Thrown> {
     let rt = rt.clone();
-    Ok(rt.clone().spawn(Box::pin(async move {
-        let symbol_text = text(&symbol)?;
-        if primary && crate::options::is_bybit_option_symbol(&symbol_text) {
-            return Err(Thrown::error(
-                "Error",
-                &format!("Bybit has no leverage for options ({symbol_text})"),
-            ));
-        }
-        let store = rt.this.get("store")?;
-        let market = store
-            .get("marketsBySymbol")?
-            .get_key(&symbol.to_js_string()?)?;
-        if !market.truthy() {
-            return Err(Thrown::error(
-                "Error",
-                &format!("Market {} not found", text(&symbol)?),
-            ));
-        }
-        let selected_symbol = symbol.clone();
-        let mut positions = store.get("positions")?.call_method(
-            "filter",
-            vec![Js::function("leveragePositionSymbol", move |_, args| {
-                Ok(Js::Bool(
-                    crate::binding::value::arg(&args, 0)
-                        .get("symbol")?
-                        .strict_equals(&selected_symbol),
-                ))
-            })],
-        )?;
-        if positions.get("length")?.strict_equals(&Js::Number(0.)) {
-            positions = await_js(
-                rt.this
-                    .call_method("fetchPositions", vec![Js::array(vec![symbol.clone()])])?,
-            )
-            .await?;
-            store.call_method("addOrUpdatePositions", vec![positions.clone()])?;
-        }
-        let first = positions.get("0")?;
-        let current = if first.is_nullish() {
-            Js::Undefined
-        } else {
-            first.get("leverage")?
-        };
-        let current = if current.is_nullish() {
-            Js::Number(1.)
-        } else {
-            current
-        };
-        let limits = market.get("limits")?.get("leverage")?;
-        let next = safe_cex_num::math_min(
-            safe_cex_num::math_max(leverage.to_number()?, limits.get("min")?.to_number()?),
-            limits.get("max")?.to_number()?,
-        );
-        if !current.strict_equals(&Js::Number(next)) {
-            let data = await_js(rt.this.get("xhr")?.call_method(
-                "post",
-                vec![
-                    Js::str(crate::types::ENDPOINTS["SET_LEVERAGE"].as_str().unwrap()),
-                    Js::object(vec![
-                            (
-                                "category",
-                                rt.this
-                                    .call_method("getCategoryForSymbol", vec![symbol.clone()])?,
-                            ),
-                            ("symbol", symbol.clone()),
-                            (
-                                "buyLeverage",
-                                Js::str(&safe_cex_num::js_number_string(next)),
-                            ),
-                            (
-                                "sellLeverage",
-                                Js::str(&safe_cex_num::js_number_string(next)),
-                            ),
-                        ]),
-                ],
-            )?)
-            .await?
-            .get("data")?;
-            if !get_key(&data, "retMsg")?.strict_equals(&Js::str("OK"))
-                && !(primary && leverage_not_modified(&data)?)
-            {
-                let message = get_key(&data, "retMsg")?;
-                rt.this
-                    .call_method("emitAndLogError", vec![message.clone()])?;
+    Ok(rt.clone().spawn(Box::pin({
+        let await_runtime = rt.exchange_runtime();
+        async move {
+            let symbol_text = text(&symbol)?;
+            if primary && crate::options::is_bybit_option_symbol(&symbol_text) {
                 return Err(Thrown::error(
                     "Error",
-                    &if message.is_undefined() {
-                        String::new()
-                    } else {
-                        text(&message)?
-                    },
+                    &format!("Bybit has no leverage for options ({symbol_text})"),
                 ));
             }
-            let positions = await_js(
-                rt.this
-                    .call_method("fetchPositions", vec![Js::array(vec![symbol])])?,
-            )
-            .await?;
-            store.call_method("addOrUpdatePositions", vec![positions])?;
+            let store = rt.this.get("store")?;
+            let market = store
+                .get("marketsBySymbol")?
+                .get_key(&symbol.to_js_string()?)?;
+            if !market.truthy() {
+                return Err(Thrown::error(
+                    "Error",
+                    &format!("Market {} not found", text(&symbol)?),
+                ));
+            }
+            let selected_symbol = symbol.clone();
+            let mut positions = store.get("positions")?.call_method(
+                "filter",
+                vec![Js::function("leveragePositionSymbol", move |_, args| {
+                    Ok(Js::Bool(
+                        crate::binding::value::arg(&args, 0)
+                            .get("symbol")?
+                            .strict_equals(&selected_symbol),
+                    ))
+                })],
+            )?;
+            if positions.get("length")?.strict_equals(&Js::Number(0.)) {
+                positions = await_js(
+                    &await_runtime,
+                    rt.this
+                        .call_method("fetchPositions", vec![Js::array(vec![symbol.clone()])])?,
+                )
+                .await?;
+                store.call_method("addOrUpdatePositions", vec![positions.clone()])?;
+            }
+            let first = positions.get("0")?;
+            let current = if first.is_nullish() {
+                Js::Undefined
+            } else {
+                first.get("leverage")?
+            };
+            let current = if current.is_nullish() {
+                Js::Number(1.)
+            } else {
+                current
+            };
+            let limits = market.get("limits")?.get("leverage")?;
+            let next = safe_cex_num::math_min(
+                safe_cex_num::math_max(leverage.to_number()?, limits.get("min")?.to_number()?),
+                limits.get("max")?.to_number()?,
+            );
+            if !current.strict_equals(&Js::Number(next)) {
+                let data = await_js(
+                    &await_runtime,
+                    rt.this.get("xhr")?.call_method(
+                        "post",
+                        vec![
+                            Js::str(crate::types::ENDPOINTS["SET_LEVERAGE"].as_str().unwrap()),
+                            Js::object(vec![
+                                (
+                                    "category",
+                                    rt.this.call_method(
+                                        "getCategoryForSymbol",
+                                        vec![symbol.clone()],
+                                    )?,
+                                ),
+                                ("symbol", symbol.clone()),
+                                (
+                                    "buyLeverage",
+                                    Js::str(&safe_cex_num::js_number_string(next)),
+                                ),
+                                (
+                                    "sellLeverage",
+                                    Js::str(&safe_cex_num::js_number_string(next)),
+                                ),
+                            ]),
+                        ],
+                    )?,
+                )
+                .await?
+                .get("data")?;
+                if !get_key(&data, "retMsg")?.strict_equals(&Js::str("OK"))
+                    && !(primary && leverage_not_modified(&data)?)
+                {
+                    let message = get_key(&data, "retMsg")?;
+                    rt.this
+                        .call_method("emitAndLogError", vec![message.clone()])?;
+                    return Err(Thrown::error(
+                        "Error",
+                        &if message.is_undefined() {
+                            String::new()
+                        } else {
+                            text(&message)?
+                        },
+                    ));
+                }
+                let positions = await_js(
+                    &await_runtime,
+                    rt.this
+                        .call_method("fetchPositions", vec![Js::array(vec![symbol])])?,
+                )
+                .await?;
+                store.call_method("addOrUpdatePositions", vec![positions])?;
+            }
+            Ok(Js::Undefined)
         }
-        Ok(Js::Undefined)
     })))
 }
 
@@ -263,7 +279,15 @@ pub(crate) fn change_position_mode(rt: &Rt, hedged: Js, symbol: Js) -> Result<Js
                         vec![Js::Bool(hedged), Js::str(category), Js::str(coin)],
                     )
                     .map_err(to_error)?;
-                Ok(async move { await_js(pending).await.map(|_| ()).map_err(to_error) })
+                Ok({
+                    let await_runtime = body_rt.exchange_runtime();
+                    async move {
+                        await_js(&await_runtime, pending)
+                            .await
+                            .map(|_| ())
+                            .map_err(to_error)
+                    }
+                })
             },
         )
         .await

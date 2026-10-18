@@ -109,7 +109,7 @@ pub(super) fn runtime() -> WeexPublicFeedRuntime<Host, Js, Thrown> {
             let retained = h.clone();
             h.spawn(Box::pin(async move {
                 let result = async {
-                    let value = await_js(pending).await?;
+                    let value = await_js(&retained.0.exchange_runtime(), pending).await?;
                     feed::run_public_callback(&retained, &runtime(), &success, value)
                 }
                 .await;

@@ -38,9 +38,9 @@ note = "Mapped to safe-cex-venue-binance/src/public_open.rs::open_binance_market
 ts = "BinanceMarketWebsocket.subscribe"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_market", "safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe" ]
+rs = [ "safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public", "safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe" ]
 status = "ported"
-note = "Renamed BinanceMarketWebsocket.subscribe to safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_market. Extracted body accepts native count-read and fallible core-send callbacks pending class integration. Shared own-key ordering snapshots keys, fresh topic counts including NaN/infinities after each send, strict finite-positive guard, sequential IDs and send error propagation preserved. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe`. Concrete class composition: shared market/public websocket member bound for this TypeScript member, selecting the venue/kind body named by this row."
+note = "Renamed BinanceMarketWebsocket.subscribe to safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public. PublicState::subscribe uses this exact common production wrapper for every public/market socket kind; four unused forwarding wrappers were retired after the SDK/registry/FFI/wasm caller census. The shared body snapshots JS own-key order, reads current native counts lazily, requires finite positive counts, sends exact SUBSCRIBE frames with IDs starting at 10, and propagates send errors. All 5,505 live TS cases remain; tests/support/public_subscription_receipts.rs executes all five actual native socket kinds and scripts/public-subscription-controls.py corrupts/restores both surviving production bodies. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe`."
 
 [[symbol]]
 ts = "BinanceMarketWebsocket.onMessage"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public", "safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe" ]
 status = "ported"
-note = "Renamed BinancePublicWebsocket.subscribe to safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public. Extracted body accepts native count-read and fallible core-send callbacks pending class integration. Shared own-key ordering snapshots keys, fresh topic counts including NaN/infinities after each send, strict finite-positive guard, sequential IDs and send error propagation preserved. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe`. Concrete class composition: shared market/public websocket member bound for this TypeScript member, selecting the venue/kind body named by this row."
+note = "Renamed BinancePublicWebsocket.subscribe to safe-cex-venue-binance/src/public_subscriptions.rs::subscribe_binance_public. PublicState::subscribe uses this exact common production wrapper for every public/market socket kind; four unused forwarding wrappers were retired after the SDK/registry/FFI/wasm caller census. The shared body snapshots JS own-key order, reads current native counts lazily, requires finite positive counts, sends exact SUBSCRIBE frames with IDs starting at 10, and propagates send errors. All 5,505 live TS cases remain; tests/support/public_subscription_receipts.rs executes all five actual native socket kinds and scripts/public-subscription-controls.py corrupts/restores both surviving production bodies. Split member `safe-cex-venue-binance/src/public_classes.rs::PublicState::subscribe`."
 
 [[symbol]]
 ts = "BinancePublicWebsocket.onMessage"

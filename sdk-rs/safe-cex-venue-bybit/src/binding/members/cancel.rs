@@ -48,6 +48,7 @@ pub(crate) fn cancel_symbol_orders(rt: &Rt, symbol: Js, cancel_tp_sl: Js) -> Res
             .as_str()
             .unwrap_or_default();
         let data = await_js(
+            &rt.exchange_runtime(),
             rt.this
                 .get("unlimitedXHR")?
                 .call_method("post", vec![Js::str(endpoint), payload])?,
@@ -67,6 +68,7 @@ pub(crate) fn cancel_symbol_orders(rt: &Rt, symbol: Js, cancel_tp_sl: Js) -> Res
                 replacements.push(replacement);
             }
             await_js(
+                &rt.exchange_runtime(),
                 rt.this
                     .call_method("placeOrders", vec![Js::array(replacements)])?,
             )
@@ -108,7 +110,7 @@ pub(crate) async fn cancel_orders_helper(
             let sleep = rt
                 .global("sleep")?
                 .call(Js::Undefined, vec![Js::Number(1000.)])?;
-            await_js(sleep).await?;
+            await_js(&rt.exchange_runtime(), sleep).await?;
         }
         let mut request = Vec::with_capacity(lot.len());
         for order in lot {
@@ -122,9 +124,12 @@ pub(crate) async fn cancel_orders_helper(
             ("request", Js::array(request)),
         ]);
         let xhr = rt.this.get("unlimitedXHR")?;
-        let data = await_js(xhr.call_method("post", vec![Js::str(endpoint), payload])?)
-            .await?
-            .get("data")?;
+        let data = await_js(
+            &rt.exchange_runtime(),
+            xhr.call_method("post", vec![Js::str(endpoint), payload])?,
+        )
+        .await?
+        .get("data")?;
         let lot = Js::array(lot.to_vec());
         let message = data.get("retMsg")?;
         if !message.strict_equals(&Js::str("OK")) {

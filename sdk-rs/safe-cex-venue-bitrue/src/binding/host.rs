@@ -192,7 +192,7 @@ impl ReadHost for Rt {
         global_call(self, "mapSeries", vec![values, callback])
     }
     async fn await_value(&self, v: Js) -> Result<Js, Thrown> {
-        await_js(v).await
+        await_js(&self.exchange_runtime(), v).await
     }
     fn observe_detached(&self, _v: Js) {}
     fn sleep(&self, ms: f64) -> Result<Js, Thrown> {

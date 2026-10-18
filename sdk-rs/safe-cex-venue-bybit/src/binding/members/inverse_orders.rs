@@ -39,6 +39,7 @@ fn number(value: f64) -> Js {
 async fn post(rt: &Rt, endpoint: &str, payload: Js) -> Result<Js, Thrown> {
     let endpoint = rt.global("ENDPOINTS")?.get(endpoint)?;
     await_js(
+        &rt.exchange_runtime(),
         rt.this
             .get("xhr")?
             .call_method("post", vec![endpoint, payload])?,
@@ -58,7 +59,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let opts = arg(&a, 0).spread_object()?;
         opts.delete(&"reduceOnly".encode_utf16().collect::<Vec<_>>());
         Ok(rt.clone().spawn(Box::pin(async move {
-            let index = await_js(rt.this.call_method("getOrderPositionIdx", vec![opts])?).await?;
+            let index = await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("getOrderPositionIdx", vec![opts])?,
+            )
+            .await?;
             Ok(if index.strict_equals(&Js::Number(0.)) {
                 Js::Number(0.)
             } else if index.strict_equals(&Js::Number(1.)) {
@@ -191,13 +196,18 @@ fn place_order(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
                 || kind.strict_equals(&Js::str("take_profit_market")))
         {
             return await_js(
+                &rt.exchange_runtime(),
                 rt.this
                     .call_method("placeStopLossOrTakeProfit", vec![opts])?,
             )
             .await;
         }
         if kind.strict_equals(&Js::str("trailing_stop_market")) {
-            return await_js(rt.this.call_method("placeTrailingStopLoss", vec![opts])?).await;
+            return await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("placeTrailingStopLoss", vec![opts])?,
+            )
+            .await;
         }
         let typed: crate::order_params::BybitPlaceOrderOpts = to_typed(&opts)?;
         let base: &PlaceOrderOpts = typed.borrow();
@@ -214,6 +224,7 @@ fn place_order(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
             position_opts.set("reduceOnly", Js::Bool(false))?;
         }
         let index = await_js(
+            &rt.exchange_runtime(),
             rt.this
                 .call_method("getOrderPositionIdx", vec![position_opts])?,
         )
@@ -452,6 +463,7 @@ async fn trading_stop(rt: &Rt, opts: Js, trailing: bool) -> Result<Js, Thrown> {
         (
             "positionIdx",
             await_js(
+                &rt.exchange_runtime(),
                 rt.this
                     .call_method("getStopOrderPositionIdx", vec![opts.clone()])?,
             )
