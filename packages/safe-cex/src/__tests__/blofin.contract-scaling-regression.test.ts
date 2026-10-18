@@ -878,6 +878,58 @@ describe('Blofin contract scaling regression', () => {
     vi.useRealTimers();
   });
 
+  // Cumulative 1 then 1.2 contracts: the second fill is 0.2 at its own price,
+  // and a replayed filled frame emits nothing.
+  it('reports each partial as its own execution, without float noise', () => {
+    vi.useFakeTimers();
+    const { exchange, store } = makeExchange();
+    seedMarkets(store, [
+      {
+        id: 'BTC-USDT',
+        symbol: 'BTCUSDT',
+        base: 'BTC',
+        quote: 'USDT',
+        active: true,
+        precision: { amount: 0.1, price: 0.1 },
+        limits: { amount: { min: 0.0001, max: 20000 }, leverage: { min: 1, max: 150 } },
+        contractSize: 0.001,
+        info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
+      } as Market,
+    ]);
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
+    const fills: Array<{ amount: number; price: number }> = [];
+    exchange.on('fill', (fill: { amount: number; price: number }) => fills.push(fill));
+
+    const frame = (state: string, filledSize: string, averagePrice: string) => ({
+      data: [
+        {
+          orderId: 'o-partial',
+          instId: 'BTC-USDT',
+          orderCategory: 'normal',
+          side: 'buy',
+          orderType: 'market',
+          size: '1.2',
+          filledSize,
+          price: '0',
+          state,
+          averagePrice,
+          reduceOnly: 'false',
+        },
+      ],
+    });
+    exchange.privateWebsocket.handleOrderTopic(frame('partially_filled', '1', '82240.200000000000000000'));
+    exchange.privateWebsocket.handleOrderTopic(frame('filled', '1.2', '82240.866666666666666667'));
+    exchange.privateWebsocket.handleOrderTopic(frame('filled', '1.2', '82240.866666666666666667'));
+
+    expect(fills.map((fill) => [fill.amount, fill.price])).toEqual([
+      [0.001, 82240.2],
+      [0.0002, 82244.2],
+    ]);
+
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
   it('does not duplicate virtual SL when both normal and algo records carry slTriggerPrice', () => {
     const { exchange, store } = makeExchange();
     const btcMarket = {

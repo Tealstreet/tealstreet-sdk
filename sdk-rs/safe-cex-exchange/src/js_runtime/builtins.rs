@@ -39,27 +39,6 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
         Js::Map(_) => map_member(this, &name),
         Js::Set(_) => set_member(this, &name),
         Js::Promise(p) => promise_member(p.clone(), &name),
-        Js::Function(_) if name == "bind" => Some(Js::function("bind", |target, args| {
-            if !target.is_callable() {
-                return Err(Thrown::type_error("Bind must be called on a function"));
-            }
-            let bound_this = arg(&args, 0);
-            let bound_args: Vec<Js> = args.into_iter().skip(1).collect();
-            let target_name = target.get("name")?;
-            let mut name: Vec<u16> = "bound ".encode_utf16().collect();
-            if let Js::String(target_name) = target_name {
-                name.extend_from_slice(&target_name);
-            }
-            Ok(Js::Function(Rc::new(super::value::FunctionData {
-                name: name.into(),
-                call: Rc::new(move |_, args| {
-                    let mut combined = bound_args.clone();
-                    combined.extend(args);
-                    target.call(bound_this.clone(), combined)
-                }),
-                props: RefCell::default(),
-            })))
-        })),
         Js::Number(n) => {
             let n = *n;
             match name.as_str() {
@@ -356,6 +335,19 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
                 this.push(v)?;
             }
             Ok(Js::Number(items(&this).len() as f64))
+        }),
+        "pop" => method(name, move |_| {
+            let Js::Array(cells) = &this else {
+                return Ok(Js::Undefined);
+            };
+            Ok(cells.borrow_mut().pop().flatten().unwrap_or(Js::Undefined))
+        }),
+        // Holes stay holes at their mirrored index, as the spec's HasProperty swaps do.
+        "reverse" => method(name, move |_| {
+            if let Js::Array(cells) = &this {
+                cells.borrow_mut().reverse();
+            }
+            Ok(this.clone())
         }),
         "includes" => method(name, move |a| {
             let needle = arg(&a, 0);

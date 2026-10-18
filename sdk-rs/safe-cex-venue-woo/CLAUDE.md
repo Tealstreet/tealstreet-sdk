@@ -512,3 +512,12 @@ boundaries, without replacing the rule or its operation table.
 The live order-page reader passes truthy message/meta.message values directly to
 the shared Raw(Js) reporter. Non-string errors must retain completed pages;
 `binding_orders` covers actual signed pagination, original emitted text and fallbacks.
+
+The constructed ticker census in `tests/binding_streams.rs::production_ticker_coercion_matches_constructed_typescript`
+uses the maintained TS exchange and DefaultStore via `parity/scripts/ticker-strict-source.cjs`.
+72 packed three-row frames cover every copied ticker/BBO/mark numeric field. Fifty-four malformed rows are visibly refused while their good siblings retain source-equal native values.
+The corpus includes null, strings, NaN-producing inputs, objects, booleans, missing
+fields, raw numeric overflow and signed zero. It compares all eleven native number
+fields before JSON; approved decision-3 refusal preserves the entire bad row.
+`parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
+behavior, requiring a compiled native failure and exact restored pass.

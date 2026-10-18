@@ -413,6 +413,12 @@ and fail named acceptance/presence assertions. Separate compiled legacy decoders
 accept each deep input and fail the named depth-refusal assertion, pinning the
 new acceptance narrowing rather than presuming the old decoder refused it.
 
+Carrier regressions compare original native numeric bits and real shared JS
+stringify with maintained source output before using finite JSON trace adapters.
+Notification error recovery preserves all original metadata and the original
+cause reference while appending the actual fanout subscriber ID; those two
+provenance additions must be included in the expected complete metadata.
+
 Store notification failures remain separate from numeric patch failures. The
 five concrete calls in four worker paths are inventoried in STORE_NOTIFICATION_AUDIT.md:
 position refresh has full and partial calls, leverage has one batch, removeOrders

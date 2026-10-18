@@ -955,6 +955,25 @@ The exchanges-level audit and retained options gap are tracked in
 entrypoints execute their initial source calls before returning their futures;
 caller-drop and reporting choices cite MANIFEST-SPEC.md#exchange-runtime-callback-choice.
 
+The shared function `call` member invokes the original target with the supplied
+strict receiver and remaining arguments. It preserves native values, returned
+references/promises and arbitrary thrown values without awaiting or JSON.
+Non-callable receivers reject before reading conversion hooks. Own function
+`call` properties/getters retain precedence. The native/Node witness
+is `tests/js_function_call.rs`.
+
+Functions retain their allocation realm's native Function prototype on the same
+referent. Parent reads/writes preserve inherited accessor receivers, readonly
+refusals, own shadows and cycle rejection. Bound functions retain the target's
+parent. Call/bind now resolve to the existing canonical intrinsic identities;
+their old per-read wrappers are removed. `tests/js_function_prototypes.rs`
+compares these operations with Node, including cross-realm identities. Intrinsic
+parent metadata is independent of the shadowable `__proto__` string property.
+Unknown surrogate keys miss inherited UTF8 intrinsic fields without replacement;
+intrinsic writes retain their existing explicit native-primitive boundary.
+Construction/new.target, accessor flags and function own-key reflection remain
+separate consolidation capabilities.
+
 The shared JS runtime supplies `Function.prototype.bind` for venue callbacks,
 retaining the target receiver and prepending bound arguments even when the result
 is rebound or called by an array helper. Own function properties take precedence.
@@ -963,7 +982,9 @@ property key, then the replacer receives the live holder, key and value, includi
 the root and array holes. Traversal captures keys/array length before reading
 individual values, so earlier callbacks can change later siblings. Unreplaced
 BigInt and circular structures throw; replacers can convert or omit them.
-Array replacer lists and indentation remain outside this runtime surface.
+An array replacer becomes the spec PropertyList (string/number items, first
+occurrence kept) and selects object keys even when non-enumerable; indentation
+remains outside this runtime surface.
 
 The JS HTTP client's retry loop resubmits the failed response's effective config,
 including interceptor changes and retry-predicate stamps. Rebuilding from the
@@ -1229,6 +1250,19 @@ surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
 snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
 real private-frame witnesses cover the production caller and final fill ordering.
 
+Shared builtins for source callers: `Array#pop`/`reverse` (holes mirror),
+`Object.getOwnPropertyNames` (own keys incl. non-enumerable; functions and
+intrinsics refuse) and `console.log` (runtime console, severity `log`). The Dayjs
+facade models dayjs 1.11 `plugin/utc` in the runtime's UTC zone: non-enumerable
+`$d`/`$offset`/`$u`/`$localOffset` fields drive `valueOf`, `utcOffset(input, keep)`
+and `startOf(unit, start)`, and `dayjs(instance)` clones them. Offset strings use
+the installed plugin parser; non-string arguments retain JS coercion and offset
+identity. Falsy start flags select the last millisecond of the unit. Native
+Date wall values use shared TimeClip.
+`tests/js_builtins.rs` compares 16 array, 420 dayjs-chain, 5 key-order and 7
+property-list cases against Node with installed dayjs (TZ=UTC), plus the
+Lighter, Orderly, Bitrue and Phemex production paths that call them.
+
 `JsProtocol::resyncs_private_state_on_reopen` reads the receiver's
 `resyncsPrivateStateOnReopen` member; undefined keeps the private-socket default.
 OKX's business socket defines it, so a business-only re-open runs the private
@@ -1362,6 +1396,13 @@ truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
 endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
+
+The receive loop polls the open callback's synchronous prefix before dispatching
+a buffered first message, for direct and relay transports. A pending callback
+continues in the existing socket-owned task registry; the receive loop does not
+wait for its authentication or other asynchronous completion. The native TCP
+`js_socket_open_order` witness coalesces the upgrade and first frame and compares
+synchronous and asynchronous listener traces with Node.
 
 The shared JS facade's async snapshot/order/position methods return rejected
 Promises for preparation errors, including errors before their first await.
@@ -1598,3 +1639,11 @@ whitespace predicate. `tests/js_string_utf16.rs` compares 4,109 Node cases per
 method through the installed String builtin on NativeRuntime, including every
 surrogate unit, paired astral letters, Greek sigma and whitespace boundaries.
 All three regressions compile and fail against the original production bodies.
+
+The typed `ExchangeRuntime::console` default forwards one unchanged string argument
+to `console_values`; production NativeRuntime inherits it. The real BaseExchange
+log witness in `tests/native_console_default.rs` checks exact native stderr and
+listener arguments, including Unicode, NUL, empty strings and formatting tokens.
+`scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
+missing classifications or changed default bodies; the receiver classification
+applies only to this typed forwarding method.
