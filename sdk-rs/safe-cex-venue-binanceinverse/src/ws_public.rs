@@ -23,6 +23,19 @@ use std::{
 
 pub(crate) fn new(parent: &Rt) -> Result<(Js, Rc<BaseWebSocket>), Thrown> {
     let socket = sockets::base_websocket(&parent.shared.sockets, parent.this.clone());
+    // The shared JS base exposes the native lifecycle; this inherited source
+    // helper operates on the listener-owned JS buffer records.
+    socket.define("orderBookInnerState", Js::object(vec![]))?;
+    socket.define(
+        "resetOrderbook",
+        Js::function("resetOrderbook", |this, _| {
+            for (_, state) in this.get("orderBookInnerState")?.own_entries()? {
+                state.set("updates", Js::array(vec![]))?;
+                state.set("isSnapshotLoaded", Js::Bool(false))?;
+            }
+            Ok(Js::Undefined)
+        }),
+    )?;
     socket.define("topics", Js::object(vec![]))?;
     socket.define("nextSubscriptionId", Js::Number(2.))?;
     let weak = Rc::downgrade(&parent.shared);

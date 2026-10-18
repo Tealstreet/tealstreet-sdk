@@ -155,6 +155,17 @@ pub(crate) fn new(parent: &Rt) -> Result<(Js, Rc<BaseWebSocket>), Thrown> {
     let base = sockets::core_of(&parent.shared.sockets, &socket)
         .expect("new socket core")
         .base()?;
+    let weak_base = Rc::downgrade(&base);
+    socket.define_accessor(
+        "isForceClosed",
+        Some(Rc::new(move |_| {
+            let base = weak_base
+                .upgrade()
+                .ok_or_else(|| Thrown::error("Error", "private socket core dropped"))?;
+            Ok(Js::Bool(base.is_force_closed()))
+        })),
+        None,
+    );
     Ok((socket, base))
 }
 fn flag(rt: &Rt, key: &str) -> Result<bool, Thrown> {
