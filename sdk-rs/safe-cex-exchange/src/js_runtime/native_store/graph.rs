@@ -1323,3 +1323,7 @@ mod legacy_owner_tests;
 #[cfg(test)]
 #[path = "legacy_request_tests.rs"]
 mod legacy_request_tests;
+
+#[cfg(test)]
+#[path = "../../../../safe-cex-store/src/test_support.rs"]
+mod comparison;

@@ -1,3 +1,4 @@
+use super::comparison;
 use super::*;
 use crate::native_store::DefaultStore;
 use safe_cex_store::{Store, StoreUpdate, StoreUpdateIdsPatch};
@@ -6,8 +7,6 @@ use safe_cex_types::{
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
-#[path = "../../../../safe-cex-store/src/test_support.rs"]
-mod comparison;
 fn snapshot(store: &DefaultStore) -> Value {
     crate::js_runtime::value::to_json(&store.graph.serialize().unwrap()).unwrap()
 }
@@ -152,6 +151,7 @@ fn terminal_cap_refresh_expiry_and_invalid_status() {
     );
 }
 #[test]
+#[allow(clippy::arc_with_non_send_sync)] // Existing local callback ABI retains Arc identity.
 fn live_listener_identity_and_old_unsubscribe() {
     let store = Rc::new(DefaultStore::new());
     let calls = Arc::new(Mutex::new(Vec::new()));

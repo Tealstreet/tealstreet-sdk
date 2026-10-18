@@ -1403,14 +1403,14 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     );
     feed(json!({"topic":"position","data":[private_position("12")]}));
     assert_eq!(h.store.positions().unwrap()[0].leverage, 12.);
-    let balance = serde_json::to_value(&h.store.balance().unwrap()).unwrap();
+    let balance = serde_json::to_value(h.store.balance().unwrap()).unwrap();
     let requests = h.wire.requests.borrow().len();
     feed(json!({"topic":"wallet","data":[{"totalEquity":"999999"}]}));
     feed(
         json!({"topic":"execution","data":[{"orderId":"hyro-frame","execQty":"999","execPrice":"1"}]}),
     );
     assert_eq!(
-        serde_json::to_value(&h.store.balance().unwrap()).unwrap(),
+        serde_json::to_value(h.store.balance().unwrap()).unwrap(),
         balance
     );
     assert_eq!(fills.borrow().len(), 2);

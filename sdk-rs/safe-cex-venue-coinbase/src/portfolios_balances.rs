@@ -556,7 +556,7 @@ pub fn fetch_balance_intx<H: PortfolioHost + 'static>(
                 Some(p) if p.borrow().r#type == "INTX" => p,
                 _ => {
                     emit(&r, "No INTX portfolio found")?;
-                    return Ok(r.host.cached_balance()?);
+                    return r.host.cached_balance();
                 }
             };
             let result = async {
@@ -653,7 +653,7 @@ pub fn fetch_balance<H: PortfolioHost + 'static>(
             let has = |kind: &str| supported.borrow().iter().any(|v| v == kind);
             if has("intx") && has("cfm") {
                 emit(&r, "Cannot have both INTX and CFM portfolios")?;
-                return Ok(r.host.cached_balance()?);
+                return r.host.cached_balance();
             }
             let mut balance = scalar_balance(0.0, 0.0, 0.0);
             if has("intx") {

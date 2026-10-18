@@ -43,28 +43,28 @@ impl BitunixVenue {
         let me = self.clone();
         Box::pin(async move {
             let read = me.reader();
-            Ok(crate::rest_reads::fetch_markets(
+            crate::rest_reads::fetch_markets(
                 || Ok(me.base.store.markets()?),
                 read,
                 |e: &Fault| me.runtime.console("error", &e.0.js_error_string()),
                 |message| me.runtime.console("warning", message),
             )
             .await
-            .map_err(|error: Fault| error.0)?)
+            .map_err(|error: Fault| error.0)
         })
     }
     pub(crate) fn fetch_tickers(self: &Rc<Self>) -> ExchangeFuture<'static, Vec<Ticker>> {
         let me = self.clone();
         Box::pin(async move {
             let read = me.reader();
-            Ok(crate::rest_reads::fetch_tickers(
+            crate::rest_reads::fetch_tickers(
                 || Ok(me.base.store.tickers()?),
                 |symbol| Ok(me.base.store.markets_by_symbol()?.get(symbol).cloned()),
                 read,
                 |e: &Fault| me.trace(&e.0),
             )
             .await
-            .map_err(|error: Fault| error.0)?)
+            .map_err(|error: Fault| error.0)
         })
     }
     pub(crate) fn fetch_balance(
@@ -104,7 +104,7 @@ impl BitunixVenue {
         let me = self.clone();
         Box::pin(async move {
             let read = me.reader();
-            Ok(crate::position_reads::fetch_positions(
+            crate::position_reads::fetch_positions(
                 read,
                 |symbol| me.symbol_setting(symbol),
                 || me.account_mode(),
@@ -126,7 +126,7 @@ impl BitunixVenue {
                 },
             )
             .await
-            .map_err(|error: Fault| error.0)?)
+            .map_err(|error: Fault| error.0)
         })
     }
     /// symbolSettings.get(symbol) as (marginType, leverage)

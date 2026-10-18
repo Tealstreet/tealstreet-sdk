@@ -856,7 +856,7 @@ fn run(case: &Value) {
         "BINGX-C native orders {method}"
     );
     assert_eq!(
-        serde_json::to_value(&s.loaded().unwrap()).unwrap(),
+        serde_json::to_value(s.loaded().unwrap()).unwrap(),
         case["loaded"],
         "BINGX-C loaded {method}"
     );

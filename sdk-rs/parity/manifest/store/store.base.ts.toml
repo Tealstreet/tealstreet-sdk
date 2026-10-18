@@ -14,7 +14,7 @@ note = "Typed store model; borrowed dictionary views retain insertion order. Map
 ts = "defaultStore"
 kind = "const"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/graph.rs::initial_state", "safe-cex-store/src/store.rs::DEFAULT_STORE"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::initial_state", "safe-cex-store/src/store.rs::DEFAULT_STORE" ]
 status = "ported"
 note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::initial_state`. Mapped `safe-cex-store/src/store.rs::DEFAULT_STORE`."
 
@@ -22,7 +22,7 @@ note = "The single canonical Graph supplies this source operation; its typed Sto
 ts = "DefaultStore"
 kind = "class"
 layer = "mirror"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::new", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::facade", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::state", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::find_row", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::market_for_id", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::facade"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::new", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::facade", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::state", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::find_row", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::market_for_id", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::facade" ]
 status = "ported"
 note = "The canonical graph supplies the source operation; native captures keep the original referent and typed reads project only when reached. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::new`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::facade`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::state`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::find_row`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::market_for_id`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::facade`."
 
@@ -30,7 +30,7 @@ note = "The canonical graph supplies the source operation; native captures keep 
 ts = "DefaultStore.constructor"
 kind = "constructor"
 layer = "mirror"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::new", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::facade"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::new", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::facade" ]
 status = "ported"
 note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::new`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::facade`."
 
@@ -62,7 +62,7 @@ note = "The canonical native graph preserves live property effects and reference
 ts = "DefaultStore.serialize"
 kind = "method"
 layer = "mirror"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::serialize", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::serialize"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::serialize", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::serialize" ]
 status = "ported"
 note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::serialize`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::serialize`."
 
@@ -86,7 +86,7 @@ note = "The canonical native graph preserves live property effects and reference
 ts = "DefaultStore.get balance"
 kind = "accessor"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance_handle", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::balance_reference"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance_handle", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::balance_reference" ]
 status = "ported"
 note = "The canonical graph supplies the source operation; native captures keep the original referent and typed reads project only when reached. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance_handle`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::balance_reference`."
 
@@ -206,7 +206,7 @@ note = "The canonical native graph preserves live property effects and reference
 ts = "DefaultStore.get tickersBySymbol"
 kind = "accessor"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers_by_symbol", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::native_value"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers_by_symbol", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::native_value" ]
 status = "divergent"
 note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers_by_symbol`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::native_value`."
 
@@ -238,7 +238,7 @@ note = "The single canonical Graph supplies this source operation; its typed Sto
 ts = "DefaultStore.static packTickerDeltas"
 kind = "method"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::pack_ticker_deltas", "safe-cex-store/src/store.rs::PackedTickerDeltas", "safe-cex-store/src/store.rs::pack_ticker_deltas"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::pack_ticker_deltas", "safe-cex-store/src/store.rs::PackedTickerDeltas", "safe-cex-store/src/store.rs::pack_ticker_deltas" ]
 status = "ported"
 note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::pack_ticker_deltas`. Mapped `safe-cex-store/src/store.rs::PackedTickerDeltas`. Mapped `safe-cex-store/src/store.rs::pack_ticker_deltas`."
 
@@ -358,7 +358,7 @@ note = "The canonical native graph preserves live property effects and reference
 ts = "DefaultStore.recordRequestOutcome"
 kind = "method"
 layer = "mirror"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::record_request_outcome", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::record_request_outcome"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::record_request_outcome", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::record_request_outcome" ]
 status = "ported"
 note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::record_request_outcome`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::record_request_outcome`."
 
@@ -366,7 +366,7 @@ note = "The single canonical Graph supplies the source operation; native adapter
 ts = "DefaultStore.auditPositions"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::audit_positions", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::audit_positions"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::audit_positions", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::audit_positions" ]
 status = "ported"
 note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::audit_positions`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::audit_positions`."
 
@@ -398,7 +398,7 @@ note = "The single canonical Graph supplies this source operation; its typed Sto
 ts = "DefaultStore.update"
 kind = "field-fn"
 layer = "mirror"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_full", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_native", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::update_balance_and_loaded"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_full", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_native", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::update_balance_and_loaded" ]
 status = "ported"
 note = "The canonical graph supplies the source operation; native captures keep the original referent and typed reads project only when reached. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_full`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_native`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::update_balance_and_loaded`."
 
@@ -414,7 +414,7 @@ note = "The single canonical Graph supplies this source operation; its typed Sto
 ts = "DefaultStore.subscribe"
 kind = "field-fn"
 layer = "mirror"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::subscribe", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::subscribe_typed"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::subscribe", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::subscribe_typed" ]
 status = "ported"
 note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::subscribe`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::subscribe_typed`."
 
@@ -470,7 +470,7 @@ note = "The single canonical Graph supplies this source operation; its typed Sto
 ts = "DefaultStore.addOrUpdateOrder"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many" ]
 status = "ported"
 note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many`."
 
@@ -518,7 +518,7 @@ note = "The single canonical Graph supplies this source operation; its typed Sto
 ts = "DefaultStore.createEmptyPositionFrom"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::create_empty_position_from", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::empty_position"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::create_empty_position_from", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::empty_position" ]
 status = "ported"
 note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::create_empty_position_from`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::empty_position`."
 
@@ -558,7 +558,7 @@ note = "The single canonical Graph supplies this source operation; its typed Sto
 ts = "DefaultStore.applyTickerDeltas"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::apply_ticker_deltas", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::apply_deltas"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::apply_ticker_deltas", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::apply_deltas" ]
 status = "ported"
 note = "The canonical graph supplies the source operation; native captures keep the original referent and typed reads project only when reached. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::apply_ticker_deltas`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::apply_deltas`."
 
@@ -622,7 +622,7 @@ note = "The single canonical Graph supplies this source operation; its typed Sto
 ts = "DefaultStore#updateInArray"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_in_array", "safe-cex-store/src/model_patch.rs::apply"]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_in_array", "safe-cex-store/src/model_patch.rs::apply" ]
 status = "divergent"
 note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_in_array`. Mapped `safe-cex-store/src/model_patch.rs::apply`."
 

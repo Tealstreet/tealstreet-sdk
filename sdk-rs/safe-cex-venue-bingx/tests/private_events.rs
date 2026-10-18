@@ -456,7 +456,7 @@ fn run(c: &Value) {
         "BINGX-PRIVATE native positions {method} variant {variant}"
     );
     assert_eq!(
-        serde_json::to_value(&Store::loaded(store.as_ref()).unwrap()).unwrap(),
+        serde_json::to_value(Store::loaded(store.as_ref()).unwrap()).unwrap(),
         c["loaded"],
         "BINGX-PRIVATE loaded flag {method} variant {variant}"
     );
@@ -556,7 +556,7 @@ fn refresh_timer_coalesces_and_executes_at_boundary() {
         );
     }
     assert_eq!(
-        serde_json::to_value(&Store::loaded(store.as_ref()).unwrap()).unwrap(),
+        serde_json::to_value(Store::loaded(store.as_ref()).unwrap()).unwrap(),
         expected["loaded"]
     );
 }

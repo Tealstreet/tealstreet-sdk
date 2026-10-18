@@ -467,7 +467,7 @@ fn set_leverage_retains_cross_margin_and_records_confirmed_metadata() {
     let calls = h.http.calls("/g-positions/leverage");
     assert_eq!(calls[0].params["longLeverageRr"], -7.0);
     assert_eq!(calls[0].params["shortLeverageRr"], -7.0);
-    let all = serde_json::to_value(&h.store.fetched_leverage().unwrap()).unwrap();
+    let all = serde_json::to_value(h.store.fetched_leverage().unwrap()).unwrap();
     assert_eq!(all[SYMBOL]["buyLeverage"], 7.0);
     assert_eq!(all[SYMBOL]["marginType"], "cross");
 }
@@ -482,7 +482,7 @@ fn change_position_mode_sends_symbol_and_records_raw_mode() {
         calls[0].params,
         json!({"symbol":SYMBOL,"targetPosMode":"OneWay"})
     );
-    let all = serde_json::to_value(&h.store.fetched_leverage().unwrap()).unwrap();
+    let all = serde_json::to_value(h.store.fetched_leverage().unwrap()).unwrap();
     assert_eq!(all[SYMBOL]["positionMode"], "hedged");
 }
 #[test]
@@ -495,7 +495,7 @@ fn change_margin_type_retains_existing_leverage() {
         h.http.calls("/g-positions/leverage")[0].params["longLeverageRr"],
         10.0
     );
-    let all = serde_json::to_value(&h.store.fetched_leverage().unwrap()).unwrap();
+    let all = serde_json::to_value(h.store.fetched_leverage().unwrap()).unwrap();
     assert_eq!(all[SYMBOL]["marginType"], "isolated");
 }
 #[test]

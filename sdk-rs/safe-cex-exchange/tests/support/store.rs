@@ -214,7 +214,7 @@ impl Store for TestStore {
         panic!("TestStore::lookup_ticker_by_symbol is not exercised by this fixture")
     }
     fn latency(&self) -> Result<f64, StoreReadError> {
-        Ok(self.data.borrow().latency.clone())
+        Ok(self.data.borrow().latency)
     }
     fn balance(&self) -> Result<Balance, StoreReadError> {
         Ok(self.data.borrow().balance.clone())

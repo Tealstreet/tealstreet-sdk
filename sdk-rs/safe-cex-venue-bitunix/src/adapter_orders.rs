@@ -597,7 +597,7 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
         Ok(input.clone())
     }
     fn orders(&mut self) -> Result<Vec<Order>, ExchangeError> {
-        Ok(self.venue.store_orders()?)
+        self.venue.store_orders()
     }
     fn attached_leg(&mut self, order: &Order) -> Result<Option<&'static str>, ExchangeError> {
         let orders = self.venue.store_orders()?;

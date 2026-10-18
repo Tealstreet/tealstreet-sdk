@@ -916,7 +916,6 @@ fn public_only_start_skips_private_sockets_and_rest() {
     assert!(h.runtime.sockets.borrow()[0].0.ends_with("/market"));
     let loaded = safe_cex_store::Store::loaded(h.store.as_ref()).unwrap();
     assert!(loaded.orders && loaded.positions && loaded.balance);
-    drop(loaded);
     h.venue().dispose().expect("dispose");
 }
 
@@ -1378,7 +1377,7 @@ fn private_balance_frames_replace_rest_currency_shape_and_ignore_empty_updates()
         json!({"code":0,"result":{"channel":"user.balance","data":[]}}),
     );
     assert_eq!(
-        serde_json::to_value(&safe_cex_store::Store::balance(h.store.as_ref()).unwrap()).unwrap(),
+        serde_json::to_value(safe_cex_store::Store::balance(h.store.as_ref()).unwrap()).unwrap(),
         before
     );
     h.venue().dispose().expect("dispose");

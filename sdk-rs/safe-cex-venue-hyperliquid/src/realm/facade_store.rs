@@ -98,7 +98,7 @@ impl Exotic for TableView {
             .native_map(realm)?
             .own_keys()
             .into_iter()
-            .map(|units| PropKey::String(units.into()))
+            .map(PropKey::String)
             .collect())
     }
 }

@@ -1968,7 +1968,6 @@ impl BaseExchange {
             }
             let loaded = self.store.loaded()?;
             if loaded.markets && loaded.tickers {
-                drop(loaded);
                 self.log("External public data loaded (markets + tickers)", "info")?;
                 return Ok(());
             }

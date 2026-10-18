@@ -543,7 +543,7 @@ pub fn fetch_open_positions_intx<H: MarketPositionHost + 'static>(
             let Some(selected) = selected.filter(|p| p.borrow().r#type == "INTX") else {
                 r.host
                     .emit_and_log_error(&[Some(json!("No INTX portfolio found"))])?;
-                return Ok(r.host.cached_positions()?);
+                return r.host.cached_positions();
             };
             let uuid = selected.borrow().uuid.clone();
             let result: Result<ReadPositions, PortfolioFailure> = async {

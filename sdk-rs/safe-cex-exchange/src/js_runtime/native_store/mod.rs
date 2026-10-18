@@ -7,7 +7,12 @@ use safe_cex_store::{
     BalanceHandle, BalanceReference, PackedTickerDelta, Store, StoreMutationError, StoreUpdate,
     model_patch::{ModelPatch, PatchModel, PatchSource},
 };
-use safe_cex_types::*;
+use safe_cex_types::{
+    ActiveChaser, ActiveTWAP, Balance, DisplayedMargin, DisplayedPosition, FetchedLeverage, Market,
+    Order, OrderRiskProfile, OrderStatus, Position, PublicDataStore, PublicDataSubscriber,
+    RequestOutcome, RequestOutcomeCounts, StoreData, StoreDataLoaded, StoreOptions, StoreReadError,
+    StoreReadPhase, StoreSubscriber, StoreUpdateIds, Ticker, retained_json,
+};
 use serde_json::{Map, Value};
 use std::rc::Rc;
 
@@ -565,6 +570,9 @@ impl Store for DefaultStore {
 }
 
 impl PublicDataStore for DefaultStore {
+    // The public callback ABI is an Arc; callbacks stay on this local runtime,
+    // and subscriber removal compares the original Arc identity.
+    #[allow(clippy::arc_with_non_send_sync)]
     fn subscribe(&self, callback: PublicDataSubscriber) -> Box<dyn Fn()> {
         self.graph
             .subscribe_typed(std::sync::Arc::new(move |data, _| callback(data)))

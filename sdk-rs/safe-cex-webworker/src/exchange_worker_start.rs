@@ -422,12 +422,8 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     .is_some_and(|v| safe_cex_num::js_truthy(Some(v)))
                 {
                     if let Some(e) = self.exchange() {
-                        let mut stats = e
-                            .base()
-                            .store
-                            .message_handler_stats()?
-                            .map(|v| v.clone())
-                            .unwrap_or(json!({}));
+                        let mut stats =
+                            e.base().store.message_handler_stats()?.unwrap_or(json!({}));
                         if !stats.is_object() {
                             stats = json!({});
                         }

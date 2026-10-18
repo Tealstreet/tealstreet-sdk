@@ -1431,7 +1431,6 @@ fn final_portfolio_and_notification_cutovers() {
     assert!(ex.base.store.orders().unwrap().is_empty());
     let loaded = ex.base.store.loaded().unwrap();
     assert!(loaded.balance && loaded.positions && loaded.orders);
-    drop(loaded);
     let (fail_s, fail_ex) = fixture();
     let (fail_ctx, fail_reads) = context(fail_s.clone(), fail_ex.clone());
     let mut original = ExchangeError::new("notification failed");

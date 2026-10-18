@@ -1,5 +1,4 @@
-#[path = "../../../../safe-cex-store/src/test_support.rs"]
-mod comparison;
+use super::comparison;
 use crate::native_store::DefaultStore;
 use safe_cex_store::{Store, request_stats::record_request_outcome};
 use safe_cex_types::RequestOutcome;
@@ -17,7 +16,7 @@ fn frozen_typescript_classification_counts_and_reset() {
         "/../safe-cex-store/tests/request_oracle.json"
     )))
     .unwrap();
-    let mut store = DefaultStore::new();
+    let store = DefaultStore::new();
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = calls.clone();
     let _unsubscribe = store.subscribe(Arc::new(move |_, _| {
@@ -26,7 +25,7 @@ fn frozen_typescript_classification_counts_and_reset() {
     }));
     for step in oracle["steps"].as_array().unwrap() {
         record_request_outcome(
-            Some(&mut store),
+            Some(&store),
             step["status"].as_f64(),
             step["hadResponse"].as_bool().unwrap(),
             step["capture"].as_bool().unwrap(),
