@@ -42,7 +42,7 @@ for alias, before, after in [
         source.write_text(text.replace(before, after))
         status, log = execute(alias + '-red')
         assert status != 0, alias + ': corrupted alias dataflow passed'
-        assert not re.search(r'^error(?:\[|:)', log, re.M), alias + ': compiler errors do not count'
+        assert not re.search(r'^error(?:\[|: (?!test failed\b))', log, re.M), alias + ': compiler errors do not count'
         assert f'test {name} ... FAILED' in log, alias + ': named runtime assertion must fail'
         assert '0 passed; 1 failed' in log
         receipt['controls'].append({'owner': 'safe_cex_venue_binance::ticker_capture::' + alias,
