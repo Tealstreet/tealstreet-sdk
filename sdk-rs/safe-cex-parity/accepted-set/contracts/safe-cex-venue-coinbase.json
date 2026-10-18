@@ -31849,5 +31849,282 @@
     },
     "reason": "Production bound supported-types arrow value, retaining its original Coinbase receiver; no raw-function deserialization.",
     "evidence": "One exact compiler-authenticated instantiation: <crate::binding::rt::Host>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::portfolios_balances::Portfolio": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Mutable runtime portfolio selection root, parsed by the separately classified PortfolioState decoder; this shared reference itself is not a raw decoder.",
+    "evidence": "Fresh maintained compiler/artifact/declaration-claim discovery authenticates this exact alias. tests/support/portfolio_alias_native.rs directly exercises native PortfolioState capture and these live references, array/row identity, retained metadata, numeric bits, native typed snapshots and the venue error adapter before reporting. Alias trait receipts classify the current non-decoder capability; they do not claim all source callbacks, arbitrary JavaScript graph identity, JSON error-view widening or a complete feature matrix. portfolio-alias-controls.py independently clears actual production portfolio metadata, requires a compiled native assertion failure, restores exact source bytes and requires GREEN."
+  },
+  "safe_cex_venue_coinbase::portfolios_balances::Portfolios": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioState",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Mutable ordered vector of runtime portfolio roots, preserving per-row identity across selection and balance reads.",
+    "evidence": "Fresh maintained compiler/artifact/declaration-claim discovery authenticates this exact alias. tests/support/portfolio_alias_native.rs directly exercises native PortfolioState capture and these live references, array/row identity, retained metadata, numeric bits, native typed snapshots and the venue error adapter before reporting. Alias trait receipts classify the current non-decoder capability; they do not claim all source callbacks, arbitrary JavaScript graph identity, JSON error-view widening or a complete feature matrix. portfolio-alias-controls.py independently clears actual production portfolio metadata, requires a compiled native assertion failure, restores exact source bytes and requires GREEN."
+  },
+  "safe_cex_venue_coinbase::portfolios_balances::SupportedTypes": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Mutable shared array returned by the supported-type promise; callers retain the same array and observe later mutations.",
+    "evidence": "Fresh maintained compiler/artifact/declaration-claim discovery authenticates this exact alias. tests/support/portfolio_alias_native.rs directly exercises native PortfolioState capture and these live references, array/row identity, retained metadata, numeric bits, native typed snapshots and the venue error adapter before reporting. Alias trait receipts classify the current non-decoder capability; they do not claim all source callbacks, arbitrary JavaScript graph identity, JSON error-view widening or a complete feature matrix. portfolio-alias-controls.py independently clears actual production portfolio metadata, requires a compiled native assertion failure, restores exact source bytes and requires GREEN."
+  },
+  "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared thrown/native-error carrier retaining native cause identity; JSON diagnostic views keep their separately approved boundary.",
+    "evidence": "Fresh maintained compiler/artifact/declaration-claim discovery authenticates this exact alias. tests/support/portfolio_alias_native.rs directly exercises native PortfolioState capture and these live references, array/row identity, retained metadata, numeric bits, native typed snapshots and the venue error adapter before reporting. Alias trait receipts classify the current non-decoder capability; they do not claim all source callbacks, arbitrary JavaScript graph identity, JSON error-view widening or a complete feature matrix. portfolio-alias-controls.py independently clears actual production portfolio metadata, requires a compiled native assertion failure, restores exact source bytes and requires GREEN."
+  },
+  "safe_cex_venue_coinbase::portfolios_balances::Balance": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioBalance",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Mutable native balance fields with retained extra roots, native typed snapshot and optional currency capability; not a wire response DTO.",
+    "evidence": "Fresh maintained compiler/artifact/declaration-claim discovery authenticates this exact alias. tests/support/portfolio_alias_native.rs directly exercises native PortfolioState capture and these live references, array/row identity, retained metadata, numeric bits, native typed snapshots and the venue error adapter before reporting. Alias trait receipts classify the current non-decoder capability; they do not claim all source callbacks, arbitrary JavaScript graph identity, JSON error-view widening or a complete feature matrix. portfolio-alias-controls.py independently clears actual production portfolio metadata, requires a compiled native assertion failure, restores exact source bytes and requires GREEN."
+  },
+  "safe_cex_venue_coinbase::portfolios_balances::Currencies": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioCurrencies",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared own-currency dictionary and explicit prototype balance handle, not a raw object parser.",
+    "evidence": "Fresh maintained compiler/artifact/declaration-claim discovery authenticates this exact alias. tests/support/portfolio_alias_native.rs directly exercises native PortfolioState capture and these live references, array/row identity, retained metadata, numeric bits, native typed snapshots and the venue error adapter before reporting. Alias trait receipts classify the current non-decoder capability; they do not claim all source callbacks, arbitrary JavaScript graph identity, JSON error-view widening or a complete feature matrix. portfolio-alias-controls.py independently clears actual production portfolio metadata, requires a compiled native assertion failure, restores exact source bytes and requires GREEN."
   }
+
 }

@@ -311,3 +311,13 @@ callback body or every generic argument. `scripts/generic-alias-contracts.mjs`
 authenticates those thirteen fixed types and classifies their non-decoder roles;
 its controls independently remove the signing and bound-method registrations,
 require the unchanged monomorphization refusal, then restore exact policy bytes.
+
+Six portfolio/balance aliases have individual non-decoder capability records.
+`scripts/portfolio-alias-contracts.mjs` authenticates their fresh compiler/artifact
+identities; its missing-contract mode requires all six named failures. The native
+`portfolio_alias_native` tests capture the actual PortfolioState through the JS
+codec, inspect live array/row references, opaque metadata and numeric bits, and
+preserve native balance snapshots plus the venue's error-cause/message carrier.
+The approved JSON error view and JavaScript input-object identity stay separate.
+`portfolio-alias-controls.py` removes production metadata retention, requires a
+compiled native assertion failure and restores the exact source before GREEN.
