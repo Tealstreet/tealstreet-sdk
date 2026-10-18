@@ -3770,6 +3770,12 @@ mod strict_codecs {
         }
     }
 
+    #[derive(serde::Deserialize)]
+    struct AvailableLockedBalance {
+        available: f64,
+        locked: f64,
+    }
+
     impl<'de> serde::Deserialize<'de> for super::CurrencyBalance {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             let input = crate::retained_json::RetainedJsonInput::deserialize(deserializer)?;
@@ -3781,13 +3787,8 @@ mod strict_codecs {
             if let Ok(balance) = input.clone().decode_native::<super::Balance>(false) {
                 return Ok(Self::Declared(balance));
             }
-            #[derive(serde::Deserialize)]
-            struct AvailableLocked {
-                available: f64,
-                locked: f64,
-            }
             let value = input
-                .decode_native::<AvailableLocked>(false)
+                .decode_native::<AvailableLockedBalance>(false)
                 .map_err(serde::de::Error::custom)?;
             Ok(Self::AvailableLocked {
                 available: value.available,
