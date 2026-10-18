@@ -917,3 +917,253 @@ fn native_data_container_aliases_preserve_holes_keys_and_mutation() {
     book.borrow_mut().bids.clear();
     assert!(other.borrow().bids.is_empty());
 }
+
+#[test]
+fn native_callable_aliases_preserve_arguments_results_and_shared_effects() {
+    use safe_cex_types::{OrderBook, OrderBookOrders};
+    use safe_cex_venue_backpack::{
+        api_factory as api, private_events, public_listeners as listeners, socket_events,
+        startup_recovery,
+    };
+    let error = Native::object(vec![("message", Native::utf16(&[0xd800]))]);
+    let data = Native::object(vec![("number", Native::Number(-0.0))]);
+    let original = data.clone();
+    let failure = error.clone();
+    let ticker: socket_events::TickerCallback<Native, Native> = Rc::new(move |row| {
+        assert!(row.same_reference(&original));
+        Err(failure.clone())
+    });
+    assert!(ticker(&data).unwrap_err().same_reference(&error));
+    let calls = Rc::new(Cell::new(0));
+    let observed = calls.clone();
+    let failure = error.clone();
+    let timeout: private_events::TimeoutCallback<Native> = Box::new(move || {
+        observed.set(observed.get() + 1);
+        Err(failure)
+    });
+    assert!(timeout().unwrap_err().same_reference(&error));
+    let observed = calls.clone();
+    let failure = error.clone();
+    let recovery: startup_recovery::Callback<Native> = Box::new(move || {
+        observed.set(observed.get() + 1);
+        Err(failure)
+    });
+    assert!(recovery().unwrap_err().same_reference(&error));
+    let observed = calls.clone();
+    let action: listeners::Action<Native> = Rc::new(move || {
+        observed.set(observed.get() + 1);
+        Ok(())
+    });
+    let shared = action.clone();
+    assert!(Rc::ptr_eq(&action, &shared));
+    action().unwrap();
+    shared().unwrap();
+    assert_eq!(calls.get(), 4);
+
+    let book: listeners::Book = Rc::new(RefCell::new(OrderBook {
+        bids: vec![OrderBookOrders {
+            price: -0.0,
+            amount: f64::NAN,
+            total: f64::INFINITY,
+        }],
+        asks: vec![],
+    }));
+    let original = book.clone();
+    let callback: listeners::BookCallback<Native> = Rc::new(move |row| {
+        assert!(Rc::ptr_eq(&row, &original));
+        assert!(row.borrow().bids[0].amount.is_nan());
+        row.borrow_mut().asks.push(OrderBookOrders {
+            price: 1.0,
+            amount: 2.0,
+            total: -0.0,
+        });
+        Ok(())
+    });
+    callback(book.clone()).unwrap();
+    assert_eq!(book.borrow().asks[0].total.to_bits(), (-0.0f64).to_bits());
+    let bits = Rc::new(RefCell::new(vec![]));
+    let observed = bits.clone();
+    let candle: listeners::CandleCallback<Native> = Rc::new(move |row| {
+        observed.borrow_mut().extend(
+            [
+                row.timestamp,
+                row.open,
+                row.high,
+                row.low,
+                row.close,
+                row.volume,
+            ]
+            .map(f64::to_bits),
+        );
+        Ok(())
+    });
+    candle(rest_reads::Candle {
+        timestamp: -0.0,
+        open: f64::NAN,
+        high: f64::INFINITY,
+        low: f64::NEG_INFINITY,
+        close: 1.0,
+        volume: 2.0,
+    })
+    .unwrap();
+    assert_eq!(
+        *bits.borrow(),
+        [-0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1.0, 2.0].map(f64::to_bits)
+    );
+    let (owner, runtime, _, _) = support::fixture();
+    let config = Rc::new(api::Config {
+        url: Some("/api/v1/time".into()),
+        method: Some("GET".into()),
+        params: Rc::new(safe_cex_num::JsJsonValue::Undefined),
+        data: Rc::new(safe_cex_num::JsJsonValue::Undefined),
+        headers: None,
+        skip_remote_signing: false,
+        extra: vec![],
+    });
+    let request: api::RequestHandler<Native> = Rc::new(|row| Box::pin(async move { Ok(row) }));
+    let shared = request.clone();
+    assert!(Rc::ptr_eq(&request, &shared));
+    assert!(Rc::ptr_eq(
+        &ready(&runtime, shared(config.clone())).unwrap(),
+        &config
+    ));
+    let response = Rc::new(api::Response {
+        data: safe_cex_types::retained_json::RetainedJsonInput::Text(vec![0xd800]),
+        config: Some(config),
+        status: Some(-0.0),
+    });
+    let success: api::ResponseHandler<Native> = Rc::new(|row| Box::pin(async move { Ok(row) }));
+    let returned = ready(&runtime, success(response.clone())).unwrap();
+    assert!(Rc::ptr_eq(&returned, &response));
+    assert_eq!(returned.data.as_text().unwrap(), [0xd800]);
+    assert_eq!(returned.status.unwrap().to_bits(), (-0.0f64).to_bits());
+    let failure: api::FailureHandler<Native> = Rc::new(|error| Box::pin(async move { Err(error) }));
+    assert!(
+        ready(&runtime, failure(error.clone()))
+            .err()
+            .unwrap()
+            .same_reference(&error)
+    );
+    let observed = calls.clone();
+    let failure = error.clone();
+    let fetcher: listeners::Fetcher<Native> = Rc::new(move || {
+        observed.set(observed.get() + 1);
+        let error = failure.clone();
+        Box::pin(async move { Err(error) })
+    });
+    let task = fetcher();
+    assert_eq!(calls.get(), 5);
+    assert!(ready(&runtime, task).unwrap_err().same_reference(&error));
+    owner.dispose().unwrap();
+}
+
+#[test]
+fn native_future_and_prepared_aliases_retain_pending_state_and_values() {
+    use safe_cex_venue_backpack::{api_factory, order_actions, public_listeners};
+    use std::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll, Waker},
+    };
+    let value = Native::object(vec![
+        ("opaque", Native::utf16(&[0xd800])),
+        ("zero", Native::Number(-0.0)),
+    ]);
+    let release = Rc::new(Cell::new(false));
+    let continuation = || {
+        let value = value.clone();
+        let release = release.clone();
+        Box::pin(std::future::poll_fn(move |_| {
+            if release.get() {
+                Poll::Ready(Ok(value.clone()))
+            } else {
+                Poll::Pending
+            }
+        })) as Pin<Box<dyn Future<Output = Result<Native, Native>>>>
+    };
+    let reply: rest_reads::Reply<Native, Native> = continuation();
+    let read: rest_reads::Task<Native, Native> = continuation();
+    let action: order_actions::Task<Native, Native> = continuation();
+    let api: api_factory::Task<Native, Native> = continuation();
+    let listen: public_listeners::Task<Native, Native> = continuation();
+    for mut task in [reply, read, action, api, listen] {
+        release.set(false);
+        assert!(
+            task.as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        release.set(true);
+        let Poll::Ready(Ok(output)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+        else {
+            panic!("released native continuation")
+        };
+        assert!(output.same_reference(&value));
+        assert_eq!(output.field("opaque").unwrap().string().unwrap(), [0xd800]);
+    }
+    let opts: order_actions::Options = order_actions::Options {
+        symbol: vec![0xd800],
+        amount: -0.0,
+        r#type: safe_cex_types::ModelField::Undefined,
+        reduce_only: safe_cex_types::ModelField::Undefined,
+        ..Default::default()
+    };
+    assert_eq!(opts.symbol, [0xd800]);
+    assert_eq!(opts.amount.to_bits(), (-0.0f64).to_bits());
+    assert!(matches!(opts.r#type, safe_cex_types::ModelField::Undefined));
+    assert!(matches!(
+        opts.reduce_only,
+        safe_cex_types::ModelField::Undefined
+    ));
+    let opts: api_factory::Options =
+        serde_json::from_value(json!({"key":"public","secret":"private","publicDataOnly":true}))
+            .unwrap();
+    assert_eq!(opts.key, "public");
+    assert_eq!(opts.secret, "private");
+    assert_eq!(opts.public_data_only, Some(true));
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn native_http_callable_aliases_execute_the_production_factory() {
+    use safe_cex_venue_backpack::{adapter, api_factory as api, native_host, native_http};
+    let (_, runtime, _, wire) = support::fixture();
+    let inputs = native_host::native_inputs(runtime.clone(), wire.clone());
+    let build: native_http::BuildHttp = inputs.build_http;
+    let install: native_http::InstallTransport = inputs.install_transport;
+    let date: adapter::DateParser = inputs.date_parse;
+    assert_eq!(
+        date(units("1970-01-01T00:00:00.000Z")).unwrap().to_bits(),
+        0.0f64.to_bits()
+    );
+    let options = Rc::new(RefCell::new(
+        serde_json::from_value::<api::Options>(json!({"key":"","secret":"","publicDataOnly":true}))
+            .unwrap(),
+    ));
+    let client = build(
+        api::ClientConfig {
+            base_url: "https://api.backpack.exchange",
+            timeout: 20_000.0,
+            headers: [
+                ("content-type", "application/json"),
+                ("accept", "application/json"),
+            ],
+            serialize: Rc::new(|_| Ok(String::new())),
+        },
+        options.clone(),
+    )
+    .unwrap();
+    install(&client, options).unwrap();
+    let result = ready(
+        &runtime,
+        client.execute(safe_cex_transport::RestRequest {
+            url: "/api/v1/time".into(),
+            method: "GET".into(),
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    assert_eq!(result.status, 200);
+    assert_eq!(wire.requests.lock().unwrap().len(), 1);
+    assert_eq!(wire.requests.lock().unwrap()[0].timeout_ms, Some(20_000));
+}
