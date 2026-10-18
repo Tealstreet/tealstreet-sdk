@@ -772,3 +772,10 @@ Use `private_classes --features native` for actual native private frame/Store,
 public ticker generations, candle delegation/cleanup and depth recovery proofs.
 Registry/N-API construction reaches those concrete classes. The current wasm FFI
 exports only `parity_probe`/`version`, with no legacy message entry.
+
+The standalone `delegated_methods` extraction layer has no production caller and
+is retired with its options alias and mock-only oracle. Keep the six TypeScript
+rows on the live ExchangeState listener/dispatch members. The native candle,
+depth and historical-position witnesses and compiled live history flag control
+are documented in DELEGATED_ROUTE_REVIEW.md; do not recreate forwarding helpers
+to satisfy accepted-owner discovery.
