@@ -459,8 +459,11 @@ async fn cancel_batches<E: std::fmt::Display>(
                                 .remove_orders(&ids.iter().map(String::as_str).collect::<Vec<_>>())
                                 .map_err(ServiceError::Store)?;
                         }
-                    } else if let Some(id) = id.and_then(Value::as_str) {
-                        store.remove_orders(&[id]).map_err(ServiceError::Store)?;
+                    } else {
+                        // DefaultStore.removeOrders builds an object-key lookup, unlike
+                        // the protective path's strict root-ID comparison above.
+                        let key = js_string(id).map_err(ServiceError::Coercion)?;
+                        store.remove_orders(&[&key]).map_err(ServiceError::Store)?;
                     }
                 } else {
                     failures.push(row);

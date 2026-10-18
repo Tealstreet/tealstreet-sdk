@@ -95,7 +95,9 @@ fn run_cases(variant: &str) {
         let null_payload = Rc::new(Value::Null);
         let mut sentinel = ExchangeError::new("emitter failed");
         sentinel.name = "RangeError".into();
-        sentinel.code = Some(json!("emitter-code"));
+        sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "emitter-code"
+        )));
         sentinel.response = Some(json!({"status":503}));
         let get = |client, url| {
             trace
@@ -270,7 +272,9 @@ fn run_cases(variant: &str) {
                 "VALIDATION native thrown message"
             );
             assert_eq!(
-                error.code.as_ref().unwrap_or(&Value::Null),
+                observed_error_code(&error.code)
+                    .as_ref()
+                    .unwrap_or(&Value::Null),
                 &expected_error["code"]
             );
             assert_eq!(
@@ -388,4 +392,17 @@ fn pending_primary_skips_option_fetch_and_emission() {
         }
         drop(future);
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

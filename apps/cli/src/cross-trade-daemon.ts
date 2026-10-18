@@ -28,6 +28,7 @@ import { getRunnableCrossTradeConfigs } from './cross-trade-store';
 import { clearHeartbeat, HEARTBEAT_INTERVAL_MS, writeHeartbeat } from './cross-trade-heartbeat';
 import { recordCrossTradeEvent } from './audit-log';
 import { logger } from './logger';
+import { BRAND } from './brand';
 
 const STATUS_INTERVAL_MS = 30_000;
 
@@ -169,7 +170,7 @@ export async function runCrossTradeDaemon(opts: RunCrossTradeDaemonOpts = {}): P
   const rawConfigs = opts.configs ?? getRunnableCrossTradeConfigs();
   if (rawConfigs.length === 0) {
     console.log(chalk.yellow('No runnable cross-trade configs.'));
-    console.log(chalk.gray('Add or enable one with: tealstreet cross-trade add / enable'));
+    console.log(chalk.gray(`Add or enable one with: ${BRAND.binName} cross-trade add / enable`));
     return;
   }
 

@@ -142,21 +142,40 @@ pub fn reset_session<H: SessionHost>(h: &H, owner: &H::Value) -> Result<(), H::E
     }
     Ok(())
 }
-pub fn dispose<H: SessionHost>(h: &H, owner: &H::Value) -> Result<(), H::Error> {
-    call!(h, owner.clone(), "resetSession", vec![]);
-    h.intrinsic("super.dispose", vec![owner.clone()])?;
-    Ok(())
+/// Closed set of lexical callbacks created by this module and selected by the native host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Callback {
+    Order,
+    Connect,
+    Close,
+    Ping,
+    Message,
+    Timeout,
 }
+impl Callback {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "order" => Some(Self::Order),
+            "connect" => Some(Self::Connect),
+            "close" => Some(Self::Close),
+            "ping" => Some(Self::Ping),
+            "message" => Some(Self::Message),
+            "timeout" => Some(Self::Timeout),
+            _ => None,
+        }
+    }
+}
+
 pub fn dispatch<H: SessionHost>(
     h: &H,
     owner: &H::Value,
-    code: &str,
+    code: Callback,
     captures: &[H::Value],
     args: Vec<H::Value>,
 ) -> Result<H::Value, H::Error> {
     let first = args.first().cloned().unwrap_or_else(|| h.undefined());
     match code {
-        "order" => {
+        Callback::Order => {
             call!(
                 h,
                 h.get(owner, "parent")?,
@@ -165,12 +184,12 @@ pub fn dispatch<H: SessionHost>(
             );
             h.apply(captures[0].clone(), vec![first])?;
         }
-        "connect" => {
+        Callback::Connect => {
             h.set(owner, "started", h.boolean(true))?;
             call!(h, owner.clone(), "resetSession", vec![]);
             h.apply(captures[0].clone(), vec![])?;
         }
-        "close" => {
+        Callback::Close => {
             let target = h.optional(&first, "currentTarget")?;
             if h.truthy(&target) && !h.equal(&h.get(&first, "currentTarget")?, &h.get(owner, "ws")?)
             {
@@ -179,12 +198,12 @@ pub fn dispatch<H: SessionHost>(
             call!(h, owner.clone(), "resetSession", vec![]);
             h.apply(captures[0].clone(), vec![first])?;
         }
-        "ping" => {
+        Callback::Ping => {
             if h.truthy(&h.get(owner, "ready")?) {
                 h.apply(captures[0].clone(), vec![])?;
             }
         }
-        "message" => {
+        Callback::Message => {
             if h.truthy(&h.get(owner, "isDisposed")?) {
                 return Ok(h.undefined());
             }
@@ -235,7 +254,7 @@ pub fn dispatch<H: SessionHost>(
                 h.apply(captures[0].clone(), vec![first])?;
             }
         }
-        "timeout" => {
+        Callback::Timeout => {
             call!(
                 h,
                 h.get(owner, "pendingAcks")?,
@@ -253,7 +272,6 @@ pub fn dispatch<H: SessionHost>(
             let error = h.error(text)?;
             h.apply(captures[2].clone(), vec![h.normalize_error(error)?])?;
         }
-        _ => return h.intrinsic("unknown callback", vec![h.literal(code)]),
     }
     Ok(h.undefined())
 }

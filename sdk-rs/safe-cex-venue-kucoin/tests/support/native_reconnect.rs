@@ -325,10 +325,18 @@ fn native_private_match_emits_incremental_base_fill() {
         private_frame(&f, order("filled", 10, None)).await;
         assert_eq!(f.store.orders()[0].status, OrderStatus::Closed);
         assert_eq!(f.store.orders()[0].filled, 0.004);
-        assert_eq!(
-            *fills.borrow(),
-            vec![json!({"id":"o1","side":"buy","symbol":"BTCUSDT","price":96.0,"amount":0.004})]
-        );
+        let fills = fills.borrow();
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].own_keys().len(), 5);
+        for (key, value) in [
+            ("id", Js::str("o1")),
+            ("side", Js::str("buy")),
+            ("symbol", Js::str("BTCUSDT")),
+            ("price", Js::Number(96.0)),
+            ("amount", Js::Number(0.004)),
+        ] {
+            assert!(fills[0].get(key).unwrap().strict_equals(&value), "{key}");
+        }
     });
 }
 fn seed_private_state(f: &Fixture) {

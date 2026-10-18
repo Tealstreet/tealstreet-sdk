@@ -7,22 +7,22 @@
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:depth_error": {
     "category": "non-decoder",
     "reason": "The axios_form_encode error formatter takes a typed usize and constructs TransportError::Host text; it admits no raw model input. Native public RestBody form serialization exercises both metadata and recursive traversal depth failures and asserts the exact 101-level diagnostic. Reviewed provider delta 3419b2a3b1: only RestRequest.config_extensions changes to retained native data; this form helper body is unchanged.",
-    "sourceSha256": "5252ec5e74fc986e3395ee075bccab850da4b043c77fe7a99eb1bf93a227460f"
+    "sourceSha256": "67b758dc8fa3e2660f9b5ca59294cc47c063be362b38160089f9a4ab31c3fac5"
   },
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:check_json_depth": {
     "category": "non-decoder",
     "reason": "The axios_form_encode metadata-output depth validator walks an already decoded serde_json::Value solely before JSON stringification into a form field. It neither parses JSON nor constructs a domain model. Native public form serialization proves metadata depth100 admission and depth101 refusal, with exact encoded bytes and error; this is bounded output validation, not a general Value-input exception. Reviewed provider delta 3419b2a3b1: only RestRequest.config_extensions changes to retained native data; this form helper body is unchanged.",
-    "sourceSha256": "5252ec5e74fc986e3395ee075bccab850da4b043c77fe7a99eb1bf93a227460f"
+    "sourceSha256": "67b758dc8fa3e2660f9b5ca59294cc47c063be362b38160089f9a4ab31c3fac5"
   },
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:append": {
     "category": "non-decoder",
     "reason": "The axios_form_encode output writer applies shared JavaScript string coercion to an already decoded Value and appends a URLSearchParams-encoded pair to the serializer. Native public form fixtures assert actual boolean/number/string coercions, percent/space encoding, array order and null omission; no inbound DTO decoding is classified away. Reviewed provider delta 3419b2a3b1: only RestRequest.config_extensions changes to retained native data; this form helper body is unchanged.",
-    "sourceSha256": "5252ec5e74fc986e3395ee075bccab850da4b043c77fe7a99eb1bf93a227460f"
+    "sourceSha256": "67b758dc8fa3e2660f9b5ca59294cc47c063be362b38160089f9a4ab31c3fac5"
   },
   "safe-cex-transport/src/provider.rs::LOCAL_FUNCTION:visit": {
     "category": "non-decoder",
     "reason": "The axios_form_encode recursive output traversal renders bracketed form keys into the output serializer. Its internal parse::<usize> selects canonical indices from an already decoded array-like object; it does not decode a wire/domain owner. Native public fixtures cover nested paths, flat/array-like items, numeric ordering, invalid length and recursive path depth101 admission/depth102 refusal. The separately reviewed metadata validator and error formatter retain their own exact source-pinned roles. Reviewed provider delta 3419b2a3b1: only RestRequest.config_extensions changes to retained native data; this form helper body is unchanged.",
-    "sourceSha256": "5252ec5e74fc986e3395ee075bccab850da4b043c77fe7a99eb1bf93a227460f"
+    "sourceSha256": "67b758dc8fa3e2660f9b5ca59294cc47c063be362b38160089f9a4ab31c3fac5"
   },
   "safe-cex-transport/src/query.rs::LOCAL_FUNCTION:encode": {
     "category": "non-decoder",

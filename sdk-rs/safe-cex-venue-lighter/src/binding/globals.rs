@@ -287,11 +287,9 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
             Ok(Js::Bool(has_non_zero_lighter_integrator_fee(maker, taker)))
         }),
         helper("extractLighterAccountTierFromPayload", |a| {
-            let payload = optional_json(&arg(&a, 0))?;
+            let payload = arg(&a, 0);
             Ok(
-                match extract_lighter_account_tier_from_payload(payload.as_ref())
-                    .map_err(coercion)?
-                {
+                match extract_lighter_account_tier_from_payload(Some(&payload))? {
                     None => Js::Undefined,
                     Some(tier) => from_typed(&tier)?,
                 },
