@@ -150,3 +150,10 @@ failed with five fills rather than four. Exact restoration passed. The scoped
 TypeScript partial-fill regression independently failed against that master's
 source handler and passed after exact restoration. These fresh controls do not
 relabel the historical complete-slice controls above.
+
+The refreshed branch also passes both touched TypeScript test files (35 tests),
+the maintained-source `complete::orders_native` comparison, production TS ESLint,
+scoped native Clippy, the all-features production cancellation inventory, and
+parity (7,465 rows / 16,639 public Rust items). The extractor reports zero
+manifest updates, additions or orphaned symbols. Cargo runs from `sdk-rs` with
+one job, using its pinned toolchain.
