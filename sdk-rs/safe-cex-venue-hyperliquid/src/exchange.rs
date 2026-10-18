@@ -415,11 +415,15 @@ mod tests {
         fn report_raw_exception(
             &self,
             _: &safe_cex_exchange::js_runtime::value::Js,
-            _: &serde_json::Value,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
         ) {
             panic!("unexpected raw exception report in this test runtime");
         }
-        fn report_exception(&self, e: &ExchangeError, _: &Value) {
+        fn report_exception(
+            &self,
+            e: &ExchangeError,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
+        ) {
             panic!("unexpected background error {}", e.message)
         }
         fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {

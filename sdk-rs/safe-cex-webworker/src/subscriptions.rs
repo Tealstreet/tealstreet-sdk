@@ -219,7 +219,7 @@ impl OrderBookSubscriptionsHandler {
                                     .exchange
                                     .base()
                                     .runtime
-                                    .report_exception(&error, &Value::Null);
+                                    .report_exception(&error, &Value::Null.into());
                             }
                         }
                     }),
@@ -329,7 +329,7 @@ impl OrderBookSubscriptionsHandler {
                                 // adapter reports rather than synchronously returning a throw.
                                 handler.exchange.base().runtime.report_exception(
                                     &error.into_exchange_error(),
-                                    &json!({"method":"sendOrderBookUpdate"}),
+                                    &json!({"method":"sendOrderBookUpdate"}).into(),
                                 );
                             }
                         }
@@ -414,7 +414,7 @@ impl OHLCVSubscriptionsHandler {
                                     .exchange
                                     .base()
                                     .runtime
-                                    .report_exception(&error, &Value::Null);
+                                    .report_exception(&error, &Value::Null.into());
                             }
                         }
                     }),
@@ -530,7 +530,7 @@ impl OHLCVSubscriptionsHandler {
                         {
                             runtime.report_exception(
                                 &error,
-                                &json!({"operation":"worker candle post"}),
+                                &json!({"operation":"worker candle post"}).into(),
                             );
                         }
                     });

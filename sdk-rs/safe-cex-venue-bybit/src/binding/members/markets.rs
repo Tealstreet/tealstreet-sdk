@@ -220,7 +220,9 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
                 Js::str("Failed to fetch Bybit Trading markets")
             };
             this.call_method("emitAndLogError", vec![message.clone()])?;
-            return Err(Thrown::new(error_object("Error", &text(&message)?)));
+            return Err(Thrown::new(
+                rt.global("Error")?.construct(vec![message], None)?,
+            ));
         }
         // ts-bug: the grace timer's `.then` runs even when PreLaunch won the race, so the
         // timeout warning is logged after 1.5s on every refresh.

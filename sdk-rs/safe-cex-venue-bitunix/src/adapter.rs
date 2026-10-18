@@ -344,7 +344,7 @@ impl BitunixVenue {
         let report = self.runtime.clone();
         let handle = self.runtime.spawn_local(Box::pin(async move {
             if let Err(e) = task.await {
-                report.report_exception(&e, &serde_json::json!({ "operation": label }));
+                report.report_exception(&e, &serde_json::json!({ "operation": label }).into());
             }
         }));
         self.tasks.borrow_mut().push(handle);

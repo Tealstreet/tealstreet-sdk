@@ -159,7 +159,7 @@ impl BitrueExchange {
                 Ok(value) => callback(value),
                 Err(error) => reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source":"bitrue listener payload"}),
+                    &serde_json::json!({"source":"bitrue listener payload"}).into(),
                 ),
             }
             Ok(Js::Undefined)

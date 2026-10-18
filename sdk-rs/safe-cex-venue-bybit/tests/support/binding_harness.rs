@@ -50,6 +50,7 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub report_contexts: RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>,
     pub logs: RefCell<Vec<String>>,
     /// Optional deterministic entropy stream for session/identity race witnesses.
     pub random_sequence: Cell<Option<u64>>,
@@ -137,10 +138,20 @@ impl ExchangeRuntime for Runtime {
             0.5
         }
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+        self.report_contexts.borrow_mut().push(context.clone());
         self.reports.borrow_mut().push(error.message.clone());
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
+        self.report_contexts.borrow_mut().push(context.clone());
         self.reports
             .borrow_mut()
             .push(safe_cex_exchange::runtime::exception_text(error));

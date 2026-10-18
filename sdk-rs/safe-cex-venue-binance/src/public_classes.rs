@@ -3,7 +3,14 @@
 //! Typed Store updates use native f64 patches. JavaScript object mutation and
 //! prototype-statistics side effects remain explicit representation differences.
 use crate::{
-    private_event_value::*, public_dispatch::*, public_listeners::*, request_weight::Failure,
+    private_event_value::{EventOps, EventValue},
+    public_dispatch::{CoreInvoke, Handler, Handlers, dispatch_binance_message},
+    public_listeners::{
+        Action, Book, Job, ListenerHost, ListenerState, Parser, Snapshot, SyncState, Unsubscribe,
+        Venue, listen_futures_book, listen_futures_market, listen_pm_book, listen_pm_market,
+        listen_spot_book, listen_spot_candles,
+    },
+    request_weight::Failure,
 };
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture},
@@ -143,7 +150,10 @@ impl PublicState {
             .expect("live socket lease")
     }
     pub fn connect_and_subscribe(self: &Rc<Self>) -> Result<(), ExchangeError> {
-        use crate::public_connect::*;
+        use crate::public_connect::{
+            connect_binance_market, connect_binance_pm_market, connect_binance_pm_public,
+            connect_binance_public, connect_binance_spot_public,
+        };
         match self.kind {
             PublicKind::FuturesMarket => connect_binance_market(&self.base()),
             PublicKind::PMMarket => connect_binance_pm_market(&self.base()),
@@ -342,7 +352,10 @@ impl PublicState {
                 },
             )
         };
-        use crate::public_ticker_events::*;
+        use crate::public_ticker_events::{
+            handle_futures_book_events, handle_futures_mark_events, handle_futures_ticker_events,
+            handle_pm_book_events, handle_pm_mark_events, handle_pm_ticker_events,
+        };
         match (self.kind, topic) {
             (PublicKind::SpotPublic, "24hrTicker") => {
                 crate::spot_ticker_events::handle_spot_ticker_events(

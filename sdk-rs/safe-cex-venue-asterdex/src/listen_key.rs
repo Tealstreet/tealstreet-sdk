@@ -80,7 +80,8 @@ impl ListenKeyLifecycle {
         let runtime = self.owner.runtime.clone();
         self.owner.start_owned_operation(async move {
             if let Err(error) = work.await {
-                runtime.report_exception(&error, &serde_json::json!({"operation":operation}));
+                runtime
+                    .report_exception(&error, &serde_json::json!({"operation":operation}).into());
             }
         });
     }

@@ -316,7 +316,7 @@ impl PublicSubscriptions {
             if let Err(error) = self.unsubscribe(&[stream.to_owned()]) {
                 self.owner.runtime.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"AsterDEX book unsubscribe"}),
+                    &serde_json::json!({"operation":"AsterDEX book unsubscribe"}).into(),
                 );
             }
         }

@@ -23,11 +23,12 @@ fn main() {
         .unwrap()
         .iter()
         .map(|value| {
-            let s = value.as_str().unwrap();
+            let units: Vec<u16> = serde_json::from_value(value.clone()).unwrap();
+            let text = String::from_utf16(&units).ok();
             json!([
-                api::is_bybit_clock_sync_ret_msg(s),
-                api::parse_bybit_server_timestamp(s),
-                api::is_public_endpoint(Some(s))
+                api::is_bybit_clock_sync_ret_msg(&units),
+                api::parse_bybit_server_timestamp(&units),
+                api::is_public_endpoint(text.as_deref())
             ])
         })
         .collect();

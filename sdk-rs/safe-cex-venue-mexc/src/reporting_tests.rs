@@ -51,7 +51,11 @@ impl ExchangeRuntime for ReportingRuntime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, data: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         // Retain the host's original value before any finite fixture observation.
         self.raw_reports.borrow_mut().push(error.clone());
         let error = native_report_shape(error);
@@ -60,7 +64,11 @@ impl ExchangeRuntime for ReportingRuntime {
             .borrow_mut()
             .push(json!({"error":error,"data":data}));
     }
-    fn report_exception(&self, error: &ExchangeError, data: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.trace.borrow_mut().push("typed-report".into());
         self.reports
             .borrow_mut()

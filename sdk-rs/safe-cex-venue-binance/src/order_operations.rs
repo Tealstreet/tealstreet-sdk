@@ -7,7 +7,9 @@
 //! Batch helpers return dense arrays (or ASCII strings for Futures spread); arbitrary
 //! malformed/non-iterable helper outputs are outside this configured domain.
 use crate::{
-    private_event_value::*,
+    private_event_value::{
+        EventOps, EventValue, PrivateEnum, array_values, fallback, record, string,
+    },
     request_weight::{Failure, type_error},
 };
 use safe_cex_types::{OrderStatus, OrderType, object_map::JsObjectMap};

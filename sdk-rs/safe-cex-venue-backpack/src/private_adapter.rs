@@ -186,7 +186,7 @@ impl BackpackPrivateWebSocket {
                 if let Err(e) = future.await {
                     report.report_exception(
                         &e,
-                        &serde_json::json!({"operation":"Backpack private socket"}),
+                        &serde_json::json!({"operation":"Backpack private socket"}).into(),
                     );
                 }
             })));
