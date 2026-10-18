@@ -1,5 +1,11 @@
 //! A scripted host for the production binding: a local executor with a
 //! virtual clock, scripted sockets, and a REST adapter answering by route.
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
@@ -34,13 +40,14 @@ struct Noop;
 impl ExchangeTask for Noop {
     fn cancel(&self) {}
 }
-struct Sleep(Rc<Cell<bool>>);
+struct Sleep(Rc<Cell<bool>>, virtual_time::SleepWaker);
 impl Future for Sleep {
     type Output = Result<(), ExchangeError>;
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.0.get() {
             Poll::Ready(Ok(()))
         } else {
+            *self.1.borrow_mut() = Some(cx.waker().clone());
             Poll::Pending
         }
     }
@@ -137,6 +144,7 @@ impl TunnelHost for NoTunnel {
 
 #[derive(Default)]
 pub struct Host {
+    sleep_wakers: virtual_time::SleepWakers,
     pub now: Cell<f64>,
     jobs: RefCell<Vec<(Job, Arc<Flag>)>>,
     timers: RefCell<Vec<(f64, Rc<Cell<bool>>)>>,
@@ -147,6 +155,7 @@ pub struct Host {
 impl Host {
     /// Run every runnable job to quiescence without advancing the clock.
     pub fn settle(&self) {
+        self.sleep_wakers.wake_due(self.now.get());
         for _ in 0..100_000 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
@@ -258,7 +267,10 @@ impl ExchangeRuntime for Host {
         self.timers
             .borrow_mut()
             .push((self.now.get() + delay_ms as f64, fired.clone()));
-        Box::pin(Sleep(fired))
+        Box::pin(Sleep(
+            fired,
+            self.sleep_wakers.register(self.now.get() + delay_ms as f64),
+        ))
     }
     fn spawn_local(&self, future: Job) -> Box<dyn ExchangeTask> {
         self.jobs
@@ -367,8 +379,8 @@ impl Routes {
 impl RestAdapter for Routes {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         let body = match &request.body {
-            Some(RestBody::Untransformed(v)) => v.clone(),
-            Some(RestBody::Transformed(d)) => d.value().clone(),
+            Some(RestBody::Untransformed(v)) => v.clone().into_value().unwrap(),
+            Some(RestBody::Transformed(d)) => d.value().clone().into_value().unwrap(),
             Some(RestBody::Encoded(bytes)) => serde_json::from_slice(bytes).unwrap_or(Value::Null),
             None => Value::Null,
         };
@@ -390,4 +402,53 @@ impl RestAdapter for Routes {
             })
         })
     }
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Host::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.now.set(runtime.now.get() + 9.0);
+    runtime.advance(0.0);
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.now.set(runtime.now.get() + 1.0);
+    runtime.advance(0.0);
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.now.set(runtime.now.get() + 10.0);
+    runtime.advance(0.0);
+    assert!(!latest.take(), "dropped sleep must not wake");
 }

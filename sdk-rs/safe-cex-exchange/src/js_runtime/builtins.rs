@@ -156,14 +156,50 @@ fn string_member(s: Str, name: &str) -> Option<Js> {
     }))
 }
 
+fn case_utf16(source: &[u16], uppercase: bool) -> Js {
+    let mut result = Vec::with_capacity(source.len());
+    let mut text = String::new();
+    let flush = |text: &mut String, result: &mut Vec<u16>| {
+        let mapped = if uppercase {
+            text.to_uppercase()
+        } else {
+            text.to_lowercase()
+        };
+        result.extend(mapped.encode_utf16());
+        text.clear();
+    };
+    // Keep whole valid runs for contextual mappings such as Greek sigma.
+    for character in char::decode_utf16(source.iter().copied()) {
+        match character {
+            Ok(character) => text.push(character),
+            Err(error) => {
+                flush(&mut text, &mut result);
+                result.push(error.unpaired_surrogate());
+            }
+        }
+    }
+    flush(&mut text, &mut result);
+    Js::utf16(&result)
+}
+
 fn plain_string_member(s: Str, name: &str) -> Option<Js> {
-    let st = String::from_utf16_lossy(&s);
     Some(match name {
-        "toUpperCase" => method(name, move |_| Ok(Js::str(&st.to_uppercase()))),
-        "toLowerCase" => method(name, move |_| Ok(Js::str(&st.to_lowercase()))),
-        "trim" => method(name, move |_| Ok(Js::str(safe_cex_num::js_trim(&st)))),
+        "toUpperCase" => method(name, move |_| Ok(case_utf16(&s, true))),
+        "toLowerCase" => method(name, move |_| Ok(case_utf16(&s, false))),
+        "trim" => method(name, move |_| {
+            let start = s
+                .iter()
+                .position(|unit| !super::regexp::is_space(*unit))
+                .unwrap_or(s.len());
+            let end = s
+                .iter()
+                .rposition(|unit| !super::regexp::is_space(*unit))
+                .map_or(start, |index| index + 1);
+            Ok(Js::utf16(&s[start..end]))
+        }),
         "toString" | "valueOf" => method(name, move |_| Ok(Js::String(s.clone()))),
         "localeCompare" => method(name, move |a| {
+            let st = String::from_utf16_lossy(&s);
             let right = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
             let collator = safe_cex_num::JsRootCollator::try_new()
                 .map_err(|error| Thrown::error(error.name, error.message))?;
@@ -775,13 +811,9 @@ fn promise_member(p: Promise, name: &str) -> Option<Js> {
             &rt,
             Box::pin(async move {
                 match p.wait().await {
-                    Ok(v) if on_ok.is_callable() => {
-                        await_js(on_ok.call(Js::Undefined, vec![v])?).await
-                    }
+                    Ok(v) if on_ok.is_callable() => on_ok.call(Js::Undefined, vec![v]),
                     Ok(v) => Ok(v),
-                    Err(e) if on_err.is_callable() => {
-                        await_js(on_err.call(Js::Undefined, vec![e.value])?).await
-                    }
+                    Err(e) if on_err.is_callable() => on_err.call(Js::Undefined, vec![e.value]),
                     Err(e) => Err(e),
                 }
             }),

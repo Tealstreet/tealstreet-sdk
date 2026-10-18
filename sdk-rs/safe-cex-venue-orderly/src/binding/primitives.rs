@@ -203,7 +203,7 @@ impl crate::api::ApiHost for Host {
                         reason: None,
                         headers: Default::default(),
                         body: safe_cex_transport::RestResponseBody::Untransformed(
-                            serde_json::Value::Null,
+                            safe_cex_types::retained_json::RetainedJsonInput::Null,
                         ),
                     }))
                 },

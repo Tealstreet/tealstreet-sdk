@@ -281,3 +281,7 @@ lifetime/type argument, or the behavior of a module/browser/transport host.
 
 
 
+
+Native metadata updates share CallMethodHandler's symbol_metadata_throttler
+constructor, acknowledge without awaiting venue work, and clear keyed trailing
+calls on disposal/deactivation. Keep watch references to that manager weak.

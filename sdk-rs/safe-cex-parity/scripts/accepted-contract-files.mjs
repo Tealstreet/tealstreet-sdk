@@ -2,72 +2,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseJsonWithSource } from './accepted-json-source.mjs';
 
 export const defaultContractDirectory = new URL('../accepted-set/contracts/', import.meta.url);
 
-// JSON.parse orders integer keys before Rust sees them. Preserve the authored
-// order separately so generated dispatch wrappers can retain their input children.
-const authoredKeys = new WeakMap();
-
-function rememberKeyOrder(text, value) {
-  const tokens = /\s*("(?:\\[\s\S]|[^"\\])*"|[{}\[\],:]|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/y;
-  const next = () => {
-    const token = tokens.exec(text);
-    assert.ok(token, 'accepted-set: expected validated JSON token');
-    return token[1];
-  };
-  function visit(value, token = next()) {
-    if (token === '{') {
-      const keys = [];
-      let key = next();
-      while (key !== '}') {
-        const name = JSON.parse(key);
-        assert.ok(!keys.includes(name), `accepted-set: duplicate JSON key: ${name}`);
-        keys.push(name);
-        assert.equal(next(), ':');
-        visit(value[name]);
-        const separator = next();
-        if (separator === '}') break;
-        assert.equal(separator, ',');
-        key = next();
-      }
-      authoredKeys.set(value, keys);
-    } else if (token === '[') {
-      let item = next();
-      let index = 0;
-      while (item !== ']') {
-        visit(value[index++], item);
-        const separator = next();
-        if (separator === ']') break;
-        assert.equal(separator, ',');
-        item = next();
-      }
-      assert.equal(index, value.length);
-    }
-  }
-  visit(value);
-  assert.match(text.slice(tokens.lastIndex), /^\s*$/);
-}
-
-export function contractJson(value) {
-  if (Array.isArray(value)) return `[${value.map(item => contractJson(item) ?? 'null').join(',')}]`;
-  if (value && typeof value === 'object') {
-    const original = authoredKeys.get(value) ?? [];
-    const keys = [...original.filter(key => Object.hasOwn(value, key)), ...Object.keys(value).filter(key => !original.includes(key))];
-    const fields = keys.flatMap(key => {
-      const encoded = contractJson(value[key]);
-      return encoded === undefined ? [] : [`${JSON.stringify(key)}:${encoded}`];
-    });
-    return `{${fields.join(',')}}`;
-  }
-  return Object.is(value, -0) ? '-0' : JSON.stringify(value);
-}
+export { stringifyJsonWithSource as contractJson } from './accepted-json-source.mjs';
 
 function readObject(file) {
-  const text = fs.readFileSync(file, 'utf8');
-  const value = JSON.parse(text);
+  const value = parseJsonWithSource(fs.readFileSync(file, 'utf8'));
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), `accepted-set: contracts must be an object: ${file}`);
-  rememberKeyOrder(text, value);
   return value;
 }
 

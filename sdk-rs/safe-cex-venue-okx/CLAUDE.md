@@ -174,3 +174,11 @@ code membership compares UTF-16 directly, without invoking conversion hooks.
 The actual constructed HTTP witness compares36 GET profiles and one write guard
 with the maintained wrapper and installed dependencies. All30 denial-set codes
 and ERR_CANCELED stop after one attempt; allowed socket errors still retry.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` covers 88 cases / 264 frames per global/EU live/demo constructor across all five ticker/valuation channels. Only the first row of each source channel frame is applied.
+It drives the production constructor/socket protocol and actual DefaultStore,
+checking native number bits against maintained TS classes and DefaultStore.
+Independent null, string, NaN-producing, object, overflow, signed-zero and false
+inputs accompany distinct good rows, with finite Store resets before every case.
+The shared `ticker-native-controls.py` compiles live field-publication faults,
+requires named native failures, restores exact bytes and requires passing tests.

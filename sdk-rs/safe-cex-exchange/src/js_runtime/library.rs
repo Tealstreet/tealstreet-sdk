@@ -1143,7 +1143,7 @@ fn qs_pairs(
     }
     Ok(())
 }
-fn qs_stringify(value: &Js, options: &Js) -> Result<String, Thrown> {
+pub fn qs_stringify(value: &Js, options: &Js) -> Result<String, Thrown> {
     let options = QsOptions::read(options)?;
     let mut out = vec![];
     if matches!(value, Js::Object(_) | Js::Array(_)) {

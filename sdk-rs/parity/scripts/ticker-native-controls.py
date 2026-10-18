@@ -5,6 +5,19 @@ import sys
 
 root = Path(__file__).resolve().parents[3]
 cases = {
+    "bingx": ("public_stream.rs", "binding", '("mark", "fairPrice"),', '("mark", "indexPrice"),'),
+    "bitget": ("ticker.rs", "exchange_binding", '("bid", &["bidPr", "bidPrice", "bid"][..]),', '("bid", &["askPr", "askPrice", "ask"][..]),'),
+    "grvt-store": ("binding/public.rs", "exchange_binding", 'vec![Js::object(vec![("id", id.clone())]), patch],', 'vec![id.clone(), patch],'),
+    "grvt-candle": ("public_feeds.rs", "exchange_binding", 'last: Some(close),', 'last: Some(close + 1.0),'),
+    "grvt-mark": ("public_feeds.rs", "exchange_binding", 'changes.last = Some(mark);', 'changes.last = Some(mark + 1.0);'),
+    "grvt": ("public_feeds.rs", "exchange_binding", '("mp", "mark_price", &mut changes.mark),', '("ip", "index_price", &mut changes.mark),'),
+    "kraken": ("stream_updates.rs", "exchange_binding", 'let bid = keyed(host, message, &["bid", "best_bid"])?;', 'let bid = keyed(host, message, &["ask", "best_ask"])?;'),
+    "krakenspot": ("stream_updates.rs", "exchange_binding", 'let last = optional(host, &item, "last", Lookup::Direct)?;', 'let last = optional(host, &item, "ask", Lookup::Direct)?;'),
+    "mexc": ("ws_public.rs", "exchange_trait", 'patch.set_number("last", next.last);', 'patch.set_number("last", next.bid);'),
+    "okx": ("public_socket.rs", "exchange_binding", 'let bid = safe_cex_num::parse_float(&js_string(update.get("bidPx")).map_err(coercion)?);', 'let bid = safe_cex_num::parse_float(&js_string(update.get("askPx")).map_err(coercion)?);'),
+    "backpack": ("socket_events.rs", "exchange_trait", 'let last = number(&host.field_text(data, "c")?);', 'let last = number(&host.field_text(data, "v")?);'),
+    "paradex": ("public_ingress.rs", "exchange_trait", 'let bid = h.parse_float(&first(h, &raw, &["bid_price"], "0")?)?;', 'let bid = h.parse_float(&first(h, &raw, &["ask_price"], "0")?)?;'),
+    "paradex-book": ("market_data.rs", "exchange_trait", 'let bid = parsed(h, h.get(&h.get(&sorted_bids, "0")?, "price")?)?;', 'let bid = parsed(h, h.get(&h.get(&sorted_bids, "1")?, "price")?)?;'),
     "polymarket-store": ("binding/socket.rs", "exchange_binding", 'Js::object(vec![("id", id.clone())]),', 'id.clone(),'),
     "polymarket": ("ws_dispatch.rs", "exchange_binding", 'let last = safe_cex_num::parse_float(&String::from_utf16_lossy(&price));', 'let last = safe_cex_num::parse_float(&String::from_utf16_lossy(&price)) + 1.0;'),
     "bitunix": ("sockets.rs", "native_identity", "patch.set_number(*k, *n);", "patch.set_number(*k, if n.is_nan() { 0.0 } else { *n });"),
@@ -21,14 +34,20 @@ cases = {
     "cryptocom": ("socket_handlers.rs", "exchange_binding", '("last", parsed_field(h, &data, "a")?),', '("last", parsed_field(h, &data, "b")?),'),
     "coinbase": ("public_stream_dispatch.rs", "exchange_binding", '"No handler for channel ".encode_utf16()', '"Unexpected ticker channel ".encode_utf16()'),
     "binance": ("public_classes.rs", "private_classes", 'patch.set_number(field.name(), value)', 'patch.set_number(field.name(), if field.name() == "last" { 0.0 } else { value })'),
+    "bybit": ("ws_public.rs", "public_stream_binding", '("lastPrice", "last", 1.),', '("bid1Price", "last", 1.),'),
+    "hyrotrader": ("ws_public.rs", "hyro_binding", '("lastPrice", "last", 1.),', '("bid1Price", "last", 1.),'),
 }
 selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
 for venue in selected:
     filename, target, before, after = cases[venue]
-    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket"}.get(venue, venue)
+    crate = {"hyrotrader": "bybit", "kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket", "grvt-store": "grvt", "grvt-candle": "grvt", "grvt-mark": "grvt", "paradex-book": "paradex", "krakenspot": "kraken"}.get(venue, venue)
     test = {
+        "kraken": "production_ticker_coercion_futures_matches_constructed_typescript",
+        "krakenspot": "production_ticker_coercion_spot_matches_constructed_typescript",
         "binance": "production_ticker_coercion_",
+        "bybit": "production_ticker_coercion_",
+        "hyrotrader": "production_ticker_coercion_hyro_",
         "kucoin": "production_ticker_coercion_futures_matches_constructed_typescript",
         "kucoinspot": "production_ticker_coercion_spot_matches_constructed_typescript",
     }.get(venue, "production_ticker_coercion_matches_constructed_typescript")
@@ -37,7 +56,7 @@ for venue in selected:
     assert original.count(before.encode()) == 1, venue
     command = ["cargo", "test", "--jobs", "1", "-p", "safe-cex-venue-" + crate,
                "--test", target, test]
-    expected = 3 if venue == "binance" else 1
+    expected = {"binance": 3, "bybit": 4}.get(venue, 1)
     if venue == "binance":
         command += ["--features", "native"]
     try:

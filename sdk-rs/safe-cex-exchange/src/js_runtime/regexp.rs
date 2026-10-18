@@ -52,7 +52,7 @@ fn is_line_terminator(c: u16) -> bool {
     matches!(c, 0x0A | 0x0D | 0x2028 | 0x2029)
 }
 
-fn is_space(c: u16) -> bool {
+pub(super) fn is_space(c: u16) -> bool {
     matches!(
         c,
         0x09..=0x0D | 0x20 | 0xA0 | 0x1680 | 0x2000..=0x200A | 0x2028 | 0x2029 | 0x202F | 0x205F

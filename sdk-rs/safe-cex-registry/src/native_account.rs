@@ -7,9 +7,10 @@ use crate::rust_venues::rust_constructor;
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
     exchange::Exchange,
-    js_runtime::value::Js,
+    js_runtime::value::{Js, Thrown},
     native::{ProxyTokenSource, native_runtime, native_tealstreet_runtime},
     runtime::{Cleanup, ExchangeError, ListenerCleanup, RemoteSigner},
+    throttle::{ThrottleManager, symbol_metadata_throttler},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -66,6 +67,8 @@ pub struct NativeAccount {
     signer: Option<Rc<HostSigner>>,
     streams: RefCell<BTreeMap<u32, NativeStream>>,
     next_stream: Cell<u32>,
+    startup_token: Cell<u64>,
+    symbol_metadata_throttler: Rc<ThrottleManager<String>>,
     store_deliveries: Rc<RefCell<Vec<Weak<NativeStoreDelivery>>>>,
     stream_listeners: Rc<RefCell<Vec<Rc<dyn Fn(&str, &NativeValue)>>>>,
 }
@@ -75,6 +78,14 @@ struct NativeStream {
     cleanup: Option<ListenerCleanup>,
 }
 impl NativeAccount {
+    pub fn exchange_name(&self) -> ExchangeName {
+        self.exchange.base().name.clone()
+    }
+    /// Invalidate startup delivery before an asynchronous host disposal is polled.
+    pub fn cancel_startup(&self) {
+        self.startup_token
+            .set(self.startup_token.get().wrapping_add(1));
+    }
     fn dispose_streams(&self) -> Result<(), ExchangeError> {
         let streams = std::mem::take(&mut *self.streams.borrow_mut());
         // Stop every host callback before invoking any potentially reentrant cleanup.
@@ -171,10 +182,22 @@ impl RemoteSigner for HostSigner {
 }
 
 fn exchange_error(error: &ExchangeError) -> NativeValue {
-    let mut fields = vec![
-        ("name", NativeValue::string(&error.name)),
-        ("message", NativeValue::string(&error.message)),
-    ];
+    let projected = Thrown::from(error.clone()).value;
+    let mut fields = Vec::with_capacity(3);
+    for field in ["name", "message"] {
+        let value = match projected.get(field) {
+            Ok(value) => value,
+            Err(cause) => {
+                return host_error(format!("cannot read native error {field}: {cause:?}"));
+            }
+        };
+        match NativeValue::from_js(&value) {
+            Ok(value) => fields.push((field, value)),
+            Err(cause) => {
+                return host_error(format!("cannot retain native error {field}: {cause}"));
+            }
+        }
+    }
     if let Some(code) = &error.code {
         match NativeValue::from_js(code) {
             Ok(code) => fields.push(("code", code)),
@@ -242,12 +265,15 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
         .construct(name, options, store.clone())
         .map_err(|error| exchange_error(&error))?;
     bind_http_events(&host, &exchange);
+    let symbol_metadata_throttler = symbol_metadata_throttler(exchange.clone());
     Ok(Rc::new(NativeAccount {
         exchange,
         store,
         signer,
         streams: RefCell::default(),
         next_stream: Cell::new(1),
+        startup_token: Cell::new(0),
+        symbol_metadata_throttler,
         store_deliveries: Rc::default(),
         stream_listeners: Rc::default(),
     }))
@@ -329,6 +355,7 @@ pub fn native_account_watch(
             let active = active.clone();
             let unsubscribe = unsubscribe.clone();
             let delivery = delivery.clone();
+            let metadata = Rc::downgrade(&account.symbol_metadata_throttler);
             let exchange = Rc::downgrade(&account.exchange);
             let id = base.on_args(
                 event,
@@ -340,6 +367,9 @@ pub fn native_account_watch(
                         // ExchangeWorker clears its delivery pipeline before disposal,
                         // including the Store reset that disposal performs.
                         active.set(false);
+                        if let Some(metadata) = metadata.upgrade() {
+                            metadata.clear();
+                        }
                         delivery.cancel();
                         unsubscribe();
                         if let Some(exchange) = exchange.upgrade() {
@@ -482,7 +512,11 @@ pub fn native_account_call(
         let base = venue.base();
         match method.as_str() {
             "start" => {
+                let token = account.startup_token.get();
                 done(venue.start().await)?;
+                if token != account.startup_token.get() || base.is_disposed() {
+                    return Ok(NativeValue::Bool(false));
+                }
                 let deliveries: Vec<_> = account
                     .store_deliveries
                     .borrow()
@@ -492,9 +526,11 @@ pub fn native_account_call(
                 for delivery in deliveries {
                     done(delivery.snapshot())?;
                 }
-                Ok(NativeValue::Null)
+                Ok(NativeValue::Bool(true))
             }
             "dispose" => {
+                account.cancel_startup();
+                account.symbol_metadata_throttler.clear();
                 let streams = account.dispose_streams();
                 let disposed = venue.dispose();
                 for delivery in account
@@ -686,7 +722,8 @@ pub fn native_account_call(
                 done(venue.fetch_historical_orders(arg(&args, 0)?).await).and_then(encode)
             }
             "updateSymbolMetadata" => {
-                done(venue.update_symbol_metadata(arg(&args, 0)?).await).map(|_| NativeValue::Null)
+                account.symbol_metadata_throttler.call(arg(&args, 0)?);
+                Ok(NativeValue::Null)
             }
             other => Err(host_error(format!("Unknown method {other}"))),
         }

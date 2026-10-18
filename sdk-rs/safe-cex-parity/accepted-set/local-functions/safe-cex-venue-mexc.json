@@ -1,13 +1,13 @@
 {
   "safe-cex-venue-mexc/src/api.rs::LOCAL_FUNCTION:entries": {
     "category": "non-decoder",
-    "reason": "Inside serialize_mexc_params: enumerates outbound parameter entries in JS own-key order (array indices, then de-duplicated object keys). Outbound serialization only.",
-    "sourceSha256": "ccf85463f978f0c0158c99fbe4e1e422a822388a6f23e57b84d78ff065313718"
+    "reason": "Inside serialize_mexc_params: enumerates outbound parameter entries in JS own-key order (array indices, then de-duplicated object keys). Outbound serialization only. Reviewed phase2: The separate request-body normalizer now accepts native Js and delegates shared JSON.stringify; the nested query entries/write helpers retain their exact bodies.",
+    "sourceSha256": "74f5cfe44cd6eab920241e251c5dce7b59d8528fc8515b9568de2bcf506a1785"
   },
   "safe-cex-venue-mexc/src/api.rs::LOCAL_FUNCTION:write": {
     "category": "non-decoder",
-    "reason": "Inside serialize_mexc_params: writes outbound parameter scalars as encoded key=value pairs, recursing into containers. Outbound serialization only.",
-    "sourceSha256": "ccf85463f978f0c0158c99fbe4e1e422a822388a6f23e57b84d78ff065313718"
+    "reason": "Inside serialize_mexc_params: writes outbound parameter scalars as encoded key=value pairs, recursing into containers. Outbound serialization only. Reviewed phase2: The separate request-body normalizer now accepts native Js and delegates shared JSON.stringify; the nested query entries/write helpers retain their exact bodies.",
+    "sourceSha256": "74f5cfe44cd6eab920241e251c5dce7b59d8528fc8515b9568de2bcf506a1785"
   },
   "safe-cex-venue-mexc/src/exchange_helpers.rs::LOCAL_FUNCTION:nonnull": {
     "category": "non-decoder",

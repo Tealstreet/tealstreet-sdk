@@ -9,12 +9,13 @@ pub fn sort(collator: &JsRootCollator, a: &str, b: &str) -> Ordering {
 }
 
 use crate::{constants, data_reads::ReadTransport};
+use safe_cex_exchange::js_runtime::value::{Js, from_retained_input, to_retained_input};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
+use safe_cex_num::js_number;
 use safe_cex_num::numeric_ingress::JsNumberInput;
-use safe_cex_num::{js_number, js_truthy};
 use safe_cex_transport::{
     RestBody, RestRequest,
     retry::{ReadClassification, reads_and_posted},
@@ -22,7 +23,7 @@ use safe_cex_transport::{
     signing::try_parse_json,
 };
 use safe_cex_types::{ExchangeOptions, retained_json::RetainedJsonInput};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::rc::Rc;
 
 pub type ParamsSerializer = Rc<dyn Fn(&Value) -> Result<String, ExchangeError>>;
@@ -59,7 +60,7 @@ pub trait ApiHost {
         options: &ExchangeOptions,
         exchange: &Rc<BaseExchange>,
     ) -> Result<(), ExchangeError>;
-    fn serialize(&self, params: &Value) -> Result<String, ExchangeError>;
+    fn serialize(&self, params: &RetainedJsonInput) -> Result<String, ExchangeError>;
     fn hmac_sha256_hex(&self, secret: &str, message: &str) -> Result<String, ExchangeError>;
     fn now_ms(&self) -> f64;
 }
@@ -80,20 +81,20 @@ pub fn is_bingx_signature_rejection(data: &Value) -> Result<bool, safe_cex_num::
 }
 // ts: unsignedPayload. A replayed POST arrives with the body Axios serialized and a
 // replayed GET with the signed params it sent; drop the previous pass's signature.
-pub fn unsigned_payload(payload: Option<Value>) -> serde_json::Map<String, Value> {
-    let mut rest = match payload.map(try_parse_json) {
-        Some(Value::Object(object)) => object,
-        // Object rest over an array copies its index keys.
-        Some(Value::Array(items)) => items
+pub fn unsigned_payload(payload: Option<RetainedJsonInput>) -> RetainedJsonInput {
+    let mut fields = match payload.map(try_parse_json) {
+        Some(RetainedJsonInput::Object(fields)) => fields,
+        Some(RetainedJsonInput::Array(items)) => items
             .into_iter()
             .enumerate()
-            .map(|(index, item)| (index.to_string(), item))
+            .map(|(index, item)| (index.to_string().encode_utf16().collect(), item))
             .collect(),
-        _ => serde_json::Map::new(),
+        _ => Vec::new(),
     };
-    rest.shift_remove("signature");
-    rest
+    fields.retain(|(key, _)| !key.iter().copied().eq("signature".encode_utf16()));
+    RetainedJsonInput::Object(fields)
 }
+
 pub struct BingxApi {
     pub options: ExchangeOptions,
     pub host: Rc<dyn ApiHost>,
@@ -106,7 +107,12 @@ pub fn create_api(
 ) -> Result<Rc<BingxApi>, ExchangeError> {
     let serializer = host.clone();
     let defaults = ApiDefaults {
-        params_serializer: Rc::new(move |params| serializer.serialize(params)),
+        params_serializer: Rc::new(move |params| {
+            serializer.serialize(
+                &RetainedJsonInput::from_value(params.clone())
+                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+            )
+        }),
         base_url: constants::BASE_URL[usize::from(options.testnet == Some(true))]
             .1
             .into(),
@@ -159,57 +165,87 @@ impl BingxApi {
             .map(RestBody::untransformed)
             .transpose()
             .map_err(|e| ExchangeError::new(e.to_string()))?;
-        let mut data = unsigned_payload(
-            body.filter(|v| js_truthy(Some(v)))
-                .or_else(|| config.params.as_ref().filter(|v| js_truthy(Some(v))))
-                .cloned(),
-        );
-        if data.contains_key("__proto__") {
+        let params = config
+            .params
+            .clone()
+            .map(RetainedJsonInput::from_value)
+            .transpose()
+            .map_err(|error| ExchangeError::new(error.to_string()))?;
+        let data = from_retained_input(unsigned_payload(
+            body.filter(|value| safe_cex_num::js_retained_truthy(value))
+                .cloned()
+                .or_else(|| params.filter(safe_cex_num::js_retained_truthy)),
+        ));
+        if data.has_own("__proto__") {
             return Err(ExchangeError::new(
                 "BingX native signing refuses prototype-mutating key",
             ));
         }
-        data.insert(
-            "timestamp".into(),
-            RetainedJsonInput::Float(self.host.now_ms())
-                .into_value()
-                .map_err(|_| ExchangeError::new("BingX native signing refuses NaN timestamp"))?,
-        );
-        let collator = JsRootCollator::try_new().map_err(|e| ExchangeError::new(e.to_string()))?;
-        let mut keys = data.keys().cloned().collect::<Vec<_>>();
-        keys.sort_by(|a, b| sort(&collator, a, b));
-        let mut sorted = serde_json::Map::new();
+        data.set("timestamp", Js::Number(self.host.now_ms()))
+            .map_err(|error| error.to_exchange_error())?;
+        let collator =
+            JsRootCollator::try_new().map_err(|error| ExchangeError::new(error.to_string()))?;
+        let mut keys = data
+            .own_keys()
+            .into_iter()
+            .map(|key| String::from_utf16(&key))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| ExchangeError::new(error.to_string()))?;
+        keys.sort_by(|left, right| sort(&collator, left, right));
+        let sorted = Js::object(Vec::new());
         for key in keys {
-            sorted.insert(key.clone(), data.remove(&key).expect("sorted key"));
+            sorted
+                .set(
+                    &key,
+                    data.get(&key).map_err(|error| error.to_exchange_error())?,
+                )
+                .map_err(|error| error.to_exchange_error())?;
         }
-        let query = self.host.serialize(&Value::Object(sorted.clone()))?;
+        let query = self
+            .host
+            .serialize(&to_retained_input(&sorted).map_err(|error| error.to_exchange_error())?)?;
         let signature = self.host.hmac_sha256_hex(&self.options.secret, &query)?;
-        sorted.insert("signature".into(), json!(signature));
+        sorted
+            .set("signature", Js::str(&signature))
+            .map_err(|error| error.to_exchange_error())?;
         if config.method != "post" {
-            config.params = Some(Value::Object(sorted));
+            // Existing legacy query ABI remains a separately declared projection.
+            config.params = Some(
+                to_retained_input(&sorted)
+                    .map_err(|error| error.to_exchange_error())?
+                    .into_value()
+                    .map_err(|error| ExchangeError::new(error.to_string()))?,
+            );
             config.body = None;
         } else {
             for field in ["quantity", "price"] {
-                if let Some(v) = sorted.get(field)
-                    && js_truthy(Some(v))
-                {
-                    let n = js_number(Some(v)).map_err(|e| ExchangeError::new(e.message))?;
-                    sorted.insert(
-                        field.into(),
-                        RetainedJsonInput::Float(n).into_value().map_err(|_| {
-                            ExchangeError::new("BingX native signing refuses NaN field")
-                        })?,
-                    );
+                let value = sorted
+                    .get(field)
+                    .map_err(|error| error.to_exchange_error())?;
+                if value.truthy() {
+                    sorted
+                        .set(
+                            field,
+                            Js::Number(
+                                value
+                                    .to_number()
+                                    .map_err(|error| error.to_exchange_error())?,
+                            ),
+                        )
+                        .map_err(|error| error.to_exchange_error())?;
                 }
             }
             config
                 .headers
                 .insert("Content-Type".into(), "application/json".into());
-            // Serialized here: axios-retry resends with an identity transformRequest.
-            let serialized = safe_cex_num::js_json_stringify(&Value::Object(sorted).into())
-                .map_err(|e| ExchangeError::new(e.message))?
-                .expect("an object serializes");
-            config.body = Some(RestBody::Untransformed(Value::String(serialized)));
+            let serialized = safe_cex_num::js_retained_json_stringify(
+                &to_retained_input(&sorted).map_err(|error| error.to_exchange_error())?,
+            )
+            .map_err(|error| ExchangeError::new(error.to_string()))?
+            .expect("object JSON");
+            config.body = Some(RestBody::Untransformed(RetainedJsonInput::Text(
+                serialized.encode_utf16().collect(),
+            )));
         }
         Ok(config)
     }
