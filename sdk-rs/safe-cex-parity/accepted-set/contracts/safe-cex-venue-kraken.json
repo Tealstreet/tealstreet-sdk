@@ -4666,5 +4666,307 @@
       }
     ],
     "evidence": "The shared model info pairName remains a native retained value through actual spot OHLCV request construction; closed symbol Strings are unrelated. Direct helper observes exact pair units, interval and optional since before empty wire response handling. Actual constructed REST ticker/order metadata and numeric-prefix regressions independently compiled RED on the old native boundary and GREEN after correction. Output identity, original property presence, UTF16 units and number bits are observed before any JSON projection."
+  },
+  "safe_cex_venue_kraken::rest_account::Handle": {
+    "category": "non-decoder",
+    "reason": "At the actual Scope<KrakenExtra> ReadHost, this alias is Rc<Js>: an owning native value capability preserving object/error referents and native cells, not a wire deserializer. The fixed host profile makes no claim about other H.",
+    "evidence": "Fresh canonical compiler inventory/source claims and artifacts; scripts/handle-alias-contracts.mjs executes the unchanged native alias Serde and all maintained conversion detectors with independent invariant expected types. tests/support/accepted_handle_alias.rs constructs the real Futures/Spot exchanges and observes concrete ReadHost outputs before serialization: retained referents and mutation, original thrown error identity, getter counts, own key order, UTF16 code units, -0 bits and infinity. scripts/handle-alias-controls.py compiles semantic faults in the three production consumer methods and requires named assertion RED followed by exact restoration GREEN. Other host instantiations and aliases remain separate obligations.",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::rest_account::ReadResult": {
+    "category": "non-decoder",
+    "reason": "At the actual Scope<KrakenExtra> ReadHost and the explicit bool payload, this alias is Result<bool,Thrown>: a completion/error carrier retaining original thrown native values, not a raw-input decoder. No other payload or host is classified.",
+    "evidence": "Fresh canonical compiler inventory/source claims and artifacts; scripts/handle-alias-contracts.mjs executes the unchanged native alias Serde and all maintained conversion detectors with independent invariant expected types. tests/support/accepted_handle_alias.rs constructs the real Futures/Spot exchanges and observes concrete ReadHost outputs before serialization: retained referents and mutation, original thrown error identity, getter counts, own key order, UTF16 code units, -0 bits and infinity. scripts/handle-alias-controls.py compiles semantic faults in the three production consumer methods and requires named assertion RED followed by exact restoration GREEN. Other host instantiations and aliases remain separate obligations.",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Error",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Error",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::rest_account::Entries": {
+    "category": "non-decoder",
+    "reason": "At the actual Scope<KrakenExtra> ReadHost, this alias is Vec<(Vec<u16>,Rc<Js>)>: ordered own UTF16 property keys with native value handles, not a JSON record decoder. No other H is classified.",
+    "evidence": "Fresh canonical compiler inventory/source claims and artifacts; scripts/handle-alias-contracts.mjs executes the unchanged native alias Serde and all maintained conversion detectors with independent invariant expected types. tests/support/accepted_handle_alias.rs constructs the real Futures/Spot exchanges and observes concrete ReadHost outputs before serialization: retained referents and mutation, original thrown error identity, getter counts, own key order, UTF16 code units, -0 bits and infinity. scripts/handle-alias-controls.py compiles semantic faults in the three production consumer methods and requires named assertion RED followed by exact restoration GREEN. Other host instantiations and aliases remain separate obligations.",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_kraken::rest_account::Handle",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "H"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "qualified_path": {
+                                    "name": "Value",
+                                    "args": null,
+                                    "self_type": {
+                                      "generic": "H"
+                                    },
+                                    "trait": {
+                                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }

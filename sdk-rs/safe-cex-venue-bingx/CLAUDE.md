@@ -46,10 +46,13 @@ executes the maintained types module. Its inherited-field control must remain:
 use resolved properties, not InterfaceDeclaration.members. Fixtures distinguish
 same-typed fields, and native field observations are separate from serde metadata.
 Wire assertions use shared JS numeric projection only after native-bit checks.
-One Node invocation emits the complete corpus. Lone-surrogate witnesses retain
-TypeScript code units and escaped output alongside Rust refusal; their manifest
-rows cite the canonical UTF-8 boundary rather than calling those inputs invalid
-JSON. No unchecked Axios runtime-validation equivalence is claimed.
+One Node invocation emits the complete corpus. Lone-surrogate witnesses compare
+exact TypeScript code units and escaped output through both canonical retained
+parsing and raw capture. Both shared and bare record decoding use numeric capture
+and retain the record, replacing lone units with U+FFFD only in typed Strings.
+Direct native member observations preserve every other distinct fixture field
+and numeric bit pattern. All 883 source cases and 3659 typed route comparisons
+remain pinned. No unchecked Axios runtime-validation equivalence is claimed.
 
 Use `--test types` while working on types, and `tests/types_controls.py --only
 '<row>'` for targeted mutation checks. The full runner proves one production

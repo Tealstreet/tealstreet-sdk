@@ -720,7 +720,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         }
         let position_idx = get_order_position_idx(&rt, position_opts).await?;
 
-        let max_size = market.limits.amount.max;
+        let max_size = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
         let (p_price, p_amount) = (market.precision.price, market.precision.amount);
         let amount = adjust(base.amount, p_amount);
         let truthy = |v: Option<f64>| v.filter(|n| *n != 0. && !n.is_nan());

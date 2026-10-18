@@ -238,6 +238,12 @@ JSON boundary, never an intermediate model conversion. The native Serde marker
 and InfoRecord codecs preserve own undefined without exposing marker objects in
 wire JSON. The single retained JSON writer lives below Num in this crate.
 
+NumericValue retains Number versus Text for numeric runtime fields whose source
+mapper passes strings unchanged. Market.limits.amount.max uses this carrier.
+The static TS projection remains number, following its maintained declaration;
+output preserves the runtime variant. Numeric consumers explicitly call num's
+numeric_value_to_number, which uses the existing Number(string) parser.
+
 Market.runtime is the shared carrier for runtime type/spot/swap/future/contract/
 linear/inverse properties constructed outside the maintained TS Market declaration.
 Its serializer writes these optional fields on the Market object; its private

@@ -86,7 +86,7 @@ pub fn format_pm_create_order(
             working_type(opts, opts.r#type == OrderType::TakeProfit),
         );
     }
-    let max = market.limits.amount.max;
+    let max = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
     let lots = if amount > max {
         (amount / max).ceil()
     } else {

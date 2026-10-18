@@ -133,13 +133,22 @@ impl RestAdapter for Adapter {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         Box::pin(async move {
             self.attempts.set(self.attempts.get() + 1);
-            let params = request.params.as_ref().unwrap();
+            assert!(request.params.is_none(), "history uses only native queries");
+            let safe_cex_types::QueryValue::Object(params) = request.query_params.as_ref().unwrap()
+            else {
+                panic!("history query is an object");
+            };
             if request.url == "/v3/trade/transactionHistory"
-                && (params.get("symbol") == Some(&json!("PERP_BTC_USDT"))
-                    || !params.as_object().unwrap().contains_key("symbol")
-                        && self.groups.borrow().is_empty())
+                && (params.get("symbol")
+                    == Some(&safe_cex_types::QueryValue::String("PERP_BTC_USDT".into()))
+                    || !params.contains_key("symbol") && self.groups.borrow().is_empty())
             {
-                self.groups.borrow_mut().push(json!({"symbol":if params.get("symbol").is_some(){json!("BTCUSDT")}else{json!({"$undefined":true})},"limit":bits(safe_cex_num::js_number(params.get("limit")).unwrap()),"fromMilliseconds":params.get("startTime").map(observe).unwrap_or(json!({"$undefined":true})),"toMilliseconds":params.get("endTime").map(observe).unwrap_or(json!({"$undefined":true}))}));
+                let number = |key| match params.get(key) {
+                    Some(safe_cex_types::QueryValue::Number(value)) => bits(*value),
+                    None => json!({"$undefined":true}),
+                    other => panic!("history native number {key}: {other:?}"),
+                };
+                self.groups.borrow_mut().push(json!({"symbol":if params.get("symbol").is_some(){json!("BTCUSDT")}else{json!({"$undefined":true})},"limit":number("limit"),"fromMilliseconds":number("startTime"),"toMilliseconds":number("endTime")}));
             }
             let group = self.groups.borrow().len();
             if matches!(self.label.as_str(), "request-error" | "logger-error")
@@ -177,14 +186,6 @@ impl RestAdapter for Adapter {
 }
 fn bits(value: f64) -> Value {
     json!({"$bits":format!("{:016x}",if value.is_nan(){0x7ff8000000000000}else{value.to_bits()})})
-}
-fn observe(value: &Value) -> Value {
-    match value {
-        Value::Number(_) => bits(safe_cex_num::js_number(Some(value)).unwrap()),
-        Value::Array(v) => Value::Array(v.iter().map(observe).collect()),
-        Value::Object(v) => Value::Object(v.iter().map(|(k, v)| (k.clone(), observe(v))).collect()),
-        other => other.clone(),
-    }
 }
 fn unpack(value: &Value) -> Value {
     if let Some(raw) = value.get("$bits").and_then(Value::as_str) {
@@ -288,7 +289,7 @@ fn historical_callers_match_source_fields_effects_and_errors() {
     for index in 0..48 {
         let case = cases.get(index).unwrap();
         let label = case["label"].as_str().unwrap();
-        if matches!(label, "normalize-error" | "limit-nan") {
+        if label == "normalize-error" {
             excluded += 1;
             continue;
         }
@@ -305,7 +306,14 @@ fn historical_callers_match_source_fields_effects_and_errors() {
             attempts: Cell::new(0),
         };
         let result = if index < 24 {
-            let opts: ExecutionsOptions = serde_json::from_value(unpack(&case["opts"])).unwrap();
+            let mut input = unpack(&case["opts"]);
+            if label == "limit-nan" {
+                input.as_object_mut().unwrap().remove("limit");
+            }
+            let mut opts: ExecutionsOptions = serde_json::from_value(input).unwrap();
+            if label == "limit-nan" {
+                opts.limit = Some(f64::NAN);
+            }
             ready(fetch_historical_fills(&venue, &adapter, &opts))
                 .map(|rows| rows.iter().map(execution).collect::<Vec<_>>())
         } else {
@@ -313,7 +321,13 @@ fn historical_callers_match_source_fields_effects_and_errors() {
             if opts.get("symbol").is_none() {
                 opts["symbol"] = json!("");
             }
-            let opts: HistoricalTradeOptions = serde_json::from_value(opts).unwrap();
+            if label == "limit-nan" {
+                opts.as_object_mut().unwrap().remove("limit");
+            }
+            let mut opts: HistoricalTradeOptions = serde_json::from_value(opts).unwrap();
+            if label == "limit-nan" {
+                opts.limit = Some(f64::NAN);
+            }
             ready(fetch_historical_trades_internal(&venue, &adapter, &opts))
                 .map(|rows| rows.iter().map(trade).collect::<Vec<_>>())
         };
@@ -355,12 +369,12 @@ fn historical_callers_match_source_fields_effects_and_errors() {
     }
     assert_eq!(
         (compared, excluded),
-        (44, 4),
+        (46, 2),
         "FILLS native comparison inventory"
     );
     assert_eq!(
         (output_count, request_count, attempt_count, log_count),
-        (61, 44, 179, 9),
+        (61, 47, 182, 9),
         "FILLS native independent totals"
     );
 }

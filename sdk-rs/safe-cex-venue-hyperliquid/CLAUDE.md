@@ -256,10 +256,10 @@ Value-returning parse adapter retains its whole-return representation cost.
 <a id="signing-adapter-contract"></a>
 
 Raw private keys and Result signatures use the shared native crypto primitives;
-no ethers Wallet/Promise/Error object identity or versioned diagnostic metadata
-is retained. Keeping that ownership outside the venue avoids a second wallet
-runtime. Generic array actions now sign with their indexed/length/prototype
-semantics and a request-local metadata overlay. Caller Value::Array does not
+ethers Wallet/Promise/Error heap identity stays outside the venue. Invalid vault
+BytesLike failures retain the installed ethers diagnostic fields in the canonical
+owned callback cause, including TypeError classification and original value.
+Generic array actions now sign with their indexed/length/prototype semantics and a request-local metadata overlay. Caller Value::Array does not
 expose signatureChainId/hyperliquidChain after the call; a richer named-property
 array ABI could retain them, but the request adapters keep their existing JSON
 carrier. Object arguments retain the writes before wallet/projection failures.
@@ -452,3 +452,14 @@ CancelOrderRequests aliases execute their actual native decoder traits through
 remain guarded. Observations read every member and list position directly,
 including signed-zero bits; all five String conversion routes retain direct
 unit/byte witnesses. This is wire-alias evidence, not a Realm/HTTP behavior claim.
+
+
+The BytesLike signing regression runs the actual bound `signL1Action` on a
+NativeRuntime/Realm and the native ApiClient preparation path. It compares five
+valid vault byte/hash/signature profiles and three rejected vault envelopes with
+the maintained TS and installed ethers. Both hex prefix cases and empty bytes
+are accepted; short vault right-padding keeps the source behavior. The native
+transport retains the same canonical cause through RestFailure and the Realm
+REST rejection.
+`tests/byteslike-signing-controls.py` requires compiled native failures for prefix
+admission and dropped error metadata, then exact restoration and passing tests.

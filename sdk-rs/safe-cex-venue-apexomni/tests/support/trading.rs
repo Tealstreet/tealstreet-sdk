@@ -208,7 +208,7 @@ fn run_trading(name: &str) {
         *host.services.borrow_mut() = Some(services);
         let store = fixture(&host);
         let mut markets = Store::markets(store.as_ref()).unwrap().to_vec();
-        markets[0].limits.amount.max = 0.009;
+        markets[0].limits.amount.max = (0.009).into();
         Store::update(
             store.as_ref(),
             StoreUpdate {

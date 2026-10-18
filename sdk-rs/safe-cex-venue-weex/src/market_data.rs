@@ -119,7 +119,7 @@ pub(crate) fn normalize_market_row(
             cost: None,
             amount: MarketLimitsAmount {
                 min: min_amount,
-                max: max_amount,
+                max: (max_amount).into(),
             },
             leverage: MarketLimitsLeverage {
                 min: min_leverage,
