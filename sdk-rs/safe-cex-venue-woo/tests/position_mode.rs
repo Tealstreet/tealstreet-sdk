@@ -1,3 +1,5 @@
+#[path = "support/retained_input_observations.rs"]
+mod retained_input_observations;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str};
 use safe_cex_types::object_map::JsObjectMap;
 use safe_cex_venue_woo::{
@@ -328,10 +330,13 @@ fn position_evidence_choices_are_native_before_source() {
         Some(WooV3AccountPositionMode::OneWay),
     );
     let raw = base().to_string().replace("audit-23", r"\ud800");
-    assert!(
-        js_from_str::<JsNumberInput>(&raw).is_err(),
-        "WOO-MODE-CHOICE native whole lone-ID input refusal"
-    );
+    for section in ["account", "positions", "regularOrders", "algoOrders"] {
+        assert_eq!(
+            retained_input_observations::text_at(&raw, &["evidence", section, "reconciliationId"]),
+            vec![0xd800],
+            "WOO-MODE-CHOICE native retained ID {section}"
+        );
+    }
     assert!(js_from_str::<WooV3SetPositionModeInput>(&raw).is_err());
     assert!(
         js_from_str::<WooV3CompletePositionModeEvidence>(
@@ -342,7 +347,11 @@ fn position_evidence_choices_are_native_before_source() {
         .is_err()
     );
     let raw_snapshot = r#"{"source":"decoded-v3-futures-positions-complete-page","reconciliationId":"\ud800","complete":true,"rows":[]}"#;
-    assert!(js_from_str::<JsNumberInput>(raw_snapshot).is_err());
+    assert_eq!(
+        retained_input_observations::text_at(raw_snapshot, &["reconciliationId"]),
+        vec![0xd800],
+        "WOO-MODE-CHOICE native retained snapshot ID"
+    );
     let paired = base().to_string().replace("audit-23", r"\ud800\udc00");
     let decoded = js_from_str::<WooV3SetPositionModeInput>(&paired).unwrap();
     assert_eq!(decoded.evidence.account.reconciliation_id, "\u{10000}");
