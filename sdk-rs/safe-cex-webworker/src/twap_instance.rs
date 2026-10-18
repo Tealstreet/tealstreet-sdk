@@ -11,6 +11,7 @@ use crate::twap_manager::SerializedTwap;
 use crate::twap_manager::TwapManager;
 use indexmap::IndexMap;
 use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::eager::start_eager;
 use safe_cex_exchange::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
@@ -452,7 +453,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
             }
             Ok(())
         })();
-        Box::pin(async move { result })
+        start_eager(&self.host.runtime(), async move { result })
     }
     pub fn terminate(&self) -> ExchangeFuture<'static, ()> {
         let result = (|| {
@@ -479,7 +480,7 @@ impl<H: TwapHost + 'static> TwapInstance<H> {
             self.host.manager().remove(&self.id());
             Ok(())
         })();
-        Box::pin(async move { result })
+        start_eager(&self.host.runtime(), async move { result })
     }
     pub fn cleanup(&self) -> ExchangeFuture<'static, ()> {
         let result = self.update_state(TwapStateUpdate {

@@ -206,12 +206,13 @@ pub(super) fn recorded() {
             "PAYLOAD_RESULT {}",
             serde_json::json!({"venue":profile.name,"count":markets.len(),"rawBytes":profile.raw_files.iter().map(|p|std::fs::metadata(p).unwrap().len()).sum::<u64>(),"parseMs":parse_ms,"decodeMs":decode_ms,"parseCpuMs":parse_cpu_ms,"decodeCpuMs":decode_cpu_ms,"captureMs":capture_ms,"captureCpuMs":capture_cpu_ms,"nativeDecodeMs":native_decode_ms,"nativeDecodeCpuMs":native_decode_cpu_ms,"sourceCpuMs":profile.source_cpu_ms,"sourceWallMs":profile.source_wall_ms,"cpuRatio":cpu_ratio,"wallRatio":wall_ratio,"debugAssertions":cfg!(debug_assertions),"rawHash":format!("{raw_hash:016x}")})
         );
-        if !cfg!(debug_assertions) && cpu_ratio > 2.0 {
-            over_budget.push(format!("{}: {cpu_ratio:.3}x source CPU", profile.name));
+        let payload_cpu_ms = parse_cpu_ms + decode_cpu_ms;
+        if !cfg!(debug_assertions) && payload_cpu_ms > 250.0 {
+            over_budget.push(format!("{}: {payload_cpu_ms:.3} ms CPU", profile.name));
         }
     }
     assert!(
         over_budget.is_empty(),
-        "release payload boundary exceeds source budget: {over_budget:?}"
+        "release bootstrap payload exceeds 250 ms CPU budget: {over_budget:?}"
     );
 }

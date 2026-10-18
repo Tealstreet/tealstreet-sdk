@@ -35,5 +35,27 @@ const policies=[];for(let index=0;index<12;index++){const s=setup(),w=s.worker()
 const rr=setup();rr.mode('pending-error');const ro=opts();let rw;
 function rcb(state){rr.events.push({update:encode(state)});if(state.status==='running'){state.ordersExecuted=7;this.options.activeMarket.symbol='OTHER';}}
 rw=new rr.context.Instance(rr.venue,rr.ctx,ro,rcb,initial('idle',[1,2]),'fixture');rr.manager.add(rw);rr.rngHook(()=>{ro.duration=1000;ro.randomnessPercentage=99;ro.activeMarket.symbol='RNG';});const rf=rw.start();assert.equal(rr.events.length,3);await rw.pause();rw.options.activeMarket.symbol='AFTER';rr.release();await rf;const rngRace=encode(rr.events);
+const settlement=[];
+for (const method of ['resume', 'terminate']) {
+ for (const mode of ['active', 'noop', 'post-error']) {
+  const s=setup();
+  const initialStatus=method==='resume'?(mode==='noop'?'running':'paused'):(mode==='noop'?'completed':'running');
+  const w=s.worker(initialStatus,[1]);
+  w.timerId=42;w.sliceTimers.push(101,102);w.trackedChaserOrderIds.push('tracked');
+  if(mode==='post-error') {
+   const post=s.ctx.postMessage;
+   s.ctx.postMessage=message=>{post(message);throw new Error('post failed');};
+  }
+  const order=[];
+  const waiter=w[method]().then(()=>order.push('fulfilled'),error=>order.push(error.message));
+  const before={events:encode(s.events),status:w.state.status,registered:s.manager.hasId(w.id),timer:w.timerId,slices:[...w.sliceTimers],tracked:[...w.trackedChaserOrderIds]};
+  assert.deepEqual(order,[]);
+  order.push('returned');
+  await waiter;
+  assert.deepEqual(order,['returned',mode==='post-error'?'post failed':'fulfilled']);
+  settlement.push({method,mode,before,order});
+ }
+}
+assert.equal(settlement.length,6);
 assert.equal(prices.length,8);assert.equal(policies.length,12);
-process.stdout.write(JSON.stringify({constructor,pauseResume,prices,policies,rngRace}));
+process.stdout.write(JSON.stringify({constructor,pauseResume,prices,policies,rngRace,settlement}));

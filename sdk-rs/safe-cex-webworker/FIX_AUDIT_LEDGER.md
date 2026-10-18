@@ -10,8 +10,8 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 2 | ChaserOrderManager#tryPlaceOrders | OPEN | Eager entry and cancellation ownership. |
 | 3 | ChaserOrderManager#emitComplete | OPEN | Native event and await order. |
 | 4 | chaserOrderManagerInstance | OPEN | Constructed module/receiver composition. |
-| 5 | TwapInstance.resume | OPEN | Native timer and immediate async prefix. |
-| 6 | TwapInstance.terminate | OPEN | Immediate cleanup and detached lifetime. |
+| 5 | TwapInstance.resume | FIX | Canonical Promise settlement; immediate prefix and rejection profiles below. |
+| 6 | TwapInstance.terminate | FIX | Same settlement boundary; synchronous cleanup and partial-commit order preserved. |
 | 7 | UpdatePositionsHandler.handleUpdatePositions | FIX | Shared eager boundary; source/native timing profiles below. |
 | 8 | UpdatePositionsHandler.handle | FIX | Same operation invoked during dispatch, without an extra spawn. |
 | 17 | StoreWorkerPayload | OPEN | Whole worker carrier and report boundary. |
@@ -65,3 +65,28 @@ commit, subscriber failure and stopped-fanout assertions remain in their native 
 The typed payload decoder's filtering and UTF-8 input costs remain separately
 declared on the manifest row. This timing repair does not close the whole
 worker-carrier cohort or claim arbitrary JavaScript input admission.
+
+## TWAP settlement: rows 5 and 6
+
+The maintained `twap/TwapInstance.ts` async arrows (resume at line 249 and
+terminate at line 267) have no awaits. State/timer effects already ran before
+native method return; the difference was their ready Result futures continuing
+an awaiting caller without the source Promise checkpoint. Both now return the
+canonical `start_eager` waiter over the already computed result. No body is
+re-executed, no bespoke task driver is added, and dropping the waiter cannot undo
+synchronous effects. Success, guarded no-op and post rejection all yield once.
+
+Two named `yields_caller_settlement` regressions in `tests/twap_lifecycle.rs`
+fail on the compiled master body at `5c3082cee1`: each returns Ready where the
+maintained-source oracle requires the caller to return before continuation.
+Six source/native profiles run actual TWAP instances and managers with only
+the existing terminal clock/timer/post capabilities supplied. They compare
+complete prefix events, status, manager membership, retained timer, slice list,
+tracked chaser IDs and continuation outcomes. A failed post leaves the state
+commit in place and prevents later cleanup/removal exactly as TS does. The
+existing 252 interleavings, constructor, clock, price and timeout cases remain.
+
+This closes the two timing findings, not the independent shared options/state
+representation review (rows 76/77). The native model still uses typed state
+snapshots and explicit timer/post capabilities; no arbitrary JS getter, mutable
+array alias or whole browser-worker startup equivalence is claimed here.
