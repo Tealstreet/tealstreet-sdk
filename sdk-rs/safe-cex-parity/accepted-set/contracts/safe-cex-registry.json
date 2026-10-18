@@ -723,10 +723,10 @@
       }
     }
   },
-  "safe_cex_registry::native_account::JsonFuture": {
+  "safe_cex_registry::native_account::NativeAccountFuture": {
     "category": "non-decoder",
-    "evidence": "safe-cex-registry/src/native_account.rs::JsonFuture: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
-    "reason": "Pinned native account continuation returning typed success or an already produced JSON error value. The bool probe establishes only that fixed future identity; JSON account argument decoding is owned by the entrypoints.",
+    "evidence": "safe-cex-registry/src/native_account.rs::NativeAccountFuture: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Pinned native account continuation returning typed success or an already produced JSON error value. The bool probe establishes only that fixed future identity; structured account argument decoding is owned by the entrypoints.",
     "target": {
       "resolved_path": {
         "path": "core::pin::Pin",
