@@ -2183,16 +2183,18 @@ fn fix_audit_real_private_refreshes_debounce_await_and_skip_disposed_store() {
                     "orders" => h
                         .store
                         .orders()
+                        .unwrap()
                         .iter()
                         .find(|v| v.id == "native-9")
                         .map(|v| v.price.to_number()),
                     "positions" => h
                         .store
                         .positions()
+                        .unwrap()
                         .iter()
                         .find(|v| v.contracts > 0.0)
                         .map(|v| v.contracts),
-                    _ => Some(h.store.balance().total),
+                    _ => Some(h.store.balance().unwrap().total),
                 }
             };
             let before = state();

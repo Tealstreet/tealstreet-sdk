@@ -46,7 +46,7 @@ Three FIX rows lose valid public data because the native adapter captures unread
 
 Run Cargo from `sdk-rs` with `CARGO_INCREMENTAL=0` and `--jobs 1`. Set `SAFE_CEX_TYPESCRIPT_PATH="$PWD/../node_modules/typescript"` for the source-driven targets.
 
-The PR records scoped native/source results, full parity index, all-features cancellation, package fmt check, and native/WASM all-target Clippy. No new exemption or scanner policy is introduced. Auto-merge remains off while #1017 is pending.
+The PR records scoped native/source results, full parity index, all-features cancellation, package fmt check, and native/WASM all-target Clippy. No new exemption or scanner policy is introduced. #1017 has merged; the refresh below supersedes the former auto-merge hold.
 
 Overseer ruling (thread-dm4ltqa1kuqc, 2026-10-19): label all eleven scalar rows FIX-OWNED, because a scoped ACCEPT would read as closed while the shared depth bound can still lose real pages. Other ACCEPTs remain.
 
@@ -54,7 +54,7 @@ All dropped-waiter and continuation probes retain the constructed exchange. They
 make no final-owner Drop claim and introduce no Drop implementation. Final native
 teardown remains governed by the separate deterministic-teardown ruling/helper.
 
-## Checked receipts
+## Original READY receipts (historical)
 
 On normally refreshed code head `9b2ec24a90` (source unchanged by later documentation):
 
@@ -70,4 +70,26 @@ On normally refreshed code head `9b2ec24a90` (source unchanged by later document
 - All-features cancellation: **5 PASS / 1 FAIL / 1 discovery test ignored**, `/tmp/port-txflow-weex-cancellation.log`. The sole failure is inherited #1082 `src/js_runtime/jobs.rs` guard drift: actual `a20ae3530f9ebf67583909eb67e3399b99bcfbb87430a83b1bc464c8a7d8366c`, reviewed `75bf253c85fc61cd0f632a8684ab250a58a58b5f3d274377391ca6074954d5c0`. Overseer explicitly authorizes READY with this inherited exception; codex-bsswa2 owns `fix/native-replay-cancellation-pin`. No pin is changed here. Normal-merge master after that repair lands.
 - CI parity job `117729376674` stops before WEEX at Crypto.com `types.rs:373` / `wire_utf8_refusal:CryptocomInstrument`. #1092's owner confirms that exact assertion and full Crypto suite GREEN in its test-only migration. This PR leaves Crypto and the four WEEX stale assertions unchanged.
 
-Implementation PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1097. The three local FIX rows are implemented here; eleven shared-bound FIX-OWNED rows remain open with their owner. Auto-merge is deliberately OFF under #1017.
+Implementation PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1097. The three local FIX rows are implemented here; eleven shared-bound FIX-OWNED rows remain open with their owner. The original READY milestone left auto-merge off under #1017; the hold has since ended.
+
+## Post-Store refresh
+
+Normal merge `81739fd71f` includes official master `971591ba9d`, #1017's
+fallible Store API and the #1096/#1107 replay-job repairs. The new held-refresh
+witness explicitly unwraps all three Store reads, so a read failure fails the
+witness instead of being treated as an empty snapshot. Its debounce, held HTTP,
+live settlement and disposal assertions are unchanged. Production adapter bytes
+are unchanged.
+
+Fresh scoped native/source suite: **79/79 PASS**, including all 65 constructed
+binding tests (`/tmp/port-txflow-weex-refresh-tests.log`). Full parity index:
+**7563 rows / 16672 Rust items PASS**; extractor **0 drift**. Required
+all-features cancellation: **6 PASS / 1 intentional discovery ignore**, with no
+inherited pin exception (`/tmp/port-txflow-weex-refresh-cancellation.log`). The
+historical #1092 stale-expectation ownership above remains separate.
+
+Full workspace formatting and strict native plus WASM all-target Clippy also
+PASS on that refreshed source (`/tmp/port-txflow-weex-refresh-fmt.log`,
+`/tmp/port-txflow-weex-refresh-native-clippy.log`, and
+`/tmp/port-txflow-weex-refresh-wasm-clippy.log`). Every Cargo invocation used
+`CARGO_INCREMENTAL=0`, SDK working directory, and one build job where applicable.
