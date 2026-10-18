@@ -57,7 +57,7 @@ function view(method, value) {
     default:assert.fail(c.method);
    }
    assert.equal(requests.length,Object.keys(c.routes).length,c.id);
-   observations.push({...c,result:view(c.method,result),requests});
+   observations.push({id:c.id,method:c.method,routeBodies:Object.fromEntries(Object.entries(c.routes).map(([k,v])=>[k,JSON.stringify(v)])),result:view(c.method,result),requests});
   }finally{venue.dispose();}
  }
  assert.equal(observations.length,13);

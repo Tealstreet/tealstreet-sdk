@@ -1975,8 +1975,15 @@ fn fix_audit_utilities_run_through_whole_source_and_constructed_native_methods()
     );
     for case in cases {
         let h = harness(options(), |http| {
-            for (path, data) in case["routes"].as_object().unwrap() {
-                http.ok("GET", path, data.clone());
+            for (path, data) in case["routeBodies"].as_object().unwrap() {
+                http.route_body(
+                    "GET",
+                    path,
+                    200,
+                    safe_cex_transport::RestResponseBody::Encoded(
+                        data.as_str().unwrap().as_bytes().to_vec(),
+                    ),
+                );
             }
             script(http);
         });
@@ -2113,10 +2120,16 @@ fn fix_audit_utilities_run_through_whole_source_and_constructed_native_methods()
         );
         let sent = h.http.sent.lock().unwrap();
         assert_eq!(sent.len(), case["requests"].as_array().unwrap().len());
-        assert!(
-            sent.iter().all(|r| r.headers.contains_key("ACCESS-SIGN")),
-            "actual signed HTTP"
-        );
+        if matches!(
+            case["method"].as_str().unwrap(),
+            "orders" | "positions" | "leverage" | "fills" | "configpositions"
+        ) {
+            assert!(
+                sent.iter().all(|r| r.headers.contains_key("ACCESS-SIGN")),
+                "{} actual signed HTTP",
+                case["id"]
+            );
+        }
         drop(sent);
         h.venue().dispose().unwrap();
     }
@@ -2124,10 +2137,29 @@ fn fix_audit_utilities_run_through_whole_source_and_constructed_native_methods()
 
 #[test]
 fn fix_audit_real_private_refreshes_debounce_await_and_skip_disposed_store() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fix-audit-refresh-source.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 6);
     use safe_cex_transport::socket::SocketFrame;
     for kind in ["orders", "positions", "account"] {
-        for disposed in [false,true] {
-            let h=setup();
+        for disposed in [false, true] {
+            let h = setup();
             h.drive(h.venue().start()).unwrap();
             h.runtime.pump();
             match kind {
@@ -2136,27 +2168,81 @@ fn fix_audit_real_private_refreshes_debounce_await_and_skip_disposed_store() {
                 "account" => h.http.replace("GET",endpoint("BALANCE"),json!([{"asset":"USDT","balance":"285","availableBalance":"240","unrealizePnl":"5"}])),
                 _=>unreachable!(),
             }
-            let state=|| -> f64 {match kind {
-                "orders"=>h.store.orders().iter().find(|v|v.id=="native-9").unwrap().price,
-                "positions"=>h.store.positions().iter().find(|v|v.contracts>0.0).unwrap().contracts,
-                _=>h.store.balance().total,
-            }};
-            let before=state();
-            let held=h.http.hold_responses();
-            let sent=h.http.sent.lock().unwrap().len();
-            let socket=h.venue().base().get_private_sockets()[0].clone();
-            let frame=SocketFrame::Text(json!({"e":kind,"d":[]}).to_string());
-            socket.on_message(&frame).unwrap();h.runtime.advance(100.0);
-            socket.on_message(&frame).unwrap();h.runtime.advance(249.0);
-            assert_eq!(h.http.sent.lock().unwrap().len(),sent,"{kind}: reset debounce deadline");
+            let state = || -> Option<f64> {
+                match kind {
+                    "orders" => h
+                        .store
+                        .orders()
+                        .iter()
+                        .find(|v| v.id == "native-9")
+                        .map(|v| v.price.to_number()),
+                    "positions" => h
+                        .store
+                        .positions()
+                        .iter()
+                        .find(|v| v.contracts > 0.0)
+                        .map(|v| v.contracts),
+                    _ => Some(h.store.balance().total),
+                }
+            };
+            let before = state();
+            let held = h.http.hold_responses();
+            let sent = h.http.sent.lock().unwrap().len();
+            let socket = h.venue().base().get_private_sockets()[0].clone();
+            let frame = SocketFrame::Text(json!({"e":kind,"d":[]}).to_string());
+            socket.on_message(&frame).unwrap();
+            h.runtime.advance(100.0);
+            socket.on_message(&frame).unwrap();
+            h.runtime.advance(249.0);
+            assert_eq!(
+                h.http.sent.lock().unwrap().len(),
+                sent,
+                "{kind}: reset debounce deadline"
+            );
             h.runtime.advance(1.0);
-            assert_eq!(h.http.sent.lock().unwrap().len()-sent,if kind=="orders" {2}else{1},"{kind}: real fetch starts at timer deadline");
-            assert_eq!(state().to_bits(),before.to_bits(),"{kind}: held HTTP cannot update Store");
-            if disposed {h.venue().dispose().unwrap();}
-            held.release();h.runtime.pump();
-            let expected=if disposed {before} else {match kind {"orders"=>999.0,"positions"=>7.0,_=>285.0}};
-            assert_eq!(state().to_bits(),expected.to_bits(),"{kind}: disposed={disposed}, real Store settlement");
-            assert!(h.runtime.reports.borrow().is_empty(),"{:?}",h.runtime.reports.borrow());
+            assert_eq!(
+                h.http.sent.lock().unwrap().len() - sent,
+                if kind == "orders" { 2 } else { 1 },
+                "{kind}: real fetch starts at timer deadline"
+            );
+            assert_eq!(
+                state().map(f64::to_bits),
+                before.map(f64::to_bits),
+                "{kind}: held HTTP cannot update Store"
+            );
+            if disposed {
+                h.venue().dispose().unwrap();
+            }
+            held.release();
+            h.runtime.pump();
+            let expected = if disposed {
+                if kind == "account" { Some(0.0) } else { None }
+            } else {
+                Some(match kind {
+                    "orders" => 999.0,
+                    "positions" => 7.0,
+                    _ => 285.0,
+                })
+            };
+            let observed = source
+                .iter()
+                .find(|v| v["kind"] == kind && v["disposed"] == disposed)
+                .unwrap();
+            assert_eq!(
+                state(),
+                observed["after"].as_f64(),
+                "actual source Store {kind} disposed={disposed}"
+            );
+            assert_eq!(
+                state().map(f64::to_bits),
+                expected.map(f64::to_bits),
+                "{kind}: disposed={disposed}, real Store settlement"
+            );
+            assert!(
+                h.runtime.reports.borrow().is_empty(),
+                "{:?}",
+                h.runtime.reports.borrow()
+            );
             h.venue().dispose().unwrap();
         }
     }

@@ -226,14 +226,17 @@ pub struct Hold {
 }
 impl Hold {
     pub fn release(&self) {
-        self.released.store(true, std::sync::atomic::Ordering::SeqCst);
-        for waker in self.wakers.lock().unwrap().drain(..) { waker.wake(); }
+        self.released
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        for waker in self.wakers.lock().unwrap().drain(..) {
+            waker.wake();
+        }
     }
 }
 impl Http {
     pub fn hold_responses(&self) -> Arc<Hold> {
-        let hold=Arc::new(Hold::default());
-        *self.held.lock().unwrap()=Some(hold.clone());
+        let hold = Arc::new(Hold::default());
+        *self.held.lock().unwrap() = Some(hold.clone());
         hold
     }
     pub fn route(&self, method: &str, path: &str, status: u16, value: Value) {
@@ -304,17 +307,21 @@ impl RestAdapter for Http {
             }
             None => panic!("unscripted {} {}", request.method, request.url),
         };
-        let hold=self.held.lock().unwrap().clone();
-        let mut result=Some(result);
+        let hold = self.held.lock().unwrap().clone();
+        let mut result = Some(result);
         Box::pin(std::future::poll_fn(move |cx| {
-            if let Some(hold)=&hold {
-                let mut wakers=hold.wakers.lock().unwrap();
+            if let Some(hold) = &hold {
+                let mut wakers = hold.wakers.lock().unwrap();
                 if !hold.released.load(std::sync::atomic::Ordering::SeqCst) {
                     wakers.push(cx.waker().clone());
                     return Poll::Pending;
                 }
             }
-            Poll::Ready(result.take().expect("terminal HTTP polled after settlement"))
+            Poll::Ready(
+                result
+                    .take()
+                    .expect("terminal HTTP polled after settlement"),
+            )
         }))
     }
 }
