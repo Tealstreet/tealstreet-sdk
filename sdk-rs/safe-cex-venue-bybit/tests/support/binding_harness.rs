@@ -468,7 +468,7 @@ impl RateLimitClock for Clock {
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub wire: Arc<Wire>,
-    pub store: Rc<safe_cex_store::store::DefaultStore>,
+    pub store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub exchange: Rc<BybitExchange>,
 }
 
@@ -541,7 +541,7 @@ fn configured_harness(
     runtime.now.set(START_MS);
     let wire = Arc::new(Wire::default());
     script(&wire);
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let epoch = Arc::new(AtomicU64::new(START_MS as u64));
     let mut clock = VirtualClock::default();
     clock.now = Arc::new(move || epoch.load(Ordering::SeqCst) as f64);

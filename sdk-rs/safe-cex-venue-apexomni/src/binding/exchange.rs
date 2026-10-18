@@ -53,7 +53,7 @@ impl ApexOmniExchange {
             ExchangeSettings::default(),
         );
         base.signers.remote_signer = remote.map(|(signer, _)| signer);
-        let host = Host::new(options, store, deps);
+        let host = Host::new(options, store, deps)?;
         // A weak imported host capability prevents the socket->parent->host cycle.
         let inner = Bodies::new(base, Rc::new(HostLink(Rc::downgrade(&host))))?;
         let venue = Rc::new(Self {

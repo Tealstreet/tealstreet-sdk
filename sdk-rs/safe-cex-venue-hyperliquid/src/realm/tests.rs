@@ -213,7 +213,7 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
     let base = Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
         safe_cex_types::ExchangeName::Hyperliquid,
         options,
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         rt,
         safe_cex_exchange::exchange::ExchangeSettings::default(),
     ));
@@ -686,7 +686,7 @@ fn production_seam_timeout_leads_are_actual_class_properties() {
     let base = Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
         safe_cex_types::ExchangeName::Hyperliquid,
         serde_json::from_value(serde_json::json!({"key":"","secret":""})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         rt,
         safe_cex_exchange::exchange::ExchangeSettings::default(),
     ));

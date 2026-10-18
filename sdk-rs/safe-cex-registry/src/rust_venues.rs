@@ -403,7 +403,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
                 }),
             },
             external,
-        );
+        )?;
         *weak.borrow_mut() = Rc::downgrade(&venue);
         Ok(venue)
     })

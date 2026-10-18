@@ -8,8 +8,9 @@ use indexmap::{IndexMap, IndexSet};
 use safe_cex_types::Candle;
 use std::{cell::RefCell, rc::Rc};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PublicStreamFailure {
+    pub native: Option<safe_cex_exchange::runtime::ExchangeError>,
     pub name: String,
     pub message: String,
 }
@@ -18,6 +19,7 @@ fn type_error(message: &str) -> Failure {
     Rc::new(PublicStreamFailure {
         name: "TypeError".into(),
         message: message.into(),
+        native: None,
     })
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,11 +1,11 @@
 #[path = "support/repair_runtime.rs"]
 mod host;
 use host::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_asterdex::listen_key::{ListenKeyLifecycle, ListenKeyParent, ListenKeyState};
 use serde_json::{Value, json};

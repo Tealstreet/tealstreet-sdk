@@ -83,7 +83,7 @@ fn native_error_instance_descriptors_and_serialization_match_node() {
         .unwrap();
     tokio::task::LocalSet::new().block_on(&rt,async{
   let runtime=native_runtime();let http=client::rest_http_host(runtime.clone(),Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
-  let shared=Rc::new(ScopeShared::new(runtime,http,Rc::new(safe_cex_store::store::DefaultStore::new()),Js::object(vec![]),()));
+  let shared=Rc::new(ScopeShared::new(runtime,http,Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),Js::object(vec![]),()));
   globals::install_builtins(&shared.globals,Rc::downgrade(&shared));
   let object=shared.globals.get("Object").unwrap().clone();let json=shared.globals.get("JSON").unwrap().clone();
   for row in cases{

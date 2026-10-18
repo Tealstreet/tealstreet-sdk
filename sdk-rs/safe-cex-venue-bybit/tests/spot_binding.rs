@@ -148,7 +148,7 @@ fn spot_methods_use_spot_requests_and_inherited_refusals() {
         "spot"
     );
     assert_eq!(
-        h.store.orders().len(),
+        h.store.orders().unwrap().len(),
         1,
         "default route waits for private WS to retire an order"
     );
@@ -182,8 +182,8 @@ fn public_only_spot_start_uses_spot_socket_and_skips_account_reads() {
     let h = support::harness_as(ExchangeName::Bybitspot, options, scripted);
     h.drive(h.venue().start()).unwrap();
     h.runtime.pump();
-    assert_eq!(h.store.markets().len(), 1);
-    assert_eq!(h.store.tickers().len(), 1);
+    assert_eq!(h.store.markets().unwrap().len(), 1);
+    assert_eq!(h.store.tickers().unwrap().len(), 1);
     let sockets = h.runtime.sockets.borrow();
     assert_eq!(sockets.len(), 1);
     assert!(
@@ -201,14 +201,14 @@ fn private_spot_start_publishes_snapshot_and_subscribes_only_to_orders() {
     let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
     h.drive(h.venue().start()).unwrap();
     h.advance(2000.);
-    let loaded = h.store.loaded().clone();
+    let loaded = h.store.loaded().unwrap().clone();
     assert!(
         loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders,
         "Spot snapshot: {loaded:?}; logs={:?}",
         h.runtime.logs.borrow()
     );
-    assert_eq!(h.store.orders()[0].id, "existing");
-    assert!(h.store.positions().is_empty());
+    assert_eq!(h.store.orders().unwrap()[0].id, "existing");
+    assert!(h.store.positions().unwrap().is_empty());
     let sockets = h.runtime.sockets.borrow();
     assert_eq!(sockets.len(), 2);
     let private = &sockets
@@ -253,7 +253,7 @@ fn brazil_spot_cancel_retires_the_local_order_fallback() {
     )
     .unwrap();
     h.drive(h.venue().cancel_orders(orders)).unwrap();
-    assert!(h.store.orders().is_empty());
+    assert!(h.store.orders().unwrap().is_empty());
     h.venue().dispose().unwrap();
 }
 
@@ -338,7 +338,11 @@ fn spot_private_frames_deliver_live_orders_and_fills_without_positions() {
         )));
     h.runtime.pump();
     assert!(
-        h.store.orders().iter().any(|o| o.id == "spot-live"),
+        h.store
+            .orders()
+            .unwrap()
+            .iter()
+            .any(|o| o.id == "spot-live"),
         "Spot private order reaches the store"
     );
     row["orderStatus"] = json!("PartiallyFilled");
@@ -369,7 +373,7 @@ fn spot_private_frames_deliver_live_orders_and_fills_without_positions() {
         )));
     h.runtime.pump();
     assert!(
-        h.store.positions().is_empty(),
+        h.store.positions().unwrap().is_empty(),
         "Spot source has no position handler"
     );
     h.venue().dispose().unwrap();

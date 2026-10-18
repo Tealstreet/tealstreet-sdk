@@ -28,7 +28,7 @@ fn scope() -> Rc<ScopeShared<()>> {
     let shared = Rc::new(ScopeShared::new(
         runtime,
         http,
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         Js::object(vec![]),
         (),
     ));

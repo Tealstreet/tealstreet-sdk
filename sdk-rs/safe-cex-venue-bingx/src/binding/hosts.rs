@@ -80,7 +80,7 @@ impl Host {
         options: ExchangeOptions,
         store: Rc<dyn Store>,
         deps: BingxDependencies,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, ExchangeError> {
         let scope = Rc::new(ScopeShared::new(
             deps.runtime,
             deps.http,
@@ -96,7 +96,10 @@ impl Host {
                 safe_cex_exchange::js_runtime::value::from_typed(&options)
                     .expect("serializable options"),
             ),
-            ("store", safe_cex_exchange::js_runtime::store::facade(store)),
+            (
+                "store",
+                safe_cex_exchange::js_runtime::store::facade(store).map_err(error)?,
+            ),
         ]);
         let weak = Rc::downgrade(&scope);
         parent
@@ -112,7 +115,7 @@ impl Host {
             .expect("fresh extensible accessor target");
         let public = sockets::base_websocket(&scope.sockets, parent.clone());
         let private = sockets::base_websocket(&scope.sockets, parent);
-        Rc::new(Self {
+        Ok(Rc::new(Self {
             public_close: public.get("onClose").expect("base close"),
             private_close: private.get("onClose").expect("base close"),
             public,
@@ -125,7 +128,7 @@ impl Host {
             blobs: Rc::default(),
             tasks: Rc::default(),
             private_listeners: RefCell::default(),
-        })
+        }))
     }
     pub fn base(&self) -> &Rc<BaseExchange> {
         self.scope

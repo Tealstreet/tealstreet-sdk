@@ -139,7 +139,7 @@ impl MexcPrivateHandlers {
         let rows = checked_source_rows(frame)?;
         let mut orders: Vec<Order> = Vec::new();
         for row in &rows {
-            let markets = store.markets_by_symbol();
+            let markets = store.markets_by_symbol()?;
             if row.is_null() {
                 return Err(null_property_error("symbol"));
             }
@@ -211,7 +211,7 @@ impl MexcPrivateHandlers {
             // accepts row.contract. Giving it a contract-derived market changes qty.
             let symbol =
                 from_mexc_symbol(raw.get("symbol")).map_err(crate::exchange_errors::coercion)?;
-            let market = store.markets_by_symbol().get(&symbol).cloned();
+            let market = store.markets_by_symbol()?.get(&symbol).cloned();
             let Some(fill) =
                 normalize_execution_for_fill(&raw, market.as_ref(), self.local_to_utc.as_ref())
                     .map_err(crate::exchange_errors::coercion)?
@@ -247,7 +247,7 @@ impl MexcPrivateHandlers {
         let rows = checked_source_rows(frame)?;
         let mut positions = Vec::new();
         for row in rows {
-            let markets = store.markets_by_symbol();
+            let markets = store.markets_by_symbol()?;
             if row.is_null() {
                 return Err(null_property_error("symbol"));
             }
@@ -286,7 +286,7 @@ impl MexcPrivateHandlers {
         let rows = checked_source_rows(frame)?;
         let mut parsed: Vec<(Order, String)> = Vec::new();
         for row in &rows {
-            let markets = store.markets_by_symbol();
+            let markets = store.markets_by_symbol()?;
             if row.is_null() {
                 return Err(null_property_error("symbol"));
             }

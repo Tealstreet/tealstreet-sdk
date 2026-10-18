@@ -184,8 +184,8 @@ fn private_snapshot_does_not_commit_a_response_after_disposal() {
     venue.base.dispose().unwrap();
     *venue.orders.result.borrow_mut() = Some(Ok(vec![order()]));
     assert!(matches!(poll(request.as_mut()), Poll::Ready(Ok(()))));
-    assert!(venue.store.orders().is_empty());
-    assert!(!venue.store.loaded().orders);
+    assert!(venue.store.orders().unwrap().is_empty());
+    assert!(!venue.store.loaded().unwrap().orders);
     assert_eq!(venue.order_calls.get(), 1);
     assert_eq!(venue.runtime.sleeps.get(), 0);
 }
@@ -218,11 +218,11 @@ fn scoped_empty_symbols_are_not_a_full_order_reconciliation() {
             .fetch_and_set_orders(venue.as_ref(), Some(vec![])),
     )
     .unwrap();
-    assert_eq!(venue.store.orders().len(), 1);
-    assert!(!venue.store.loaded().orders);
+    assert_eq!(venue.store.orders().unwrap().len(), 1);
+    assert!(!venue.store.loaded().unwrap().orders);
     ready(venue.base.fetch_and_set_orders(venue.as_ref(), None)).unwrap();
-    assert!(venue.store.orders().is_empty());
-    assert!(venue.store.loaded().orders);
+    assert!(venue.store.orders().unwrap().is_empty());
+    assert!(venue.store.loaded().unwrap().orders);
     assert_eq!(*venue.symbols.borrow(), vec![Some(vec![]), None]);
 }
 
@@ -295,7 +295,7 @@ fn disposed_origin_returns_empty_but_existing_waiter_gets_fetch_result() {
     venue.runtime.pump();
     assert!(matches!(poll(first.as_mut()), Poll::Ready(Ok(positions)) if positions.is_empty()));
     assert!(matches!(poll(second.as_mut()), Poll::Ready(Ok(positions)) if positions.len() == 1));
-    assert!(venue.store.positions().is_empty());
+    assert!(venue.store.positions().unwrap().is_empty());
     assert_eq!(venue.position_calls.get(), 1);
 }
 
@@ -314,7 +314,7 @@ fn adversarial_dropped_position_initiator_still_commits_completed_fetch() {
     *venue.positions.result.borrow_mut() = Some(Ok(vec![position()]));
     venue.runtime.pump();
     assert_eq!(
-        venue.store.positions().len(),
+        venue.store.positions().unwrap().len(),
         1,
         "Ignoring the initiating caller must not discard the source async method's post-fetch store update"
     );
@@ -348,7 +348,7 @@ fn host_discarding_unpolled_or_pending_position_task_settles_all_waiters() {
         assert!(
             matches!(poll(second.as_mut()), Poll::Ready(Err(error)) if error.message == "Position fetch task cancelled")
         );
-        assert!(venue.store.positions().is_empty());
+        assert!(venue.store.positions().unwrap().is_empty());
     }
 }
 
@@ -562,7 +562,7 @@ fn notification_failure_is_inside_private_snapshot_retry_catch() {
     assert_eq!(failures.get(), 3);
     assert_eq!(venue.runtime.sleeps.get(), 2);
     assert_eq!(
-        venue.store.orders().len(),
+        venue.store.orders().unwrap().len(),
         1,
         "failed notification follows committed orders"
     );
@@ -640,5 +640,5 @@ fn position_notification_error_belongs_to_origin_not_shared_fetch_waiter() {
         matches!(poll(waiter.as_mut()), Poll::Ready(Ok(rows)) if rows.len() == 1),
         "shared waiter awaits fetch only, not origin notification"
     );
-    assert_eq!(venue.store.positions().len(), 1);
+    assert_eq!(venue.store.positions().unwrap().len(), 1);
 }

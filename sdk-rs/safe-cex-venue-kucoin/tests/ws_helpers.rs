@@ -118,7 +118,7 @@ fn live_socket_number_and_timestamp_helpers() {
     assert_eq!(reference["cases"].as_array().unwrap().len(), cases.len());
     for (c, expected) in cases.iter().zip(reference["cases"].as_array().unwrap()) {
         let value = c.get("value");
-        let store = safe_cex_store::store::DefaultStore::new();
+        let store = safe_cex_exchange::native_store::DefaultStore::new();
         safe_cex_store::Store::update(
             &store,
             safe_cex_store::StoreUpdate {
@@ -134,7 +134,8 @@ fn live_socket_number_and_timestamp_helpers() {
             &store,
             c["shardIndex"].as_f64().unwrap_or(f64::NAN),
             c["shardCount"].as_f64().unwrap_or(f64::NAN),
-        );
+        )
+        .unwrap();
         let topic = match get_candle_handler_topic(c["topic"].as_str().unwrap()) {
             Ok(t) => json!({"ok":t}),
             Err(e) => json!({"error":e}),
@@ -451,7 +452,7 @@ fn shard_cardinality_supplement_retains_each_native_symbol() {
         2,
         "KUCOIN-CARDINALITY shard source total"
     );
-    let store = safe_cex_store::store::DefaultStore::new();
+    let store = safe_cex_exchange::native_store::DefaultStore::new();
     safe_cex_store::Store::update(
         &store,
         safe_cex_store::StoreUpdate {
@@ -461,7 +462,7 @@ fn shard_cardinality_supplement_retains_each_native_symbol() {
         false,
     )
     .unwrap();
-    let native = snapshot_shard_symbols(&store, 0.0, 1.0);
+    let native = snapshot_shard_symbols(&store, 0.0, 1.0).unwrap();
     assert_eq!(
         native.len(),
         2,
