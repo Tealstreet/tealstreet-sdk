@@ -29,6 +29,14 @@ pins, Clone/Copy traits, role reviews and native observations remain required.
 Evidence ledgers, fixed compiler fixtures and control registries retain their
 own formats; they are not maps of independently appended crate reviews.
 
+The callable-alias family admits one or two distinct, unbounded type parameters
+on an actual compiler-authenticated `Rc<dyn Fn(...) -> ...>` target. Every type
+parameter is fixed to `serde_json::Value` by the probe, independently of the
+contract. Bounds, lifetimes, higher-ranked binders and additional parameters
+remain unsupported. Exact raw/expanded targets and explicit non-decoder reviews
+are required. These native trait receipts classify the fixed alias type; actual
+production-binding callback witnesses separately establish callback behavior.
+
 The initial cutover from master `d9d338ebff` preserved all 160 records across
 eight tables in 52 shards. The cutover compares every complete parsed old map
 with `loadPolicy`, including native adapter strings and negative zero, using:

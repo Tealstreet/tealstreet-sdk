@@ -4,7 +4,7 @@ use super::{
     client::JsHttpHost,
     promise::{JsFuture, Promise},
     sockets::JsSocketContext,
-    value::{Js, Thrown},
+    value::{Js, ObjectData, Prop, Thrown, utf16},
 };
 use crate::{
     exchange::BaseExchange,
@@ -14,6 +14,7 @@ use crate::{
 use safe_cex_store::Store;
 use std::{
     cell::{OnceCell, RefCell},
+    collections::HashMap,
     rc::Rc,
 };
 
@@ -27,6 +28,7 @@ pub struct ScopeShared<X> {
     pub exchange: RefCell<Js>,
     pub timers: Timers,
     pub extra: X,
+    native_modules: RefCell<HashMap<&'static str, Rc<ObjectData>>>,
 }
 
 impl<X> ScopeShared<X> {
@@ -39,6 +41,22 @@ impl<X> ScopeShared<X> {
     ) -> Self {
         let sockets = JsSocketContext::new(runtime.clone());
         *sockets.http.borrow_mut() = Some(http.clone());
+        let mut native_modules = HashMap::new();
+        if let Js::Object(data) = &globals {
+            let props = data.props.borrow();
+            for name in super::library::NATIVE_MODULE_ROOTS {
+                if let Some(
+                    Prop::Data(Js::Object(module))
+                    | Prop::DataDescriptor {
+                        value: Js::Object(module),
+                        ..
+                    },
+                ) = props.get(&utf16(name))
+                {
+                    native_modules.insert(name, module.clone());
+                }
+            }
+        }
         Self {
             sockets,
             runtime,
@@ -49,7 +67,21 @@ impl<X> ScopeShared<X> {
             exchange: RefCell::new(Js::Undefined),
             timers: RefCell::default(),
             extra,
+            native_modules: RefCell::new(native_modules),
         }
+    }
+    pub(crate) fn native_module(&self, name: &str) -> Option<Js> {
+        self.native_modules
+            .borrow()
+            .get(name)
+            .cloned()
+            .map(Js::Object)
+    }
+    pub(crate) fn retain_native_module(&self, name: &'static str, module: Rc<ObjectData>) {
+        self.native_modules
+            .borrow_mut()
+            .entry(name)
+            .or_insert(module);
     }
 }
 
