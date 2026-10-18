@@ -155,7 +155,7 @@ impl ApexOmniExchange {
                         ask: 0.,
                         last: 0.,
                         mark: 0.,
-                        index: 0.,
+                        index: Some(0.),
                         mid_price: None,
                         timestamp: None,
                         percentage: 0.,

@@ -82,7 +82,7 @@ fn spot_cfm_tickers_preserve_field_identity_and_cardinality() {
                 ("ask", ticker.ask),
                 ("last", ticker.last),
                 ("mark", ticker.mark),
-                ("index", ticker.index),
+                ("index", ticker.index.unwrap()),
                 ("percentage", ticker.percentage),
                 ("fundingRate", ticker.funding_rate),
                 ("fundingTime", ticker.funding_time),

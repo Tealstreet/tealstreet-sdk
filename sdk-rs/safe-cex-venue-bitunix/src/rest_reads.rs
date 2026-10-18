@@ -225,7 +225,7 @@ where
                 ask: last,
                 last,
                 mark,
-                index: mark,
+                index: Some(mark),
                 percentage: if open == 0.0 {
                     0.0
                 } else {

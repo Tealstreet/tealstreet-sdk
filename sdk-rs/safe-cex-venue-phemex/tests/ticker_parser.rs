@@ -116,7 +116,7 @@ fn compare(
                     ("ask", ticker.ask),
                     ("last", ticker.last),
                     ("mark", ticker.mark),
-                    ("index", ticker.index),
+                    ("index", ticker.index.unwrap()),
                     ("percentage", ticker.percentage),
                     ("openInterest", ticker.open_interest),
                     ("fundingRate", ticker.funding_rate),

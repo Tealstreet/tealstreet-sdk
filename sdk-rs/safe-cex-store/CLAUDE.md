@@ -212,6 +212,10 @@ Required numeric Ticker patch fields reject own Undefined as a typed patch error
 Candidate publication remains atomic; optional-field and info presence policies
 are unchanged. Orderly's real socket census covers per-row refusal and siblings.
 
+Ticker.index patches accept null and retain it across both aliases. Packed ticker
+values stay numeric: both maintained packers filter non-numbers. Full ticker
+snapshots retain null; packing a null field intentionally omits its delta.
+
 `subscribe_native` is a required opaque native-state subscription. The canonical
 owner borrows its actual state referent at each reached slot; lower layers cannot
 replace it with a typed snapshot. Internal emitter and native account observers

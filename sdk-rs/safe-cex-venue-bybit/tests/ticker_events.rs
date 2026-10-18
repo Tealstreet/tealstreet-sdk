@@ -172,7 +172,7 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
             ticker.ask,
             ticker.last,
             ticker.mark,
-            ticker.index,
+            ticker.index.unwrap(),
             ticker.percentage,
             ticker.open_interest,
             ticker.funding_rate,

@@ -269,7 +269,7 @@ fn lighter_ws_state_helpers_match_live_typescript() {
                 let mut ticker: safe_cex_types::Ticker = serde_json::from_value(clean).unwrap();
                 ticker.mark = number(&value["mark"]);
                 ticker.last = number(&value["last"]);
-                ticker.index = number(&value["index"]);
+                ticker.index = Some(number(&value["index"]));
                 ticker.bid = number(&value["bid"]);
                 ticker.ask = number(&value["ask"]);
                 ticker

@@ -74,7 +74,7 @@ fn project(
             ask: number(row.get("askPrice"))?,
             last,
             mark: last,
-            index: last,
+            index: Some(last),
             mid_price: None,
             timestamp: None,
             percentage,

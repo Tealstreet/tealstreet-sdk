@@ -49,7 +49,11 @@ pub fn pack_ticker_deltas<P: PatchSource>(
             let value = match value {
                 crate::model_patch::PatchValueRef::Number(value) => Some(value),
                 crate::model_patch::PatchValueRef::Native(value) => {
-                    value.downcast_ref::<f64>().copied()
+                    if let Some(value) = value.downcast_ref::<Option<f64>>() {
+                        *value
+                    } else {
+                        value.downcast_ref::<f64>().copied()
+                    }
                 }
                 crate::model_patch::PatchValueRef::Json(Value::Number(value)) => {
                     Some(safe_cex_num::number_from_string(&value.to_string()))

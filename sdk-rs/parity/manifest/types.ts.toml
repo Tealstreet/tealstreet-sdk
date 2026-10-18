@@ -128,7 +128,7 @@ kind = "type"
 layer = "mirror"
 rs = "safe-cex-types/src/lib.rs::Ticker"
 status = "ported"
-note = "Runtime timestamp extra retained as optional numeric data: actual Paradex fetchTickers emits virtualClock.getCurrentTimeMs(); shared types.ts omits it, so generated TS remains the static source-declaration projection. Timestamp participates in canonical numeric ingress and exhaustive output checking, not the retained info passthrough. Source emitter census covers 303 venue TS files, with Paradex the direct ticker emitter and external-public-data forwarding received Ticker records unchanged. Later actual-method ticker_timestamp witness pins clock calls and native timestamp/quoteVolume identity; no venue-local clock or sidecar is supplied."
+note = "Runtime null index is preserved as required Option<f64>: the captured WOO /v1/public/futures response has 222 real markets, one (PERP_SOLV_USDT) with index_price:null. Static generated TS retains index:number; native output retains null without coercion or row refusal. Missing index and non-number/non-null values remain invalid. Runtime timestamp extra retained as optional numeric data: actual Paradex fetchTickers emits virtualClock.getCurrentTimeMs(); shared types.ts omits it, so generated TS remains the static source-declaration projection. Timestamp participates in canonical numeric ingress and exhaustive output checking, not the retained info passthrough. Source emitter census covers 303 venue TS files, with Paradex the direct ticker emitter and external-public-data forwarding received Ticker records unchanged. Later actual-method ticker_timestamp witness pins clock calls and native timestamp/quoteVolume identity; no venue-local clock or sidecar is supplied."
 
 [[symbol]]
 ts = "PublicTrade"

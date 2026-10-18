@@ -123,7 +123,7 @@ pub fn has_hydrated_ticker_price(tickers: &[safe_cex_types::Ticker]) -> bool {
         [
             ticker.mark,
             ticker.last,
-            ticker.index,
+            ticker.index.unwrap_or(0.0),
             ticker.bid,
             ticker.ask,
         ]

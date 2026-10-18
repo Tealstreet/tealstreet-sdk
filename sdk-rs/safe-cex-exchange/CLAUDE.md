@@ -1932,6 +1932,11 @@ boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
 
+Store payload ticker baselines retain nullable index prices. The maintained worker
+advances its baseline for number-to-null transitions but omits non-number deltas;
+null-to-number emits the new number. Preserve this source behavior. The live
+store_payload oracle pins both transitions and unchanged-null packed arrays.
+
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.
 Typed subscribers remain explicit projection boundaries at their reached slots;
