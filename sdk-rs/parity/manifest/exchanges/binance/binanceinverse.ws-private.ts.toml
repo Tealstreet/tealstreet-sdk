@@ -1,6 +1,5 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/binance/binanceinverse.ws-private.ts"
-
 rust_files = [ "safe-cex-venue-binance/src/inverse/ws_private.rs" ]
 
 [[symbol]]
