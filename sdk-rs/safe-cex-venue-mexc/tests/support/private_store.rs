@@ -5,8 +5,8 @@ use safe_cex_store::{
     model_patch::{ModelPatch, PatchSource},
     store::DefaultStore,
 };
-use safe_cex_types::*;
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
+use safe_cex_types::*;
 use serde_json::{Map, Value};
 use std::cell::{Cell, Ref, RefCell};
 type Subscriber = StoreSubscriber;

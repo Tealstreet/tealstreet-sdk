@@ -318,7 +318,7 @@ fn refresh_markets_declared_owned_old_value_boundary() {
         1,
         "REFRESH owned native removed count"
     );
-    assert_eq!(
+    assert!(
         changes.removed[0]
             .info
             .as_ref()
@@ -326,7 +326,6 @@ fn refresh_markets_declared_owned_old_value_boundary() {
             .get("ih")
             .unwrap()
             .text_equals("old-a"),
-        true,
         "REFRESH declared owned old metadata"
     );
     assert_eq!(

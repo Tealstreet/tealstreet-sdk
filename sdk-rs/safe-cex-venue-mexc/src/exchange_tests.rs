@@ -860,10 +860,10 @@ fn mexc_fetch_markets_matches_live_source() {
                 .find(|row| row["symbol"] == market.id)
                 .unwrap();
             source_raw["__from_input"] = json!("input");
-            assert_ne!(
-                info.get("__from_input")
-                    .is_some_and(|value| value.text_equals("input")),
-                true
+            assert!(
+                !info
+                    .get("__from_input")
+                    .is_some_and(|value| value.text_equals("input"))
             );
             assert_eq!(case["alias"]["returnMutatesInput"], true);
             assert_eq!(case["alias"]["inputMutatesReturn"], true);
@@ -1493,10 +1493,10 @@ fn mexc_fetch_tickers_matches_live_source() {
         ));
         assert_ne!(parsed_source[2]["__from_ticker"], json!("ticker"));
         parsed_source[2]["__from_input"] = json!("input");
-        assert_ne!(
-            info.get("__from_input")
-                .is_some_and(|value| value.text_equals("input")),
-            true
+        assert!(
+            !info
+                .get("__from_input")
+                .is_some_and(|value| value.text_equals("input"))
         );
     }
     let actual: Vec<Value> = tickers
@@ -1621,11 +1621,10 @@ fn mexc_fetch_balance_matches_live_source() {
         ));
     assert_ne!(raw[0]["__from_result"], json!("result"));
     raw[0]["__from_input"] = json!("input");
-    assert_ne!(
-        info.as_array().unwrap()[0]
+    assert!(
+        !info.as_array().unwrap()[0]
             .get("__from_input")
-            .is_some_and(|value| value.text_equals("input")),
-        true
+            .is_some_and(|value| value.text_equals("input"))
     );
     assert_eq!(response.1.borrow()[0].url, "/api/v1/private/account/assets");
     let timing_response = Rc::new(StaticResponse(

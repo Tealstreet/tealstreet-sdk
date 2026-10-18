@@ -47,14 +47,14 @@ fn float(v: Option<&Input>) -> Result<f64, JsCoercionError> {
 }
 fn first<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
-        .find_map(|k| row.get(*k).filter(|v| truth(Some(v))))
+        .find_map(|k| row.get(k).filter(|v| truth(Some(v))))
 }
 fn or<'a>(v: Option<&'a Input>, fallback: &'a Input) -> Option<&'a Input> {
     Some(v.filter(|v| truth(Some(v))).unwrap_or(fallback))
 }
 fn record(v: &Input) -> Result<Input, JsCoercionError> {
     if v.is_object() {
-        Ok(Input::from(v.clone()))
+        Ok(v.clone())
     } else {
         Err(JsCoercionError {
             name: "TypeError",
@@ -646,7 +646,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                             let mut info = existing
                                 .get("info")
                                 .filter(|v| truth(Some(v)))
-                                .map_or(o(Vec::new()), |v| Input::from(v.clone()));
+                                .map_or(o(Vec::new()), |v| v.clone());
                             let Input::Object(fields) = record(data)? else {
                                 unreachable!()
                             };
@@ -708,9 +708,7 @@ pub fn on_private_message<H: PrivateMessageHost>(
                         }) == Some(side.to_owned())
                 }) {
                     if truth(data.get("positionId")) {
-                        let mut info = pos
-                            .get("info")
-                            .map_or(o(Vec::new()), |v| Input::from(v.clone()));
+                        let mut info = pos.get("info").map_or(o(Vec::new()), |v| v.clone());
                         put(&mut info, "positionId", j(data.get("positionId")));
                         host.update_position_info(&pos, info)?;
                     }

@@ -204,7 +204,7 @@ fn forward<T: serde::Serialize>(
     table
         .iter()
         .find(|(k, _)| key.is_some_and(|key| key.iter().copied().eq(k.encode_utf16())))
-        .map_or(fallback, |(_, value)| Input::from(enum_value(value)))
+        .map_or(fallback, |(_, value)| enum_value(value))
 }
 fn inverse_type(v: Option<&Input>) -> Input {
     inverse(crate::types::ORDER_TYPE, v)
