@@ -40,7 +40,13 @@ impl HttpHost for Host {
     fn emit(&self, _: &str, _: &str) -> Result<(), String> {
         Ok(())
     }
-    fn note_success(&self, _: &safe_cex_types::ExchangeName, _: &RestResponse) {}
+    fn note_success(
+        &self,
+        _: &safe_cex_types::ExchangeName,
+        _: &RestResponse,
+        _request: &safe_cex_transport::RestRequest,
+    ) {
+    }
     fn note_failure(&self, _: &safe_cex_types::ExchangeName, _: &HttpFailure) {
         self.failures.set(self.failures.get() + 1);
     }

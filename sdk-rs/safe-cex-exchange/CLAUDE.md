@@ -1647,3 +1647,10 @@ listener arguments, including Unicode, NUL, empty strings and formatting tokens.
 `scripts/check-console-default.mjs` checks fresh compiler inventory and rejects
 missing classifications or changed default bodies; the receiver classification
 applies only to this typed forwarding method.
+
+
+Native HTTP receipts and the JS Axios factory feed the shared REST diagnostics
+aggregate. Request-start, hosted-signing and proxy-header markers remain on the
+effective config across adapters; signing captures are excluded from outcomes.
+HOW fulfillment remains success for diagnostics even when its HTTP status is 4xx.
+Failure body classification is shallow and never serializes object contents.

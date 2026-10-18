@@ -74,7 +74,13 @@ impl HttpHost for Host {
     fn emit(&self, _: &str, _: &str) -> Result<(), String> {
         Ok(())
     }
-    fn note_success(&self, _: &ExchangeName, _: &RestResponse) {}
+    fn note_success(
+        &self,
+        _: &ExchangeName,
+        _: &RestResponse,
+        _request: &safe_cex_transport::RestRequest,
+    ) {
+    }
     fn note_failure(&self, _: &ExchangeName, _: &HttpFailure) {}
     fn mark_start(&self, _: &mut RestRequest) {}
     fn signing_capture(&self, _: &RestRequest) -> bool {

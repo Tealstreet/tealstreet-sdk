@@ -55,6 +55,19 @@ pub fn create(
     )?;
     let client = super::create(host.clone(), defaults);
     install_outcome_interceptor(&client, Rc::downgrade(owner), transport.proxied)?;
+    let runtime = host.runtime();
+    let mark_start = Js::function("markRestRequestStart", move |_, args| {
+        let config = arg(&args, 0);
+        // Source diagnostics cannot turn an otherwise valid request into a rejection.
+        if let Err(error) = config.set("safeCexRestDiagStartedAt", Js::Number(runtime.now_ms())) {
+            drop(error);
+        }
+        Ok(config)
+    });
+    client
+        .get("interceptors")?
+        .get("request")?
+        .call_method("use", vec![mark_start])?;
     if transport.proxied
         && let Some(authorize) = transport.authorize
     {
@@ -97,6 +110,7 @@ fn install_outcome_interceptor(
         let response = arg(&args, 0);
         if let Some(owner) = fulfilled_owner.upgrade() {
             record_outcome(&owner, &response, Some(&response));
+            record_rest_diagnostics(&owner, &response, true);
         }
         Ok(response)
     });
@@ -106,6 +120,7 @@ fn install_outcome_interceptor(
             let response = optional(&error, "response")?;
             let response = response.truthy().then_some(response);
             record_outcome(&owner, &error, response.as_ref());
+            record_rest_diagnostics(&owner, &error, false);
             if proxied && let Some(response) = &response {
                 report_proxy_failure(&owner, response)?;
             }
@@ -250,4 +265,144 @@ pub fn install_transport_adapter(
         client.get("defaults")?.set("adapter", adapter)?;
     }
     Ok(())
+}
+
+fn diagnostic_headers(headers: Js) -> safe_cex_store::venue_rest_diagnostics::DiagnosticHeaders {
+    use safe_cex_store::venue_rest_diagnostics::DiagnosticHeaders;
+    let lower = std::cell::RefCell::new(None::<indexmap::IndexMap<String, Js>>);
+    DiagnosticHeaders {
+        values: Default::default(),
+        get: Some(Rc::new(move |name| {
+            let read = || -> Result<Option<Value>, Thrown> {
+                if headers.type_of() != "object" || headers.is_nullish() {
+                    return Ok(None);
+                }
+                if lower.borrow().is_none() {
+                    let entries = headers
+                        .own_entries()?
+                        .into_iter()
+                        .map(|(key, value)| (String::from_utf16_lossy(&key).to_lowercase(), value))
+                        .collect();
+                    *lower.borrow_mut() = Some(entries);
+                }
+                let getter = headers.get("get")?;
+                let value = if getter.is_callable() {
+                    getter.call(headers.clone(), vec![Js::str(name)])?
+                } else {
+                    Js::Undefined
+                };
+                let value = if value.is_nullish() {
+                    lower
+                        .borrow()
+                        .as_ref()
+                        .and_then(|values| values.get(name))
+                        .cloned()
+                        .unwrap_or(Js::Undefined)
+                } else {
+                    value
+                };
+                if value.is_nullish() {
+                    return Ok(None);
+                }
+                let text = if matches!(value, Js::SymbolIterator) {
+                    "Symbol(Symbol.iterator)".into()
+                } else {
+                    String::from_utf16_lossy(&value.to_js_string()?)
+                };
+                Ok(Some(Value::String(text)))
+            };
+            read().map_err(|error| error.message())
+        })),
+    }
+}
+fn diagnostic_config(
+    config: &Js,
+) -> Result<safe_cex_store::venue_rest_diagnostics::RestDiagnosticConfig, Thrown> {
+    use safe_cex_store::venue_rest_diagnostics::RestDiagnosticConfig;
+    let text = |key| -> Result<Option<String>, Thrown> {
+        Ok(match optional(config, key)? {
+            Js::String(value) => Some(String::from_utf16_lossy(&value)),
+            _ => None,
+        })
+    };
+    let mut result = RestDiagnosticConfig {
+        url: text("url")?,
+        base_url: text("baseURL")?,
+        proxy_header: text("safeCexRestDiagProxyHeader")?,
+        headers: diagnostic_headers(optional(config, "headers")?),
+        ..Default::default()
+    };
+    for name in [
+        "safeCexRestDiagStartedAt",
+        "safeCexRestDiagSignMs",
+        "safeCexRestDiagSignedAt",
+        "safeCexRestDiagSignatureAgeMs",
+    ] {
+        if let Js::Number(value) = optional(config, name)? {
+            result.numbers.insert(name.into(), value);
+        }
+    }
+    Ok(result)
+}
+fn diagnostic_response(
+    response: &Js,
+    include_body: bool,
+) -> Result<safe_cex_store::venue_rest_diagnostics::RestDiagnosticResponse, Thrown> {
+    use safe_cex_store::venue_rest_diagnostics::RestDiagnosticResponse;
+    let data = if include_body {
+        optional(response, "data")?
+    } else {
+        Js::Undefined
+    };
+    Ok(RestDiagnosticResponse {
+        config: Some(diagnostic_config(&optional(response, "config")?)?),
+        status: match optional(response, "status")? {
+            Js::Number(value) => Some(value),
+            _ => None,
+        },
+        headers: diagnostic_headers(optional(response, "headers")?),
+        data: crate::rest_diagnostics::body(&data)?,
+    })
+}
+fn record_rest_diagnostics(owner: &BaseExchange, context: &Js, success: bool) {
+    use safe_cex_store::venue_rest_diagnostics::{self as diagnostics, RestDiagnosticError};
+    let record = || -> Result<(), Thrown> {
+        let config = optional(context, "config")?;
+        if optional(&config, "__tealstreetSigningCapture")?.truthy() {
+            return Ok(());
+        }
+        let name = serde_json::to_value(&owner.name).expect("exchange name");
+        let name = name.as_str().expect("exchange string");
+        if success {
+            diagnostics::note_rest_success(
+                name,
+                Some(&diagnostic_response(context, false)?),
+                owner.runtime.now_ms(),
+            );
+        } else {
+            let response = optional(context, "response")?;
+            let text = |key| -> Result<Option<String>, Thrown> {
+                Ok(match optional(context, key)? {
+                    Js::String(value) => Some(String::from_utf16_lossy(&value)),
+                    _ => None,
+                })
+            };
+            let error = RestDiagnosticError {
+                config: Some(diagnostic_config(&config)?),
+                response: if response.truthy() {
+                    Some(diagnostic_response(&response, true)?)
+                } else {
+                    None
+                },
+                code: text("code")?,
+                message: text("message")?,
+                name: text("name")?,
+            };
+            diagnostics::note_rest_failure(name, Some(&error), owner.runtime.now_ms());
+        }
+        Ok(())
+    };
+    if let Err(error) = record() {
+        drop(error);
+    }
 }

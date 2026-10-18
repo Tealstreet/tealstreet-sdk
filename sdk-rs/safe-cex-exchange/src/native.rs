@@ -173,8 +173,7 @@ impl TunnelHost for TokenTunnel {
         self.dials.sync_server_time(server_time)
     }
 }
-/// The Tealstreet transport's host: HOW adapters over the token tunnel. The source's
-/// `markRestProxyHeader` stamps a diagnostic config property, which RestRequest has no field for.
+/// HOW adapters over the token tunnel retain proxy diagnostics on request configs.
 struct NativeTealstreetHost {
     tunnel: Rc<dyn TunnelHost>,
 }
@@ -196,7 +195,12 @@ impl TealstreetTransportHost for NativeTealstreetHost {
     fn is_node_or_bun_runtime(&self) -> bool {
         true
     }
-    fn mark_rest_proxy_header(&self, _request: &mut RestRequest, _shape: &'static str) {}
+    fn mark_rest_proxy_header(&self, request: &mut RestRequest, shape: &'static str) {
+        request.config_extensions.insert(
+            "safeCexRestDiagProxyHeader".into(),
+            safe_cex_types::retained_json::RetainedJsonInput::Text(shape.encode_utf16().collect()),
+        );
+    }
     fn default_adapter(&self) -> Arc<dyn RestAdapter> {
         how(
             &self.tunnel,
@@ -446,11 +450,33 @@ impl HttpHost for NativeHttpHost {
             .emit(event, crate::js_runtime::value::Js::str(message))
             .map_err(|error| error.message)
     }
-    fn note_success(&self, _exchange: &ExchangeName, _response: &RestResponse) {}
-    fn note_failure(&self, _exchange: &ExchangeName, _error: &RestFailure) {}
-    fn mark_start(&self, _request: &mut RestRequest) {}
-    fn signing_capture(&self, _request: &RestRequest) -> bool {
-        false
+    fn note_success(
+        &self,
+        exchange: &ExchangeName,
+        response: &RestResponse,
+        request: &RestRequest,
+    ) {
+        crate::rest_diagnostics::success(exchange, response, request, wall_clock_ms() as f64);
+    }
+    fn note_failure(&self, exchange: &ExchangeName, error: &RestFailure) {
+        crate::rest_diagnostics::failure(exchange, error, wall_clock_ms() as f64);
+    }
+    fn mark_start(&self, request: &mut RestRequest) {
+        request.config_extensions.insert(
+            "safeCexRestDiagStartedAt".into(),
+            safe_cex_types::retained_json::RetainedJsonInput::Float(wall_clock_ms() as f64),
+        );
+    }
+    fn signing_capture(&self, request: &RestRequest) -> bool {
+        request
+            .config_extensions
+            .get("__tealstreetSigningCapture")
+            .is_some_and(|value| {
+                matches!(
+                    value,
+                    safe_cex_types::retained_json::RetainedJsonInput::Bool(true)
+                )
+            })
     }
     fn is_development(&self) -> bool {
         false

@@ -284,7 +284,13 @@ impl HttpHost for Host {
             .borrow_mut()
             .push(response.body.clone().into_data().into_value().unwrap());
     }
-    fn note_success(&self, _: &ExchangeName, _: &RestResponse) {}
+    fn note_success(
+        &self,
+        _: &ExchangeName,
+        _: &RestResponse,
+        _request: &safe_cex_transport::RestRequest,
+    ) {
+    }
     fn note_failure(&self, _: &ExchangeName, _: &HttpFailure) {
         self.failures.set(self.failures.get() + 1);
     }

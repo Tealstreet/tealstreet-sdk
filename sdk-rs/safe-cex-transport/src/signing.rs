@@ -243,6 +243,27 @@ fn header(headers: &IndexMap<String, String>, name: &str) -> Option<String> {
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
         .map(|(_, value)| value.clone())
 }
+fn mark_signed(request: &mut RestRequest, now: u64) {
+    let Some(sign_ms) = request.sign_ms else {
+        return;
+    };
+    request
+        .config_extensions
+        .insert("safeCexRestDiagSignMs".into(), Input::Float(sign_ms as f64));
+    request
+        .config_extensions
+        .insert("safeCexRestDiagSignedAt".into(), Input::Float(now as f64));
+    let stamped = header(&request.headers, "x-bapi-timestamp")
+        .map(|text| safe_cex_num::number_from_string(&text))
+        .unwrap_or(f64::NAN);
+    if stamped.is_finite() && stamped > 0.0 {
+        request.config_extensions.insert(
+            "safeCexRestDiagSignatureAgeMs".into(),
+            Input::Float(now as f64 - stamped),
+        );
+    }
+}
+
 impl RemoteSigningAdapter {
     fn execute_query(
         &self,
@@ -320,7 +341,9 @@ impl RemoteSigningAdapter {
             }
             request.query_params = signed.params;
             request.body = signed.data.map(crate::RestBody::from_remote_adapter_data);
-            request.sign_ms = Some((self.now_ms)().saturating_sub(started));
+            let signed_at = (self.now_ms)();
+            request.sign_ms = Some(signed_at.saturating_sub(started));
+            mark_signed(&mut request, signed_at);
             let inner = self.inner.read().expect("inner adapter lock").clone();
             inner.execute_with_receipt(request).await
         })
@@ -457,6 +480,7 @@ impl RemoteSigningAdapter {
             // The source calls the selected inner adapter directly. Running
             // Axios transformation here would stringify an echoed object again.
             retry_config.merge_axios_headers(&IndexMap::new());
+            mark_signed(&mut retry_config, (self.now_ms)());
             inner.execute_with_receipt(retry_config).await
         })
     }

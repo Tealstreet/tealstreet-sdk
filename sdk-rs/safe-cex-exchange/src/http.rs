@@ -38,7 +38,7 @@ pub trait HttpHost {
     fn enhance_error(&self, error: HttpFailure, exchange: &ExchangeName) -> HttpFailure;
     fn emit(&self, event: &str, message: &str) -> Result<(), String>;
     fn note_response(&self, _response: &RestResponse, _request: &RestRequest) {}
-    fn note_success(&self, exchange: &ExchangeName, response: &RestResponse);
+    fn note_success(&self, exchange: &ExchangeName, response: &RestResponse, request: &RestRequest);
     fn note_failure(&self, exchange: &ExchangeName, error: &HttpFailure);
     fn mark_start(&self, request: &mut RestRequest);
     fn signing_capture(&self, request: &RestRequest) -> bool;
@@ -596,7 +596,7 @@ impl HttpClient {
                 self.record_outcome(Some(response.status), true, request);
                 if !self.host.signing_capture(request) {
                     self.host.note_response(response, request);
-                    self.host.note_success(&self.exchange, response);
+                    self.host.note_success(&self.exchange, response, request);
                 }
                 if !self.no_proxy && self.should_log(&request.url, true) {
                     let body = response.body.clone().into_data();

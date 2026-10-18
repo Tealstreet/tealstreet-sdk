@@ -120,3 +120,43 @@ fn proxy_server_error_emits_error() {
         );
     });
 }
+
+#[test]
+fn proxy_failures_retain_diagnostic_shape_without_credentials() {
+    run_local(async {
+        use safe_cex_store::venue_rest_diagnostics::{
+            drain_venue_rest_failure_samples, reset_venue_rest_diagnostics,
+        };
+        reset_venue_rest_diagnostics();
+        let (account, seen) =
+            proxied_account(json!({"__status":403,"body":{"message":"Invalid JWT"}})).await;
+        native_account_call(
+            account.clone(),
+            "fetchAndSetOrders".into(),
+            vec![Value::Null.into()],
+        )
+        .await
+        .unwrap();
+        let failures = drain_venue_rest_failure_samples();
+        assert!(
+            !failures.is_empty(),
+            "actual native proxy failures reach aggregate diagnostics"
+        );
+        assert_eq!(failures.len(), seen.borrow().len());
+        for failure in failures {
+            assert_eq!(failure.status, Some(403.0));
+            assert_eq!(failure.rest_proxy_header_sent.as_deref(), Some("bearer"));
+            assert!(failure.total_ms.is_some_and(|ms| ms >= 0.0));
+            assert!(
+                failure
+                    .error_message
+                    .as_deref()
+                    .is_none_or(|text| !text.contains(TOKEN))
+            );
+            assert!(!format!("{failure:?}").contains(TOKEN));
+        }
+        native_account_call(account, "dispose".into(), vec![])
+            .await
+            .unwrap();
+    });
+}

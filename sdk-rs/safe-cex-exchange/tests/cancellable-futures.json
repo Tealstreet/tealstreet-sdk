@@ -1478,9 +1478,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "745724aec989c245f85aef17303b3fe9e19c48ca9fa8d87073724753d6f795ab",
+      "producer_sha256": "15b5b838bb2ee60eb6f0098127d1d6b2bb7790f3ac359fe1a3f103ec7eca1fc1",
       "classification": "no-owned-latch",
-      "reason": "Pending authorization and host adapter stages own request values. Selected response transforms and effective-config hooks are synchronous after the response; statistics remain observations. No independent lifecycle slot or waiter registration is reserved. Receipt cutover reviewed at 88b2ffc150."
+      "reason": "Pending authorization and host adapter stages own request values. Selected response transforms and effective-config hooks are synchronous after the response; statistics remain observations. No independent lifecycle slot or waiter registration is reserved. Receipt cutover reviewed at 88b2ffc150. Reviewed REST diagnostic receipt/start observations; existing await boundaries and cancellation ownership are unchanged."
     },
     {
       "owner": "src/http.rs::HttpClient::execute_with_interceptor",
@@ -1745,9 +1745,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "64772fd8567f69e68a60fb54dd75d977a5748773b23ad0a6800310fa554d37ba",
+      "producer_sha256": "cc792ced20e49b2337bf45580e936322e322e9a7ada0550bf746461e62193e99",
       "classification": "no-owned-latch",
-      "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send. Reviewed response interceptor ownership: synchronous outcome/error handlers retain only Weak<BaseExchange>; existing request authorization and its asynchronous boundaries are unchanged."
+      "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send. Reviewed response interceptor ownership: synchronous outcome/error handlers retain only Weak<BaseExchange>; existing request authorization and its asynchronous boundaries are unchanged. Reviewed REST diagnostic receipt/start observations; existing await boundaries and cancellation ownership are unchanged."
     },
     {
       "owner": "src/js_runtime/globals.rs::resolve_promise",

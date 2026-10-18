@@ -4312,3 +4312,119 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
     assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
     assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn native_http_factory_diagnostics_keep_shallow_bodies_headers_and_capture_guards() {
+    use safe_cex_exchange::{js_runtime::client::factory, native::native_runtime};
+    use safe_cex_store::venue_rest_diagnostics::{
+        drain_venue_rest_failure_samples, get_venue_rest_stats, reset_venue_rest_diagnostics,
+    };
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(async {
+            reset_venue_rest_diagnostics();
+            let runtime = native_runtime();
+            let owner = factory_owner(runtime.clone());
+            let host = client::rest_http_host(
+                runtime.clone(),
+                std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+            );
+            let xhr = factory::create(
+                host,
+                &safe_cex_transport::DirectTransport,
+                Js::object(vec![("baseURL", Js::str("https://diagnostics.invalid"))]),
+                &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]),
+                &owner,
+            )
+            .unwrap();
+            let body = Js::object(vec![]);
+            body.define("self", body.clone()).unwrap();
+            body.define("invalidUtf16", Js::utf16(&[0xd800])).unwrap();
+            let headers = Js::object(vec![
+                ("X-BAPI-LIMIT-STATUS", Js::Number(7.0)),
+                ("Server", Js::str("source-server")),
+                ("get", Js::function("get", |_, _| Ok(Js::Null))),
+            ]);
+            for (success, capture) in [(true, false), (false, false), (true, true), (false, true)] {
+                let data = body.clone();
+                let headers = headers.clone();
+                let adapter = Js::function("externalDiagnosticAdapter", move |_, args| {
+                    let config = arg(&args, 0);
+                    let response = Js::object(vec![
+                        ("config", config.clone()),
+                        ("headers", headers.clone()),
+                        ("status", Js::Number(if success { 200.0 } else { 403.0 })),
+                        ("data", data.clone()),
+                    ]);
+                    if success {
+                        Ok(response)
+                    } else {
+                        let error = safe_cex_exchange::js_runtime::value::error_object(
+                            "AxiosError",
+                            "refused",
+                        );
+                        error.define("config", config)?;
+                        error.define("response", response)?;
+                        Err(Thrown::new(error))
+                    }
+                });
+                let result = await_js(
+                    xhr.call_method(
+                        "get",
+                        vec![
+                            Js::str("/private?secret=hidden"),
+                            Js::object(vec![
+                                ("adapter", adapter),
+                                ("__tealstreetSigningCapture", Js::Bool(capture)),
+                            ]),
+                        ],
+                    )
+                    .unwrap(),
+                )
+                .await;
+                assert_eq!(result.is_ok(), success);
+            }
+            let unavailable = Js::function("unavailableSigner", |_, args| {
+                let error = safe_cex_exchange::js_runtime::value::error_object(
+                    "Error",
+                    "Remote signer unavailable",
+                );
+                error.define("config", arg(&args, 0))?;
+                Err(Thrown::new(error))
+            });
+            assert!(
+                await_js(
+                    xhr.call_method(
+                        "get",
+                        vec![
+                            Js::str("/unsent"),
+                            Js::object(vec![("adapter", unavailable)])
+                        ]
+                    )
+                    .unwrap()
+                )
+                .await
+                .is_err()
+            );
+            let stats = get_venue_rest_stats(runtime.now_ms());
+            let stats = stats
+                .get("polymarket")
+                .expect("actual native factory diagnostics");
+            assert_eq!((stats.requests, stats.ok, stats.failures), (2.0, 1.0, 1.0));
+            assert_eq!(stats.unsent_signing, 1.0);
+            assert_eq!(stats.min_quota_remaining, Some(7.0));
+            let failures = drain_venue_rest_failure_samples();
+            assert_eq!(failures.len(), 2);
+            assert!(failures[1].unsent_signing);
+            assert_eq!(failures[0].body_kind, "json");
+            assert_eq!(failures[0].path.as_deref(), Some("/private"));
+            assert_eq!(
+                failures[0].headers.get("server").map(String::as_str),
+                Some("source-server")
+            );
+            body.delete(&utf16("self"));
+        }));
+}

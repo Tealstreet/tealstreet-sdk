@@ -21,6 +21,7 @@ pub mod native;
 pub mod order_operations;
 pub mod position_intervals;
 pub mod proxy_token;
+mod rest_diagnostics;
 pub mod runtime;
 pub mod signing;
 pub mod snapshots;

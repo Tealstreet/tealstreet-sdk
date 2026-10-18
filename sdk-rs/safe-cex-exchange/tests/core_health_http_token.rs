@@ -455,7 +455,12 @@ impl HttpHost for HttpTestHost {
         self.response_configs.borrow_mut().push(request.clone());
         self.events.borrow_mut().push("response".into());
     }
-    fn note_success(&self, _: &ExchangeName, _: &RestResponse) {
+    fn note_success(
+        &self,
+        _: &ExchangeName,
+        _: &RestResponse,
+        _request: &safe_cex_transport::RestRequest,
+    ) {
         self.events.borrow_mut().push("success".into());
     }
     fn note_failure(&self, _: &ExchangeName, error: &HttpFailure) {

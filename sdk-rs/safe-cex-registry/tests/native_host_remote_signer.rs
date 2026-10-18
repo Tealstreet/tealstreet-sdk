@@ -91,6 +91,7 @@ impl RemoteSigner for BrowserSigner {
 #[test]
 fn binance_signs_through_a_hosted_remote_signer_with_no_secret() {
     run_local(async {
+        safe_cex_store::venue_rest_diagnostics::reset_venue_rest_diagnostics();
         let signer = Rc::new(BrowserSigner::default());
         let Harness { exchange, seen, .. } = binance_harness_on(
             Rc::new(|_| None),
@@ -110,6 +111,13 @@ fn binance_signs_through_a_hosted_remote_signer_with_no_secret() {
             .await
             .expect("placeOrder signed remotely");
         assert_eq!(ids, vec!["9001"]);
+        let stats = safe_cex_store::venue_rest_diagnostics::get_venue_rest_stats(0.0);
+        let stats = stats
+            .get("binance")
+            .expect("hosted native requests have diagnostics");
+        assert!(stats.requests >= 1.0);
+        assert!(stats.sign_p50_ms.is_some_and(|ms| ms >= 0.0));
+        assert!(stats.total_p50_ms.is_some_and(|ms| ms >= 0.0));
 
         let placed = seen
             .borrow()

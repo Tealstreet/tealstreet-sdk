@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/utils/venueRestDiagnostics.ts"
-rust_files = [ "safe-cex-store/src/venue_rest_diagnostics.rs" ]
+rust_files = [ "safe-cex-store/src/venue_rest_diagnostics.rs", "safe-cex-exchange/src/rest_diagnostics.rs", "safe-cex-exchange/src/js_runtime/client/factory.rs", "safe-cex-transport/src/signing.rs" ]
 
 [[symbol]]
 ts = "VenueRestFailureSample"
@@ -86,9 +86,9 @@ note = "FINDING owner: shared core divergence audit. scrub of alpha199+emoji yie
 ts = "readHeaders"
 kind = "const-fn"
 layer = "adapted"
-rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::read_headers", "safe-cex-store/src/venue_rest_diagnostics.rs::DiagnosticHeaders" ]
+rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::read_headers", "safe-cex-store/src/venue_rest_diagnostics.rs::DiagnosticHeaders", "safe-cex-exchange/src/js_runtime/client/factory.rs::diagnostic_headers" ]
 status = "divergent"
-note = "FINDING owner: shared core divergence audit. actual readHeaders contributes public sample.headers.server length120 with U+D83D at119 after cutting valid scalar input; native String output substitutes U+FFFD. This returned program value is not covered by diagnostic-only labeling. See sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::read_headers` mirrors readHeaders. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::DiagnosticHeaders` mirrors readHeaders. Split targets retain the adapter and its concrete behavior."
+note = "Explicit rename: `safe-cex-exchange/src/js_runtime/client/factory.rs::diagnostic_headers` bridges the real native receipt/factory to this aggregate. FINDING owner: shared core divergence audit. actual readHeaders contributes public sample.headers.server length120 with U+D83D at119 after cutting valid scalar input; native String output substitutes U+FFFD. This returned program value is not covered by diagnostic-only labeling. See sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::read_headers` mirrors readHeaders. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::DiagnosticHeaders` mirrors readHeaders. Split targets retain the adapter and its concrete behavior."
 
 [[symbol]]
 ts = "visibleText"
@@ -102,9 +102,9 @@ note = "CHOSEN: the 64,000-unit UTF-16 cut replaces an isolated cut surrogate wi
 ts = "classifyBody"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/venue_rest_diagnostics.rs::classify_body"
+rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::classify_body", "safe-cex-exchange/src/rest_diagnostics.rs::body" ]
 status = "divergent"
-note = "FINDING owner: shared core divergence audit. classifyBody supplies public drained bodySnippet length200 with U+D83D at199 from valid alpha199+emoji input; native scrub replaces that cut unit with U+FFFD. Price the returned field conflict separately from adapter exclusions; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::classify_body` mirrors classifyBody."
+note = "Split adapter: explicit rename `safe-cex-exchange/src/rest_diagnostics.rs::body` implements this source operation at the native factory/receipt boundary. FINDING owner: shared core divergence audit. classifyBody supplies public drained bodySnippet length200 with U+D83D at199 from valid alpha199+emoji input; native scrub replaces that cut unit with U+FFFD. Price the returned field conflict separately from adapter exclusions; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::classify_body` mirrors classifyBody."
 
 [[symbol]]
 ts = "normalizeErrorKey"
@@ -158,9 +158,9 @@ note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repair
 ts = "markRestSigned"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_signed"
+rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_signed", "safe-cex-transport/src/signing.rs::mark_signed" ]
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repaired existing sealed writes and retained ordered partial writes when the wrapper catches a later assignment failure. Same-config identity is asserted. Evidence: DIAGNOSTICS_CHOICE_GATE_EXITS.md. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_signed` mirrors markRestSigned."
+note = "Split adapter: explicit rename `safe-cex-transport/src/signing.rs::mark_signed` implements this source operation at the native factory/receipt boundary. CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repaired existing sealed writes and retained ordered partial writes when the wrapper catches a later assignment failure. Same-config identity is asserted. Evidence: DIAGNOSTICS_CHOICE_GATE_EXITS.md. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_signed` mirrors markRestSigned."
 
 [[symbol]]
 ts = "stampSigned"
@@ -174,17 +174,17 @@ note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repair
 ts = "noteRestSuccess"
 kind = "const-fn"
 layer = "adapted"
-rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::note_rest_success", "safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticResponse" ]
+rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::note_rest_success", "safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticResponse", "safe-cex-exchange/src/rest_diagnostics.rs::success" ]
 status = "divergent"
-note = "FINDING owner: shared core divergence audit. noteRestSuccess accepts exchange U+D800 and creates a diagnostics map entry exposed under that exact public stats key. Native exchange:&str/String key excludes it. Header/snapshot adapter choices do not price this identifier lookup boundary; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::note_rest_success` mirrors noteRestSuccess. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticResponse` mirrors noteRestSuccess. Split targets retain the adapter and its concrete behavior."
+note = "Explicit rename: `safe-cex-exchange/src/rest_diagnostics.rs::success` bridges the real native receipt/factory to this aggregate. FINDING owner: shared core divergence audit. noteRestSuccess accepts exchange U+D800 and creates a diagnostics map entry exposed under that exact public stats key. Native exchange:&str/String key excludes it. Header/snapshot adapter choices do not price this identifier lookup boundary; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::note_rest_success` mirrors noteRestSuccess. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticResponse` mirrors noteRestSuccess. Split targets retain the adapter and its concrete behavior."
 
 [[symbol]]
 ts = "noteRestFailure"
 kind = "const-fn"
 layer = "adapted"
-rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::note_rest_failure", "safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticError" ]
+rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::note_rest_failure", "safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticError", "safe-cex-exchange/src/rest_diagnostics.rs::failure" ]
 status = "divergent"
-note = "FINDING owner: shared core divergence audit. noteRestFailure stores exchange U+D800 in an actual public returned failure sample and keyed stats entry. Native &str/String cannot retain it; generic owned diagnostic-field wording omits this exact identifier observation. See sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::note_rest_failure` mirrors noteRestFailure. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticError` mirrors noteRestFailure. Split targets retain the adapter and its concrete behavior."
+note = "Explicit rename: `safe-cex-exchange/src/rest_diagnostics.rs::failure` bridges the real native receipt/factory to this aggregate. FINDING owner: shared core divergence audit. noteRestFailure stores exchange U+D800 in an actual public returned failure sample and keyed stats entry. Native &str/String cannot retain it; generic owned diagnostic-field wording omits this exact identifier observation. See sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::note_rest_failure` mirrors noteRestFailure. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticError` mirrors noteRestFailure. Split targets retain the adapter and its concrete behavior."
 
 [[symbol]]
 ts = "percentile"
