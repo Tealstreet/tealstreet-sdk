@@ -9,9 +9,15 @@ export const publicReadMethods = [
   'fetchOptionMarkets',
   'fetchOptionChain',
   'fetchOptionExpiries',
+  'fetchSymbolMaxLeverage',
+  'fetchTickersRaw',
+  'fetchTickersWithoutParse',
+  'fetchTickersIntx',
+  'fetchTickersCfm',
+  'fetchTickersSpot',
 ];
 
-export function publicRestPlan(exchange, description, epoch) {
+export function publicRestPlan(exchange, description, epoch, { enableOptions = true } = {}) {
   const markets = description.markets ?? [];
   const market =
     markets.find((m) => m.active && m.base === 'BTC' && m.quote === 'USDT') ??
@@ -20,7 +26,9 @@ export function publicRestPlan(exchange, description, epoch) {
     markets[0];
   const symbol = market?.symbol ?? (exchange.startsWith('hyperliquid') ? 'BTC' : 'BTCUSDT');
   const methods = new Set(description.methods);
-  const plan = [];
+  const plan = [
+    { label: 'markets', method: exchange.startsWith('hyperliquid') ? '$markets' : 'fetchMarkets', args: [] },
+  ];
   for (const [interval, duration] of [
     ['1m', 60000],
     ['1h', 3600000],
@@ -46,30 +54,59 @@ export function publicRestPlan(exchange, description, epoch) {
     args: [symbol, 10],
     ...(!description.tradeOverride ? { skip: 'NO_TS_REST_METHOD: inherited empty public-trade fallback' } : {}),
   });
-  if (exchange === 'bybit') {
+  if (['bybit', 'bybitdemo'].includes(exchange)) {
     plan.push({ label: 'option-markets', method: 'fetchOptionMarkets', args: [] });
     plan.push({ label: 'option-expiries', method: 'fetchOptionExpiries', args: ['BTC'] });
     plan.push({ label: 'option-chain', method: 'fetchOptionChain', args: [{ underlying: 'BTC' }] });
+  }
+  for (const method of [
+    'fetchSymbolMaxLeverage',
+    'fetchTickersRaw',
+    'fetchTickersWithoutParse',
+    'fetchTickersIntx',
+    'fetchTickersCfm',
+    'fetchTickersSpot',
+  ]) {
+    if (!(description.overrides ?? []).includes(method)) continue;
+    // Bitrue max leverage may call a signed leverage-bracket read. Keep
+    // authenticated metadata out of this keyless method inventory.
+    if (method === 'fetchSymbolMaxLeverage' && exchange === 'bitrue') {
+      plan.push({ label: method, method, args: [symbol], skip: 'AUTH_REQUIRED: leverage-bracket metadata' });
+      continue;
+    }
+    plan.push({ label: method, method, args: method === 'fetchSymbolMaxLeverage' ? [symbol] : [] });
   }
   plan.push({
     label: 'tickers-funding-open-interest',
     method: 'fetchTickers',
     args: [],
     ...(exchange.startsWith('hyperliquid') ? { method: '$tickers' } : {}),
-    ...(['apexomni', 'bitrue', 'lighter'].includes(exchange)
+    ...(['apexomni', 'bitrue', 'lighter', 'lighter-robinhood'].includes(exchange)
       ? { skip: 'WS_REQUIRED: TS live ticker values require startup streams' }
       : {}),
   });
+  for (const spec of plan) {
+    if (!enableOptions && spec.label.startsWith('option-'))
+      spec.skip = 'PROFILE_DISABLED: options are tested in the separate options-enabled capture';
+    if (
+      (!market && spec.args?.[0]?.symbol) ||
+      (!market && ['orderbook', 'public-trades', 'fetchSymbolMaxLeverage'].includes(spec.label))
+    )
+      spec.skip = 'NO_TRADING_MARKETS: TS bootstrap returned no market for this read';
+  }
   return { symbol, plan };
 }
 
 export function resultStatus(spec, left, right, records, stable = true) {
   const diffs = differences(left, right);
   if (spec.skip) return { status: 'UNAVAILABLE', reason: spec.skip, diffs: [] };
-  if (!stable) return { status: 'NONDETERMINISTIC', diffs };
   if (records.some((r) => r.replayMiss || r.blocked || r.transportError)) return { status: 'INPUT_DIFF', diffs };
+  if (left?.timeout || right?.timeout) return { status: 'TIMEOUT', diffs: [] };
+  if (left?.notRun || right?.notRun) return { status: 'NOT_RUN', diffs: [] };
+  if (left?.probeFailure || right?.probeFailure) return { status: 'BLOCKED', diffs: [] };
+  if (differences(left?.clock, right?.clock).length) return { status: 'CLOCK_DIFF', diffs };
+  if (!stable) return { status: 'NONDETERMINISTIC', diffs };
   if (records.some((r) => r.status >= 400 && !r.expectedFallback)) return { status: 'BLOCKED', diffs };
-  if (left?.timeout || right?.timeout) return { status: 'TIMEOUT', diffs };
   if (diffs.length) return { status: 'DIFF', diffs };
   if (left?.failure || right?.failure || left?.errors || right?.errors) return { status: 'BLOCKED', diffs };
   const value = left?.value;

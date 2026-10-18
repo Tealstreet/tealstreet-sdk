@@ -4,11 +4,13 @@ import { exchangeRegistry } from '../../../packages/safe-cex/src/exchanges/regis
 import { BaseExchange } from '../../../packages/safe-cex/src/exchanges/base.ts';
 import { DefaultStore } from '../../../packages/safe-cex/src/store/store.base.ts';
 import { virtualClock } from '../../../packages/safe-cex/src/utils/virtualClock.ts';
+import { replayClock } from './replay-clock.mjs';
 import { publicReadMethods } from './rest-plan.mjs';
 
 console.log = console.warn = console.error = () => {};
 const implementation = process.argv[2];
-let instance,
+let clock,
+  instance,
   native,
   id,
   store = {},
@@ -27,20 +29,16 @@ process.on('message', async (message) => {
         tealstreetTunnel: false,
         tealstreetWsRoute: false,
         hostedMode: true,
-        enableOptionMarkets: message.exchange === 'bybit',
+        enableOptionMarkets:
+          message.accountOptions?.enableOptionMarkets ?? ['bybit', 'bybitdemo'].includes(message.exchange),
         tuning: { consoleLogging: false },
       };
       if (implementation === 'ts') {
-        const OriginalDate = Date;
-        globalThis.Date = class extends OriginalDate {
-          constructor(...args) {
-            super(...(args.length ? args : [message.epoch]));
-          }
-          static now() {
-            return message.epoch;
-          }
-        };
-        virtualClock.getCurrentTimeMs = () => message.epoch;
+        if (!message.realtimeClock) {
+          clock = replayClock(message.epoch);
+          clock.begin();
+          virtualClock.getCurrentTimeMs = () => message.epoch + clock.now();
+        }
         const Exchange = await exchangeRegistry[message.exchange]();
         instance = new Exchange(message.exchange, options, new DefaultStore());
         instance.emitter.on('error', () => errors++);
@@ -48,13 +46,22 @@ process.on('message', async (message) => {
         native = createRequire(import.meta.url)(process.env.LIVE_DIFF_ADDON);
         if (typeof native.nativeAccountReplay !== 'function') throw new Error('Addon needs the #1082 replay clock ABI');
         id = await native.nativeAccountOpen(
-          { exchange: message.exchange, options, replayEpochMs: message.epoch },
+          { exchange: message.exchange, options, ...(!message.realtimeClock ? { replayEpochMs: message.epoch } : {}) },
           (event) => {
             if (event.event === 'error') errors++;
           },
           (slices) => Object.assign(store, slices),
         );
+        if (!message.realtimeClock) await native.nativeAccountReplay(id, { op: 'begin' });
       }
+    } else if (message.method === '$advance') {
+      if (implementation === 'ts') {
+        await clock.advance(message.args[0]);
+        value = { atMs: clock.now() };
+      } else value = await native.nativeAccountReplay(id, { op: 'advance', atMs: message.args[0] });
+    } else if (message.method === '$receipt') {
+      if (implementation !== 'rust') throw new Error('Native diagnostic only');
+      value = await native.nativeAccountReplay(id, { op: 'receipt' });
     } else if (message.method === '$describe') {
       if (implementation !== 'ts') throw new Error('Capabilities are taken from the maintained TS API');
       const base = new BaseExchange(instance.name, instance.options, new DefaultStore());
@@ -67,12 +74,16 @@ process.on('message', async (message) => {
           active,
         })),
         methods: publicReadMethods.filter((m) => typeof instance[m] === 'function'),
+        overrides: publicReadMethods.filter(
+          (m) => typeof instance[m] === 'function' && instance[m].toString() !== base[m]?.toString(),
+        ),
         tradeOverride: instance.fetchPublicTrades.toString() !== base.fetchPublicTrades.toString(),
       };
       await base.dispose();
-    } else if (message.method === '$tickers') {
+    } else if (message.method === '$tickers' || message.method === '$markets') {
       if (implementation === 'rust') await new Promise((r) => realTimeout(r, 350));
-      value = implementation === 'ts' ? instance.store.tickers : store.tickers;
+      const field = message.method === '$tickers' ? 'tickers' : 'markets';
+      value = implementation === 'ts' ? instance.store[field] : store[field];
     } else if (message.method === 'close') {
       if (implementation === 'ts') await instance?.dispose();
       else if (id !== undefined) await native.nativeAccountClose(id);
