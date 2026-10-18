@@ -92,7 +92,9 @@ pub trait ExchangeImports {
         Ok(crate::request_weight::HeaderGetMember::NotCallable)
     }
     fn weight_error_response(&self, error: &Failure) -> Result<Option<EventValue>, Failure> {
-        Ok(error.response.clone().map(crate::private_session::native))
+        Ok(error
+            .retained_response_input()
+            .map(safe_cex_exchange::js_runtime::value::from_retained_input))
     }
     fn external_provider(
         &self,
@@ -1347,7 +1349,7 @@ impl crate::order_batches::BatchBindings for Context {
         Ok(Rc::new(|rejection| {
             let value = match rejection {
                 crate::order_batches::Rejection::Error(error) => {
-                    json!({"response":error.response,"code":error.metadata.code.as_ref().map(safe_cex_exchange::js_runtime::value::to_json).transpose().map_err(|e| Rc::new(e.to_exchange_error()))?,"message":error.message})
+                    json!({"response":error.response_json_view(),"code":error.metadata.code.as_ref().map(safe_cex_exchange::js_runtime::value::to_json).transpose().map_err(|e| Rc::new(e.to_exchange_error()))?,"message":error.message})
                 }
                 crate::order_batches::Rejection::Row(row) => json_value(&row)?,
             };
@@ -2452,7 +2454,7 @@ impl ExchangeState {
                 .store
                 .update_orders_status(&ids.iter().map(String::as_str).collect::<Vec<_>>(), status)
         };
-        let emit = |msg| emit_json(&self.base, &msg).map_err(Rc::new);
+        let emit = |msg| self.emit(msg);
         match self.venue {
             Venue::Futures => {
                 crate::cancel_symbol_orders::cancel_binance_symbol_orders(

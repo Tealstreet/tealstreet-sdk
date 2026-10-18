@@ -57,8 +57,8 @@ fn emit_account_error(
     error: ExchangeError,
     emit: impl FnOnce(Option<&Value>) -> Result<(), ExchangeError>,
 ) -> Result<Option<Value>, ExchangeError> {
-    let response_message = error
-        .response
+    let response_view = error.response_json_view();
+    let response_message = response_view
         .as_ref()
         .and_then(|response| response.get("data"))
         .and_then(|data| data.get("msg"));

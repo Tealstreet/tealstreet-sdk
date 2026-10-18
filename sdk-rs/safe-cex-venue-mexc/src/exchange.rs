@@ -567,8 +567,8 @@ impl MexcExchange {
                     balance: Some(balance),
                 }),
                 Err(error) => {
-                    let data = error
-                        .response
+                    let response_view = error.response_json_view();
+                    let data = response_view
                         .as_ref()
                         .and_then(|response| response.get("data"));
                     let message = data

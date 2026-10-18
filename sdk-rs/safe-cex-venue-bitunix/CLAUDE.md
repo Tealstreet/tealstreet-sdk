@@ -209,3 +209,9 @@ Private socket controls retain opaque metadata through position and order patche
 including a UTF-16 client-key cache miss. Malformed websocket JSON still maps to
 null, matching the maintained jsonParse helper, and does not reconnect the socket.
 Each repair has a compiling pre-fix failure and a restored passing native control.
+
+Native typed SDK wrappers use the owning runtime's shared `eager::start_eager`.
+The common native HTTP request adds the Axios Promise await boundary even for
+ready terminal responses; private login captures clock/nonce and starts sync
+before its waiter is queued. `ASYNC_WRAPPER_REVIEW.md` records actual dropped,
+ready and held-response binding probes and three compiled boundary controls.
