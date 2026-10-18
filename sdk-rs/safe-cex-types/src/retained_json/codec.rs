@@ -141,7 +141,7 @@ impl<'de> serde::Deserialize<'de> for Units {
                 Ok(Units(
                     bytes
                         .chunks_exact(2)
-                        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                        .map(|pair| u16::from_ne_bytes([pair[0], pair[1]]))
                         .collect(),
                 ))
             }

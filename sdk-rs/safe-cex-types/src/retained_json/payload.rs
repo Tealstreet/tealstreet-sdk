@@ -74,11 +74,7 @@ impl<'de> Deserializer<'de> for Payload {
     ) -> Result<V::Value, Error> {
         if _name == UTF16_UNITS {
             if let Self::Units(units) | Self::Value(Input::Text(units)) = self {
-                let mut bytes = vec![0; units.len() * 2];
-                for (chunk, unit) in bytes.chunks_exact_mut(2).zip(units) {
-                    chunk.copy_from_slice(&unit.to_le_bytes());
-                }
-                return visitor.visit_byte_buf(bytes);
+                return visit_units(&units, visitor);
             }
         }
         visitor.visit_newtype_struct(self)
@@ -88,4 +84,13 @@ impl<'de> Deserializer<'de> for Payload {
         bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf
         unit unit_struct seq tuple tuple_struct map struct enum identifier ignored_any
     }
+}
+
+fn visit_units<'de, V: Visitor<'de>>(units: &[u16], visitor: V) -> Result<V::Value, Error> {
+    // SAFETY: initialized u16 storage has no padding and u8 alignment is 1.
+    // The owner lives through visit_bytes; the decoder reads native-endian pairs.
+    let bytes = unsafe {
+        std::slice::from_raw_parts(units.as_ptr().cast::<u8>(), std::mem::size_of_val(units))
+    };
+    visitor.visit_bytes(bytes)
 }

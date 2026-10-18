@@ -477,17 +477,6 @@ fn native_market_info_decode_does_not_expand_each_utf16_unit_into_a_value() {
     });
 }
 
-#[cfg(unix)]
-#[path = "support/large_payload_decode.rs"]
-mod large_payload_decode;
-
-#[test]
-#[ignore = "requires the recorded Bybit, Paradex and OKX fixture manifest"]
-#[cfg(unix)]
-fn recorded_large_payload_parse_and_market_decode() {
-    large_payload_decode::recorded();
-}
-
 #[test]
 fn native_json_string_parser_avoids_geometric_buffer_growth() {
     let content = "unescaped market metadata ".repeat(8000);

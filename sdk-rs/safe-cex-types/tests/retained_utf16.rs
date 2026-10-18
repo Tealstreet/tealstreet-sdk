@@ -125,6 +125,9 @@ fn native_payload_stream_preserves_all_units_and_rejects_malformed_units() {
     );
     for (raw, expected) in [
         (r#"["Text",[0,65535,3.0,-0.0]]"#, Some(vec![0, 65535, 3, 0])),
+        (r#"[{"Text":null},[0]]"#, None),
+        (r#"[3,[0]]"#, None),
+        (r#"[false,[0]]"#, None),
         (r#"["Text",[-1]]"#, None),
         (r#"["Text",[65536]]"#, None),
         (r#"["Text",[1.5]]"#, None),

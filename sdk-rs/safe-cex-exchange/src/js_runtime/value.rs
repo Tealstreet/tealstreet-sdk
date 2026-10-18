@@ -1731,11 +1731,10 @@ impl Js {
         }
     }
     fn enumerable_property_indices(props: &RefCell<IndexMap<Str, Prop>>) -> Vec<(Str, usize)> {
-        let mut keys: Vec<_> = props
-            .borrow()
-            .iter()
-            .enumerate()
-            .filter(|(_, (_, prop))| {
+        let props = props.borrow();
+        let count = props
+            .values()
+            .filter(|prop| {
                 !matches!(
                     prop,
                     Prop::DataDescriptor {
@@ -1747,8 +1746,22 @@ impl Js {
                     }
                 )
             })
-            .map(|(index, (key, _))| (key.clone(), index))
-            .collect();
+            .count();
+        let mut keys = Vec::with_capacity(count);
+        for (index, (key, prop)) in props.iter().enumerate() {
+            if !matches!(
+                prop,
+                Prop::DataDescriptor {
+                    enumerable: false,
+                    ..
+                } | Prop::Accessor {
+                    enumerable: false,
+                    ..
+                }
+            ) {
+                keys.push((key.clone(), index));
+            }
+        }
         keys.sort_by_key(|(key, _)| array_index(key).unwrap_or(usize::MAX));
         keys
     }
@@ -1827,6 +1840,44 @@ impl Js {
     /// Object spread / Object.assign source read: own enumerable values in key order.
     pub fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
         if let Some(props) = self.own_props() {
+            let data_entries = {
+                let props = props.borrow();
+                let mut count = 0;
+                let mut accessors = false;
+                for prop in props.values() {
+                    match prop {
+                        Prop::Data(_)
+                        | Prop::DataDescriptor {
+                            enumerable: true, ..
+                        } => count += 1,
+                        Prop::Accessor {
+                            enumerable: true, ..
+                        } => accessors = true,
+                        _ => {}
+                    }
+                }
+                if accessors {
+                    None
+                } else {
+                    let mut entries = Vec::with_capacity(count);
+                    for (key, prop) in props.iter() {
+                        if let Prop::Data(value)
+                        | Prop::DataDescriptor {
+                            value,
+                            enumerable: true,
+                            ..
+                        } = prop
+                        {
+                            entries.push((key.clone(), value.clone()));
+                        }
+                    }
+                    Some(entries)
+                }
+            };
+            if let Some(mut entries) = data_entries {
+                entries.sort_by_key(|(key, _)| array_index(key).unwrap_or(usize::MAX));
+                return Ok(entries);
+            }
             let keys = Self::enumerable_property_indices(props);
             let mut entries = Vec::with_capacity(keys.len());
             let mut indices_valid = true;

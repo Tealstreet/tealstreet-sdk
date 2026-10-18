@@ -61085,7 +61085,7 @@
     55296,
     65535
   ],
-  "evidence": "Private UTF-16 storage decoder accepts the existing validated numeric unit sequence or the canonical internal packed little-endian byte event. Direct native bytes observe empty/even/odd input and lone units; retained_utf16 exercises every unit through the actual payload adapter. No JSON wire format change.",
+  "evidence": "Private UTF-16 storage decoder accepts the existing validated numeric unit sequence or the canonical internal packed native-endian byte event. Direct native bytes observe empty/even/odd input and lone units; retained_utf16 exercises every unit through the actual payload adapter. No JSON wire format change.",
   "entrypoints": [],
   "positive": [
     [],
