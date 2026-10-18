@@ -34,7 +34,8 @@ fn functions_keep_live_prototypes_receivers_and_bound_inheritance() {
             Ok(this.clone())
         })),
         None,
-    );
+    )
+    .expect("test accessor target permits definition");
     let writes = trace.clone();
     let expected_receiver = derived.clone();
     base.define_accessor(
@@ -46,7 +47,8 @@ fn functions_keep_live_prototypes_receivers_and_bound_inheritance() {
                 .push(this.same_reference(&expected_receiver));
             this.set("written", value)
         })),
-    );
+    )
+    .expect("test accessor target permits definition");
     let Js::Function(data) = &base else {
         unreachable!()
     };
@@ -223,7 +225,8 @@ fn inherited_function_accessors_keep_original_throws_and_data_shadows() {
         "failure",
         Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
         None,
-    );
+    )
+    .expect("test accessor target permits definition");
     child.set("__proto__", base.clone()).unwrap();
     assert!(
         child
@@ -255,7 +258,9 @@ fn inherited_function_accessors_keep_original_throws_and_data_shadows() {
             .value
             .same_reference(&failure)
     );
-    child.define_accessor("onlyGet", Some(Rc::new(|_| Ok(Js::Number(2.0)))), None);
+    child
+        .define_accessor("onlyGet", Some(Rc::new(|_| Ok(Js::Number(2.0)))), None)
+        .expect("test accessor target permits definition");
     assert!(object.set("onlyGet", Js::Number(1.0)).is_err());
     assert!(!object.has_own("onlyGet"));
     assert!(

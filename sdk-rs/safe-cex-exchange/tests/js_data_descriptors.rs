@@ -248,18 +248,20 @@ fn inherited_descriptor_fields_getter_order_and_readonly_prototypes() {
         ("writable", Js::Bool(false)),
     ] {
         let reads = reads.clone();
-        descriptor_proto.define_accessor(
-            name,
-            Some(Rc::new(move |receiver| {
-                reads.borrow_mut().push(name);
-                assert!(
-                    receiver.has_own("receiver"),
-                    "inherited getter receives original descriptor"
-                );
-                Ok(value.clone())
-            })),
-            None,
-        );
+        descriptor_proto
+            .define_accessor(
+                name,
+                Some(Rc::new(move |receiver| {
+                    reads.borrow_mut().push(name);
+                    assert!(
+                        receiver.has_own("receiver"),
+                        "inherited getter receives original descriptor"
+                    );
+                    Ok(value.clone())
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
     }
     let descriptor = Js::object(vec![("receiver", Js::Bool(true))]);
     if let Js::Object(object) = &descriptor {

@@ -119,7 +119,7 @@ impl BitgetExchange {
             }
         };
         *shared.exchange.borrow_mut() = receiver.clone();
-        super::getters::install(&rt.with_this(receiver.clone()));
+        super::getters::install(&rt.with_this(receiver.clone())).map_err(err)?;
         super::prototype::install(&rt.with_this(receiver.clone()));
         let venue = Rc::new(Self {
             rt: rt.with_this(receiver),
