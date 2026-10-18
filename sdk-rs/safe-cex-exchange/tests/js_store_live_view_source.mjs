@@ -38,12 +38,13 @@ function fixture(name){
  const store=new DefaultStore();store.update({markets:[structuredClone(market)],tickers:[structuredClone(ticker)]});
  const markets=name.startsWith('markets'),id=markets?'m':'t',key=name.endsWith('ById')?id:'BTCUSD';
  const field=markets?'active':'bid',changed=markets?false:7;
- return {store,markets,id,key,field,changed,view:store[name],other:store[markets?(name.endsWith('ById')?'marketsBySymbol':'marketsById'):(name.endsWith('ById')?'tickersBySymbol':'tickersById')],
+ const notices={count:0};store.subscribe(()=>{notices.count++});
+ return {store,markets,id,key,field,changed,notices,view:store[name],other:store[markets?(name.endsWith('ById')?'marketsBySymbol':'marketsById'):(name.endsWith('ById')?'tickersBySymbol':'tickersById')],
   state:store[markets?'markets':'tickers'],write(changes){store[markets?'updateMarket':'updateTicker']({id},changes??{[field]:changed})}};
 }
 function attempt(action){try{action();return null}catch(e){return e.name}}
 function domain(view,key){const d=Object.getOwnPropertyDescriptor(view,key);return {own:Object.hasOwn(view,key),keys:Object.keys(view),descriptor:d?{enumerable:d.enumerable,writable:d.writable,configurable:d.configurable}:null,json:JSON.stringify(view)}}
-const identity=[],deletion=[],overlays=[],integrity=[],generations=[],unicode=[];
+const identity=[],deletion=[],overlays=[],integrity=[],generations=[],unicode=[],partialWrites=[];
 for(const name of names){
  {
   const f=fixture(name),row=f.view[f.key];
@@ -72,12 +73,21 @@ for(const name of names){
   if(how==='defineHidden')assert.equal(Object.getOwnPropertyDescriptor(f.view,f.key).enumerable,false);
   overlays.push({name,how,before,after:domain(f.view,f.key),replacementSurvives:tickerId,stateValue:f.state[0][f.field]});
  }
+ {
+  const f=fixture(name),row=f.view[f.key],last=f.markets?'quote':'ask',lastValue=row[last];
+  Object.defineProperty(row,last,{writable:false});
+  const error=attempt(()=>f.write({[f.field]:f.changed,[last]:f.markets?'CHANGED':9}));
+  assert.equal(error,'TypeError');assert.equal(row[f.field],f.changed);assert.equal(row[last],lastValue);
+  assert.equal(f.notices.count,0);assert.equal(f.state[0],row);assert.equal(Object.values(f.other)[0],row);
+  partialWrites.push({name,error,firstValue:row[f.field],lastValue,notices:f.notices.count});
+ }
  for(const operation of ['freeze','seal','preventExtensions'])for(const subject of ['map','row']){
   const f=fixture(name),row=f.view[f.key],target=subject==='map'?f.view:row;
   Object[operation](target);
   const mutationError=attempt(()=>f.write());
   const expectedError=operation==='freeze'?'TypeError':null;
   assert.equal(mutationError,expectedError);
+  const mutationNotices=f.notices.count;assert.equal(mutationNotices,operation==='freeze'?0:1);
   assert.equal(row[f.field],operation==='freeze'&&subject==='row'?(f.markets?true:1):f.changed);
   const insertionError=attempt(()=>{f.view.extra=row});
   assert.equal(insertionError,subject==='map'?'TypeError':null);
@@ -85,9 +95,9 @@ for(const name of names){
   assert.equal(deleteError,subject==='map'&&operation!=='preventExtensions'?'TypeError':null);
   const beforeFull=row[f.field];
   const fullError=attempt(()=>f.store.update({[f.markets?'markets':'tickers']:[structuredClone(f.markets?market:ticker)]}));
-  assert.equal(fullError,null);assert.notEqual(f.store[name],f.view);assert.notEqual(f.store[name][f.key],row);
+  assert.equal(fullError,null);assert.equal(f.notices.count,mutationNotices+1);assert.notEqual(f.store[name],f.view);assert.notEqual(f.store[name][f.key],row);
   assert.equal(row[f.field],beforeFull);
-  integrity.push({name,operation,subject,mutationError,rowValue:row[f.field],insertionError,deleteError,fullError});
+  integrity.push({name,operation,subject,mutationError,mutationNotices,rowValue:row[f.field],insertionError,deleteError,fullError});
  }
  {
   const f=fixture(name),oldMap=f.view,oldRow=f.view[f.key];
@@ -113,4 +123,4 @@ for(const value of [-0,NaN,Infinity,-Infinity]){
  assert.equal(Object.is(row.bid,value),true);assert.equal(f.view[f.key],row);
  bits.push({value:Object.is(value,-0)?'-0':String(value),same:true});
 }
-process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits}));
+process.stdout.write(JSON.stringify({identity,deletion,overlays,integrity,generations,unicode,bits,partialWrites}));
