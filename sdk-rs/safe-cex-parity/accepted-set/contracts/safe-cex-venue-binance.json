@@ -17376,5 +17376,184 @@
     },
     "reason": "Snapshots topic keys in JavaScript own-key order, reads native f64 counts lazily, filters finite positive values and writes outgoing SUBSCRIBE frames with sequential numeric IDs through the supplied send capability. String keys are topic names, not serialized inputs; Result<(), E> forwards the host send error and admits no decoded record.",
     "evidence": "Individually reviewed actual production function and all five live TS subscribe bodies (binance, binancepm and binancespot ws-public.ts). tests/private_classes.rs -> support/public_subscription_receipts.rs::production_native_subscription_frames_order_counts_reentry_and_send_failure constructs native_dependencies and actual ExchangeOwner/PublicSocket, observes host frame bytes for all five kinds, finite/NaN/infinity count filtering, key snapshot/fresh count reentry, error name/message and abort, plus empty topics. scripts/public-subscription-controls.py compiles a separate semantic fault in this exact owner, requires the named real-binding assertion to fail, restores exact source and requires it to pass. tests/public_subscriptions.rs retains all 5505 live TS comparisons against the common production body, including scalar counter gates, key ordering, activation/removal/append and thrown send. Accepted receipts for this specific outgoing capability are classifications, not claimed decoder execution, arbitrary native getter admission or all generic-host coverage."
+  },
+  "safe_cex_venue_binance::private_rest::SnapshotCall": {
+    "category": "non-decoder",
+    "evidence": "Maintained BinanceExchange.fetchOrders reports non-array responses through console.error(message, originalData) and log(message, LogSeverity.Error), and reports caught failures through console.error(message, error). tests/private_classes.rs::snapshot_call_binding constructs actual native_dependencies/ExchangeOwner and executes both signed order requests. Its three tests observe the source error severity, both console arguments including original negative-zero/NaN/own-undefined values, and the native caught Error name/message before serialization. scripts/snapshot-call-controls.py separately corrupts severity, variadic arguments and Error materialization, requires each named assertion to fail after successful compilation, restores exact production bytes and requires GREEN. scripts/snapshot-call-alias-contracts.mjs authenticates fresh compiler declarations and artifacts and separately checks the selected native alias classification; its classification receipt does not execute the callback.",
+    "reason": "Captured executable snapshot reporting capability over already-produced SnapshotArgument values. It forwards console/log/emitter calls to the owning native exchange and returns callback success/failure; it does not decode raw input into an owner.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_venue_binance::private_rest::SnapshotArgument",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_binance::request_weight::Failure",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_venue_binance::private_rest::SnapshotArgument",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }
