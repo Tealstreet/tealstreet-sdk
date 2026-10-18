@@ -234,3 +234,13 @@ native numbers, undefined and UTF16 before serialization; `into_value` is a real
 JSON boundary, never an intermediate model conversion. The native Serde marker
 and InfoRecord codecs preserve own undefined without exposing marker objects in
 wire JSON. The single retained JSON writer lives below Num in this crate.
+
+Market.runtime is the shared carrier for runtime type/spot/swap/future/contract/
+linear/inverse properties constructed outside the maintained TS Market declaration.
+Its serializer writes these optional fields on the Market object; its private
+object decoder reads the same flattened keys. Precision base/quote, price max and
+cost limits are likewise optional runtime fields on the canonical nested models.
+The static TS declaration projection omits them; native output and numeric ingress
+retain them. Other venue constructors explicitly leave these fields absent.
+The recorded public-market addon regression executes the actual Backpack and
+Crypto.com TS constructors and compiled native binding against identical HTTP bytes.
