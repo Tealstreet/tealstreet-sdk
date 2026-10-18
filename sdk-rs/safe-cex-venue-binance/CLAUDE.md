@@ -561,3 +561,12 @@ TS acceptance are explicit witnesses; public class/onMessage rows remain diverge
 Connection/keepalive warning concatenation must retain native UTF16 before the
 existing shared reporting/log boundaries; tests read the actual Base console Js
 argument before any diagnostic display projection.
+
+The eleven inverse socket raw-string helper contracts use the separate
+`scripts/inverse-socket-helper-contracts.mjs` runner and 79 native cases.
+Their scope, primitive capability seams and actual-class source coverage are
+reviewed in [INVERSE_SOCKET_HELPER_CONTRACT_REVIEW.md](INVERSE_SOCKET_HELPER_CONTRACT_REVIEW.md).
+The runner keeps rustdoc artifacts in `target/accepted-inventory`, separate from
+normal native builds. The companion Python control runner compiles isolated
+production faults and restores exact bytes; source fixtures are never substitutes
+for those native receipts.

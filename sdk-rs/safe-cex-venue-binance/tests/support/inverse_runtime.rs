@@ -3,6 +3,8 @@
     dead_code,
     reason = "each socket target selects its own primitive fixture operations"
 )]
+#[cfg(not(test))]
+use crate as safe_cex_venue_binance;
 mod virtual_time {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),

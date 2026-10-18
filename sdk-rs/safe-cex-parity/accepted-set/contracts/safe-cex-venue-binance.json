@@ -3062,5 +3062,1945 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_binance::inverse::ws_private::call": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "call",
+      "signature": {
+        "inputs": [
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::call(case,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "result": {
+            "error": "TypeError"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "case": "not-callable"
+        },
+        "output": {
+          "result": {
+            "error": "TypeError"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "case": "getter-throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "result": {
+            "kind": "identity"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "result": {
+            "bits": "8000000000000000"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "nan"
+        },
+        "output": {
+          "result": {
+            "bits": "7ff8000000000000"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "utf16"
+        },
+        "output": {
+          "result": {
+            "units": [
+              55296
+            ]
+          },
+          "calls": 1
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_private::flag": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "flag",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::flag(case,true,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "undefined"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "false"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "empty"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "zero"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "nan"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "bool": true
+        }
+      },
+      {
+        "input": {
+          "case": "utf16"
+        },
+        "output": {
+          "bool": true
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "error": "original"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_private::global": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "global",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::global(case,true,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "error": "ReferenceError"
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "error": "original"
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "kind": "identity"
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "utf16"
+        },
+        "output": {
+          "units": [
+            55296
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_private::optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::property(case,true,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "nan"
+        },
+        "output": {
+          "bits": "7ff8000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "kind": "identity"
+        }
+      },
+      {
+        "input": {
+          "case": "inherited"
+        },
+        "output": {
+          "kind": "identity"
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "error": "original"
+        }
+      },
+      {
+        "input": {
+          "case": "null-owner"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined-owner"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_private::send": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "send",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::send(case,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "object"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "arguments": [
+            {
+              "units": [
+                123,
+                34,
+                122,
+                101,
+                114,
+                111,
+                34,
+                58,
+                48,
+                44,
+                34,
+                110,
+                97,
+                110,
+                34,
+                58,
+                110,
+                117,
+                108,
+                108,
+                125
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "undefined"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "arguments": [
+            {
+              "kind": "undefined"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "utf16"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "arguments": [
+            {
+              "units": [
+                34,
+                92,
+                117,
+                100,
+                56,
+                48,
+                48,
+                34
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "cycle"
+        },
+        "output": {
+          "result": {
+            "error": "TypeError"
+          },
+          "arguments": []
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "arguments": [
+            {
+              "units": [
+                123,
+                34,
+                122,
+                101,
+                114,
+                111,
+                34,
+                58,
+                48,
+                44,
+                34,
+                110,
+                97,
+                110,
+                34,
+                58,
+                110,
+                117,
+                108,
+                108,
+                125
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_private::timeout": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "timeout",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "delay",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "guarded",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::timer(case,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "normal"
+        },
+        "output": {
+          "before": 0,
+          "after": 1
+        }
+      },
+      {
+        "input": {
+          "case": "disposed"
+        },
+        "output": {
+          "before": 0,
+          "after": 0
+        }
+      },
+      {
+        "input": {
+          "case": "closed"
+        },
+        "output": {
+          "before": 0,
+          "after": 0
+        }
+      },
+      {
+        "input": {
+          "case": "unguarded"
+        },
+        "output": {
+          "before": 0,
+          "after": 1
+        }
+      },
+      {
+        "input": {
+          "case": "cancel"
+        },
+        "output": {
+          "before": 0,
+          "after": 0
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_public::call": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "call",
+      "signature": {
+        "inputs": [
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::call(case,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "result": {
+            "error": "TypeError"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "case": "not-callable"
+        },
+        "output": {
+          "result": {
+            "error": "TypeError"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "case": "getter-throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "result": {
+            "kind": "identity"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "result": {
+            "bits": "8000000000000000"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "nan"
+        },
+        "output": {
+          "result": {
+            "bits": "7ff8000000000000"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "utf16"
+        },
+        "output": {
+          "result": {
+            "units": [
+              55296
+            ]
+          },
+          "calls": 1
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_public::flag": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "flag",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::flag(case,false,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "undefined"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "false"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "empty"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "zero"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "nan"
+        },
+        "output": {
+          "bool": false
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "bool": true
+        }
+      },
+      {
+        "input": {
+          "case": "utf16"
+        },
+        "output": {
+          "bool": true
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "error": "original"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_public::global": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "global",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::global(case,false,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "error": "ReferenceError"
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "error": "original"
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "kind": "identity"
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "utf16"
+        },
+        "output": {
+          "units": [
+            55296
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_public::subscription": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "subscription",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "topic",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::subscription(case,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "normal"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "idBits": "4008000000000000",
+          "wires": [
+            "{\"method\":\"SUBSCRIBE\",\"params\":[\"btcusd_perp@depth\"],\"id\":2}"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "unsubscribe"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "idBits": "4008000000000000",
+          "wires": [
+            "{\"method\":\"UNSUBSCRIBE\",\"params\":[\"btcusd_perp@depth\"],\"id\":2}"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "zero"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "idBits": "3ff0000000000000",
+          "wires": [
+            "{\"method\":\"SUBSCRIBE\",\"params\":[\"btcusd_perp@depth\"],\"id\":0}"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "utf16"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "idBits": "4008000000000000",
+          "wires": [
+            "{\"method\":\"SUBSCRIBE\",\"params\":[\"\\ud800\"],\"id\":2}"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "idBits": "4008000000000000",
+          "wires": [
+            "{\"method\":\"SUBSCRIBE\",\"params\":[\"btcusd_perp@depth\"],\"id\":2}"
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::inverse::ws_public::tickers": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "tickers",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::scope::Scope",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::inverse::ExchangeState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "events",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "fields",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "quote",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed unchanged socket helper. Native observations execute the actual production function with the real constructor Scope and primitive runtime. Receivers, argument/object/error identities, numeric bits and UTF16 units are checked before finite reporting. This bounded helper corpus supplements the maintained whole-class socket oracle; it does not claim arbitrary graph equivalence.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-socket-helper-observers.rs\")); } let case=$value[\"case\"].as_str().unwrap(); witness::tickers(case,$type) }",
+    "cases": [
+      {
+        "input": {
+          "case": "normal"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "patches": [
+            {
+              "lastBits": "NaN",
+              "quote": {
+                "bits": "4010000000000000"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "unknown"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "patches": []
+        }
+      },
+      {
+        "input": {
+          "case": "quote-fallback"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "patches": [
+            {
+              "lastBits": "8000000000000000",
+              "quote": {
+                "bits": "4029000000000000"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "quote-zero"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "patches": [
+            {
+              "lastBits": "7ff0000000000000",
+              "quote": {
+                "bits": "0000000000000000"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "no-quote"
+        },
+        "output": {
+          "result": {
+            "kind": "undefined"
+          },
+          "patches": [
+            {
+              "lastBits": "NaN",
+              "quote": {
+                "kind": "undefined"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "patches": [
+            {
+              "lastBits": "NaN",
+              "quote": {
+                "bits": "4010000000000000"
+              }
+            }
+          ]
+        }
+      }
+    ]
   }
 }
