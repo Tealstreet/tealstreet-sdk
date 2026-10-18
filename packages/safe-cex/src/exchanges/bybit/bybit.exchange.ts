@@ -640,9 +640,13 @@ export class BybitExchange extends BaseExchange {
   private recentlyPlacedOrders = new Map<string, { placedAt: number; order: Order }>();
   private recentlyPlacedOrderReconciliationTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
 
-  private shouldUseLocalRestOrderLifecycleFallback = () => {
+  // Protected method (not a private arrow) so Bybit-compatible subclasses whose
+  // private WS reliability differs from the base (e.g. HyrotraderExchange, whose
+  // simulator-backed private WS has not yet been independently verified against
+  // Bybit mainnet) can override without touching Bybit's own live/demo gate.
+  protected shouldUseLocalRestOrderLifecycleFallback(): boolean {
     return this.isDemo || this.options.bybitSiteId === BYBIT_BRAZIL_SITE_ID;
-  };
+  }
 
   /** First sighting via private WS or an explicit cancel — stop protecting the id. */
   markOrderSeen = (orderId: string) => {
