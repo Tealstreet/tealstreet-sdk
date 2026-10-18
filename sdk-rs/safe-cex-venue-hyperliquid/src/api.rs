@@ -325,7 +325,11 @@ impl ApiClient {
                 &body["nonce"],
                 !self.options.testnet.unwrap_or(false),
             )
-            .map_err(TransportError::Host)?;
+            .map_err(|cause| {
+                TransportError::Rejected(safe_cex_transport::provider::TransportErrorOrigin::new(
+                    cause,
+                ))
+            })?;
             body.as_object_mut().unwrap().insert(
                 "signature".into(),
                 serde_json::to_value(signature).map_err(|e| TransportError::Host(e.to_string()))?,
