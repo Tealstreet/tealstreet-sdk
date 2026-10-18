@@ -34,21 +34,26 @@ if (venue) {
     markets = await exchange.fetchMarkets();
     await exchange.dispose();
   } else {
-    const native = createRequire(import.meta.url)('../dist/node/safe_cex_ffi.node');
+    const native = createRequire(import.meta.url)(process.env.LIVE_DIFF_ADDON || '../dist/node/safe_cex_ffi.node');
+    process.send({ phase: 'open' });
     const id = await native.nativeAccountOpen(
       { exchange: venue, options },
       () => {},
       () => {},
     );
+    process.send({ phase: 'fetchMarkets' });
     markets = await native.nativeAccountCallMethod(id, 'fetchMarkets', []);
+    process.send({ phase: 'close' });
     await native.nativeAccountClose(id);
   }
-  assert.deepEqual(seen, [{ backpack: '/api/v1/markets', cryptocom: '/exchange/v1/public/get-instruments' }[venue]]);
+  assert.deepEqual(seen, [
+    { backpack: '/api/v1/markets', cryptocom: '/exchange/v1/public/get-instruments', paradex: '/v1/markets' }[venue],
+  ]);
   process.send({ markets });
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 } else {
-  for (const name of ['backpack', 'cryptocom']) {
+  for (const name of ['backpack', 'cryptocom', 'paradex']) {
     test(`${name} recorded public markets retain runtime fields through the production addon`, async () => {
       async function run(implementation) {
         return await new Promise((resolve, reject) => {
@@ -64,13 +69,15 @@ if (venue) {
             },
           );
           let result,
-            errors = '';
+            errors = '',
+            phase = 'initialization';
           const timer = setTimeout(() => {
             child.kill('SIGKILL');
-            reject(new Error(`${name} ${implementation} did not settle within 8s`));
+            reject(new Error(`${name} ${implementation} did not settle within 8s (phase: ${phase})`));
           }, 8000);
           child.on('message', (message) => {
-            result = message;
+            if (message.phase) phase = message.phase;
+            else result = message;
           });
           child.stderr.on('data', (data) => {
             errors += data;
@@ -84,7 +91,10 @@ if (venue) {
         });
       }
       const expected = await run('ts');
-      assert.equal(expected.length, { backpack: 188, cryptocom: 404 }[name], 'full recorded market count');
+      assert.equal(expected.length, { backpack: 188, cryptocom: 404, paradex: 66 }[name], 'full recorded market count');
+      if (name === 'paradex') {
+        for (const market of expected) assert.deepEqual(market.fees, { maker: 0, taker: 0 });
+      }
       assert.deepEqual(await run('rust'), expected);
     });
   }

@@ -1,5 +1,9 @@
 # Bybit venue port (in progress)
 
+The fill-history source witness compares diagnostic messages separately from
+the console severity argument. Its native observer verifies both argument count
+and severity before comparing all 45 maintained-source request/result/log cases.
+
 The 19 concrete SessionHost, SnapshotHost and AccountRefreshHost receiver rows
 are pinned to their full production impl items. The native `receiver_tests`
 construct primary/demo exchanges and observe cells, UTF-16, signed zero,
