@@ -3772,7 +3772,9 @@ mod strict_codecs {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             let input = crate::retained_json::RetainedJsonInput::deserialize(deserializer)?;
             if !input.is_object() {
-                return Err(serde::de::Error::custom("CurrencyBalance must be an object"));
+                return Err(serde::de::Error::custom(
+                    "CurrencyBalance must be an object",
+                ));
             }
             if let Ok(balance) = input.clone().decode_native::<super::Balance>(false) {
                 return Ok(Self::Declared(balance));

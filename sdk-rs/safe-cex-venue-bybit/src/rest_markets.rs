@@ -97,8 +97,8 @@ where
     for row in rows {
         let fees = fees.as_array().ok_or("fees.find is not a function")?;
         mapped.push(map_market(
-            row,
-            fees,
+            &row.clone().into(),
+            &fees.iter().cloned().map(Into::into).collect::<Vec<_>>(),
             category,
             if inverse {
                 Family::Inverse

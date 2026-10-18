@@ -1,63 +1,81 @@
 //! Bybit options as an instrument: symbol routing, instrument rows and greeks.
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice,
     MarketPrecision, OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle,
 };
-use serde_json::Value;
 
 /// Measured on 2026-10-14 against Black-Scholes on mainnet BTC options; Bybit's docs do not state them.
 pub const BYBIT_GREEK_UNITS: &str = "Black-Scholes per 1 unit of the underlying, in the premium asset: vega per 1 vol point, theta per calendar day";
 
 // ts: num — parseFloat(String(value ?? '')), 0 when not finite.
-fn num(value: Option<&Value>) -> Result<f64, String> {
-    let text = match value {
-        None | Some(Value::Null) => String::new(),
-        Some(value) => safe_cex_num::js_string(Some(value)).map_err(|e| e.message.to_string())?,
-    };
-    let parsed = safe_cex_num::parse_float(&text);
+fn num(value: Option<&Input>) -> Result<f64, String> {
+    let value = value.filter(|value| !value.is_nullish());
+    let parsed = safe_cex_num::js_retained_parse_float(value).map_err(|error| error.to_string())?;
     Ok(if parsed.is_finite() { parsed } else { 0. })
 }
-fn nested<'a>(raw: &'a Value, outer: &str, inner: &str) -> Option<&'a Value> {
+fn nested<'a>(raw: &'a Input, outer: &str, inner: &str) -> Option<&'a Input> {
     raw.get(outer)
-        .filter(|value| !value.is_null())
+        .filter(|value| !value.is_nullish())
         .and_then(|value| value.get(inner))
 }
 // ts: strikeOf — the third '-' segment, where the first `d` marks a decimal point.
-fn strike_of(symbol: &str) -> Result<f64, String> {
+fn strike_of(symbol: &[u16]) -> Result<f64, String> {
     let segment = symbol
-        .split('-')
+        .split(|unit| *unit == u16::from(b'-'))
         .nth(2)
-        .map(|part| Value::String(part.replacen('d', ".", 1)));
+        .map(|part| {
+            let mut part = part.to_vec();
+            if let Some(index) = part.iter().position(|unit| *unit == u16::from(b'd')) {
+                part[index] = u16::from(b'.');
+            }
+            Input::Text(part)
+        });
     num(segment.as_ref())
 }
 
 // ts: mapBybitOptionInstrument — undefined when the row is not tradable.
-pub fn map_bybit_option_instrument(raw: &Value) -> Result<Option<Market>, String> {
-    if raw.get("status").and_then(Value::as_str) != Some("Trading") {
+pub fn map_bybit_option_instrument(raw: &Input) -> Result<Option<Market>, String> {
+    if !raw
+        .get("status")
+        .is_some_and(|value| value.text_equals("Trading"))
+    {
         return Ok(None);
     }
-    let symbol = raw.get("symbol").and_then(Value::as_str).unwrap_or("");
+    let symbol = raw.get("symbol").and_then(Input::as_text).unwrap_or(&[]);
     let strike = strike_of(symbol)?;
-    let right = match raw.get("optionsType").and_then(Value::as_str) {
-        Some("Call") => OptionRight::Call,
-        Some("Put") => OptionRight::Put,
-        _ => return Ok(None),
+    let right = if raw
+        .get("optionsType")
+        .is_some_and(|value| value.text_equals("Call"))
+    {
+        OptionRight::Call
+    } else if raw
+        .get("optionsType")
+        .is_some_and(|value| value.text_equals("Put"))
+    {
+        OptionRight::Put
+    } else {
+        return Ok(None);
     };
     if strike == 0. {
         return Ok(None);
     }
-    let text = |key: &str| {
+    let symbol = String::from_utf16(symbol)
+        .map_err(|_| "Bybit option symbol cannot be represented as a Rust string")?;
+    let text = |key: &str| -> Result<String, String> {
         raw.get(key)
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned()
+            .and_then(Input::as_text)
+            .map(String::from_utf16)
+            .transpose()
+            .map_err(|_| format!("Bybit option {key} cannot be represented as a Rust string"))
+            .map(|value| value.unwrap_or_default())
     };
     Ok(Some(Market {
-        id: symbol.into(),
-        symbol: symbol.into(),
+        id: symbol.clone(),
+        symbol,
         pretty_symbol: None,
-        base: text("baseCoin"),
-        quote: text("quoteCoin"),
+        base: text("baseCoin")?,
+        quote: text("quoteCoin")?,
         active: true,
         precision: MarketPrecision {
             amount: num(nested(raw, "lotSizeFilter", "qtyStep"))?,
@@ -74,14 +92,14 @@ pub fn map_bybit_option_instrument(raw: &Value) -> Result<Option<Market>, String
             }),
         },
         option: Some(OptionTerms {
-            underlying: text("baseCoin"),
+            underlying: text("baseCoin")?,
             expiry: num(raw.get("deliveryTime"))?,
             strike,
             right,
             style: OptionTermsStyle::European,
             settlement: OptionTermsSettlement::Cash,
-            premium_asset: text("quoteCoin"),
-            settle_asset: text("settleCoin"),
+            premium_asset: text("quoteCoin")?,
+            settle_asset: text("settleCoin")?,
         }),
         contract_size: Some(1.),
         is_expiring: Some(true),
@@ -89,7 +107,7 @@ pub fn map_bybit_option_instrument(raw: &Value) -> Result<Option<Market>, String
         is_spot: None,
         is_perpetual: None,
         is_read_only: None,
-        info: Some(raw.clone().into()),
+        info: Some(raw.clone()),
         taker_fee: None,
         maker_fee: None,
     }))

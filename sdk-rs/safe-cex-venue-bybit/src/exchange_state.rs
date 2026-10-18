@@ -45,9 +45,10 @@ pub fn get_position_reliability_score(position: &Position) -> Result<u32, &'stat
         score += 20;
     }
     if let Some(value) = average.filter(|value| !value.is_nullish())
-        && !safe_cex_num::js_trim(
-            &safe_cex_num::js_retained_string(Some(value)).map_err(|error| error.message)?,
-        )
+        && !safe_cex_num::js_trim(&String::from_utf16_lossy(
+            &safe_cex_types::js_coercion::js_retained_string_utf16(value)
+                .map_err(|error| error.message)?,
+        ))
         .is_empty()
     {
         score += 5;

@@ -24,14 +24,16 @@ fn value(v: &Value) -> DataValue {
         Value::Null => DataValue::Null,
         Value::Bool(v) => DataValue::Bool(*v),
         Value::Number(v) => DataValue::Number(v.as_f64().unwrap()),
-        Value::String(v) => DataValue::String(v.clone()),
+        Value::String(v) => DataValue::String(v.encode_utf16().collect()),
         Value::Array(v) => DataValue::Array(Rc::new(RefCell::new(v.iter().map(value).collect()))),
         Value::Object(v) => {
             if v.get("fixtureUndefined") == Some(&json!(true)) {
                 DataValue::Undefined
             } else {
                 DataValue::Object(Rc::new(RefCell::new(
-                    v.iter().map(|(k, v)| (k.clone(), value(v))).collect(),
+                    v.iter()
+                        .map(|(k, v)| (k.encode_utf16().collect(), value(v)))
+                        .collect(),
                 )))
             }
         }
@@ -43,12 +45,12 @@ fn leaves(v: &DataValue) -> Value {
         DataValue::Null => Value::Null,
         DataValue::Bool(v) => json!(v),
         DataValue::Number(v) => json!(v),
-        DataValue::String(v) => json!(v),
+        DataValue::String(v) => json!(String::from_utf16(v).unwrap()),
         DataValue::Array(v) => json!(v.borrow().iter().map(leaves).collect::<Vec<_>>()),
         DataValue::Object(v) => Value::Object(
             v.borrow()
                 .iter()
-                .map(|(k, v)| (k.clone(), leaves(v)))
+                .map(|(k, v)| (String::from_utf16(k).unwrap(), leaves(v)))
                 .collect(),
         ),
     }
@@ -66,7 +68,7 @@ fn assert_value(v: &DataValue, e: &Value, label: &str) {
             let e = e.as_object().expect("native object expected");
             assert_eq!(v.borrow().len(), e.len(), "{label}: native object count");
             for (k, v) in v.borrow().iter() {
-                assert_value(v, &e[k], label)
+                assert_value(v, &e[&String::from_utf16(k).unwrap()], label)
             }
         }
         DataValue::Number(v) => assert_eq!(*v, e.as_f64().unwrap(), "{label}: native number"),
@@ -378,29 +380,33 @@ impl Host {
             .borrow_mut()
             .push(json!(["mapOption", leaves(&row)]));
         let symbol = match &row {
-            DataValue::Object(fields) => fields.borrow().get("symbol").cloned(),
+            DataValue::Object(fields) => fields
+                .borrow()
+                .get(&"symbol".encode_utf16().collect::<Vec<_>>())
+                .cloned(),
             _ => None,
         };
         let symbol = match symbol {
             Some(DataValue::String(symbol)) => symbol,
             _ => return Ok(DataValue::Null),
         };
-        if self.input["failMap"].as_str() == Some(symbol.as_str()) {
+        if self.input["failMap"].as_str() == Some(String::from_utf16(&symbol).unwrap().as_str()) {
             return Err(self.error("mapOption"));
         }
         let fields = match &row {
             DataValue::Object(fields) => fields.borrow().clone(),
             _ => unreachable!(),
         };
-        if !matches!(fields.get("status"), Some(DataValue::String(s)) if s == "Trading") {
+        if !matches!(fields.get(&"status".encode_utf16().collect::<Vec<_>>()), Some(DataValue::String(s)) if s.iter().copied().eq("Trading".encode_utf16()))
+        {
             return Ok(DataValue::Null);
         }
         let strike = fields
-            .get("strike")
+            .get(&"strike".encode_utf16().collect::<Vec<_>>())
             .cloned()
             .unwrap_or(DataValue::Undefined);
         Ok(value(
-            &json!({"symbol":symbol,"option":{"strike":leaves(&strike)}}),
+            &json!({"symbol":String::from_utf16(&symbol).unwrap(),"option":{"strike":leaves(&strike)}}),
         ))
     }
     fn send(&self, frame: &str) -> Result<(), Error> {
@@ -490,7 +496,7 @@ fn run(h: Rc<Host>) -> (Result<DataValue, Error>, Vec<Value>) {
                         if h.input["swapTimer"] == true {
                             h.timer_index.set(1)
                         }
-                        Ok(DataValue::String("t0".into()))
+                        Ok(DataValue::String("t0".encode_utf16().collect()))
                     },
                     || {
                         let i = h.timer_index.get();
@@ -788,9 +794,11 @@ fn public_data_recovery_native_source_oracle() {
                     "{label}: native replacement identity"
                 );
                 let fee = if let DataValue::Object(o) = &h.fee {
-                    if let Some(DataValue::Object(r)) = o.borrow().get("result") {
+                    if let Some(DataValue::Object(r)) =
+                        o.borrow().get(&"result".encode_utf16().collect::<Vec<_>>())
+                    {
                         r.borrow()
-                            .get("list")
+                            .get(&"list".encode_utf16().collect::<Vec<_>>())
                             .cloned()
                             .unwrap_or(DataValue::Undefined)
                     } else {

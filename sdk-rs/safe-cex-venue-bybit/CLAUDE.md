@@ -35,10 +35,10 @@ union member and optional omission. Rate-limit numeric fields use f64, not an
 integer restriction absent from TypeScript. Simulator NEXT_PUBLIC settings are
 Cargo build-time values; the live oracle tests both empty and configured builds.
 
-Raw proxy JSON with a lone UTF-16 surrogate is a declared divergence in
-parseRawResponse/getBybitResponseMeta: TS accepts it; Rust drops the raw envelope
-and any status/message supplied only there. A bidirectional source-driven test
-pins this limitation. Both helpers use the shared js_trim shim.
+Raw proxy envelopes retain UTF-16 and nonfinite opaque fields. The final
+BybitResponseMeta.ret_msg String boundary visibly refuses lone surrogates; the
+coordinator-approved follow-up widens that message. The response oracle pins the
+refusal while all status extraction keeps the canonical retained input.
 
 Live Node tests require the frozen root dependency installation (including qs
 and Axios). CI runs the command above in the `types` job after that installation;
@@ -907,3 +907,9 @@ finite Store resets and native binary64 assertions. Spot's ignored funding time
 and truthy rate-to-zero behavior remain source-equal. The shared control runner
 must fail all four family witnesses and the configured Hyro witness under live
 last/bid misrouting, then pass after exact source restoration.
+
+The response factory and typed HTTP receiver retain canonical Input through status,
+retry and mapper dispatch. Market rows and option instruments consume Input;
+the mutable public-data graph keeps UTF-16 text and keys without changing array
+or object allocation identity. Native market/position regressions cover opaque
+surrogates, overflow and the reliability score's nonempty UTF-16 price test.

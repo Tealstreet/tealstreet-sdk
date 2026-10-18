@@ -241,6 +241,7 @@ pub struct Wire {
     pub reject_http_errors: Cell<bool>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(u16, Value)>)>>,
     pub encoded_routes: RefCell<Vec<(String, Vec<u8>)>>,
+    pub retained_routes: RefCell<Vec<(String, safe_cex_types::retained_json::RetainedJsonInput)>>,
     /// (METHOD, path, query key, query value) routes, checked before the plain ones.
     pub param_routes: RefCell<Vec<(String, String, String, String, (u16, Value))>>,
     pub requests: RefCell<Vec<Request>>,
@@ -365,6 +366,12 @@ impl RestAdapter for Wire {
             .iter()
             .find(|(route, _)| route == &path)
             .map(|(_, body)| body.clone());
+        let retained = self
+            .retained_routes
+            .borrow()
+            .iter()
+            .find(|(route, _)| route == &path)
+            .map(|(_, body)| body.clone());
         Box::pin(async move {
             if let Some(gate) = gate {
                 gate.wait().await;
@@ -389,8 +396,13 @@ impl RestAdapter for Wire {
                     status,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Encoded(
-                        encoded.unwrap_or_else(|| body.to_string().into_bytes()),
+                    body: retained.map_or_else(
+                        || {
+                            RestResponseBody::Encoded(
+                                encoded.unwrap_or_else(|| body.to_string().into_bytes()),
+                            )
+                        },
+                        RestResponseBody::Untransformed,
                     ),
                 }),
                 None => Err(safe_cex_transport::RestFailure::pre_transmit(
