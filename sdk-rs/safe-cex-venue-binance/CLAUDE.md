@@ -603,3 +603,11 @@ source claims before running ordinary alias probes. Separate
 paths independently; both must compile and fail the named native test, then pass
 after exact source restoration. Other owners and generic instantiations remain
 outside this finite evidence.
+
+Native HTTP weight guards receive canonical shared AxiosHeaders on both successful
+responses and reconstructed rejection responses. NativeImports reads and invokes
+the actual get method with the original header receiver. The native
+`production_native_request_weight_callbacks_observe_success_and_rejection` test
+compares five signed request outcomes, including mixed-case weight/retry headers,
+against actual maintained TS guards with installed Axios. Its only request stub
+is the terminal RestAdapter; the factories, signer and response guards are live.

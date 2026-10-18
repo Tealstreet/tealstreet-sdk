@@ -4728,7 +4728,10 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
     use safe_cex_transport::{
         RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
     };
-    use std::sync::{Arc, Mutex};
+    use std::{
+        io::Write,
+        sync::{Arc, Mutex},
+    };
     struct Response {
         status: u16,
         header: &'static str,
@@ -4753,6 +4756,8 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
             Box::pin(async move { Ok(response) })
         }
     }
+    let mut source_input = vec![];
+    let mut native_pauses = vec![];
     for (status, header, value, duration) in [
         (200, "x-mbx-used-weight-1m", "1920", 60_000.0),
         (200, "X-MbX-UsEd-WeIgHt-1m", "1920", 60_000.0),
@@ -4821,8 +4826,38 @@ fn production_native_request_weight_callbacks_observe_success_and_rejection() {
         assert_eq!(path, "/fapi/v1/openOrders");
         assert!(query.contains("timestamp="));
         assert!(query.contains("signature="));
+        source_input
+            .push(json!({"status":status,"header":header,"value":value,"now":runtime.now.get()}));
+        native_pauses.push(owner.paused_until.get());
         owner.dispose().unwrap();
     }
+    let mut source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/native-weight-headers-source.cjs"
+        ))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    source
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&source_input).unwrap())
+        .unwrap();
+    let source = source.wait_with_output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source_pauses: Vec<f64> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        native_pauses, source_pauses,
+        "all five native request outcomes match actual TS/Axios guards"
+    );
 }
 
 #[test]
