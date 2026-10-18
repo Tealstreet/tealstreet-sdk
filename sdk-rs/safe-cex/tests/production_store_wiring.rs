@@ -151,7 +151,7 @@ fn factory_constructs_real_exchange_while_clock_source_is_pending() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     exchange.store.set_setting("isHedged", true).unwrap();
     assert!(
-        store.options().is_hedged,
+        store.options().unwrap().is_hedged,
         "factory must retain the production Store"
     );
     assert_eq!(factory.clock.get_current_time_ms(), 1000.0);

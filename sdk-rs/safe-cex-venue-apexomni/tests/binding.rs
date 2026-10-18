@@ -446,7 +446,7 @@ fn native_sdk_initialization_has_no_deferred_module_work() {
         assert_eq!(request.headers["APEX-API-KEY"], "fixture-key");
     }
     assert!(
-        h.store.orders().is_empty(),
+        h.store.orders().unwrap().is_empty(),
         "placement does not invent Store rows"
     );
     assert_eq!(
