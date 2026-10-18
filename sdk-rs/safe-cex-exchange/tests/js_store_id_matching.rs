@@ -107,7 +107,7 @@ fn singular_store_ids_match_actual_source_property_access_and_lookup_rules() {
             row["empty"]
         );
         let field = row["field"].as_str().unwrap();
-        let actual:Vec<Value>=facade.get(state).unwrap().array_values().unwrap().into_iter().map(|value|json!({"id":value.get("id").unwrap().to_display(),"value":value.get(field).unwrap().to_display()})).collect();
+        let actual:Vec<Value>=facade.get(state).unwrap().array_values().expect("fixture array property reads").unwrap().into_iter().map(|value|json!({"id":value.get("id").unwrap().to_display(),"value":value.get(field).unwrap().to_display()})).collect();
         assert_eq!(
             json!(actual),
             row["rows"],

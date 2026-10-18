@@ -169,7 +169,7 @@ impl SecondaryProtocol {
                 let Some(socket) = weak.upgrade() else {
                     return Ok(());
                 };
-                let rows = value.get("added")?.array_values().ok_or_else(|| {
+                let rows = value.get("added")?.array_values()?.ok_or_else(|| {
                     type_error("Cannot read properties of undefined (reading 'length')")
                 })?;
                 let added = rows

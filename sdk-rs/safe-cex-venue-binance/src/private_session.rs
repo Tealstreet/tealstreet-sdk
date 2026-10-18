@@ -469,7 +469,7 @@ pub trait ModeBindings {
 }
 fn dense(v: &EventValue, expr: &str) -> Result<usize, Failure> {
     if let EventValue::Array(a) = v {
-        Ok(a.borrow().len())
+        Ok(a.len())
     } else if v.nullish() {
         Err(type_error(format!(
             "Cannot read properties of {} (reading 'map')",

@@ -24,7 +24,7 @@ fn method(
 }
 fn items(value: &Js) -> Result<Vec<Js>, Thrown> {
     Ok(value
-        .array_items()
+        .array_items()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))?
         .into_iter()
         .map(|item| item.unwrap_or(Js::Undefined))

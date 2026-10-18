@@ -22,7 +22,7 @@ where
     let tickers_by_symbol = capture()?;
     let mut i = 0;
     while i < events.len() {
-        let event = events.event(i);
+        let event = events.event(i)?;
         let key = symbol_key(&event)?;
         if let Some(ticker) = lookup(&tickers_by_symbol, &key)? {
             let update = get_update()?;
@@ -60,7 +60,7 @@ where
     let tickers_by_symbol = capture()?;
     let mut i = 0;
     while i < events.len() {
-        let event = events.event(i);
+        let event = events.event(i)?;
         let key = symbol_key(&event)?;
         if let Some(ticker) = lookup(&tickers_by_symbol, &key)? {
             let update = get_update()?;

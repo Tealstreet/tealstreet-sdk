@@ -99,7 +99,7 @@ pub(crate) fn has_property(key: &str, value: &Js) -> Result<bool, Thrown> {
 }
 
 fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
-    v.array_values()
+    v.array_values()?
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", v.to_display())))
 }
 
@@ -144,7 +144,7 @@ pub(crate) fn intrinsic(name: &str, a: Vec<Js>) -> Result<Js, Thrown> {
             let f = receiver.get_key(&key(1)?)?;
             f.call(receiver, a.iter().skip(2).cloned().collect())?
         }
-        "call-with-this" => x(0).call(x(1), x(2).array_values().unwrap_or_default())?,
+        "call-with-this" => x(0).call(x(1), x(2).array_values()?.unwrap_or_default())?,
         "get-index" => x(0).get_key(&key(1)?)?,
         "set-index" => {
             x(0).set_key(&key(1)?, x(2))?;
@@ -293,7 +293,7 @@ pub(crate) fn intrinsic(name: &str, a: Vec<Js>) -> Result<Js, Thrown> {
 
 /// Array.prototype.map over a live array; holes stay holes.
 fn map(input: Js, f: Rc<dyn Fn(Js) -> Result<Js, Thrown>>) -> Result<Js, Thrown> {
-    let Some(rows) = input.array_items() else {
+    let Some(rows) = input.array_items()? else {
         return Err(Thrown::type_error(&format!(
             "{}.map is not a function",
             input.to_display()
@@ -310,7 +310,7 @@ fn map(input: Js, f: Rc<dyn Fn(Js) -> Result<Js, Thrown>>) -> Result<Js, Thrown>
 }
 
 fn filter(input: Js, f: Rc<dyn Fn(Js) -> Result<bool, Thrown>>) -> Result<Js, Thrown> {
-    let Some(rows) = input.array_items() else {
+    let Some(rows) = input.array_items()? else {
         return Err(Thrown::type_error(&format!(
             "{}.filter is not a function",
             input.to_display()

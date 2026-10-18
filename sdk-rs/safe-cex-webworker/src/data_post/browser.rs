@@ -85,19 +85,14 @@ fn materialize(value: &Js, seen: &mut Vec<(Js, JsValue)>) -> Result<JsValue, Exc
             if let Some((_, v)) = seen.iter().find(|(old, _)| old.strict_equals(value)) {
                 return Ok(v.clone());
             }
-            let values = values.borrow().clone();
-            let array = Array::new_with_length(
-                values
-                    .len()
-                    .try_into()
-                    .map_err(|_| ExchangeError::new("Worker DATA array too large"))?,
-            );
+            let array = Array::new_with_length(values.len() as u32);
             let output: JsValue = array.clone().into();
+            // Publish the canonical identity before evaluating any child/getter.
             seen.push((value.clone(), output.clone()));
-            for (index, child) in values.iter().enumerate() {
-                if let Some(child) = child {
-                    array.set(index as u32, materialize(child, seen)?);
-                }
+            let object: Object = array.into();
+            for key in value.own_keys() {
+                let child = value.get_key(&key).map_err(|e| e.to_exchange_error())?;
+                property(&object, &string(&key), &materialize(&child, seen)?, true)?;
             }
             Ok(output)
         }

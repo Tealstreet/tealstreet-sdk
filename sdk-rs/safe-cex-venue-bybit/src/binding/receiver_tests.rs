@@ -398,7 +398,13 @@ fn native_receiver_selected_members_preserve_owner_and_capture() {
             .unwrap()
             .call(Js::Null, vec![])
             .unwrap();
-        assert_eq!(flat.array_values().unwrap().len(), 2);
+        assert_eq!(
+            flat.array_values()
+                .expect("fixture array property reads")
+                .unwrap()
+                .len(),
+            2
+        );
         assert!(flat.get("0").unwrap().same_reference(&child));
         assert!(flat.get("1").unwrap().is_array());
         assert!(SessionHost::select(rt, Js::Null, "method").is_err());

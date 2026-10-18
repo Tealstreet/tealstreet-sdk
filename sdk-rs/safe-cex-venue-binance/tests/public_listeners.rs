@@ -39,7 +39,11 @@ fn wire(v: &EventValue) -> Value {
         }
         EventValue::Bool(v) => json!(v),
         EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
-        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -276,6 +280,7 @@ impl ListenerHost for Host {
                 panic!("authored levels")
             };
             array_values(&a)
+                .expect("fixture array reads")
                 .iter()
                 .map(|r| {
                     vec![
@@ -386,13 +391,16 @@ fn check_payloads(h: &Host, id_dynamic: bool, book: bool, label: &str) {
         let EventValue::Array(a) = p.read("params").unwrap() else {
             panic!("native params")
         };
-        assert_eq!(a.borrow().len(), 1, "{label}: native params count");
+        assert_eq!(a.len(), 1, "{label}: native params count");
         assert!(
-            a.borrow()[0].as_ref().unwrap().same(&string(if book {
-                "btcusdt@depth"
-            } else {
-                "btcusdt@kline_1m"
-            })),
+            EventValue::Array(a.clone()).array_items().unwrap().unwrap()[0]
+                .as_ref()
+                .unwrap()
+                .same(&string(if book {
+                    "btcusdt@depth"
+                } else {
+                    "btcusdt@kline_1m"
+                })),
             "{label}: native captured topic"
         );
     }

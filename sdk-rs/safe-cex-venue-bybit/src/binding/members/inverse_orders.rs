@@ -49,7 +49,7 @@ async fn post(rt: &Rt, endpoint: &str, payload: Js) -> Result<Js, Thrown> {
 }
 fn items(value: &Js) -> Result<Vec<Js>, Thrown> {
     value
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))
 }
 
