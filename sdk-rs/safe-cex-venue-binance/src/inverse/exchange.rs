@@ -205,7 +205,7 @@ impl BinanceInverseExchange {
                 Ok(value) => callback(value),
                 Err(error) => reporter.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"source":"binanceinverse listener payload"}),
+                    &serde_json::json!({"source":"binanceinverse listener payload"}).into(),
                 ),
             }
             Ok(Js::Undefined)

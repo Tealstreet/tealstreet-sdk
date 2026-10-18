@@ -1754,3 +1754,10 @@ native account identity reads with the maintained TS constructor's shared option
 and checks reentry, exact references/bits, capture release and refusal behavior.
 Missing-publication and premature-publication production mutations must compile,
 fail the named source-visible assertions, restore exact bytes and pass.
+
+Exception reporter contexts and `emitAndLogError` extra data use canonical
+`RetainedJsonInput`. JS adapters capture before JSON so UTF-16, own undefined,
+NaN and signed zero reach the reporting sink intact. Native terminal formatting
+is a sink choice. Typed `ExchangeError` diagnostic strings keep their existing
+shape; original UTF-16 name/message fields use the existing retained callback
+cause and are restored only while their diagnostic views remain unchanged.

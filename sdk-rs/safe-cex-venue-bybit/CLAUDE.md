@@ -921,3 +921,9 @@ messages while preserving the option Store fallback. The bounded
 scripts/accepted-retained-info-contracts.mjs checks nine changed retained-input
 function owners with fresh compiler APIs and native field/bit observations;
 it does not classify unrelated Bybit package inventory debt.
+
+The retMsg diagnostic witness crosses real signed native HTTP, production
+response normalization, `emitAndLogError` and typed error rematerialization.
+Position-mode failure extras also retain raw message units while the source
+continues with its `oneway` placement fallback. Runtime report contexts remain
+canonical retained inputs through the terminal reporting capability.

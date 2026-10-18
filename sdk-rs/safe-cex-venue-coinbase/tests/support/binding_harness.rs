@@ -126,11 +126,19 @@ impl ExchangeRuntime for Runtime {
         self.random_calls.set(self.random_calls.get() + 1);
         self.random_values.borrow_mut().pop_front().unwrap_or(0.5)
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports.borrow_mut().push(error.message.clone());
         self.reported_errors.borrow_mut().push(error.clone());
     }
-    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.reports
             .borrow_mut()
             .push(safe_cex_exchange::runtime::exception_text(error));

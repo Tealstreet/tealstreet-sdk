@@ -76,11 +76,15 @@ impl ExchangeRuntime for Clock {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, e: &ExchangeError, v: &Value) {
+    fn report_exception(
+        &self,
+        e: &ExchangeError,
+        v: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         self.inner.report_exception(e, v)
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {

@@ -57,8 +57,10 @@ impl Drop for ReplyGuard {
                 ])),
             )
         {
-            self.runtime
-                .report_exception(&error, &json!({"operation":"worker cancelled reply"}));
+            self.runtime.report_exception(
+                &error,
+                &json!({"operation":"worker cancelled reply"}).into(),
+            );
         }
     }
 }
@@ -162,11 +164,10 @@ impl CallMethodHandler {
                             .expect("fresh error data");
                     }
                     if let Err(error) = reply.send(false, Some(serialized)) {
-                        handler
-                            .exchange
-                            .base()
-                            .runtime
-                            .report_exception(&error, &json!({"operation":"worker error reply"}));
+                        handler.exchange.base().runtime.report_exception(
+                            &error,
+                            &json!({"operation":"worker error reply"}).into(),
+                        );
                     }
                 }
             }

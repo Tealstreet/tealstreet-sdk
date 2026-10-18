@@ -80,7 +80,7 @@ pub trait WsParent {
         &self,
         error: &str,
         message: Option<&str>,
-        extra: Option<&Value>,
+        extra: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError>;
 }
 /// Dial inputs produced by an owned asynchronous preparation operation.
@@ -317,7 +317,7 @@ fn run_reopen_resync(
             if let Some(error) = log_error {
                 reporting_runtime.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"private resync log"}),
+                    &serde_json::json!({"operation":"private resync log"}).into(),
                 );
             }
             if let Some(future) = followup {
@@ -727,7 +727,7 @@ impl BaseWebSocket {
         if let Err(error) = result {
             self.runtime.report_exception(
                 &error,
-                &serde_json::json!({"operation":"websocket callback"}),
+                &serde_json::json!({"operation":"websocket callback"}).into(),
             );
         }
     }
@@ -1085,7 +1085,7 @@ impl BaseWebSocket {
         &self,
         error: &str,
         message: Option<&str>,
-        extra: Option<&Value>,
+        extra: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> Result<(), ExchangeError> {
         self.parent.emit_and_log_error(error, message, extra)?;
         Ok(())
@@ -1147,7 +1147,7 @@ impl BaseWebSocket {
             {
                 // CHOSEN host projection of an unhandled promise rejection.
                 // This is not a transport event and must not consume error_log.
-                socket.runtime.report_exception(&error, &Value::Null);
+                socket.runtime.report_exception(&error, &Value::Null.into());
             }
         }))
     }
@@ -1687,7 +1687,7 @@ impl BaseWebSocket {
                 .await;
                 reporter.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"websocket unawaited reconnect"}),
+                    &serde_json::json!({"operation":"websocket unawaited reconnect"}).into(),
                 );
             }),
         );
@@ -2555,7 +2555,7 @@ impl BaseWebSocket {
                             }
                             Timer::Reconnect => {
                                 if let Err(error) = socket.reconnect_now() {
-                                    socket.runtime.report_exception(&error, &Value::Null);
+                                    socket.runtime.report_exception(&error, &Value::Null.into());
                                     return Ok(());
                                 }
                             }
@@ -2954,10 +2954,18 @@ mod tests {
         fn random(&self) -> f64 {
             0.0
         }
-        fn report_raw_exception(&self, _: &crate::js_runtime::value::Js, _: &serde_json::Value) {
+        fn report_raw_exception(
+            &self,
+            _: &crate::js_runtime::value::Js,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
+        ) {
             panic!("unexpected raw exception report in this test runtime");
         }
-        fn report_exception(&self, error: &ExchangeError, _: &Value) {
+        fn report_exception(
+            &self,
+            error: &ExchangeError,
+            _: &safe_cex_types::retained_json::RetainedJsonInput,
+        ) {
             self.exceptions.borrow_mut().push(error.clone());
         }
         fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -3313,7 +3321,7 @@ mod tests {
             &self,
             error: &str,
             _: Option<&str>,
-            _: Option<&Value>,
+            _: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
         ) -> Result<(), ExchangeError> {
             if let Some(error) = self.announcement_error.borrow().clone() {
                 return Err(error);
@@ -4643,9 +4651,9 @@ mod tests {
                 c.set(c.get() + 1);
                 Ok(())
             }));
-        s.dispatch_message("book.ETH", &Value::Null).unwrap();
+        s.dispatch_message("book.ETH", &Value::Null.into()).unwrap();
         assert_eq!(calls.get(), 0);
-        s.dispatch_message("book.BTC", &Value::Null).unwrap();
+        s.dispatch_message("book.BTC", &Value::Null.into()).unwrap();
         assert_eq!(calls.get(), 2);
         assert_eq!(
             s.message_handlers_stats.borrow()["book.BTC"].had_handlers,
@@ -4737,10 +4745,16 @@ mod tests {
             .message_handlers
             .borrow_mut()
             .insert("empty".into(), Rc::new(RefCell::new(vec![])));
-        assert_eq!(socket.dispatch_message("absent", &Value::Null), Ok(()));
-        assert_eq!(socket.dispatch_message("empty", &Value::Null), Ok(()));
+        assert_eq!(
+            socket.dispatch_message("absent", &Value::Null.into()),
+            Ok(())
+        );
+        assert_eq!(
+            socket.dispatch_message("empty", &Value::Null.into()),
+            Ok(())
+        );
         assert!(socket.message_handlers_stats.borrow().is_empty());
-        let result = socket.dispatch_message("ticker", &Value::Null);
+        let result = socket.dispatch_message("ticker", &Value::Null.into());
         assert_eq!(
             later_calls.get(),
             0,
@@ -4805,7 +4819,7 @@ mod tests {
             .borrow_mut()
             .insert("__proto__".into(), Rc::new(RefCell::new(vec![handler])));
         let error = socket
-            .dispatch_message("__proto__", &Value::Null)
+            .dispatch_message("__proto__", &Value::Null.into())
             .unwrap_err();
         assert_eq!(
             error.name, "TypeError",

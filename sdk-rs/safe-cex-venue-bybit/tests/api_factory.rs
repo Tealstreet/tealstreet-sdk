@@ -60,7 +60,12 @@ fn ready<F: Future>(future: F) -> F::Output {
 struct Runtime {
     console: RefCell<Vec<(String, String)>>,
     expected_report: RefCell<Option<String>>,
-    reports: RefCell<Vec<(ExchangeError, Value)>>,
+    reports: RefCell<
+        Vec<(
+            ExchangeError,
+            safe_cex_types::retained_json::RetainedJsonInput,
+        )>,
+    >,
 }
 impl ExchangeRuntime for Runtime {
     fn monotonic_now_ms(&self) -> f64 {
@@ -94,11 +99,15 @@ impl ExchangeRuntime for Runtime {
     fn report_raw_exception(
         &self,
         _: &safe_cex_exchange::js_runtime::value::Js,
-        _: &serde_json::Value,
+        _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         panic!("unexpected raw exception report in this test runtime");
     }
-    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+    fn report_exception(
+        &self,
+        error: &ExchangeError,
+        context: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) {
         assert_eq!(
             self.expected_report.borrow().as_deref(),
             Some(error.message.as_str()),
@@ -983,20 +992,32 @@ fn transform_cases() -> Vec<Value> {
                 error.message, "Exchange Error: Server was unavailable for a request, retrying...",
                 "factory_transform_native_report_message {id}"
             );
-            assert_eq!(
-                context["tags"]["exchange"], "bybitinverse",
+            assert!(
+                context
+                    .get("tags")
+                    .and_then(|value| value.get("exchange"))
+                    .is_some_and(|value| value.text_equals("bybitinverse")),
                 "factory_transform_native_report_exchange {id}"
             );
-            assert_eq!(
-                context["tags"]["module"], "Exchange",
+            assert!(
+                context
+                    .get("tags")
+                    .and_then(|value| value.get("module"))
+                    .is_some_and(|value| value.text_equals("Exchange")),
                 "factory_transform_native_report_module {id}"
             );
-            assert_eq!(
-                context["tags"]["severity"], "error",
+            assert!(
+                context
+                    .get("tags")
+                    .and_then(|value| value.get("severity"))
+                    .is_some_and(|value| value.text_equals("error")),
                 "factory_transform_native_report_severity {id}"
             );
-            assert_eq!(
-                context["extra"]["originalMessage"], error.message,
+            assert!(
+                context
+                    .get("extra")
+                    .and_then(|value| value.get("originalMessage"))
+                    .is_some_and(|value| value.text_equals(&error.message)),
                 "factory_transform_native_report_original {id}"
             );
         }
