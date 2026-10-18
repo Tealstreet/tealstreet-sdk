@@ -48,11 +48,14 @@ fn put_number(value: &mut Value, key: &str, n: f64) -> Result<(), ExchangeError>
 fn error_text(error: &ExchangeError) -> Result<String, ExchangeError> {
     for value in [
         error
-            .response
+            .response_json_view()
             .as_ref()
             .and_then(|r| r.get("data"))
             .and_then(|v| v.get("msg")),
-        error.response.as_ref().and_then(|r| r.get("msg")),
+        error
+            .response_json_view()
+            .as_ref()
+            .and_then(|r| r.get("msg")),
         error.original_error.as_ref().and_then(|r| r.get("msg")),
     ] {
         if js_truthy(value) {

@@ -57,8 +57,13 @@ pub(crate) fn thrown_from(r: &mut Realm, error: ExchangeError) -> Thrown {
         };
         r.define_hidden(&e, PropKey::str("code"), code);
     }
-    if let Some(response) = &error.response {
-        let response = r.from_serde(response);
+    if let Some(response) = error.retained_response_input() {
+        let response = match r.restore_typed_value(
+            &safe_cex_exchange::js_runtime::value::from_retained_input(response),
+        ) {
+            Ok(response) => response,
+            Err(cause) => return cause,
+        };
         r.define_hidden(&e, PropKey::str("response"), response);
     }
     e

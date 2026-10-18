@@ -65,7 +65,7 @@ fn error() -> Failure {
     e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
         -1000
     )));
-    e.response = Some(json!({"status":503,"data":{"msg":"session detail"}}));
+    e = e.with_retained_response((json!({"status":503,"data":{"msg":"session detail"}})).into());
     Rc::new(e)
 }
 fn assert_error(r: &Result<(), Failure>, wanted: bool, e: &Failure, label: &str) {

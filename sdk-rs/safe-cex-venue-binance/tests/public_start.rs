@@ -364,7 +364,7 @@ fn startup_box_retains_cause_beyond_structural_subscriber_ids() {
                     "opaque callback type survives startup"
                 );
                 assert_eq!(
-                    converted.response,
+                    converted.response_json_view(),
                     Some(json!({"data":{"msg":"wrapper response"}}))
                 );
             }

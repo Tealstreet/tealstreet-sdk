@@ -98,7 +98,7 @@ fn run_cases(variant: &str) {
         sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
             "emitter-code"
         )));
-        sentinel.response = Some(json!({"status":503}));
+        sentinel = sentinel.with_retained_response((json!({"status":503})).into());
         let get = |client, url| {
             trace
                 .borrow_mut()
@@ -110,7 +110,7 @@ fn run_cases(variant: &str) {
                 c["primaryReject"] == true
             };
             let mut error = ExchangeError::new(c["message"].as_str().unwrap());
-            error.response = Some(json!({"data":{"msg":c["msg"]}}));
+            error = error.with_retained_response((json!({"data":{"msg":c["msg"]}})).into());
             std::future::ready(if reject {
                 Err(error)
             } else {
@@ -278,7 +278,7 @@ fn run_cases(variant: &str) {
                 &expected_error["code"]
             );
             assert_eq!(
-                error.response.as_ref().unwrap_or(&Value::Null),
+                error.response_json_view().as_ref().unwrap_or(&Value::Null),
                 &expected_error["response"]
             );
             assert_eq!(

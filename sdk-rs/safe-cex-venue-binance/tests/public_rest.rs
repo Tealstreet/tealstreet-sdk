@@ -117,7 +117,7 @@ impl Bindings {
         e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
             "fixture-code"
         )));
-        e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
+        e = e.with_retained_response((json!({"status":503,"data":{"msg":"venue detail"}})).into());
         Self {
             public_only: c["name"] == "public-only",
             c,
@@ -137,10 +137,10 @@ impl Bindings {
         self.trace.borrow_mut().push(v)
     }
     fn failure_wire(&self, error: &Failure) -> Value {
-        json!({"original":Rc::ptr_eq(error,&self.error),"name":error.name,"message":error.message,"code":opt(observed_error_code(&error.code).as_ref()),"response":opt(error.response.as_ref())})
+        json!({"original":Rc::ptr_eq(error,&self.error),"name":error.name,"message":error.message,"code":opt(observed_error_code(&error.code).as_ref()),"response":opt(error.response_json_view().as_ref())})
     }
     fn emissions_wire(&self) -> Vec<Value> {
-        self.emissions.iter().map(|e|match e{ErrorEmission::Error(e,prefix)=>json!({"kind":"error","original":Rc::ptr_eq(e,&self.error),"prefix":prefix,"message":null,"errorName":e.name,"errorMessage":e.message,"errorCode":opt(observed_error_code(&e.code).as_ref()),"errorResponse":opt(e.response.as_ref())}),ErrorEmission::Message(message)=>json!({"kind":"message","original":false,"prefix":null,"message":opt(message.as_ref()),"errorName":null,"errorMessage":null,"errorCode":null,"errorResponse":null})}).collect()
+        self.emissions.iter().map(|e|match e{ErrorEmission::Error(e,prefix)=>json!({"kind":"error","original":Rc::ptr_eq(e,&self.error),"prefix":prefix,"message":null,"errorName":e.name,"errorMessage":e.message,"errorCode":opt(observed_error_code(&e.code).as_ref()),"errorResponse":opt(e.response_json_view().as_ref())}),ErrorEmission::Message(message)=>json!({"kind":"message","original":false,"prefix":null,"message":opt(message.as_ref()),"errorName":null,"errorMessage":null,"errorCode":null,"errorResponse":null})}).collect()
     }
     fn wire(&self, value: Option<Value>, fallback: bool, error: Option<&Failure>) -> Value {
         json!({"name":self.name(),"trace":*self.trace.borrow(),"emissions":self.emissions_wire(),"fallback":fallback,"value":value,"failure":error.map(|e|self.failure_wire(e))})
@@ -358,7 +358,7 @@ fn assert_original(e: &Failure, b: &Bindings, label: &str) {
         "{label}: native original code"
     );
     assert_eq!(
-        e.response,
+        e.response_json_view(),
         Some(json!({"status":503,"data":{"msg":"venue detail"}})),
         "{label}: native original response"
     );
@@ -395,7 +395,11 @@ fn emission(b: &Bindings, v: RestVenue, original: bool, expected_message: &str, 
                     None,
                     "{label}: native generated code"
                 );
-                assert_eq!(e.response, None, "{label}: native generated response");
+                assert_eq!(
+                    e.response_json_view(),
+                    None,
+                    "{label}: native generated response"
+                );
             }
             assert_eq!(
                 prefix.as_deref(),
@@ -1024,7 +1028,11 @@ fn ohlcv_test(v: RestVenue) {
                         None,
                         "{label}: native generated code"
                     );
-                    assert_eq!(e.response, None, "{label}: native generated response");
+                    assert_eq!(
+                        e.response_json_view(),
+                        None,
+                        "{label}: native generated response"
+                    );
                 }
                 projected.push(b.wire(None, false, Some(&e)));
             }

@@ -111,8 +111,13 @@ impl Completion<Js, Thrown> for Pending {
 /// Native failure as the thrown value the bodies read `response.data` from.
 pub(crate) fn thrown(error: ExchangeError) -> Thrown {
     let value = error_object(&error.name, &error.message);
-    if let Some(response) = &error.response {
-        let _ = value.define("response", from_json(response));
+    if let Some(response) = error.retained_response_input() {
+        value
+            .define(
+                "response",
+                safe_cex_exchange::js_runtime::value::from_retained_input(response),
+            )
+            .expect("fresh error response");
     }
     if let Some(code) = &error.code {
         let _ = value.define("code", code.clone());

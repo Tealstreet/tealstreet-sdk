@@ -307,7 +307,7 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
 fn subscriber_id_survives_store_to_exchange_error_conversion() {
     let store = DefaultStore::new();
     let mut cause = ExchangeError::new("subscriber failed");
-    cause.response = Some(json!({"status": 503}));
+    cause = cause.with_retained_response((json!({"status": 503})).into());
     let subscriber_cause: Rc<dyn Error> = Rc::new(cause);
     let _subscriber = Store::subscribe(
         &store,

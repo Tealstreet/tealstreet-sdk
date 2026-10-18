@@ -373,8 +373,8 @@ impl Exchange for MexcExchange {
     }
 }
 fn failure_message(error: &RestFailure) -> Result<String, ExchangeError> {
-    let message = error
-        .response
+    let response_view = error.response;
+    let message = response_view
         .as_ref()
         .and_then(|r| r.body.json_value().ok())
         .and_then(|v| v.get("message").cloned())
@@ -574,8 +574,8 @@ impl MexcExchange {
                     balance: Some(balance),
                 }),
                 Err(error) => {
-                    let data = error
-                        .response
+                    let response_view = error.response_json_view();
+                    let data = response_view
                         .as_ref()
                         .and_then(|response| response.get("data"));
                     let message = data

@@ -111,8 +111,8 @@ fn strict_number(value: Option<&Input>, field: &str) -> Result<f64, ExchangeErro
         .ok_or_else(|| type_error(format!("typed {field} requires a number")))
 }
 fn error_message(error: &ExchangeError) -> Result<String, ExchangeError> {
-    let msg = error
-        .response
+    let response_view = error.response_json_view();
+    let msg = response_view
         .as_ref()
         .and_then(|r| r.get("data"))
         .and_then(|d| d.get("msg"));

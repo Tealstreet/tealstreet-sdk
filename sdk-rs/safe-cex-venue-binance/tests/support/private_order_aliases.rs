@@ -276,8 +276,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
         assert_eq!(result.is_ok(), algo_status == 200);
         if let Err(error) = &result {
             let response = error
-                .response
-                .as_ref()
+                .response_json_view()
                 .expect("retained HTTP rejection response");
             assert_eq!(response["status"], 500);
             assert_eq!(response["data"]["msg"], "algo refused");
@@ -304,7 +303,7 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
             "errors":errors.borrow().len(),
         });
         if let Err(error) = &result {
-            let response = error.response.as_ref().unwrap();
+            let response = error.response_json_view().unwrap();
             observed["status"] = response["status"].clone();
             observed["msg"] = response["data"]["msg"].clone();
         }
@@ -645,8 +644,8 @@ fn native_cancel_symbol_reports_retained_messages_like_constructed_typescript() 
         let response = failure.response.as_ref().expect("original HTTP response");
         assert_eq!(response.status, 400);
         assert!(
-            matches!(&response.body, RestResponseBody::Encoded(bytes) if bytes == raw.as_bytes()),
-            "Binance original encoded response retained"
+            matches!(&response.body, RestResponseBody::Transformed(data) if data.get("msg") == Some(&safe_cex_types::retained_json::RetainedJsonInput::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap().get("msg").unwrap().clone())),
+            "Binance original response retained after configured transform"
         );
         owner.dispose().unwrap();
     }

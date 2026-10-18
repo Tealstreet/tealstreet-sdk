@@ -7588,3 +7588,15 @@ reason = "Native stepping of the source for-in language operation, using canonic
 [[exempt]]
 rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::own_properties"
 reason = "Stock intrinsic descriptor-name/enumerability metadata in the existing retained PrototypeRealm, consumed by canonical for-in enumeration without reading values or allocating another heap. Native/Node property-set and flag witnesses cover six actual intrinsic roles; there is no named TypeScript SDK method and public intrinsic descriptor reflection remains refused."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::with_retained_response"
+reason = "C3: native API-error construction glue attaches one existing RetainedJsonInput response to an origin wrapper while chaining the previous opaque cause. It neither parses nor duplicates a transport response authority. No standalone TypeScript declaration; actual Binance signed cancel and nearest-origin native tests exercise this boundary."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::retained_response_input"
+reason = "C3: reads the nearest retained response origin deterministically, using the original RestFailure for transport errors and the same canonical RetainedJsonInput for API-created errors. It exposes no JSON cache or new value tree; native cause-chain and signed Binance error emission tests cover it. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::response_json_view"
+reason = "C3: explicit computed decision-5 Rust model/report boundary over retained_response_input. Reuses the existing lossy JSON projection without storing its result or mutating the original response. No standalone TypeScript declaration; raw consumers use retained_response_input."

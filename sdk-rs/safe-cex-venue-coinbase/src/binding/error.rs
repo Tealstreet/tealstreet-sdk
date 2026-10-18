@@ -20,7 +20,18 @@ pub(super) fn from_thrown(error: Thrown) -> PortfolioFailure {
                 .filter(|v| !v.is_undefined())
                 .and_then(|v| safe_cex_exchange::js_runtime::value::to_json(&v).ok())
         };
-        native.response = property("response");
+        let response = match error.value.get("response") {
+            Ok(value) => value,
+            Err(cause) => return failure(cause.into()),
+        };
+        if !response.is_undefined() {
+            let response = match safe_cex_exchange::js_runtime::value::to_retained_input(&response)
+            {
+                Ok(value) => value,
+                Err(cause) => return failure(cause.into()),
+            };
+            native = native.with_retained_response(response);
+        }
         native.config = property("config");
 
         native.is_axios_error = error

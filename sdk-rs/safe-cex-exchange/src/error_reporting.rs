@@ -443,7 +443,9 @@ pub fn enhance_axios_error(
     error.request = get("request").cloned();
     error.config = get("config").cloned();
     error.code = get("code").map(from_json);
-    error.response = get("response").cloned();
+    if let Some(response) = get("response") {
+        error = error.with_retained_response(response.clone().into());
+    }
     Ok(error)
 }
 
