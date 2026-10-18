@@ -688,7 +688,13 @@ impl Host for Harness {
             | "reconciliation-link"
             | "existing-order"
             | "cancel-child"
-            | "accepted-order" => api::dispatch(self, owner, code, captures, args),
+            | "accepted-order" => api::dispatch(
+                self,
+                owner,
+                api::Callback::from_name(code).expect("source callback selector"),
+                captures,
+                args,
+            ),
             "next" => {
                 let Node::Iterator { value, index } = owner.as_ref() else {
                     panic!("iterator")

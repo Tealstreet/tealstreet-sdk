@@ -23,7 +23,9 @@ fn run<F: Future>(future: F) -> F::Output {
 fn error() -> Failure {
     let mut e = ExchangeError::new("position fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!("fixture-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "fixture-code"
+    )));
     Rc::new(e)
 }
 fn original(result: &Result<(), Failure>, expected: bool, error: &Failure) {
@@ -34,7 +36,7 @@ fn original(result: &Result<(), Failure>, expected: bool, error: &Failure) {
             assert!(Rc::ptr_eq(e, error), "native original failure identity");
             assert_eq!(e.name, "RangeError");
             assert_eq!(e.message, "position fixture");
-            assert_eq!(e.code, Some(json!("fixture-code")));
+            assert_eq!(observed_error_code(&e.code), Some(json!("fixture-code")));
         }
     }
 }
@@ -917,4 +919,17 @@ fn futures_execute() {
 #[ignore = "requires configured local TypeScript"]
 fn pm_execute() {
     execute("binancepm");
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

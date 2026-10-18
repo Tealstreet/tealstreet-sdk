@@ -85,8 +85,11 @@ export function accountToExchangeOptions(
     metadata.requiresApplicationId || isLighterExchange(account.exchange) || account.exchange === 'asterdex';
   const shouldForwardApiKeyIndex = metadata.requiresApiKeyIndex || isLighterExchange(account.exchange);
   const publicKucoinBrokerConfig = resolvePublicKucoinBrokerConfig(account.exchange);
+  const hyrotraderMode =
+    account.exchange === 'hyrotrader' ? (account.hyrotraderDemo ? ('demo' as const) : ('production' as const)) : undefined;
   const extra = {
     ...(publicKucoinBrokerConfig ? { kucoinBroker: publicKucoinBrokerConfig } : {}),
+    ...(hyrotraderMode ? { hyrotraderMode } : {}),
     ...overrideExtra,
   };
   const hasExtra = Object.keys(extra).length > 0;

@@ -241,11 +241,12 @@ fn native_socket_listener_failures_are_not_transport_errors() {
                 if actual != case["trace"] {
                     failures.push(format!("{event}: {case}; actual {actual}"));
                 }
-                if captured
-                    .iter()
-                    .flatten()
-                    .any(|v| v.to_string().contains("WebSocket error:"))
-                {
+                if captured.iter().flatten().any(|v| {
+                    safe_cex_exchange::js_runtime::value::to_json(v)
+                        .unwrap()
+                        .to_string()
+                        .contains("WebSocket error:")
+                }) {
                     failures.push(format!(
                         "{event}: {case}; unexpected transport log {captured:?}"
                     ));

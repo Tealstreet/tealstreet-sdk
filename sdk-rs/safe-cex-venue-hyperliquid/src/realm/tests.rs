@@ -223,6 +223,10 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
         base.on_args(
             event,
             Rc::new(move |event, args| {
+                let args: Vec<serde_json::Value> = args
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 seen.borrow_mut().push((event.to_owned(), args.to_vec()));
                 Ok(())
             }),

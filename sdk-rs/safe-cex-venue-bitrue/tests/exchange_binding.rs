@@ -261,12 +261,18 @@ fn private_trade_frame_emits_incremental_fill_and_commits_order() {
         }),
     );
     f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":"socket-fill","S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","p":"27300","q":"3","z":"1"}}));
-    assert_eq!(
-        *fills.borrow(),
-        vec![
-            json!({"id":"socket-fill","symbol":"E-BTC-USDT","side":"buy","price":27300.0,"amount":1.0})
-        ]
-    );
+    assert_eq!(fills.borrow().len(), 1);
+    let fill = fills.borrow()[0].clone();
+    assert_eq!(fill.own_entries().unwrap().len(), 5);
+    for (key, expected) in [
+        ("id", "socket-fill"),
+        ("symbol", "E-BTC-USDT"),
+        ("side", "buy"),
+    ] {
+        assert!(fill.get(key).unwrap().strict_equals(&Js::str(expected)));
+    }
+    assert_eq!(fill.get("price").unwrap().as_f64(), Some(27300.0));
+    assert_eq!(fill.get("amount").unwrap().as_f64(), Some(1.0));
     assert_eq!(
         f.store
             .orders()
@@ -401,7 +407,11 @@ fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
                     .base()
                     .emit(
                         "callMethod:done",
-                        json!({"requestId":request["requestId"],"success":true,"result":null}),
+                        Js::object(vec![
+                            ("requestId", request.get("requestId").unwrap()),
+                            ("success", Js::Bool(true)),
+                            ("result", Js::Null),
+                        ]),
                     )
                     .unwrap();
             }));
@@ -561,10 +571,19 @@ fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
         "BIND native request signing"
     );
     assert!(
-        worker_calls
-            .borrow()
-            .iter()
-            .any(|r| r["method"] == "removeOrders" && r["args"][0][0]["id"] == "existing-order"),
+        worker_calls.borrow().iter().any(|r| r
+            .get("method")
+            .unwrap()
+            .strict_equals(&Js::str("removeOrders"))
+            && r.get("args")
+                .unwrap()
+                .get("0")
+                .unwrap()
+                .get("0")
+                .unwrap()
+                .get("id")
+                .unwrap()
+                .strict_equals(&Js::str("existing-order"))),
         "BIND cancelOrders worker payload"
     );
     api.dispose().unwrap();
@@ -1122,7 +1141,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         .base()
         .emit(
             "markets:changed",
-            json!({"added":[{"symbol":"E-ETH-USDT"},{"symbol":"E-ADA-USDT"}]}),
+            from_json(&json!({"added":[{"symbol":"E-ETH-USDT"},{"symbol":"E-ADA-USDT"}]})),
         )
         .unwrap();
     f.runtime.pump();
