@@ -192,17 +192,52 @@ fn async_callback_and_body_keep_pending_resolution_and_rejection_identity() {
 
 #[test]
 fn metadata_handle_alias_retains_real_cache_aliases_and_all_fields() {
-    let cache = RefCell::new(vec![]);
-    let leverage = serde_json::json!(7.25);
-    let position_type = serde_json::json!(2);
-    let snapshots = [crate::account_helpers::AccountPositionSnapshot {
-        symbol: "E-BTC-USDT",
-        side: safe_cex_types::PositionSide::Short,
-        leverage_level: &leverage,
-        position_type: &position_type,
-    }];
+    let f = Fixture::new();
+    let h = &f.venue.rt;
+    let runtime = h.exchange_runtime();
+    let promise = h
+        .this
+        .call_method(
+            "fetchPositionMetadata",
+            vec![
+                Js::array(vec![Js::str("E-BTC-USDT"), Js::str("E-BTC-USDT")]),
+                Js::array(vec![Js::object(vec![
+                    ("symbol", Js::str("E-BTC-USDT")),
+                    ("side", Js::str("short")),
+                    ("leverageLevel", Js::Number(7.25)),
+                    ("positionType", Js::Number(2.0)),
+                ])]),
+            ],
+        )
+        .unwrap();
+    let future = await_js(&runtime, promise);
+    let mut future = pin!(future);
+    let mut context = Context::from_waker(Waker::noop());
+    let returned = (0..32)
+        .find_map(|_| {
+            f.runtime.pump();
+            match future.as_mut().poll(&mut context) {
+                Poll::Pending => None,
+                Poll::Ready(value) => Some(value),
+            }
+        })
+        .expect("actual metadata member settles")
+        .unwrap()
+        .array_values()
+        .unwrap();
+    assert_eq!(returned.len(), 2);
+    assert!(
+        returned[0].same_reference(&returned[1]),
+        "actual public metadata Map retains duplicate aliases"
+    );
+    let cache = &h.shared.extra.metadata;
+    assert_eq!(
+        cache.borrow().len(),
+        1,
+        "actual constructor's native metadata cache is populated by its maintained member"
+    );
     let symbols = ["E-BTC-USDT".to_owned(), "E-BTC-USDT".to_owned()];
-    let future=crate::position_metadata::fetch_position_metadata(&cache,&symbols,Some(&snapshots),||->Result<std::future::Ready<Result<Option<serde_json::Value>,safe_cex_exchange::runtime::ExchangeError>>,safe_cex_exchange::runtime::ExchangeError>{panic!("supplied native snapshots must not fetch")},||false);
+    let future=crate::position_metadata::fetch_position_metadata(cache,&symbols,None,||->Result<std::future::Ready<Result<Option<serde_json::Value>,safe_cex_exchange::runtime::ExchangeError>>,safe_cex_exchange::runtime::ExchangeError>{panic!("supplied native snapshots must not fetch")},||false);
     let mut future = pin!(future);
     let mut cx = Context::from_waker(Waker::noop());
     let Poll::Ready(Ok(handles)) = future.as_mut().poll(&mut cx) else {

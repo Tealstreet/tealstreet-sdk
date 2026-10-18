@@ -9,7 +9,7 @@ claim. All seven initially fail their missing contracts by name.
 | --- | --- |
 | `wire::FetchContractsResponse` | Actual Vec decoder. Native observation reads all fourteen fields on two distinct rows, including UTF-16 string units and every binary64 bit pattern, without Serialize. Empty and malformed lists are separate cases. |
 | `wire::FetchKlineResponse` | Actual Vec decoder. Native observation reads every string's units and timestamp bits on distinct rows, plus empty/malformed cases. |
-| `position_metadata::PositionMetadataHandle` | Cache-owned Rc/RefCell capability; its underlying metadata record has no raw decoder. Actual source fetch checks duplicate/cache referents, every field and shared mutation. |
+| `position_metadata::PositionMetadataHandle` | Cache-owned Rc/RefCell capability; its underlying metadata record has no raw decoder. Actual constructed parent fetchPositionMetadata populates its native cache; the typed cache-hit consumer checks duplicate/cache referents, every field and shared mutation. |
 | `public_bodies::NativeCallback` | Callable capability. Canonical generic probe is the existing fixed Value/Value instantiation, not an unbounded V/E claim. Actual constructed-exchange consumer also exercises Js/Thrown arguments, return identity and original rejection identity. |
 | `collection_reads::Callback` | Callable capability fixed to the actual production `binding::Rt` (Js/Thrown). The real host function consumes native callbacks with argument order, signed-zero and original resolution/rejection identity checks. |
 | `trading_rest::Body` | Native pinned future fixed to the same production Rt. Actual host/Promise consumption checks pending work, wake/release, and original resolution/rejection identity. |
