@@ -1004,7 +1004,12 @@ mod js_sockets {
             matches!(&received[0], Js::Object(object) if object.class == "Buffer"),
             "binary frame remains a Buffer"
         );
-        let bytes = received[0].get("bytes").unwrap().array_values().unwrap();
+        let bytes = received[0]
+            .get("bytes")
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(
             bytes
                 .iter()
@@ -1020,6 +1025,7 @@ mod js_sockets {
                 .get("bytes")
                 .unwrap()
                 .array_values()
+                .expect("fixture array property reads")
                 .unwrap()
                 .len(),
             4

@@ -92,9 +92,14 @@ pub(crate) fn length(v: &Js) -> Result<usize, Thrown> {
 
 /// A for...of iterator: arrays iterate live, re-reading length each step.
 pub(crate) struct Iter(safe_cex_exchange::js_runtime::iterator::IteratorRecord);
-pub(crate) fn iterate(v:Js)->Result<Iter,Thrown>{Ok(Iter(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(&v)?))}
-pub(crate) fn next(it:&mut Iter)->Result<Option<Js>,Thrown>{it.0.step_value()}
-
+pub(crate) fn iterate(v: Js) -> Result<Iter, Thrown> {
+    Ok(Iter(
+        safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(&v)?,
+    ))
+}
+pub(crate) fn next(it: &mut Iter) -> Result<Option<Js>, Thrown> {
+    it.0.step_value()
+}
 
 /// setTimeout / setInterval whose handle `clear_timer` cancels; a rejected
 /// callback task is reported like an unhandled rejection.

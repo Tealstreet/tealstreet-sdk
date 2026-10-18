@@ -237,18 +237,26 @@ impl crate::market_data::MarketDataHost for Host {
         mut x: Js,
         c: &mut dyn FnMut(Js, Js) -> Result<Js, Thrown>,
     ) -> Result<Js, Thrown> {
-        let Js::Array(array) = &v else { return Err(Thrown::type_error("value.reduce is not a function")); };
+        let Js::Array(array) = &v else {
+            return Err(Thrown::type_error("value.reduce is not a function"));
+        };
         let length = array.len();
         for index in 0..length {
-            if v.has_index(index) { x = c(x, v.get(&index.to_string())?)?; }
+            if v.has_index(index) {
+                x = c(x, v.get(&index.to_string())?)?;
+            }
         }
         Ok(x)
     }
     fn for_each(&self, v: Js, c: &mut dyn FnMut(Js) -> Result<(), Thrown>) -> Result<(), Thrown> {
-        let Js::Array(array) = &v else { return Err(Thrown::type_error("value.forEach is not a function")); };
+        let Js::Array(array) = &v else {
+            return Err(Thrown::type_error("value.forEach is not a function"));
+        };
         let length = array.len();
         for index in 0..length {
-            if v.has_index(index) { c(v.get(&index.to_string())?)?; }
+            if v.has_index(index) {
+                c(v.get(&index.to_string())?)?;
+            }
         }
         Ok(())
     }
@@ -259,28 +267,42 @@ impl crate::market_data::MarketDataHost for Host {
         Host::intrinsic(self, n, a)
     }
     fn map(&self, v: Js, c: &mut dyn FnMut(Js) -> Result<Js, Thrown>) -> Result<Js, Thrown> {
-        let Js::Array(array) = &v else { return Err(Thrown::type_error("value.map is not a function")); };
+        let Js::Array(array) = &v else {
+            return Err(Thrown::type_error("value.map is not a function"));
+        };
         let length = array.len();
         let mut out = Vec::new();
         for index in 0..length {
-            out.push(if v.has_index(index) { Some(c(v.get(&index.to_string())?)?) } else { None });
+            out.push(if v.has_index(index) {
+                Some(c(v.get(&index.to_string())?)?)
+            } else {
+                None
+            });
         }
         Ok(Js::holey_array(out))
     }
     fn filter(&self, v: Js, c: &mut dyn FnMut(Js) -> Result<bool, Thrown>) -> Result<Js, Thrown> {
-        let Js::Array(array) = &v else { return Err(Thrown::type_error("value.filter is not a function")); };
+        let Js::Array(array) = &v else {
+            return Err(Thrown::type_error("value.filter is not a function"));
+        };
         let length = array.len();
         let mut out = Vec::new();
         for index in 0..length {
             if v.has_index(index) {
                 let item = v.get(&index.to_string())?;
-                if c(item.clone())? { out.push(item); }
+                if c(item.clone())? {
+                    out.push(item);
+                }
             }
         }
         Ok(Js::array(out))
     }
     fn sort(&self, v: Js, c: &mut dyn FnMut(Js, Js) -> Result<f64, Thrown>) -> Result<Js, Thrown> {
-        v.sort_array_with(|x,y| Ok(c(x.clone(),y.clone())?.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)))?;
+        v.sort_array_with(|x, y| {
+            Ok(c(x.clone(), y.clone())?
+                .partial_cmp(&0.0)
+                .unwrap_or(std::cmp::Ordering::Equal))
+        })?;
         Ok(v)
     }
     fn select_log(&self) -> Result<Js, Thrown> {
@@ -400,20 +422,30 @@ impl crate::order_execution::OrderExecutionHost for Host {
         v: Js,
         c: &mut dyn FnMut(Js, f64) -> Result<Js, Thrown>,
     ) -> Result<Js, Thrown> {
-        let Js::Array(array) = &v else { return Err(Thrown::type_error("value.map is not a function")); };
+        let Js::Array(array) = &v else {
+            return Err(Thrown::type_error("value.map is not a function"));
+        };
         let length = array.len();
         let mut out = Vec::new();
         for index in 0..length {
-            out.push(if v.has_index(index) { Some(c(v.get(&index.to_string())?,index as f64)?) } else { None });
+            out.push(if v.has_index(index) {
+                Some(c(v.get(&index.to_string())?, index as f64)?)
+            } else {
+                None
+            });
         }
         Ok(Js::holey_array(out))
     }
     fn find(&self, v: Js, c: &mut dyn FnMut(Js) -> Result<bool, Thrown>) -> Result<Js, Thrown> {
-        let Js::Array(array) = &v else { return Err(Thrown::type_error("value.find is not a function")); };
+        let Js::Array(array) = &v else {
+            return Err(Thrown::type_error("value.find is not a function"));
+        };
         let length = array.len();
         for index in 0..length {
             let item = v.get(&index.to_string())?;
-            if c(item.clone())? { return Ok(item); }
+            if c(item.clone())? {
+                return Ok(item);
+            }
         }
         Ok(Js::Undefined)
     }

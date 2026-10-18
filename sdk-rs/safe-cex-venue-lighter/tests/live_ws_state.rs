@@ -127,9 +127,17 @@ fn lighter_ws_state_helpers_match_live_typescript() {
             .then(|| from_json(&case["payload"]));
         let include = case["include"].as_bool().unwrap();
         let flattened = private::flatten_by_market_payload(payload.as_ref(), include).unwrap();
-        compared_items[0] += flattened.array_values().expect("fixture array property reads").unwrap().len();
+        compared_items[0] += flattened
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()
+            .len();
         assert_eq!(
-            flattened.array_values().expect("fixture array property reads").unwrap().len(),
+            flattened
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap()
+                .len(),
             case["expected"].as_array().unwrap().len(),
             "FLATTEN-CARDINALITY native payload count"
         );
@@ -139,9 +147,17 @@ fn lighter_ws_state_helpers_match_live_typescript() {
             "flattenByMarketPayload {case}"
         );
         let orders = private::flatten_orders_by_market(payload.as_ref()).unwrap();
-        compared_items[1] += orders.array_values().expect("fixture array property reads").unwrap().len();
+        compared_items[1] += orders
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()
+            .len();
         assert_eq!(
-            orders.array_values().expect("fixture array property reads").unwrap().len(),
+            orders
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap()
+                .len(),
             case["orders"].as_array().unwrap().len(),
             "FLATTEN-CARDINALITY native orders count"
         );
@@ -213,7 +229,10 @@ fn lighter_ws_state_helpers_match_live_typescript() {
         let flattened =
             private::flatten_by_market_payload(Some(&payload), case["include"].as_bool().unwrap())
                 .unwrap();
-        let items = flattened.array_values().expect("fixture array property reads").unwrap();
+        let items = flattened
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         let tags: Vec<_> = items
             .iter()
             .map(|value| {

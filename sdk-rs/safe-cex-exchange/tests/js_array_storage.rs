@@ -316,7 +316,15 @@ fn array_freeze_blocks_builtin_mutations_without_detaching_original_alias() {
         assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
         refused += 1;
     }
-    assert_eq!(a.delete(&[b'0' as u16]).unwrap_err().value.get("name").unwrap().to_display(), "TypeError");
+    assert_eq!(
+        a.delete(&[b'0' as u16])
+            .unwrap_err()
+            .value
+            .get("name")
+            .unwrap()
+            .to_display(),
+        "TypeError"
+    );
     assert_eq!(
         json!({
             "refused": refused, "retainedIndex": a.has_own("0"),
@@ -391,73 +399,266 @@ fn array_length_coercion_observes_two_conversions_and_intervening_reentry() {
 fn sparse_array_max_index_and_named_uint32_key_stay_sparse() {
     let object = object();
     let a = Js::array(vec![]);
-    define(&object,&a,Js::str("4294967294"),Js::object(vec![("value",Js::Number(7.0)),("writable",Js::Bool(true)),("enumerable",Js::Bool(true)),("configurable",Js::Bool(true))])).unwrap();
-    a.set("4294967295",Js::str("named")).unwrap();
+    define(
+        &object,
+        &a,
+        Js::str("4294967294"),
+        Js::object(vec![
+            ("value", Js::Number(7.0)),
+            ("writable", Js::Bool(true)),
+            ("enumerable", Js::Bool(true)),
+            ("configurable", Js::Bool(true)),
+        ]),
+    )
+    .unwrap();
+    a.set("4294967295", Js::str("named")).unwrap();
     let high = number(&a.get("length").unwrap()) as u64;
-    a.set("length",Js::Number(0.0)).unwrap();
-    assert_eq!(json!({"highLength":high,"length":number(&a.get("length").unwrap()) as u64,"names":keys(a.own_property_names().unwrap()),"named":a.get("4294967295").unwrap().to_display()}),expected("sparse"));
+    a.set("length", Js::Number(0.0)).unwrap();
+    assert_eq!(
+        json!({"highLength":high,"length":number(&a.get("length").unwrap()) as u64,"names":keys(a.own_property_names().unwrap()),"named":a.get("4294967295").unwrap().to_display()}),
+        expected("sparse")
+    );
 }
 
 #[test]
 fn readonly_array_length_refuses_empty_push_but_define_coerces_twice() {
-    let object=object();let a=Js::array(vec![]);
-    define(&object,&a,Js::str("length"),Js::object(vec![("writable",Js::Bool(false))])).unwrap();
-    let refused=a.call_method("push",vec![]).is_err();
-    let count=Rc::new(std::cell::Cell::new(0));let observed=count.clone();
-    let value=Js::object(vec![("valueOf",Js::function("valueOf",move|_,_|{observed.set(observed.get()+1);Ok(Js::Number(0.0))}))]);
-    define(&object,&a,Js::str("length"),Js::object(vec![("value",value)])).unwrap();
-    assert_eq!(json!({"pushRefused":refused,"conversions":count.get(),"length":number(&a.get("length").unwrap()) as u64}),expected("readonly"));
+    let object = object();
+    let a = Js::array(vec![]);
+    define(
+        &object,
+        &a,
+        Js::str("length"),
+        Js::object(vec![("writable", Js::Bool(false))]),
+    )
+    .unwrap();
+    let refused = a.call_method("push", vec![]).is_err();
+    assert!(
+        a.set("0", Js::Number(1.0)).is_err(),
+        "ARRAY_STORAGE readonly length blocks new indexed properties"
+    );
+    assert!(!a.has_own("0"));
+    let count = Rc::new(std::cell::Cell::new(0));
+    let observed = count.clone();
+    let value = Js::object(vec![(
+        "valueOf",
+        Js::function("valueOf", move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(Js::Number(0.0))
+        }),
+    )]);
+    define(
+        &object,
+        &a,
+        Js::str("length"),
+        Js::object(vec![("value", value)]),
+    )
+    .unwrap();
+    assert_eq!(
+        json!({"pushRefused":refused,"conversions":count.get(),"length":number(&a.get("length").unwrap()) as u64}),
+        expected("readonly")
+    );
 }
 
 #[test]
 fn inherited_array_index_setter_observes_original_receiver_without_growth() {
-    let object=object();let a=Js::array(vec![]);let parent=Js::array(vec![]);
-    let calls=Rc::new(RefCell::new(vec![]));let out=calls.clone();let receiver=a.clone();
-    define(&object,&parent,Js::str("1"),Js::object(vec![("set",Js::function("setter",move|this,args|{out.borrow_mut().push(json!([this.same_reference(&receiver),args[0].to_display()]));Ok(Js::Undefined)})),("configurable",Js::Bool(true))])).unwrap();
-    object.call_method("setPrototypeOf",vec![a.clone(),parent]).unwrap();
-    a.set("1",Js::str("direct")).unwrap();let before=number(&a.get("length").unwrap()) as u64;
-    a.call_method("push",vec![Js::str("zero"),Js::str("one")]).unwrap();
-    assert_eq!(json!({"beforePush":before,"length":number(&a.get("length").unwrap()) as u64,"keys":keys(a.own_keys()),"calls":*calls.borrow()}),expected("inheritedSetter"));
+    let object = object();
+    let a = Js::array(vec![]);
+    let parent = Js::array(vec![]);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let out = calls.clone();
+    let receiver = a.clone();
+    define(
+        &object,
+        &parent,
+        Js::str("1"),
+        Js::object(vec![
+            (
+                "set",
+                Js::function("setter", move |this, args| {
+                    out.borrow_mut().push(json!([
+                        this.same_reference(&receiver),
+                        args[0].to_display()
+                    ]));
+                    Ok(Js::Undefined)
+                }),
+            ),
+            ("configurable", Js::Bool(true)),
+        ]),
+    )
+    .unwrap();
+    object
+        .call_method("setPrototypeOf", vec![a.clone(), parent])
+        .unwrap();
+    a.set("1", Js::str("direct")).unwrap();
+    let before = number(&a.get("length").unwrap()) as u64;
+    a.call_method("push", vec![Js::str("zero"), Js::str("one")])
+        .unwrap();
+    assert_eq!(
+        json!({"beforePush":before,"length":number(&a.get("length").unwrap()) as u64,"keys":keys(a.own_keys()),"calls":*calls.borrow()}),
+        expected("inheritedSetter")
+    );
 }
 
 #[test]
 fn array_for_in_hidden_own_index_suppresses_inherited_without_get() {
-    let object=object();let a=Js::array(vec![]);let parent=Js::array(vec![Js::Number(3.0),Js::Number(4.0)]);
-    let count=Rc::new(std::cell::Cell::new(0));let observed=count.clone();
-    define(&object,&a,Js::str("0"),Js::object(vec![("get",Js::function("hidden",move|_,_|{observed.set(observed.get()+1);Ok(Js::Number(99.0))})),("enumerable",Js::Bool(false))])).unwrap();
-    object.call_method("setPrototypeOf",vec![a.clone(),parent]).unwrap();
-    let mut record=safe_cex_exchange::js_runtime::for_in::ForInRecord::get(&a);let mut found=vec![];
-    while let Some(key)=record.next_key().unwrap(){found.push(key);}
-    assert_eq!(json!({"keys":keys(found),"names":keys(a.own_property_names().unwrap()),"reads":count.get()}),expected("hiddenForIn"));
+    let object = object();
+    let a = Js::array(vec![]);
+    let parent = Js::array(vec![Js::Number(3.0), Js::Number(4.0)]);
+    let count = Rc::new(std::cell::Cell::new(0));
+    let observed = count.clone();
+    define(
+        &object,
+        &a,
+        Js::str("0"),
+        Js::object(vec![
+            (
+                "get",
+                Js::function("hidden", move |_, _| {
+                    observed.set(observed.get() + 1);
+                    Ok(Js::Number(99.0))
+                }),
+            ),
+            ("enumerable", Js::Bool(false)),
+        ]),
+    )
+    .unwrap();
+    object
+        .call_method("setPrototypeOf", vec![a.clone(), parent])
+        .unwrap();
+    let mut record = safe_cex_exchange::js_runtime::for_in::ForInRecord::get(&a);
+    let mut found = vec![];
+    while let Some(key) = record.next_key().unwrap() {
+        found.push(key);
+    }
+    assert_eq!(
+        json!({"keys":keys(found),"names":keys(a.own_property_names().unwrap()),"reads":count.get()}),
+        expected("hiddenForIn")
+    );
 }
 
 #[test]
 fn array_callbacks_slice_sort_and_json_read_live_properties() {
-    let object=object();let a=Js::array(vec![Js::Number(1.0),Js::Number(2.0),Js::Number(3.0)]);
-    let receiver=a.clone();
-    let mapped=a.call_method("map",vec![Js::function("map",move|_,args|{if number(&args[1])==0.0{receiver.set("1",Js::Number(8.0))?;receiver.delete(&"2".encode_utf16().collect::<Vec<_>>())?;}Ok(Js::Number(number(&args[0])*2.0))})]).unwrap();
-    let sliced_array=Js::array(vec![Js::Number(0.0),Js::Number(1.0),Js::Number(2.0)]);let receiver=sliced_array.clone();
-    let start=Js::object(vec![("valueOf",Js::function("valueOf",move|_,_|{receiver.set("1",Js::Number(9.0))?;Ok(Js::Number(0.0))}))]);
-    let sliced=sliced_array.call_method("slice",vec![start,Js::Number(2.0)]).unwrap();
-    let sorted=Js::array(vec![Js::Number(2.0),Js::Number(1.0)]);
-    define(&object,&sorted,Js::str("0"),Js::object(vec![("get",Js::function("get",|this,_|{this.set("1",Js::Number(5.0))?;Ok(Js::Number(3.0))})),("set",Js::function("set",|this,args|{this.set("finalFirst",args[0].clone())?;Ok(Js::Undefined)})),("configurable",Js::Bool(true)),("enumerable",Js::Bool(true))])).unwrap();
-    sorted.call_method("sort",vec![Js::function("compare",|_,args|Ok(Js::Number(number(&args[0])-number(&args[1]))))]).unwrap();
-    let json_array=Js::array(vec![Js::Number(0.0),Js::Number(1.0)]);
-    define(&object,&json_array,Js::str("0"),Js::object(vec![("get",Js::function("get",|this,_|{this.delete(&"1".encode_utf16().collect::<Vec<_>>())?;Ok(Js::Number(-0.0))}))])).unwrap();
-    let wire=|value:&Js| String::from_utf16(&stringify_json(value).unwrap().unwrap()).unwrap();
-    assert_eq!(json!({"mapped":wire(&mapped),"mappedKeys":keys(mapped.own_keys()),"sliced":[number(&sliced.get("0").unwrap()) as i64,number(&sliced.get("1").unwrap()) as i64],"sorted":[number(&sorted.get("finalFirst").unwrap()) as i64,number(&sorted.get("1").unwrap()) as i64],"json":wire(&json_array)}),expected("liveReads"));
-    let token=Js::object(vec![]);let thrown=token.clone();
-    define(&object,&a,Js::str("1"),Js::object(vec![("get",Js::function("throw",move|_,_|Err(Thrown::new(thrown.clone()))))])).unwrap();
-    let error=a.call_method("map",vec![Js::function("identity",|_,args|Ok(args[0].clone()))]).unwrap_err();
-    assert!(error.value.same_reference(&token),"original accessor throw must escape map");
+    let object = object();
+    let a = Js::array(vec![Js::Number(1.0), Js::Number(2.0), Js::Number(3.0)]);
+    let receiver = a.clone();
+    let mapped = a
+        .call_method(
+            "map",
+            vec![Js::function("map", move |_, args| {
+                if number(&args[1]) == 0.0 {
+                    receiver.set("1", Js::Number(8.0))?;
+                    receiver.delete(&"2".encode_utf16().collect::<Vec<_>>())?;
+                }
+                Ok(Js::Number(number(&args[0]) * 2.0))
+            })],
+        )
+        .unwrap();
+    let sliced_array = Js::array(vec![Js::Number(0.0), Js::Number(1.0), Js::Number(2.0)]);
+    let receiver = sliced_array.clone();
+    let start = Js::object(vec![(
+        "valueOf",
+        Js::function("valueOf", move |_, _| {
+            receiver.set("1", Js::Number(9.0))?;
+            Ok(Js::Number(0.0))
+        }),
+    )]);
+    let sliced = sliced_array
+        .call_method("slice", vec![start, Js::Number(2.0)])
+        .unwrap();
+    let sorted = Js::array(vec![Js::Number(2.0), Js::Number(1.0)]);
+    define(
+        &object,
+        &sorted,
+        Js::str("0"),
+        Js::object(vec![
+            (
+                "get",
+                Js::function("get", |this, _| {
+                    this.set("1", Js::Number(5.0))?;
+                    Ok(Js::Number(3.0))
+                }),
+            ),
+            (
+                "set",
+                Js::function("set", |this, args| {
+                    this.set("finalFirst", args[0].clone())?;
+                    Ok(Js::Undefined)
+                }),
+            ),
+            ("configurable", Js::Bool(true)),
+            ("enumerable", Js::Bool(true)),
+        ]),
+    )
+    .unwrap();
+    sorted
+        .call_method(
+            "sort",
+            vec![Js::function("compare", |_, args| {
+                Ok(Js::Number(number(&args[0]) - number(&args[1])))
+            })],
+        )
+        .unwrap();
+    let json_array = Js::array(vec![Js::Number(0.0), Js::Number(1.0)]);
+    define(
+        &object,
+        &json_array,
+        Js::str("0"),
+        Js::object(vec![(
+            "get",
+            Js::function("get", |this, _| {
+                this.delete(&"1".encode_utf16().collect::<Vec<_>>())?;
+                Ok(Js::Number(-0.0))
+            }),
+        )]),
+    )
+    .unwrap();
+    let wire = |value: &Js| String::from_utf16(&stringify_json(value).unwrap().unwrap()).unwrap();
+    assert_eq!(
+        json!({"mapped":wire(&mapped),"mappedKeys":keys(mapped.own_keys()),"sliced":[number(&sliced.get("0").unwrap()) as i64,number(&sliced.get("1").unwrap()) as i64],"sorted":[number(&sorted.get("finalFirst").unwrap()) as i64,number(&sorted.get("1").unwrap()) as i64],"json":wire(&json_array)}),
+        expected("liveReads")
+    );
+    let token = Js::object(vec![]);
+    let thrown = token.clone();
+    define(
+        &object,
+        &a,
+        Js::str("1"),
+        Js::object(vec![(
+            "get",
+            Js::function("throw", move |_, _| Err(Thrown::new(thrown.clone()))),
+        )]),
+    )
+    .unwrap();
+    let error = a
+        .call_method(
+            "map",
+            vec![Js::function("identity", |_, args| Ok(args[0].clone()))],
+        )
+        .unwrap_err();
+    assert!(
+        error.value.same_reference(&token),
+        "original accessor throw must escape map"
+    );
 }
 
 #[test]
 fn array_prototype_method_alias_uses_actual_call_receiver() {
-    let globals=Js::object(vec![]);install_builtins::<()>(&globals,std::rc::Weak::new());
-    let prototype=globals.get("Array").unwrap().get("prototype").unwrap();
-    let a=Js::array(vec![]);let b=Js::array(vec![]);
-    let callback=Js::function("map",|_,args|Ok(Js::Number(number(&args[0])+1.0)));
-    let result=prototype.get("map").unwrap().call(Js::object(vec![("0",Js::Number(4.0)),("length",Js::Number(1.0))]),vec![callback]).unwrap();
-    assert_eq!(json!({"samePrototype":a.get("__proto__").unwrap().same_reference(&prototype),"sameMap":a.get("map").unwrap().same_reference(&b.get("map").unwrap()),"mapBorrow":[number(&result.get("0").unwrap()) as i64]}),expected("prototypeAliases"));
+    let globals = Js::object(vec![]);
+    install_builtins::<()>(&globals, std::rc::Weak::new());
+    let prototype = globals.get("Array").unwrap().get("prototype").unwrap();
+    let a = Js::array(vec![]);
+    let b = Js::array(vec![]);
+    let callback = Js::function("map", |_, args| Ok(Js::Number(number(&args[0]) + 1.0)));
+    let result = prototype
+        .get("map")
+        .unwrap()
+        .call(
+            Js::object(vec![("0", Js::Number(4.0)), ("length", Js::Number(1.0))]),
+            vec![callback],
+        )
+        .unwrap();
+    assert_eq!(
+        json!({"samePrototype":a.get("__proto__").unwrap().same_reference(&prototype),"sameMap":a.get("map").unwrap().same_reference(&b.get("map").unwrap()),"mapBorrow":[number(&result.get("0").unwrap()) as i64]}),
+        expected("prototypeAliases")
+    );
 }

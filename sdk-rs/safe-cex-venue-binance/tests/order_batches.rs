@@ -67,7 +67,13 @@ fn decoded(v: Value) -> EventValue {
 }
 fn snap(v: &EventValue) -> EventValue {
     match v {
-        EventValue::Array(a) => array(array_values(a).expect("fixture array reads").iter().map(snap).collect()),
+        EventValue::Array(a) => array(
+            array_values(a)
+                .expect("fixture array reads")
+                .iter()
+                .map(snap)
+                .collect(),
+        ),
         EventValue::Object(_) => EventValue::record_object(
             v.spread()
                 .iter()
@@ -90,7 +96,11 @@ fn wire(v: &EventValue) -> Value {
         }
         EventValue::Bool(v) => json!(v),
         EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
-        EventValue::Array(a) => array_values(a).expect("fixture array reads").iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -127,7 +137,7 @@ fn values(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("{l}: native Array")
     };
-    assert_eq!(a.borrow().len(), n, "{l}: native array count");
+    assert_eq!(a.len(), n, "{l}: native array count");
     array_values(a).expect("fixture array reads")
 }
 fn own(v: &EventValue, k: &str) -> bool {
@@ -160,9 +170,13 @@ fn encoded_input(v: &EventValue) -> JsJsonValue {
         EventValue::Bool(v) => JsJsonValue::Bool(*v),
         EventValue::Number(v) => JsJsonValue::Number(*v),
         EventValue::String(v) => JsJsonValue::String(String::from_utf16(v).unwrap()),
-        EventValue::Array(a) => {
-            JsJsonValue::Array(array_values(a).expect("fixture array reads").iter().map(encoded_input).collect())
-        }
+        EventValue::Array(a) => JsJsonValue::Array(
+            array_values(a)
+                .expect("fixture array reads")
+                .iter()
+                .map(encoded_input)
+                .collect(),
+        ),
         EventValue::Object(_) => JsJsonValue::Object(
             v.spread()
                 .iter()
@@ -510,7 +524,7 @@ impl BatchBindings for Bindings {
                 };
                 let replaced = decoded(fixture()["orders"][1].clone());
                 replaced.write("id", string("replaced"));
-                a.borrow_mut()[1] = Some(replaced);
+                EventValue::Array(a.clone()).set("1", replaced).unwrap();
             }
             let id = o.read("id")?.text()?;
             let regular = record([
@@ -685,7 +699,7 @@ impl BatchBindings for Bindings {
                 let EventValue::Array(a) = &b.data else {
                     panic!()
                 };
-                a.borrow()[4]
+                native_array_fixture::slots(&a)[4]
                     .as_ref()
                     .unwrap()
                     .write("msg", string("changed row error"));
@@ -1152,7 +1166,10 @@ fn http_test(family: &str) {
                     panic!()
                 };
                 assert!(
-                    array_values(&original).expect("fixture array reads").iter().any(|p| p.same(&row)),
+                    array_values(&original)
+                        .expect("fixture array reads")
+                        .iter()
+                        .any(|p| p.same(&row)),
                     "{l}: native codec original payload referent"
                 );
             }
@@ -1338,7 +1355,10 @@ fn http_test(family: &str) {
                     panic!()
                 };
                 assert!(
-                    array_values(&a).expect("fixture array reads").iter().any(|o| o.same(row)),
+                    array_values(&a)
+                        .expect("fixture array reads")
+                        .iter()
+                        .any(|o| o.same(row)),
                     "{l}: native classifier original row"
                 );
                 assert!(
@@ -1777,3 +1797,7 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;

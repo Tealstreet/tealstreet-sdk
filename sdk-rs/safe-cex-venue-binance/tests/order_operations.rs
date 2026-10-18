@@ -67,7 +67,13 @@ fn decoded(v: Value) -> EventValue {
 }
 fn snap(v: &EventValue) -> EventValue {
     match v {
-        EventValue::Array(a) => array(array_values(a).expect("fixture array reads").iter().map(snap).collect()),
+        EventValue::Array(a) => array(
+            array_values(a)
+                .expect("fixture array reads")
+                .iter()
+                .map(snap)
+                .collect(),
+        ),
         EventValue::Object(_) => EventValue::record_object(
             v.spread()
                 .iter()
@@ -90,7 +96,11 @@ fn wire(v: &EventValue) -> Value {
         }
         EventValue::Bool(v) => json!(v),
         EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
-        EventValue::Array(a) => array_values(a).expect("fixture array reads").iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -127,7 +137,7 @@ fn values(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("{l}: native Array")
     };
-    assert_eq!(a.borrow().len(), n, "{l}: native array count");
+    assert_eq!(a.len(), n, "{l}: native array count");
     array_values(a).expect("fixture array reads")
 }
 fn own(v: &EventValue, k: &str) -> bool {
@@ -395,7 +405,11 @@ impl OrderBindings for Bindings {
                     let EventValue::Array(a) = &b.orders else {
                         panic!()
                     };
-                    for (i, o) in array_values(&a).expect("fixture array reads").iter().enumerate() {
+                    for (i, o) in array_values(&a)
+                        .expect("fixture array reads")
+                        .iter()
+                        .enumerate()
+                    {
                         o.write("id", string(format!("changed-{i}")))
                     }
                     EventValue::Array(a.clone())
@@ -573,7 +587,9 @@ impl OrderBindings for Bindings {
                     let EventValue::Array(a) = b.formatted.read("algo").unwrap() else {
                         panic!()
                     };
-                    a.borrow_mut().clear();
+                    EventValue::Array(a.clone())
+                        .set("length", EventValue::Number(0.0))
+                        .unwrap();
                 }
                 Ok(match m {
                     Method::RegularBatch => array(vec![string("regular-A"), string("regular-B")]),
@@ -1529,3 +1545,7 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;

@@ -830,7 +830,9 @@ impl ListenerHost for SocketHost {
     fn append(&self, feed: Feed, key: &Key<Js>, callback: Rc<Js>) -> Result<(), ExchangeError> {
         let map = self.handlers_map(feed)?;
         let key = key_units(key)?;
-        let mut list = handler_list(&map, &key)?.array_values()?.unwrap_or_default();
+        let mut list = handler_list(&map, &key)?
+            .array_values()?
+            .unwrap_or_default();
         list.push((*callback).clone());
         map.set_key(&key, Js::array(list)).map_err(ex)
     }

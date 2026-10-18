@@ -469,7 +469,8 @@ impl listeners::Host for PublicFrame {
             let v = response.await?;
             let levels = |side: &str| -> Result<Vec<[JsString; 2]>, ExchangeError> {
                 let side = v.field(side)?.array()?;
-                side.array_items()?.expect("array variant")
+                side.array_items()?
+                    .expect("array variant")
                     .iter()
                     .map(|row| {
                         let row = row

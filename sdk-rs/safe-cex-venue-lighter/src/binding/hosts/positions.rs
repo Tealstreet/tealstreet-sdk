@@ -19,7 +19,10 @@ fn put(base: &Js, key: &[u16], value: Js) -> Result<(), Thrown> {
     let name = String::from_utf16_lossy(key);
     match base {
         Js::Object(_) | Js::Function(_) | Js::Array(_) => base.set_key(key, value),
-        Js::Map(_) | Js::Set(_) | Js::Promise(_) => Err(Thrown::type_error(&format!("Cannot create property '{name}' on {}",base.to_display()))),
+        Js::Map(_) | Js::Set(_) | Js::Promise(_) => Err(Thrown::type_error(&format!(
+            "Cannot create property '{name}' on {}",
+            base.to_display()
+        ))),
         primitive => Err(Thrown::type_error(&format!(
             "Cannot create property '{name}' on {} '{}'",
             primitive.type_of(),

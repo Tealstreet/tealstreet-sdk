@@ -1006,7 +1006,10 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
                 continue;
             }
         };
-        let entries = items.array_items().expect("fixture array property reads").unwrap();
+        let entries = items
+            .array_items()
+            .expect("fixture array property reads")
+            .unwrap();
         let observed = entries
             .iter()
             .flatten()

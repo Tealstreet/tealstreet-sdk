@@ -315,112 +315,307 @@ fn string_position(value: f64, length: usize) -> usize {
     }
 }
 
-fn array_length(this: &Js) -> Result<usize,Thrown> { Ok(this.get("length")?.to_number()? as usize) }
-fn indexed(this:&Js,index:usize)->Result<Option<Js>,Thrown> {
-    let key=super::value::utf16(&index.to_string());
-    if this.has_property(&key) {Ok(Some(this.get_key(&key)?))} else {Ok(None)}
+fn array_length(this: &Js) -> Result<usize, Thrown> {
+    Ok(this.get("length")?.to_number()? as usize)
 }
-fn items(this: &Js) -> Result<Vec<Option<Js>>,Thrown> {
-    this.array_items()?.ok_or_else(|| Thrown::type_error("array receiver required"))
+fn indexed(this: &Js, index: usize) -> Result<Option<Js>, Thrown> {
+    let key = super::value::utf16(&index.to_string());
+    if this.has_property(&key) {
+        Ok(Some(this.get_key(&key)?))
+    } else {
+        Ok(None)
+    }
+}
+fn items(this: &Js) -> Result<Vec<Option<Js>>, Thrown> {
+    this.array_items()?
+        .ok_or_else(|| Thrown::type_error("array receiver required"))
 }
 
 pub(crate) fn array_member(this: Js, name: &str) -> Option<Js> {
     Some(match name {
         "push" => method(name, move |a| {
-            let mut len=array_length(&this)?;
-            for value in a {this.set(&len.to_string(),value)?;len+=1;}
-            this.set("length",Js::Number(len as f64))?;
+            let mut len = array_length(&this)?;
+            for value in a {
+                this.set(&len.to_string(), value)?;
+                len += 1;
+            }
+            this.set("length", Js::Number(len as f64))?;
             Ok(Js::Number(len as f64))
         }),
         "pop" => method(name, move |_| {
-            let len=array_length(&this)?;
-            if len==0 {this.set("length",Js::Number(0.))?;return Ok(Js::Undefined);}
-            let key=(len-1).to_string();let value=this.get(&key)?;
-            this.delete(&super::value::utf16(&key))?;this.set("length",Js::Number((len-1) as f64))?;Ok(value)
+            let len = array_length(&this)?;
+            if len == 0 {
+                this.set("length", Js::Number(0.))?;
+                return Ok(Js::Undefined);
+            }
+            let key = (len - 1).to_string();
+            let value = this.get(&key)?;
+            this.delete(&super::value::utf16(&key))?;
+            this.set("length", Js::Number((len - 1) as f64))?;
+            Ok(value)
         }),
         "reverse" => method(name, move |_| {
-            let len=array_length(&this)?;
-            for lower in 0..len/2 {
-                let upper=len-lower-1;
-                let left=indexed(&this,lower)?;let right=indexed(&this,upper)?;
-                match (left,right) {
-                    (Some(l),Some(r))=>{this.set(&lower.to_string(),r)?;this.set(&upper.to_string(),l)?;},
-                    (None,Some(r))=>{this.set(&lower.to_string(),r)?;this.delete(&super::value::utf16(&upper.to_string()))?;},
-                    (Some(l),None)=>{this.delete(&super::value::utf16(&lower.to_string()))?;this.set(&upper.to_string(),l)?;},
-                    _=>{},
+            let len = array_length(&this)?;
+            for lower in 0..len / 2 {
+                let upper = len - lower - 1;
+                let left = indexed(&this, lower)?;
+                let right = indexed(&this, upper)?;
+                match (left, right) {
+                    (Some(l), Some(r)) => {
+                        this.set(&lower.to_string(), r)?;
+                        this.set(&upper.to_string(), l)?;
+                    }
+                    (None, Some(r)) => {
+                        this.set(&lower.to_string(), r)?;
+                        this.delete(&super::value::utf16(&upper.to_string()))?;
+                    }
+                    (Some(l), None) => {
+                        this.delete(&super::value::utf16(&lower.to_string()))?;
+                        this.set(&upper.to_string(), l)?;
+                    }
+                    _ => {}
                 }
             }
             Ok(this.clone())
         }),
-        "includes" | "indexOf" => {let includes=name=="includes";method(name,move |a|{
-            let len=array_length(&this)?;if len==0{return Ok(if includes{Js::Bool(false)}else{Js::Number(-1.)});}let needle=arg(&a,0);let start=arg(&a,1).to_number()?;
-            let start=if start.is_nan(){0.}else{start.trunc()};let start=if start<0.{(len as f64+start).max(0.)}else{start} as usize;
-            for i in start..len {
-                let value=if includes {Some(this.get(&i.to_string())?)}else{indexed(&this,i)?};
-                if value.is_some_and(|v| if includes{v.same_value_zero(&needle)}else{v.strict_equals(&needle)}) {return Ok(if includes{Js::Bool(true)}else{Js::Number(i as f64)});}
-            }
-            Ok(if includes{Js::Bool(false)}else{Js::Number(-1.)})
-        })},
-        "join" => method(name,move |a|{
-            let len=array_length(&this)?;let separator=arg(&a,0);
-            let sep=if separator.is_undefined(){super::value::utf16(",")}else{separator.to_js_string()?};
-            let mut units=vec![];
-            for i in 0..len {if i>0{units.extend_from_slice(&sep);}let v=this.get(&i.to_string())?;if !v.is_nullish(){units.extend_from_slice(&v.to_js_string()?);}}
-            Ok(Js::utf16(&units))
-        }),
-        "slice" => method(name,move |a|{
-            let len=array_length(&this)?;
-            let norm=|v:Js,d:usize|->Result<usize,Thrown>{if v.is_undefined(){return Ok(d);}let n=v.to_number()?.trunc();let n=if n.is_nan(){0.}else{n};Ok(if n<0.{(len as f64+n).max(0.)}else{n.min(len as f64)} as usize)};
-            let start=norm(arg(&a,0),0)?;let end=norm(arg(&a,1),len)?;
-            let mut out=vec![];for i in start..end{out.push(indexed(&this,i)?);}Ok(Js::holey_array(out))
-        }),
-        "concat" => method(name,move |a|{
-            let mut out=items(&this)?;for v in a{if let Some(more)=v.array_items()?{out.extend(more);}else{out.push(Some(v));}}Ok(Js::holey_array(out))
-        }),
-        "map" | "forEach" | "filter" | "some" | "every" | "find" | "findIndex" | "flatMap" => {
-            let kind=name.to_owned();method(name,move |a|{
-                let len=array_length(&this)?;let f=arg(&a,0);require_callback(&f)?;let receiver=arg(&a,1);
-                let mut out=vec![];
-                for i in 0..len {
-                    let value=if matches!(kind.as_str(),"find"|"findIndex"){Some(this.get(&i.to_string())?)}else{indexed(&this,i)?};
-                    let Some(value)=value else {if kind=="map"{out.push(None);}continue;};
-                    let result=f.call(receiver.clone(),vec![value.clone(),Js::Number(i as f64),this.clone()])?;
-                    let hit=result.truthy();
-                    match kind.as_str(){
-                        "map"=>out.push(Some(result)),"filter" if hit=>out.push(Some(value)),
-                        "flatMap"=>{if result.is_array(){flatten_into(&result,0.,&mut out)?;}else{out.push(Some(result));}},
-                        "some" if hit=>return Ok(Js::Bool(true)),"every" if !hit=>return Ok(Js::Bool(false)),
-                        "find" if hit=>return Ok(value),"findIndex" if hit=>return Ok(Js::Number(i as f64)),_=>{},
+        "includes" | "indexOf" => {
+            let includes = name == "includes";
+            method(name, move |a| {
+                let len = array_length(&this)?;
+                if len == 0 {
+                    return Ok(if includes {
+                        Js::Bool(false)
+                    } else {
+                        Js::Number(-1.)
+                    });
+                }
+                let needle = arg(&a, 0);
+                let start = arg(&a, 1).to_number()?;
+                let start = if start.is_nan() { 0. } else { start.trunc() };
+                let start = if start < 0. {
+                    (len as f64 + start).max(0.)
+                } else {
+                    start
+                } as usize;
+                for i in start..len {
+                    let value = if includes {
+                        Some(this.get(&i.to_string())?)
+                    } else {
+                        indexed(&this, i)?
+                    };
+                    if value.is_some_and(|v| {
+                        if includes {
+                            v.same_value_zero(&needle)
+                        } else {
+                            v.strict_equals(&needle)
+                        }
+                    }) {
+                        return Ok(if includes {
+                            Js::Bool(true)
+                        } else {
+                            Js::Number(i as f64)
+                        });
                     }
                 }
-                Ok(match kind.as_str(){"map"|"filter"|"flatMap"=>Js::holey_array(out),"some"=>Js::Bool(false),"every"=>Js::Bool(true),"find"=>Js::Undefined,"findIndex"=>Js::Number(-1.),_=>Js::Undefined})
+                Ok(if includes {
+                    Js::Bool(false)
+                } else {
+                    Js::Number(-1.)
+                })
             })
-        },
-        "reduce"=>method(name,move |a|{
-            let len=array_length(&this)?;let f=arg(&a,0);require_callback(&f)?;let mut at=0;
-            let mut acc=if a.len()>1{a[1].clone()}else{loop{if at>=len{return Err(Thrown::type_error("Reduce of empty array with no initial value"));}let next=indexed(&this,at)?;at+=1;if let Some(v)=next{break v;}}};
-            while at<len {let i=at;at+=1;if let Some(v)=indexed(&this,i)?{acc=f.call(Js::Undefined,vec![acc,v,Js::Number(i as f64),this.clone()])?;}}
+        }
+        "join" => method(name, move |a| {
+            let len = array_length(&this)?;
+            let separator = arg(&a, 0);
+            let sep = if separator.is_undefined() {
+                super::value::utf16(",")
+            } else {
+                separator.to_js_string()?
+            };
+            let mut units = vec![];
+            for i in 0..len {
+                if i > 0 {
+                    units.extend_from_slice(&sep);
+                }
+                let v = this.get(&i.to_string())?;
+                if !v.is_nullish() {
+                    units.extend_from_slice(&v.to_js_string()?);
+                }
+            }
+            Ok(Js::utf16(&units))
+        }),
+        "slice" => method(name, move |a| {
+            let len = array_length(&this)?;
+            let norm = |v: Js, d: usize| -> Result<usize, Thrown> {
+                if v.is_undefined() {
+                    return Ok(d);
+                }
+                let n = v.to_number()?.trunc();
+                let n = if n.is_nan() { 0. } else { n };
+                Ok(if n < 0. {
+                    (len as f64 + n).max(0.)
+                } else {
+                    n.min(len as f64)
+                } as usize)
+            };
+            let start = norm(arg(&a, 0), 0)?;
+            let end = norm(arg(&a, 1), len)?;
+            let mut out = vec![];
+            for i in start..end {
+                out.push(indexed(&this, i)?);
+            }
+            Ok(Js::holey_array(out))
+        }),
+        "concat" => method(name, move |a| {
+            let mut out = items(&this)?;
+            for v in a {
+                if let Some(more) = v.array_items()? {
+                    out.extend(more);
+                } else {
+                    out.push(Some(v));
+                }
+            }
+            Ok(Js::holey_array(out))
+        }),
+        "map" | "forEach" | "filter" | "some" | "every" | "find" | "findIndex" | "flatMap" => {
+            let kind = name.to_owned();
+            method(name, move |a| {
+                let len = array_length(&this)?;
+                let f = arg(&a, 0);
+                require_callback(&f)?;
+                let receiver = arg(&a, 1);
+                let mut out = vec![];
+                for i in 0..len {
+                    let value = if matches!(kind.as_str(), "find" | "findIndex") {
+                        Some(this.get(&i.to_string())?)
+                    } else {
+                        indexed(&this, i)?
+                    };
+                    let Some(value) = value else {
+                        if kind == "map" {
+                            out.push(None);
+                        }
+                        continue;
+                    };
+                    let result = f.call(
+                        receiver.clone(),
+                        vec![value.clone(), Js::Number(i as f64), this.clone()],
+                    )?;
+                    let hit = result.truthy();
+                    match kind.as_str() {
+                        "map" => out.push(Some(result)),
+                        "filter" if hit => out.push(Some(value)),
+                        "flatMap" => {
+                            if result.is_array() {
+                                flatten_into(&result, 0., &mut out)?;
+                            } else {
+                                out.push(Some(result));
+                            }
+                        }
+                        "some" if hit => return Ok(Js::Bool(true)),
+                        "every" if !hit => return Ok(Js::Bool(false)),
+                        "find" if hit => return Ok(value),
+                        "findIndex" if hit => return Ok(Js::Number(i as f64)),
+                        _ => {}
+                    }
+                }
+                Ok(match kind.as_str() {
+                    "map" | "filter" | "flatMap" => Js::holey_array(out),
+                    "some" => Js::Bool(false),
+                    "every" => Js::Bool(true),
+                    "find" => Js::Undefined,
+                    "findIndex" => Js::Number(-1.),
+                    _ => Js::Undefined,
+                })
+            })
+        }
+        "reduce" => method(name, move |a| {
+            let len = array_length(&this)?;
+            let f = arg(&a, 0);
+            require_callback(&f)?;
+            let mut at = 0;
+            let mut acc = if a.len() > 1 {
+                a[1].clone()
+            } else {
+                loop {
+                    if at >= len {
+                        return Err(Thrown::type_error(
+                            "Reduce of empty array with no initial value",
+                        ));
+                    }
+                    let next = indexed(&this, at)?;
+                    at += 1;
+                    if let Some(v) = next {
+                        break v;
+                    }
+                }
+            };
+            while at < len {
+                let i = at;
+                at += 1;
+                if let Some(v) = indexed(&this, i)? {
+                    acc = f.call(
+                        Js::Undefined,
+                        vec![acc, v, Js::Number(i as f64), this.clone()],
+                    )?;
+                }
+            }
             Ok(acc)
         }),
-        "flat"=>method(name,move |a|{
-            let length=array_length(&this)?;let depth=arg(&a,0);let depth=if depth.is_undefined(){1.}else{let n=depth.to_number()?;if n.is_nan(){0.}else{n.trunc()}};
-            let mut out=vec![];flatten_length(&this,length,depth,&mut out)?;Ok(Js::holey_array(out))
+        "flat" => method(name, move |a| {
+            let length = array_length(&this)?;
+            let depth = arg(&a, 0);
+            let depth = if depth.is_undefined() {
+                1.
+            } else {
+                let n = depth.to_number()?;
+                if n.is_nan() { 0. } else { n.trunc() }
+            };
+            let mut out = vec![];
+            flatten_length(&this, length, depth, &mut out)?;
+            Ok(Js::holey_array(out))
         }),
-        "sort"=>method(name,move |a|{
-            let f=arg(&a,0);if !f.is_undefined()&&!f.is_callable(){return Err(Thrown::type_error("The comparison function must be either a function or undefined"));}
-            this.sort_array_with(|x,y|{
-                if f.is_callable(){let n=f.call(Js::Undefined,vec![x.clone(),y.clone()])?.to_number()?;Ok(n.partial_cmp(&0.).unwrap_or(std::cmp::Ordering::Equal))}else{Ok(x.to_js_string()?.cmp(&y.to_js_string()?))}
+        "sort" => method(name, move |a| {
+            let f = arg(&a, 0);
+            if !f.is_undefined() && !f.is_callable() {
+                return Err(Thrown::type_error(
+                    "The comparison function must be either a function or undefined",
+                ));
+            }
+            this.sort_array_with(|x, y| {
+                if f.is_callable() {
+                    let n = f
+                        .call(Js::Undefined, vec![x.clone(), y.clone()])?
+                        .to_number()?;
+                    Ok(n.partial_cmp(&0.).unwrap_or(std::cmp::Ordering::Equal))
+                } else {
+                    Ok(x.to_js_string()?.cmp(&y.to_js_string()?))
+                }
             })?;
             Ok(this.clone())
         }),
-        _=>return None,
+        _ => return None,
     })
 }
-fn flatten_into(source:&Js,depth:f64,out:&mut Vec<Option<Js>>)->Result<(),Thrown>{
-    let len=array_length(source)?;flatten_length(source,len,depth,out)
+fn flatten_into(source: &Js, depth: f64, out: &mut Vec<Option<Js>>) -> Result<(), Thrown> {
+    let len = array_length(source)?;
+    flatten_length(source, len, depth, out)
 }
-fn flatten_length(source:&Js,len:usize,depth:f64,out:&mut Vec<Option<Js>>)->Result<(),Thrown>{
-    for i in 0..len{if let Some(value)=indexed(source,i)?{if value.is_array()&&depth>0.{flatten_into(&value,depth-1.,out)?;}else{out.push(Some(value));}}}
+fn flatten_length(
+    source: &Js,
+    len: usize,
+    depth: f64,
+    out: &mut Vec<Option<Js>>,
+) -> Result<(), Thrown> {
+    for i in 0..len {
+        if let Some(value) = indexed(source, i)? {
+            if value.is_array() && depth > 0. {
+                flatten_into(&value, depth - 1., out)?;
+            } else {
+                out.push(Some(value));
+            }
+        }
+    }
     Ok(())
 }
 

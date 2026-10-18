@@ -134,13 +134,17 @@ impl EventOps for EventValue {
                         return Ok(String::new());
                     }
                     active.push(identity);
-                    let mut parts=Vec::new();
-                    let length=items.len();
+                    let mut parts = Vec::new();
+                    let length = items.len();
                     for index in 0..length {
-                        let item=value.get(&index.to_string())?;
-                        parts.push(if item.is_nullish(){String::new()}else{text_in(&item,active)?});
+                        let item = value.get(&index.to_string())?;
+                        parts.push(if item.is_nullish() {
+                            String::new()
+                        } else {
+                            text_in(&item, active)?
+                        });
                     }
-                    let text:Result<Vec<String>,Failure>=Ok(parts);
+                    let text: Result<Vec<String>, Failure> = Ok(parts);
                     active.pop();
                     text?.join(",")
                 }
@@ -227,7 +231,7 @@ pub fn for_each(
 ) -> Result<(), Failure> {
     let len = array.len();
     for i in 0..len {
-        let value = array_element(array,i)?;
+        let value = array_element(array, i)?;
         if let Some(value) = value {
             visit(value)?
         }
@@ -254,7 +258,7 @@ pub fn find(
 ) -> Result<EventValue, Failure> {
     let len = array.len();
     for i in 0..len {
-        let value=EventValue::Array(array.clone()).get(&i.to_string())?;
+        let value = EventValue::Array(array.clone()).get(&i.to_string())?;
         if predicate(&value)? {
             return Ok(value);
         }
@@ -268,14 +272,18 @@ pub fn native_json(value: &EventValue) -> safe_cex_num::JsJsonValue {
 }
 
 /// Live HasProperty/Get for Array callback algorithms; holes stay absent.
-pub fn array_element(array:&EventArray,index:usize)->Result<Option<EventValue>,Failure>{
-    let value=EventValue::Array(array.clone());
-    Ok(if value.has_index(index){Some(value.get(&index.to_string())?)}else{None})
+pub fn array_element(array: &EventArray, index: usize) -> Result<Option<EventValue>, Failure> {
+    let value = EventValue::Array(array.clone());
+    Ok(if value.has_index(index) {
+        Some(value.get(&index.to_string())?)
+    } else {
+        None
+    })
 }
 
 /// Values yielded by a source array iterator; holes yield undefined.
 pub fn array_values(array: &EventArray) -> Result<Vec<EventValue>, Failure> {
-    Ok(EventValue::Array(array.clone()).array_values()?.expect("native array"))
+    Ok(EventValue::Array(array.clone()).iterable_values()?)
 }
 
 /// Attach the existing captured native prototype realm to a freshly decoded graph.
@@ -290,7 +298,13 @@ pub(crate) fn in_current_realm(value: EventValue) -> EventValue {
                 }
             }
             EventValue::Array(values) => {
-                for value in EventValue::Array(values.clone()).array_items().expect("fresh decoded array").expect("array variant").into_iter().flatten() {
+                for value in EventValue::Array(values.clone())
+                    .array_items()
+                    .expect("fresh decoded array")
+                    .expect("array variant")
+                    .into_iter()
+                    .flatten()
+                {
                     attach(&value, realm);
                 }
             }

@@ -68,8 +68,12 @@ fn array_cell(value: &Js, method: &str) -> Result<Js, Thrown> {
 }
 
 /// Element `i` if the live array still has it (HasProperty), skipping holes.
-fn live(items:&Js,i:usize)->Result<Option<Js>,Thrown> {
-    if items.has_index(i) {Ok(Some(items.get(&i.to_string())?))}else{Ok(None)}
+fn live(items: &Js, i: usize) -> Result<Option<Js>, Thrown> {
+    if items.has_index(i) {
+        Ok(Some(items.get(&i.to_string())?))
+    } else {
+        Ok(None)
+    }
 }
 
 fn native_filter<F>(value: Js, mut f: F) -> Result<Js, Thrown>
@@ -114,7 +118,14 @@ where
     for i in 0..len {
         if let Some(item) = live(&items, i)? {
             match f(item, i)? {
-                inner @ Js::Array(_) => {let len=inner.get("length")?.to_number()? as usize;for index in 0..len{if let Some(v)=live(&inner,index)?{out.push(v);}}},
+                inner @ Js::Array(_) => {
+                    let len = inner.get("length")?.to_number()? as usize;
+                    for index in 0..len {
+                        if let Some(v) = live(&inner, index)? {
+                            out.push(v);
+                        }
+                    }
+                }
                 other => out.push(other),
             }
         }
@@ -137,8 +148,14 @@ where
     Ok(acc)
 }
 
-fn iterator_of(value:&Js)->Result<JsIter,Thrown>{Ok(JsIter(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?))}
-fn iterator_next(iter:&mut JsIter)->Result<Option<Js>,Thrown>{iter.0.step_value()}
+fn iterator_of(value: &Js) -> Result<JsIter, Thrown> {
+    Ok(JsIter(
+        safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?,
+    ))
+}
+fn iterator_next(iter: &mut JsIter) -> Result<Option<Js>, Thrown> {
+    iter.0.step_value()
+}
 
 fn property_key(key: &Js) -> Result<Str, Thrown> {
     key.to_js_string()

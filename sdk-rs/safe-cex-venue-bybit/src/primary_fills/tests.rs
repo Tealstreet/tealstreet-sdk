@@ -60,7 +60,8 @@ fn primary_fill_mapping_preserves_prefix_and_numeric_classes() {
             "fills case{i}: {c}"
         );
         let classes: Vec<_> = fills
-            .array_values().expect("fixture array property reads")
+            .array_values()
+            .expect("fixture array property reads")
             .unwrap()
             .iter()
             .map(|r| {

@@ -59,7 +59,9 @@ fn sort_desc(array: &Js, key: &str) -> Result<Js, Thrown> {
         }
     });
     let sorted: Vec<Js> = keyed.into_iter().map(|(_, v)| v).collect();
-    for (index,value) in sorted.iter().enumerate(){array.set(&index.to_string(),value.clone())?;}
+    for (index, value) in sorted.iter().enumerate() {
+        array.set(&index.to_string(), value.clone())?;
+    }
     Ok(array.clone())
 }
 

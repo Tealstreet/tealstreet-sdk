@@ -434,19 +434,38 @@ impl Host for Frame {
         let sorted = merge_sort(values, &cmp)?;
         let mut out: Vec<Option<Js>> = sorted.into_iter().chain(undefined).map(Some).collect();
         out.extend(std::iter::repeat_n(None, holes));
-        let _=cells;
-        for (index,value) in out.into_iter().enumerate(){let key=index.to_string();if let Some(value)=value{rows.set(&key,value)?;}else{rows.delete(&key.encode_utf16().collect::<Vec<_>>())?;}}
+        let _ = cells;
+        for (index, value) in out.into_iter().enumerate() {
+            let key = index.to_string();
+            if let Some(value) = value {
+                rows.set(&key, value)?;
+            } else {
+                rows.delete(&key.encode_utf16().collect::<Vec<_>>())?;
+            }
+        }
         Ok(rows)
     }
     /// `sorted.slice(0, limit)`
     fn slice(&mut self, v: Js, limit: Js) -> Result<Js, Thrown> {
-        let Js::Array(array) = &v else { return Err(Thrown::type_error("slice requires an array")); };
+        let Js::Array(array) = &v else {
+            return Err(Thrown::type_error("slice requires an array"));
+        };
         let length = array.len() as f64;
         let end = limit.to_number()?;
-        let end = if end.is_nan() {0.0} else {end.trunc()};
-        let end = if end < 0.0 {(length+end).max(0.0)} else {end.min(length)} as usize;
-        let mut items=Vec::new();
-        for index in 0..end {items.push(if v.has_index(index){Some(v.get(&index.to_string())?)}else{None});}
+        let end = if end.is_nan() { 0.0 } else { end.trunc() };
+        let end = if end < 0.0 {
+            (length + end).max(0.0)
+        } else {
+            end.min(length)
+        } as usize;
+        let mut items = Vec::new();
+        for index in 0..end {
+            items.push(if v.has_index(index) {
+                Some(v.get(&index.to_string())?)
+            } else {
+                None
+            });
+        }
         Ok(Js::holey_array(items))
     }
 

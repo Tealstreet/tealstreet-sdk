@@ -85,7 +85,7 @@ fn map(
     let len = a.len();
     let mut out = vec![];
     for i in 0..len {
-        let value = { crate::private_event_value::array_element(&a,i)? };
+        let value = { crate::private_event_value::array_element(&a, i)? };
         if let Some(v) = value {
             out.push(f(v)?);
         }
@@ -308,7 +308,7 @@ pub async fn historical_fills(
         let mut rows = vec![];
         let mut i = 0;
         loop {
-            let window = crate::private_event_value::array_element(&windows,i)?;
+            let window = crate::private_event_value::array_element(&windows, i)?;
             let Some(window) = window else { break };
             i += 1;
             let get = b.capture_get(HistoryClient::Private)?;

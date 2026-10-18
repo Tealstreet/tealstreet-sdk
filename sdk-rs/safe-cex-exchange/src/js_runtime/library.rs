@@ -23,7 +23,7 @@ fn func(name: &str, f: impl Fn(Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
     Js::function(name, move |_, a| f(a))
 }
 
-fn list(v: &Js) -> Result<Vec<Js>,Thrown> {
+fn list(v: &Js) -> Result<Vec<Js>, Thrown> {
     Ok(v.array_values()?.unwrap_or_default())
 }
 
@@ -1289,13 +1289,13 @@ fn update_order_book(book: &Js, side: &Js, update: Js, upsert: bool) -> Result<J
             if !upsert || update.get("amount")?.strict_equals(&Js::Number(0.0)) {
                 return Ok(Js::Number(-1.0));
             }
-            let length=levels.get("length")?.to_number()? as usize;
-            levels.splice_array((left as usize).min(length),0,vec![update])?;
+            let length = levels.get("length")?.to_number()? as usize;
+            levels.splice_array((left as usize).min(length), 0, vec![update])?;
             left
         }
         Some(index) => {
             if update.get("amount")?.strict_equals(&Js::Number(0.0)) {
-                levels.splice_array(index as usize,1,vec![])?;
+                levels.splice_array(index as usize, 1, vec![])?;
                 return Ok(Js::Number(-1.0));
             }
             let level = levels.get(&Js::Number(index).to_display())?;

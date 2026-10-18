@@ -25,10 +25,15 @@ pub(super) fn deep_clone(value: &Js) -> R<Js> {
         match value {
             Js::Array(items) => {
                 let target = Js::array(vec![]);
-                target.set("length",Js::Number(items.len() as f64))?;
-                seen.push((value.clone(),target.clone()));
+                target.set("length", Js::Number(items.len() as f64))?;
+                seen.push((value.clone(), target.clone()));
                 for index in 0..items.len() {
-                    if value.has_index(index) {target.define(&index.to_string(),copy(&value.get(&index.to_string())?,seen)?)?;}
+                    if value.has_index(index) {
+                        target.define(
+                            &index.to_string(),
+                            copy(&value.get(&index.to_string())?, seen)?,
+                        )?;
+                    }
                 }
                 Ok(target)
             }

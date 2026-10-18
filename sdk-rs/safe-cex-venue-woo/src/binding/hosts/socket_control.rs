@@ -171,8 +171,9 @@ impl body::Host for Frame {
         }
         Ok(v.own_entries()?.into_iter().map(|(_, v)| v).collect())
     }
-    fn flattenable_values(&mut self, v: &Js) -> Option<Vec<Js>> {
-        v.array_values()?
+    fn flattenable_values(&mut self, v: &Js) -> Result<Option<Vec<Js>>, Thrown> {
+        Ok(v.array_items()?
+            .map(|items| items.into_iter().flatten().collect()))
     }
     fn track_last_received(&mut self) -> Result<(), Thrown> {
         self.call_own("trackLastReceived", vec![])
@@ -351,11 +352,11 @@ fn update_order_book_by_price(a: Vec<Js>) -> Result<Js, Thrown> {
                 ("amount", amount),
                 ("total", Js::Number(0.0)),
             ]);
-            levels.splice_array(left as usize,0,vec![level])?;
+            levels.splice_array(left as usize, 0, vec![level])?;
             left as f64
         }
         Some(i) if zero => {
-            levels.splice_array(i as usize,1,vec![])?;
+            levels.splice_array(i as usize, 1, vec![])?;
             -1.0
         }
         Some(i) => {

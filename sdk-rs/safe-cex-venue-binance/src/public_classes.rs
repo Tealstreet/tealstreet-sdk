@@ -656,7 +656,14 @@ fn core_json(value: &EventValue) -> Result<serde_json::Value, Failure> {
                 "core JSON callback cannot represent nonfinite native number",
             )
         })?),
-        EventValue::Array(_) => V::Array(value.array_values()?.expect("array").iter().map(core_json).collect::<Result<_,_>>()?),
+        EventValue::Array(_) => V::Array(
+            value
+                .array_values()?
+                .expect("array")
+                .iter()
+                .map(core_json)
+                .collect::<Result<_, _>>()?,
+        ),
         EventValue::Object(_) => V::Object(
             value
                 .spread()

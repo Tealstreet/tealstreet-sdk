@@ -162,7 +162,7 @@ async fn many(orders: EventValue, b: &mut impl BatchBindings) -> Result<EventVal
     for i in 0..len {
         let o = {
             if let EventValue::Array(a) = &orders {
-                crate::private_event_value::array_element(&a,i)?
+                crate::private_event_value::array_element(&a, i)?
             } else {
                 None
             }
@@ -234,7 +234,7 @@ pub async fn regular_futures(
                 if let EventValue::Array(rows) = data {
                     let len = rows.len();
                     for i in 0..len {
-                        let o = { crate::private_event_value::array_element(&rows,i)? };
+                        let o = { crate::private_event_value::array_element(&rows, i)? };
                         if let Some(o) = o {
                             if o.read("code")?.truthy() {
                                 if !post_only(b, Rejection::Row(o.clone()))? {

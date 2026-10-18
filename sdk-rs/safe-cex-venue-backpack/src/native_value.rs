@@ -37,7 +37,7 @@ impl NativeValue for Value {
         }
     }
     fn array(&self) -> Result<Self, ExchangeError> {
-        if matches!(self,Self::Array(_)) {
+        if matches!(self, Self::Array(_)) {
             Ok(self.clone())
         } else {
             Err(ExchangeError::new("Value is not an array"))
@@ -131,7 +131,8 @@ impl NativeValue for Value {
             Self::BigInt(n) => JsJsonValue::BigInt((**n).clone()),
             Self::String(_) => JsJsonValue::String(self.utf8()?),
             Self::Array(_) => JsJsonValue::Array(
-                self.array_items()?.expect("array variant")
+                self.array_items()?
+                    .expect("array variant")
                     .iter()
                     .map(|v| v.as_ref().unwrap_or(&Self::Undefined).prepared())
                     .collect::<Result<_, _>>()?,

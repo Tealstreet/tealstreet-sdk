@@ -370,10 +370,14 @@ fn delegate<'a>(
 /// Array/string iteration protocol (`...value`, destructuring) over the live value.
 pub(crate) struct JsIterator(safe_cex_exchange::js_runtime::iterator::IteratorRecord);
 impl JsIterator {
-    fn next(&self) -> Result<Option<Js>, Thrown> { self.0.step_value() }
+    fn next(&self) -> Result<Option<Js>, Thrown> {
+        self.0.step_value()
+    }
 }
 fn js_iterator(value: &Js) -> Result<JsIterator, Thrown> {
-    Ok(JsIterator(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?))
+    Ok(JsIterator(
+        safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?,
+    ))
 }
 
 impl OrderReadsHost for Rt {

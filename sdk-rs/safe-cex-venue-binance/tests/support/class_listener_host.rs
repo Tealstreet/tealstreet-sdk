@@ -40,7 +40,11 @@ fn wire(v: &EventValue) -> Value {
         }
         EventValue::Bool(v) => json!(v),
         EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
-        EventValue::Array(a) => array_values(a).expect("fixture array reads").iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -276,7 +280,8 @@ impl ListenerHost for Host {
             let EventValue::Array(a) = data.get(key).unwrap() else {
                 panic!("authored levels")
             };
-            array_values(&a).expect("fixture array reads")
+            array_values(&a)
+                .expect("fixture array reads")
                 .iter()
                 .map(|r| {
                     vec![

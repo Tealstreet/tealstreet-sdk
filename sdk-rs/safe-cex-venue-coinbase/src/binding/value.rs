@@ -38,7 +38,10 @@ pub(super) fn from_js(value: &Js) -> Result<Option<Frame>, PortfolioFailure> {
         Js::Number(value) => Frame::Number(*value),
         Js::String(value) => Frame::String(value.to_vec()),
         Js::Array(_) => {
-            let values = value.array_items().map_err(super::error::from_thrown)?.expect("array variant");
+            let values = value
+                .array_items()
+                .map_err(super::error::from_thrown)?
+                .expect("array variant");
             let mut captured = Vec::with_capacity(values.len());
             for value in values {
                 let value = value

@@ -4077,7 +4077,10 @@ fn promise_combinators_keep_pending_values_and_native_identity() {
         );
         pending.settle(Ok(marker.clone()));
         let result = settle(&runtime, returned).unwrap();
-        let values = result.array_values().unwrap();
+        let values = result
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap();
         assert_eq!(values.len(), 3);
         let value = |i: usize| {
             if method == "allSettled" {

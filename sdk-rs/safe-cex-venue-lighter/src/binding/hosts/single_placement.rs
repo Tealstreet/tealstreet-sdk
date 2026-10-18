@@ -56,9 +56,7 @@ fn strict_put(target: &Js, key: &[u16], value: Js) -> Result<(), Thrown> {
                 target.to_display()
             )))
         }
-        Js::Array(_) => {
-            target.set_key(key, value)
-        }
+        Js::Array(_) => target.set_key(key, value),
         Js::Object(_) | Js::Function(_) => {
             let getter_only = own_props(target).is_some_and(|p| {
                 matches!(p.borrow().get(key), Some(Prop::Accessor { set: None, .. }))

@@ -65,3 +65,17 @@ for(const [actual,expected] of [[typedError,sourceTyped],[typedClone,sourceClone
  assert.equal(actual.stack,expected.stack);
 }
 console.log('WORKER-EVENT actual WASM Error identity/stack and native structuredClone PASS');
+let arrayMessage;
+assert.equal(wasm.post_worker_array_data(value=>{arrayMessage=value;}),1,'WORKER-ARRAY one source Get');
+const sourceArray=[,undefined,-0,{bits:Infinity}];sourceArray.tag=sourceArray[3];sourceArray.self=sourceArray;
+Object.defineProperty(sourceArray,'read',{enumerable:true,get(){return this.tag;}});
+const expectedArray=structuredClone(sourceArray);
+for(const message of [arrayMessage,structuredClone(arrayMessage)]) {
+ const array=message.data.array;
+ assert(Array.isArray(array));assert.equal(array,message.data.alias,'WORKER-ARRAY root alias');
+ assert.equal(array.length,expectedArray.length);assert.deepEqual(Object.keys(array),Object.keys(expectedArray));
+ assert(!Object.hasOwn(array,'0'),'WORKER-ARRAY original hole');assert(Object.hasOwn(array,'1')&&array[1]===undefined);
+ assert(Object.is(array[2],-0),'WORKER-ARRAY negative zero');assert.equal(array[3].bits,Infinity);
+ assert.equal(array.tag,array[3]);assert.equal(array.read,array.tag,'WORKER-ARRAY enumerable getter result aliases');assert.equal(array.self,array,'WORKER-ARRAY original cycle');
+}
+console.log('WORKER-ARRAY actual WASM canonical holes, named properties, getter receiver, aliases/cycle and native bits PASS');

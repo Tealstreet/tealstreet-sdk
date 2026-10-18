@@ -134,7 +134,7 @@ pub(crate) fn map(
     let n = a.len();
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let v = crate::private_event_value::array_element(&a,i)?;
+        let v = crate::private_event_value::array_element(&a, i)?;
         out.push(match v {
             Some(v) => visit(v)?,
             None => EventValue::Undefined,
@@ -644,7 +644,7 @@ pub async fn fetch_spot_positions_balance(
         let mut i = 0;
         loop {
             let entry = match &balances {
-                EventValue::Array(a) => crate::private_event_value::array_element(&a,i)?,
+                EventValue::Array(a) => crate::private_event_value::array_element(&a, i)?,
                 EventValue::String(s) => EventValue::String(s.clone())
                     .text()?
                     .chars()

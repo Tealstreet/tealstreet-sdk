@@ -62,7 +62,9 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
                     i -= 1;
                 }
             }
-            for (index,value) in values.into_iter().enumerate(){array.set(&index.to_string(),value)?;}
+            for (index, value) in values.into_iter().enumerate() {
+                array.set(&index.to_string(), value)?;
+            }
             Ok(array)
         },
         is_array: |_, value| Ok(value.is_array()),

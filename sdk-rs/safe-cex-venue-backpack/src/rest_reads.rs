@@ -28,10 +28,19 @@ pub enum Severity {
 pub trait Host: 'static {
     type Value: Clone + 'static;
     type Array: Clone + 'static;
-    fn array_length(&mut self,a:&Self::Array)->Result<usize,Self::Error>;
-    fn array_element(&mut self,a:&Self::Array,index:usize)->Result<Option<Self::Value>,Self::Error>;
-    fn array_set(&mut self,a:&Self::Array,index:usize,value:Self::Value)->Result<(),Self::Error>;
-    fn array_from(&mut self,values:Vec<Option<Self::Value>>)->Self::Array;
+    fn array_length(&mut self, a: &Self::Array) -> Result<usize, Self::Error>;
+    fn array_element(
+        &mut self,
+        a: &Self::Array,
+        index: usize,
+    ) -> Result<Option<Self::Value>, Self::Error>;
+    fn array_set(
+        &mut self,
+        a: &Self::Array,
+        index: usize,
+        value: Self::Value,
+    ) -> Result<(), Self::Error>;
+    fn array_from(&mut self, values: Vec<Option<Self::Value>>) -> Self::Array;
     type Error: 'static;
     type LogTarget;
     type Order: 'static;
@@ -177,7 +186,7 @@ fn map_array<H: Host, T>(
     let len = h.array_length(&a)?;
     let mut out = Vec::with_capacity(len);
     for i in 0..len {
-        let value = h.array_element(&a,i)?;
+        let value = h.array_element(&a, i)?;
         out.push(match value {
             Some(v) => Some(map(h, v)?),
             None => None,
@@ -224,7 +233,7 @@ pub fn fetch_markets<H: Host>(host: Rc<RefCell<H>>) -> Task<Vec<Market<H::Value>
                 let len = h.array_length(&a)?;
                 let mut rows = vec![];
                 for i in 0..len {
-                    let Some(m) = h.array_element(&a,i)? else {
+                    let Some(m) = h.array_element(&a, i)? else {
                         continue;
                     };
                     let symbol = field_text(&mut *h, &m, "symbol")?;
@@ -406,7 +415,7 @@ pub fn fetch_tickers<H: Host>(
                     if i >= h.array_length(&a)? {
                         break;
                     }
-                    let m = h.array_element(&a,i)?;
+                    let m = h.array_element(&a, i)?;
                     i += 1;
                     let m = m.unwrap_or_else(|| h.undefined());
                     let s = h.field(&m, "symbol")?;
@@ -695,7 +704,7 @@ pub fn fetch_historical_fills<H: Host>(
         let len = h.array_length(&a)?;
         let mut out = vec![];
         for i in 0..len {
-            let Some(fill) = h.array_element(&a,i)? else {
+            let Some(fill) = h.array_element(&a, i)? else {
                 continue;
             };
             let s = h.field(&fill, "symbol")?;
@@ -793,7 +802,7 @@ pub fn fetch_orders<H: Host>(
                 let len = h.array_length(&a)?;
                 let mut rows = vec![];
                 for i in 0..len {
-                    let Some(v) = h.array_element(&a,i)? else {
+                    let Some(v) = h.array_element(&a, i)? else {
                         continue;
                     };
                     let s = field_text(&mut *h, &v, "symbol")?;
@@ -827,7 +836,7 @@ pub fn fix_trigger_orders_without_trigger_by<H: Host>(
         let len = h.array_length(&orders)?;
         let mut rows = vec![];
         for i in 0..len {
-            let Some(o) = h.array_element(&orders,i)? else {
+            let Some(o) = h.array_element(&orders, i)? else {
                 continue;
             };
             let p = h.field(&o, "triggerPrice")?;
@@ -918,12 +927,13 @@ pub fn fix_trigger_orders_without_trigger_by<H: Host>(
                 )?;
                 let len = h.array_length(&orders)?;
                 for j in 0..len {
-                    let v = h.array_element(&orders,j)?
+                    let v = h
+                        .array_element(&orders, j)?
                         .unwrap_or_else(|| h.undefined());
                     let id = h.field(&v, "id")?;
                     let oid = h.field(&order, "id")?;
                     if h.strict_equal(&id, &oid) {
-                        h.array_set(&orders,j,new_order)?;
+                        h.array_set(&orders, j, new_order)?;
                         break;
                     }
                 }
@@ -1095,7 +1105,7 @@ pub fn fetch_positions<H: Host>(host: Rc<RefCell<H>>) -> Task<Vec<Position>, H::
                 let len = h.array_length(&a)?;
                 let mut rows = vec![];
                 for i in 0..len {
-                    let Some(p) = h.array_element(&a,i)? else {
+                    let Some(p) = h.array_element(&a, i)? else {
                         continue;
                     };
                     if field_num(&mut *h, &p, "netQuantity")? != 0.0 {
@@ -1150,7 +1160,8 @@ pub fn fetch_positions<H: Host>(host: Rc<RefCell<H>>) -> Task<Vec<Position>, H::
                 if i >= h.array_length(&markets)? {
                     break;
                 }
-                let m = h.array_element(&markets,i)?
+                let m = h
+                    .array_element(&markets, i)?
                     .unwrap_or_else(|| h.undefined());
                 i += 1;
                 let active = h.field(&m, "active")?;

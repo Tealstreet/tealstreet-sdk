@@ -13,11 +13,7 @@ use crate::{
 };
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_types::{MarginType, PositionMode, PositionSide};
-use std::{
-    cell::Cell,
-    collections::HashSet,
-    rc::Rc,
-};
+use std::{cell::Cell, collections::HashSet, rc::Rc};
 pub type Emit = Rc<dyn Fn(EventValue) -> Result<(), Failure>>;
 pub type Log = Rc<dyn Fn(String, LogSeverity) -> Result<(), Failure>>;
 pub trait PositionSnapshotBindings {

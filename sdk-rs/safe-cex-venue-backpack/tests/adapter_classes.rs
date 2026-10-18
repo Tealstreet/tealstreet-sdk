@@ -872,7 +872,10 @@ fn native_data_container_aliases_preserve_holes_keys_and_mutation() {
     map.borrow_mut().pop();
     assert_eq!(other.borrow().len(), 1);
     let array = Native::holey_array(vec![
-        None, Some(Native::Null), Some(Native::Undefined), Some(value.clone()),
+        None,
+        Some(Native::Null),
+        Some(Native::Undefined),
+        Some(value.clone()),
     ]);
     let other = array.clone();
     assert!(array.same_reference(&other));

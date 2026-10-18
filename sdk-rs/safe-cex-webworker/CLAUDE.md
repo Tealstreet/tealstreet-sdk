@@ -694,3 +694,9 @@ Constructed AsterDEX private-frame/worker emitter witnesses live in
 `../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
 The venue retains private facade tests without importing the worker crate. Both paths preserve
 variadic event arguments; the real fill bridge retains Infinity and object identity.
+
+The browser DATA materializer retains array holes plus enumerable named string
+properties from the canonical ArrayData owner. It caches the destination array
+before evaluating children/getters, preserving cycles and repeated references.
+The worker_data_host example compares the actual Wasm result and structuredClone
+for hole/undefined distinction, named getter receiver, aliases and numeric bits.

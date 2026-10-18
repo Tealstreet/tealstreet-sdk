@@ -12,10 +12,10 @@ use std::{
     fmt,
     rc::Rc,
 };
-mod typed;
 pub(super) mod array;
+mod typed;
 pub use array::ArrayData;
-use array::{freeze_prop,frozen_prop};
+use array::{freeze_prop, frozen_prop};
 
 pub type Str = Rc<[u16]>;
 pub type NativeFn = Rc<dyn Fn(Js, Vec<Js>) -> Result<Js, Thrown>>;
@@ -836,9 +836,13 @@ impl Js {
                 let length = items.len();
                 let mut out = Vec::new();
                 for i in 0..length {
-                    if i > 0 { out.push(b',' as u16); }
+                    if i > 0 {
+                        out.push(b',' as u16);
+                    }
                     let item = self.get(&i.to_string())?;
-                    if !item.is_nullish() { out.extend_from_slice(&item.to_js_string()?); }
+                    if !item.is_nullish() {
+                        out.extend_from_slice(&item.to_js_string()?);
+                    }
                 }
                 out.into()
             }
@@ -1059,7 +1063,9 @@ impl Js {
             return reference.own_fields().contains_key(key);
         }
         match self {
-            Js::Array(items) => key == "length" || items.props.borrow().contains_key(utf16(key).as_ref()),
+            Js::Array(items) => {
+                key == "length" || items.props.borrow().contains_key(utf16(key).as_ref())
+            }
             _ => self
                 .own_props()
                 .is_some_and(|p| p.borrow().contains_key(utf16(key).as_ref())),
@@ -1117,7 +1123,9 @@ impl Js {
         if let Js::Array(items) = self {
             if key == utf16("length").as_ref() {
                 // Ordinary Set rejects readonly length before coercing the RHS.
-                if !items.length_writable.get() { return Err(Thrown::type_error("Cannot assign to read only length")); }
+                if !items.length_writable.get() {
+                    return Err(Thrown::type_error("Cannot assign to read only length"));
+                }
                 return self.define_property(key, &Js::object(vec![("value", value)]));
             }
         }
@@ -1194,7 +1202,9 @@ impl Js {
                 "Cannot add a property to a non-extensible object",
             ));
         }
-        if existing.is_none() { self.check_array_growth(key)?; }
+        if existing.is_none() {
+            self.check_array_growth(key)?;
+        }
         match existing {
             Some(Prop::Accessor {
                 set: Some(setter), ..
@@ -1233,7 +1243,15 @@ impl Js {
     }
     pub fn define_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
         if matches!(self, Js::Array(_)) {
-            return self.define_property(key, &Js::object(vec![("value",value),("writable",Js::Bool(true)),("enumerable",Js::Bool(true)),("configurable",Js::Bool(true))]));
+            return self.define_property(
+                key,
+                &Js::object(vec![
+                    ("value", value),
+                    ("writable", Js::Bool(true)),
+                    ("enumerable", Js::Bool(true)),
+                    ("configurable", Js::Bool(true)),
+                ]),
+            );
         }
         if let Some(props) = self.own_props() {
             if matches!(
@@ -1322,8 +1340,12 @@ impl Js {
             }
         }
         if let Js::Array(array) = self {
-            if frozen { array.length_writable.set(false); }
-            if let Some(property) = array.symbol_iterator.borrow_mut().as_mut() { freeze_prop(property, frozen); }
+            if frozen {
+                array.length_writable.set(false);
+            }
+            if let Some(property) = array.symbol_iterator.borrow_mut().as_mut() {
+                freeze_prop(property, frozen);
+            }
         }
         Ok(self.clone())
     }
@@ -1335,7 +1357,15 @@ impl Js {
             return Ok(false);
         }
         if let Js::Array(array) = self {
-            if array.length_writable.get() || array.symbol_iterator.borrow().as_ref().is_some_and(|p| !frozen_prop(p)) { return Ok(false); }
+            if array.length_writable.get()
+                || array
+                    .symbol_iterator
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|p| !frozen_prop(p))
+            {
+                return Ok(false);
+            }
         }
         Ok(self
             .own_props()
@@ -1356,8 +1386,16 @@ impl Js {
         self.own_property_descriptor_for(&Js::utf16(key))
     }
     pub(super) fn own_property_descriptor_for(&self, key: &Js) -> Result<Js, Thrown> {
-        if self.own_props().is_none() { return Err(Thrown::type_error("Descriptor reflection requires native descriptor storage")); }
-        let property = if matches!(key, Js::SymbolIterator) { self.symbol_iterator_slot().and_then(|s| s.borrow().clone()) } else { self.own_descriptor(&key.to_js_string()?) };
+        if self.own_props().is_none() {
+            return Err(Thrown::type_error(
+                "Descriptor reflection requires native descriptor storage",
+            ));
+        }
+        let property = if matches!(key, Js::SymbolIterator) {
+            self.symbol_iterator_slot().and_then(|s| s.borrow().clone())
+        } else {
+            self.own_descriptor(&key.to_js_string()?)
+        };
         Ok(match property.as_ref() {
             None => Js::Undefined,
             Some(Prop::Data(value)) => Js::object(vec![
@@ -1395,10 +1433,18 @@ impl Js {
         self.define_property_slot(key, descriptor, false)
     }
     pub(super) fn define_property_for(&self, key: &Js, descriptor: &Js) -> Result<(), Thrown> {
-        if matches!(key, Js::SymbolIterator) { self.define_property_slot(&[],descriptor,true) }
-        else { self.define_property(&key.to_js_string()?,descriptor) }
+        if matches!(key, Js::SymbolIterator) {
+            self.define_property_slot(&[], descriptor, true)
+        } else {
+            self.define_property(&key.to_js_string()?, descriptor)
+        }
     }
-    fn define_property_slot(&self, key: &[u16], descriptor: &Js, symbol: bool) -> Result<(), Thrown> {
+    fn define_property_slot(
+        &self,
+        key: &[u16],
+        descriptor: &Js,
+        symbol: bool,
+    ) -> Result<(), Thrown> {
         let props = self.own_props().ok_or_else(|| {
             Thrown::type_error(
                 "Object.defineProperty target must be an ordinary object or function",
@@ -1439,17 +1485,33 @@ impl Js {
                 "Invalid mixed data and accessor descriptor",
             ));
         }
-        let array_length = !symbol && matches!(self, Js::Array(_)) && key == utf16("length").as_ref();
+        let array_length =
+            !symbol && matches!(self, Js::Array(_)) && key == utf16("length").as_ref();
         if array_length && let Some(input) = value.as_ref() {
             // ArraySetLength observes ToUint32 and ToNumber separately; user code may reenter.
             let first = input.to_number()?;
-            let uint = if first.is_finite() && first != 0.0 { first.trunc().rem_euclid(4294967296.0) as u32 } else { 0 };
+            let uint = if first.is_finite() && first != 0.0 {
+                first.trunc().rem_euclid(4294967296.0) as u32
+            } else {
+                0
+            };
             let second = input.to_number()?;
-            if second != uint as f64 { return Err(Thrown::error("RangeError", "Invalid array length")); }
+            if second != uint as f64 {
+                return Err(Thrown::error("RangeError", "Invalid array length"));
+            }
             value = Some(Js::Number(uint as f64));
         }
-        if !symbol { self.check_array_growth(key)?; }
-        let existing = if symbol { self.symbol_iterator_slot().ok_or_else(|| Thrown::type_error("Unsupported symbol descriptor target"))?.borrow().clone() } else { self.own_descriptor(key) };
+        if !symbol {
+            self.check_array_growth(key)?;
+        }
+        let existing = if symbol {
+            self.symbol_iterator_slot()
+                .ok_or_else(|| Thrown::type_error("Unsupported symbol descriptor target"))?
+                .borrow()
+                .clone()
+        } else {
+            self.own_descriptor(key)
+        };
         if existing.is_none() && !self.is_extensible()? {
             return Err(Thrown::type_error(
                 "Cannot define a property on a non-extensible object",
@@ -1540,8 +1602,16 @@ impl Js {
                 configurable: configurable.unwrap_or(old_configurable),
             }
         };
-        if array_length { return self.apply_array_length(next); }
-        if symbol { *self.symbol_iterator_slot().expect("validated symbol storage").borrow_mut()=Some(next); return Ok(()); }
+        if array_length {
+            return self.apply_array_length(next);
+        }
+        if symbol {
+            *self
+                .symbol_iterator_slot()
+                .expect("validated symbol storage")
+                .borrow_mut() = Some(next);
+            return Ok(());
+        }
         props.borrow_mut().insert(key.into(), next);
         self.grow_array_length(key);
         Ok(())
@@ -1611,7 +1681,9 @@ impl Js {
                 "Cannot convert undefined or null to object",
             ));
         }
-        if matches!(self, Js::Array(_)) && key == utf16("length").as_ref() { return Ok(false); }
+        if matches!(self, Js::Array(_)) && key == utf16("length").as_ref() {
+            return Ok(false);
+        }
         if let Some(props) = self.own_props() {
             if matches!(
                 props.borrow().get(key),
@@ -1694,7 +1766,11 @@ impl Js {
     /// OrdinaryOwnPropertyKeys order; array and string `length` follows the indices.
     pub fn own_property_names(&self) -> Result<Vec<Str>, Thrown> {
         Ok(match self {
-            Js::String(_) => { let mut keys = self.own_keys(); keys.push(utf16("length")); keys }
+            Js::String(_) => {
+                let mut keys = self.own_keys();
+                keys.push(utf16("length"));
+                keys
+            }
             Js::Object(_) | Js::Function(_) | Js::Array(_) => {
                 let keys: Vec<Str> = self
                     .own_props()
@@ -1709,7 +1785,9 @@ impl Js {
                     .collect();
                 indexed.sort_by_key(|(i, _)| *i);
                 let mut out: Vec<Str> = indexed.into_iter().map(|(_, k)| k).collect();
-                if matches!(self, Js::Array(_)) { out.push(utf16("length")); }
+                if matches!(self, Js::Array(_)) {
+                    out.push(utf16("length"));
+                }
                 out.extend(keys.into_iter().filter(|k| array_index(k).is_none()));
                 out
             }
@@ -1781,20 +1859,33 @@ impl Js {
     }
     /// Typed snapshot: capture length once, then HasProperty/Get each live slot.
     pub fn array_items(&self) -> Result<Option<Vec<Option<Js>>>, Thrown> {
-        let Js::Array(array) = self else { return Ok(None); };
+        let Js::Array(array) = self else {
+            return Ok(None);
+        };
         let length = array.len();
         let mut out = Vec::new();
         for index in 0..length {
             let key = utf16(&index.to_string());
-            out.push(if self.has_property(&key) { Some(self.get_key(&key)?) } else { None });
+            out.push(if self.has_property(&key) {
+                Some(self.get_key(&key)?)
+            } else {
+                None
+            });
         }
         Ok(Some(out))
     }
     pub fn array_values(&self) -> Result<Option<Vec<Js>>, Thrown> {
-        Ok(self.array_items()?.map(|items| items.into_iter().map(|v| v.unwrap_or(Js::Undefined)).collect()))
+        Ok(self.array_items()?.map(|items| {
+            items
+                .into_iter()
+                .map(|v| v.unwrap_or(Js::Undefined))
+                .collect()
+        }))
     }
     pub fn push(&self, value: Js) -> Result<(), Thrown> {
-        let Js::Array(array) = self else { return Err(Thrown::type_error("push is not a function")); };
+        let Js::Array(array) = self else {
+            return Err(Thrown::type_error("push is not a function"));
+        };
         let length = array.len();
         self.set(&length.to_string(), value)?;
         self.set("length", Js::Number(length as f64 + 1.0))
@@ -1985,7 +2076,14 @@ pub fn to_json(value: &Js) -> Result<serde_json::Value, Thrown> {
             String::from_utf16(s)
                 .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?,
         ),
-        Js::Array(_) => serde_json::Value::Array(value.array_values()?.expect("array snapshot").iter().map(to_json).collect::<Result<_,_>>()?),
+        Js::Array(_) => serde_json::Value::Array(
+            value
+                .array_values()?
+                .expect("array snapshot")
+                .iter()
+                .map(to_json)
+                .collect::<Result<_, _>>()?,
+        ),
         Js::Builtin(reference) if reference.is_callable() => serde_json::Value::Null,
         Js::Object(_) | Js::Builtin(_) => {
             let mut out = serde_json::Map::new();

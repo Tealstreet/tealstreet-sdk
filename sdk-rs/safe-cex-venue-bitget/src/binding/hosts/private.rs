@@ -139,7 +139,7 @@ impl PrivateTopicsHost for Rt {
     }
     fn has_index(&self, array: &Js, index: usize) -> Result<bool, Thrown> {
         match array {
-            Js::Array(_) => Ok(array.has_index(index)), 
+            Js::Array(_) => Ok(array.has_index(index)),
             other => Err(Thrown::type_error(&format!(
                 "{} is not an array",
                 other.to_display()

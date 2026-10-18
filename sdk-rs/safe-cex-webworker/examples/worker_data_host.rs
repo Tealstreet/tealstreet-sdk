@@ -172,3 +172,46 @@ pub fn post_worker_error_getter_data(post: js_sys::Function) -> Result<u32, JsVa
     .map_err(|error| js_sys::Error::new(&error.message))?;
     Ok(reads.get())
 }
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn post_worker_array_data(post: js_sys::Function) -> Result<u32, JsValue> {
+    use safe_cex_exchange::{js_runtime::value::Js, runtime::ExchangeError};
+    use safe_cex_webworker::{
+        data_post::{WorkerDataPayload, WorkerDataPost},
+        payload::StoreWorkerOp,
+    };
+    use std::{cell::Cell, rc::Rc};
+    let host = WorkerDataPost::for_browser(Rc::new(move |value| {
+        post.call1(&JsValue::UNDEFINED, value)
+            .map(|_| ())
+            .map_err(|error| ExchangeError::new(format!("array post failed: {error:?}")))
+    }));
+    let token = Js::object(vec![("bits", Js::Number(f64::INFINITY))]);
+    let array = Js::holey_array(vec![
+        None,
+        Some(Js::Undefined),
+        Some(Js::Number(-0.0)),
+        Some(token.clone()),
+    ]);
+    array.define("tag", token).unwrap();
+    array.define("self", array.clone()).unwrap();
+    let reads = Rc::new(Cell::new(0));
+    let observed = reads.clone();
+    array
+        .define_accessor(
+            "read",
+            Some(Rc::new(move |this| {
+                observed.set(observed.get() + 1);
+                this.get("tag")
+            })),
+            None,
+        )
+        .unwrap();
+    host.send(WorkerDataPayload {
+        op: StoreWorkerOp::CallMethodDone,
+        data: Js::object(vec![("array", array.clone()), ("alias", array)]),
+    })
+    .map_err(|error| js_sys::Error::new(&error.message))?;
+    Ok(reads.get())
+}

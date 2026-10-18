@@ -3,6 +3,7 @@ use crate::{
     core_snapshot_readers::SnapshotHost, exchange::BybitExchange,
     hyro_private_session::SessionHost, variant_account_refresh::AccountRefreshHost,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     js_runtime::{
         promise::await_js,
@@ -10,7 +11,6 @@ use safe_cex_exchange::{
     },
     native::{NativeHttpHost, native_runtime},
 };
-use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, TransportFuture, rate_limit::RateLimitClock,
@@ -263,7 +263,13 @@ fn native_receiver_selected_members_preserve_owner_and_capture() {
             .unwrap()
             .call(Js::Null, vec![])
             .unwrap();
-        assert_eq!(flat.array_values().expect("fixture array property reads").unwrap().len(), 2);
+        assert_eq!(
+            flat.array_values()
+                .expect("fixture array property reads")
+                .unwrap()
+                .len(),
+            2
+        );
         assert!(flat.get("0").unwrap().same_reference(&child));
         assert!(flat.get("1").unwrap().is_array());
         assert!(SessionHost::select(rt, Js::Null, "method").is_err());

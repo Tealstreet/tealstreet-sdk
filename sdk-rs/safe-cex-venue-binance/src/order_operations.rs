@@ -70,7 +70,7 @@ fn each_map(
     for i in 0..len {
         let row = {
             if let EventValue::Array(a) = v {
-                crate::private_event_value::array_element(&a,i)?
+                crate::private_event_value::array_element(&a, i)?
             } else {
                 None
             }
@@ -172,7 +172,7 @@ fn classify(
     for i in 0..len {
         let row = {
             if let EventValue::Array(a) = orders {
-                crate::private_event_value::array_element(&a,i)?
+                crate::private_event_value::array_element(&a, i)?
             } else {
                 None
             }

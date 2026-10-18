@@ -1092,8 +1092,9 @@ in ECMA-262. New fields default to undefined/false; omitted fields on an existin
 property retain their value. Read-only writes reject, non-enumerable fields stay
 out of keys/spread/JSON, and non-configurable fields survive deletion and reject
 incompatible redefinition (SameValue preserves NaN and the sign of zero).
-Arrays and accessor descriptors explicitly refuse until a source caller requires
-that representation. Existing host define_accessor remains the host accessor seam.
+Array and accessor descriptors share this checked property machinery; arrays now
+retain sparse indexed/named slots and a virtual length in one ArrayData owner.
+Existing host define_accessor remains the fallible host accessor seam.
 The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
 redefinition matrix; the native error test covers Polymarket's enhanced message.
 
@@ -1834,7 +1835,8 @@ Native functions store name/length as ordinary nonenumerable configurable,
 readonly descriptors; redefining/deleting them uses the common property code.
 Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
 this does not widen the public intrinsic descriptor-reflection surface.
-Array descriptor/prototype migration remains the separate single-storage step.
+Array descriptors, virtual length and prototype links now use the same canonical
+ArrayData owner; hidden own indices suppress inherited names without reading values.
 
 ## ccxt compatibility imports
 
@@ -1906,3 +1908,12 @@ prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
 boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
+
+## Canonical array storage
+
+`Js::Array` now holds sparse `ArrayData`, with no mutable Vec/Deref or parallel
+property map. Array snapshots return Result so getter failures propagate. Native
+consumer loops retain the original Js owner and use checked Get/Has/Set/Delete.
+See ARRAY_STORAGE_REVIEW.md for the length/descriptor/iterator algorithms, atomic
+consumer boundaries and independent native/Node/compiled controls. The browser
+DATA bridge caches identity before walking enumerable indexed and named fields.

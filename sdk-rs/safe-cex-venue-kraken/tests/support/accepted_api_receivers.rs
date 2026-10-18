@@ -232,7 +232,12 @@ fn spot_retry_condition_short_circuits_and_stamps_original_config_once() {
     assert!(!result(&predicate, error).unwrap());
     assert_eq!(responses.get(), 3);
     assert_eq!(
-        data.get("error").unwrap().array_values().expect("fixture array property reads").unwrap()[0].to_display(),
+        data.get("error")
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()[0]
+            .to_display(),
         "EAPI:Invalid signature"
     );
     let read = Js::object(vec![

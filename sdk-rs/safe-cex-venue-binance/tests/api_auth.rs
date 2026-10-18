@@ -42,7 +42,11 @@ fn wire(v: &EventValue) -> Value {
         EventValue::Bool(v) => json!(v),
         EventValue::Number(v) => json!(v),
         EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
-        EventValue::Array(v) => array_values(v).expect("fixture array reads").iter().map(wire).collect(),
+        EventValue::Array(v) => array_values(v)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()

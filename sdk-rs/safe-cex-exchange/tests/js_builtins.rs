@@ -172,6 +172,7 @@ fn cells(value: &Js) -> Value {
     Value::Array(
         value
             .array_items()
+            .expect("fixture array property reads")
             .unwrap()
             .into_iter()
             .map(|cell| match cell {

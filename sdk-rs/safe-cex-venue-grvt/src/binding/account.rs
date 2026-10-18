@@ -91,8 +91,14 @@ impl AccountHost for Host {
             .ok_or_else(|| failure("virtual clock returned a non-number"))
     }
     fn for_of(&self, iterable: Js, visitor: &mut Iteration<'_, Js>) -> JsResult<Js, ()> {
-        let iterator=value(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(&iterable))?;
-        while let Some(item)=value(iterator.step_value())? {if visitor(item)? {value(iterator.close())?;break;}}
+        let iterator =
+            value(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(&iterable))?;
+        while let Some(item) = value(iterator.step_value())? {
+            if visitor(item)? {
+                value(iterator.close())?;
+                break;
+            }
+        }
         Ok(())
     }
 

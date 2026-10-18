@@ -128,8 +128,14 @@ fn destructure(v: &Js, key: &str) -> Result<Js, Thrown> {
 
 /// Live native iterator over the iterable intrinsics.
 pub(crate) struct JsIter(safe_cex_exchange::js_runtime::iterator::IteratorRecord);
-fn iterate(value:&Js)->Result<JsIter,Thrown>{Ok(JsIter(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?))}
-fn iter_next(it:&mut JsIter)->Result<Option<Js>,Thrown>{it.0.step_value()}
+fn iterate(value: &Js) -> Result<JsIter, Thrown> {
+    Ok(JsIter(
+        safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?,
+    ))
+}
+fn iter_next(it: &mut JsIter) -> Result<Option<Js>, Thrown> {
+    it.0.step_value()
+}
 
 fn array_len(v: &Js) -> usize {
     match v {
@@ -139,8 +145,16 @@ fn array_len(v: &Js) -> usize {
 }
 
 /// HasProperty(i) then Get(i) on the live array.
-fn element(v:&Js,i:usize)->Result<Option<Js>,Thrown>{if v.has_index(i){Ok(Some(v.get(&i.to_string())?))}else{Ok(None)}}
-fn element_or_undefined(v:&Js,i:usize)->Result<Js,Thrown>{Ok(element(v,i)?.unwrap_or(Js::Undefined))}
+fn element(v: &Js, i: usize) -> Result<Option<Js>, Thrown> {
+    if v.has_index(i) {
+        Ok(Some(v.get(&i.to_string())?))
+    } else {
+        Ok(None)
+    }
+}
+fn element_or_undefined(v: &Js, i: usize) -> Result<Js, Thrown> {
+    Ok(element(v, i)?.unwrap_or(Js::Undefined))
+}
 
 /// Array callbacks run natively; a non-array receiver's member is not a builtin.
 fn require_array(member: &Js, array: &Js, name: &str) -> Result<(), Thrown> {
@@ -728,11 +742,11 @@ fn update_order_book(book: &Js, side: &Js, update: &Js, upsert: &Js) -> Result<J
         None if !upsert || zero => -1.0,
         None => {
             let at = (left as usize).min(items.len());
-            levels.splice_array(at,0,vec![update.clone()])?;
+            levels.splice_array(at, 0, vec![update.clone()])?;
             at as f64
         }
         Some(index) if zero => {
-            levels.splice_array(index,1,vec![])?;
+            levels.splice_array(index, 1, vec![])?;
             -1.0
         }
         Some(index) => {

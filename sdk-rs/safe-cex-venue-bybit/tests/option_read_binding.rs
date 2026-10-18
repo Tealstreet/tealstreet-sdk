@@ -228,7 +228,8 @@ fn option_reads_match_maintained_methods_and_helpers() {
             Js::Number(n) => json!({"numberBits":format!("{:016x}",n.to_bits())}),
             Js::Array(_) => Value::Array(
                 value
-                    .array_values().expect("fixture array property reads")
+                    .array_values()
+                    .expect("fixture array property reads")
                     .unwrap()
                     .into_iter()
                     .map(encode)

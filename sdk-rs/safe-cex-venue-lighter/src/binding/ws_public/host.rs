@@ -299,7 +299,11 @@ impl CleanupArrayAccess for Pending {
         if let Js::Array(items) = &self.0 {
             let length = items.len();
             for index in 0..length {
-                let present = if self.0.has_index(index){Some(js(self.0.get(&index.to_string()))?)}else{None};
+                let present = if self.0.has_index(index) {
+                    Some(js(self.0.get(&index.to_string()))?)
+                } else {
+                    None
+                };
                 if let Some(value) = present {
                     visit(to_account(&value))?;
                 }

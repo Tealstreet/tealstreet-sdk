@@ -49,7 +49,11 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
-        EventValue::Array(v) => array_values(v).expect("fixture array reads").iter().map(wire).collect(),
+        EventValue::Array(v) => array_values(v)
+            .expect("fixture array reads")
+            .iter()
+            .map(wire)
+            .collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -125,7 +129,7 @@ fn rows(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("{l}: native array")
     };
-    assert_eq!(a.borrow().len(), n, "{l}: native row count");
+    assert_eq!(a.len(), n, "{l}: native row count");
     array_values(a).expect("fixture array reads")
 }
 fn native_enum(v: &EventValue, want: PrivateEnum, l: &str) {
@@ -474,7 +478,7 @@ fn state(family: &str, name: &str) -> Shared {
             let EventValue::Array(a) = &payload else {
                 panic!()
             };
-            a.borrow()[0].as_ref().unwrap().write(
+            native_array_fixture::slots(&a)[0].as_ref().unwrap().write(
                 "id",
                 if name == "null-id" {
                     EventValue::Null
@@ -966,7 +970,7 @@ fn reader(family: &str) {
             let EventValue::Array(a) = &state.payload else {
                 panic!()
             };
-            assert_eq!(a.borrow().len(), 3, "{label}: native appended input floor");
+            assert_eq!(a.len(), 3, "{label}: native appended input floor");
         }
         if family == "range" {
             assert_eq!(
@@ -1426,7 +1430,7 @@ fn seed() {
             let mut s = state.borrow_mut();
             s.trace.push(json!(["callback"]));
             let last = if let EventValue::Array(a) = &s.candles {
-                a.borrow().last().cloned().flatten()
+                native_array_fixture::slots(&a).last().cloned().flatten()
             } else {
                 None
             };
@@ -1626,3 +1630,7 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;
