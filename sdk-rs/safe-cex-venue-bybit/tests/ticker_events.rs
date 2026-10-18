@@ -1,4 +1,5 @@
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::Ticker;
 use safe_cex_venue_bybit::ws_public::handle_tickers_event;
 use serde_json::Value;
@@ -59,7 +60,7 @@ fn ticker_notification_retains_subscriber_identity_after_committed_patch() {
         )
         .unwrap_err();
         let TickerEventError::Store(StoreMutationError::Notification(notification)) = error else {
-            panic!("ticker notification must retain typed subscriber identity");
+            panic!("ticker notification must retain typed subscriber identity: {error:?}");
         };
         assert_eq!(
             notification.cause(),
@@ -72,7 +73,7 @@ fn ticker_notification_retains_subscriber_identity_after_committed_patch() {
             "ticker stable subscriber identity"
         );
         assert_eq!(
-            store.tickers()[0].last,
+            store.tickers().unwrap()[0].last,
             last,
             "ticker patch commits before notification"
         );
@@ -164,7 +165,7 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
             case["notifications"].as_u64().unwrap(),
             "notification case {i}: {case}"
         );
-        let tickers = store.tickers();
+        let tickers = store.tickers().unwrap();
         let ticker = &tickers[0];
         let numbers = [
             ticker.bid,

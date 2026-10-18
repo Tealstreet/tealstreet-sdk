@@ -1042,7 +1042,7 @@ fn actual_market_reads_native_floor() {
     }
     // All native decoded fields/values/closures/identities precede source-only pin.
     assert_eq!(
-        corpus["contentHash"], "bde9f36561b607529d85d60f7449b1f5cfc7b889a8e0ed4886d3ebc532f06dad",
+        corpus["contentHash"], "35db19e5e1a26cd7955ff12661e0fcdb2ba51078f88f75a5a49ad1da20ba428a",
         "source-only pin AFTER native assertions"
     );
     println!("161 native cases; stopped at iteration160; no exhaustive/runtime/engine claim");

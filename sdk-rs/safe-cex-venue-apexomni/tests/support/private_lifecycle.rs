@@ -41,19 +41,24 @@ fn private_reopen_refreshes_positions_orders_and_balance() {
         h.runtime.console.borrow()
     );
     assert!(!h.http.calls("/v3/open-orders").is_empty());
-    assert_eq!(h.store.balance().total, 1269.0);
-    assert_eq!(h.store.balance().upnl, -492.0);
-    assert_eq!(h.store.balance().free, 666.0);
+    assert_eq!(h.store.balance().unwrap().total, 1269.0);
+    assert_eq!(h.store.balance().unwrap().upnl, -492.0);
+    assert_eq!(h.store.balance().unwrap().free, 666.0);
     assert_eq!(
         h.store
             .positions()
+            .unwrap()
             .iter()
             .find(|p| p.id == "BTC-USDC:long")
             .unwrap()
             .contracts,
         4.0
     );
-    assert!(h.store.loaded().positions && h.store.loaded().orders && h.store.loaded().balance);
+    assert!(
+        h.store.loaded().unwrap().positions
+            && h.store.loaded().unwrap().orders
+            && h.store.loaded().unwrap().balance
+    );
     done(&h);
 }
 
@@ -119,8 +124,8 @@ fn private_close_cancels_self_heal_while_replacement_dial_is_pending() {
 fn private_fill_topic_retains_execution_for_history_reads() {
     let h = fixture();
     let private = started_private(&h);
-    let orders = h.store.orders().to_vec();
-    let balance = h.store.balance().clone();
+    let orders = h.store.orders().unwrap().to_vec();
+    let balance = h.store.balance().unwrap().clone();
     h.http.ok("GET", "/v3/fills", json!([]));
     h.http.ok("GET", "/v3/history-trades", json!([]));
     frame(
@@ -128,8 +133,8 @@ fn private_fill_topic_retains_execution_for_history_reads() {
         json!({"topic":"ws_zk_accounts_v3","contents":{"fills":[{"symbol":"BTC-USDC","side":"BUY","createdAt":h.runtime.now.get(),"price":"123.25","size":"2.5","fee":"-0.125","orderId":"ws-fill-1","token":"USDC"}]}}),
     );
     h.runtime.pump();
-    assert_eq!(h.store.orders().as_ref(), orders.as_slice());
-    assert_eq!(*h.store.balance(), balance);
+    assert_eq!(h.store.orders().unwrap().as_slice(), orders.as_slice());
+    assert_eq!(h.store.balance().unwrap(), balance);
     let executions = h
         .drive(h.venue().fetch_historical_fills(
             serde_json::from_value(json!({"symbol":"BTCUSDC","limit":10})).unwrap(),
@@ -151,17 +156,20 @@ fn private_fill_topic_retains_execution_for_history_reads() {
 fn private_wallet_only_frame_preserves_rest_owned_balance() {
     let h = fixture();
     let private = started_private(&h);
-    let balance = h.store.balance().clone();
-    let orders = h.store.orders().to_vec();
-    let positions = h.store.positions().to_vec();
+    let balance = h.store.balance().unwrap().clone();
+    let orders = h.store.orders().unwrap().to_vec();
+    let positions = h.store.positions().unwrap().to_vec();
     frame(
         &private,
         json!({"topic":"ws_zk_accounts_v3","contents":{"wallets":[{"token":"USDC","balance":"9999"}]},"op":"ping","args":["wallet-frame"]}),
     );
     h.runtime.pump();
-    assert_eq!(*h.store.balance(), balance);
-    assert_eq!(h.store.orders().as_ref(), orders.as_slice());
-    assert_eq!(h.store.positions().as_ref(), positions.as_slice());
+    assert_eq!(h.store.balance().unwrap(), balance);
+    assert_eq!(h.store.orders().unwrap().as_slice(), orders.as_slice());
+    assert_eq!(
+        h.store.positions().unwrap().as_slice(),
+        positions.as_slice()
+    );
     assert!(
         private
             .sent

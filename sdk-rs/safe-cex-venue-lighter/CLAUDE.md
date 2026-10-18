@@ -472,3 +472,6 @@ placement exercises real promise continuation and native crypto. The publicly
 exported SDK validator is exercised through its native function entry separately.
 `scripts/structural-alias-controls.py` compiles independent production faults and
 requires named failures followed by exact restoration.
+
+`SOURCE_CORPUS_PIN_REVIEW.md` reviews the eighteen source-provenance guards
+following unrelated type-only additions to the shared TypeScript types barrel.

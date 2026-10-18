@@ -102,7 +102,7 @@ fn venue(public: bool, throw: bool, logs: Rc<RefCell<Vec<Value>>>) -> Venue {
     let base = BaseExchange::new(
         ExchangeName::Woo,
         serde_json::from_value(json!({"key":"test-key","secret":"test-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         runtime,
         ExchangeSettings::default(),
     );
@@ -159,9 +159,17 @@ impl RestAdapter for Adapter {
                     ))
             {
                 let mut error = RestFailure::pre_transmit("outer-message".into(), request);
-                error.context = Some(Box::new(
-                    json!({"response":{"data":{"message":"response-message"}}}),
-                ));
+                error.response = Some(Box::new(RestResponse {
+                    status: 500,
+                    reason: None,
+                    headers: BTreeMap::new(),
+                    body: RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"message":"response-message"}),
+                        )
+                        .unwrap(),
+                    ),
+                }));
                 return Err(error);
             }
             let rows =

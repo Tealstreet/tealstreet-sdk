@@ -81,7 +81,7 @@ fn actual_public_factory_bypasses_private_provider_routing() {
         "/dapi/v2/leverageBracket",
         json!([{"symbol":"BTCUSD_PERP","brackets":[{"initialLeverage":75}]}]),
     );
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let exchange = BinanceInverseExchange::new(
         ExchangeName::Binanceinverse,
         options(),

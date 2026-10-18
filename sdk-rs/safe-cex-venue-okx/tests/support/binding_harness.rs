@@ -358,7 +358,7 @@ impl JsHttpHost for Http {
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub http: Rc<Http>,
-    pub store: Rc<safe_cex_store::store::DefaultStore>,
+    pub store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub exchange: Rc<OkxExchange>,
 }
 
@@ -379,7 +379,7 @@ pub fn harness(
     let http = Rc::new(Http::default());
     *http.runtime.borrow_mut() = Some(runtime.clone());
     script(&http);
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let exchange = OkxExchange::new(
         name,
         options,

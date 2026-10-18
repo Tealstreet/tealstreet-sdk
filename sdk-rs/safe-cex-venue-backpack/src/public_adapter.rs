@@ -399,7 +399,7 @@ impl listeners::Host for PublicFrame {
             .parent()?
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == symbol)
             .map(|m| units(&m.id)))
@@ -898,7 +898,7 @@ impl socket_events::TickerHost<Value> for PublicFrame {
             .parent()?
             .base
             .store
-            .tickers()
+            .tickers()?
             .iter()
             .find(|t| t.symbol == symbol)
             .map(|t| t.id.clone()))

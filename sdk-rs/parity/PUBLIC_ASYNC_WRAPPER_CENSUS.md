@@ -14,6 +14,8 @@ The shared boundary eagerly polls the typed body to its first real suspension. I
 
 ## Measured family regressions
 
+- Phemex: common `invoke` / `invoke_unit` now call the existing JS member before boxing its waiter. `binding/divergence_regressions.rs` proves original client/initializer calls before SDK waiter polling and error emission after dropping a pending ticker waiter; real HTTP retains its interceptor microtasks. The installed private reconciliation Promise already retained its eager prefix, silent catch and post-await disposal guard (ACCEPT, independently mutation controlled). See `safe-cex-venue-phemex/DIVERGENCE_FIX_AUDIT.md`.
+
 - BloFin: `tests/divergence_timing_binding.rs` calls the actual public SDK, Store and signed HTTP path. Compiled master observes zero logs before polling; maintained TypeScript and #1050 observe three. Four production-native scheduler tests separately cover drop continuation, native non-Clone/non-serializable values and number bits, error metadata/identity, and one ready-result await boundary. All 26 boxed SDK async returns are migrated in #1050; this does not close every method-specific FIX-audit row.
 - WEEX: `tests/eager_sdk_binding.rs` calls the actual constructed public SDK. Compiled baseline leaves `Store.options.isHedged` false where the source changes it synchronously, and dropping an unpolled orders waiter sends zero requests where the maintained class sends both signed normal/algo requests. The source oracle executes the whole maintained class with only terminal Axios replaced. These witnesses cover both common helpers; they do not claim all deeper helper contracts are unrestricted JavaScript parity.
 

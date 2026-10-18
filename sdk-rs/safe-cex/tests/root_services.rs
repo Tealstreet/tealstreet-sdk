@@ -1,5 +1,6 @@
 use safe_cex::{account::*, factory::*, options_patch::*};
-use safe_cex_store::{Store, store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, virtual_clock::VirtualClock};
 use safe_cex_transport::TransportRegistry;
 use safe_cex_types::{ExchangeAccountConfig, ExchangeName, ExchangeOptions};
 use std::{

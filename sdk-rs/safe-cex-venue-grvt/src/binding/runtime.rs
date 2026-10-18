@@ -168,7 +168,7 @@ mod accepted_clone_tests {
     fn host_clone_retains_shared_scope_and_receiver_identity() {
         let runtime = Rc::new(fixture::Runtime::default());
         let http = Rc::new(fixture::Http::default());
-        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
         let shared = Rc::new(ScopeShared::new(
             runtime,
             http,

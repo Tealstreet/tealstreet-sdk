@@ -112,6 +112,7 @@ fn setup(input: &Value) -> Rc<PublicStreamReceiver<Host>> {
     let failure = Rc::new(PublicStreamFailure {
         name: "Error".into(),
         message: "controlled failure".into(),
+        native: None,
     });
     let r = Rc::new(PublicStreamReceiver::new(Host {
         trace: trace.clone(),

@@ -12,16 +12,45 @@ fn numeric_or_zero(value: Option<&Value>) -> Result<f64, &'static str> {
     )
 }
 
+/// A source decoder refusal and a live Store read have distinct retained causes.
+#[derive(Debug)]
+pub enum PositionMappingError {
+    Source(String),
+    Store(safe_cex_types::StoreReadError),
+}
+impl From<String> for PositionMappingError {
+    fn from(error: String) -> Self {
+        Self::Source(error)
+    }
+}
+impl From<&str> for PositionMappingError {
+    fn from(error: &str) -> Self {
+        Self::Source(error.into())
+    }
+}
+impl From<safe_cex_types::StoreReadError> for PositionMappingError {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error)
+    }
+}
+impl std::fmt::Display for PositionMappingError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Source(error) => formatter.write_str(error),
+            Self::Store(error) => error.fmt(formatter),
+        }
+    }
+}
 pub fn map_position(
     raw: &Value,
     store: &dyn safe_cex_store::Store,
     margin_type: Option<MarginType>,
     now: impl FnMut() -> f64,
     log: impl FnMut(String),
-) -> Result<Position, String> {
+) -> Result<Position, PositionMappingError> {
     match map_position_deferred(raw, store, margin_type, now, log)? {
         PositionMapping::Mapped(position) => Ok(*position),
-        PositionMapping::Refused(message) => Err(message),
+        PositionMapping::Refused(message) => Err(message.into()),
     }
 }
 
@@ -38,7 +67,7 @@ pub(crate) fn map_position_deferred(
     margin_type: Option<MarginType>,
     mut now: impl FnMut() -> f64,
     mut log: impl FnMut(String),
-) -> Result<PositionMapping, String> {
+) -> Result<PositionMapping, PositionMappingError> {
     if raw.is_null() {
         return Err("Cannot read properties of null (reading 'size')".into());
     }
@@ -87,14 +116,14 @@ pub(crate) fn map_position_deferred(
         safe_cex_num::js_string(raw.get("symbol")).map_err(|error| error.message.to_owned())?;
     let symbol = symbol_key.as_str();
     let inverse = store
-        .markets_by_symbol()
+        .markets_by_symbol()?
         .get(symbol)
         .and_then(|m| m.is_inverse)
         .unwrap_or(false);
     let mut notional = numeric_or_zero(field(raw, "positionValue")?)?;
     let mut contracts = contracts_native;
     if inverse {
-        let ticker = store.tickers_by_symbol().get(symbol).cloned();
+        let ticker = store.tickers_by_symbol()?.get(symbol).cloned();
         let price = ticker
             .as_ref()
             .map(|t| t.mark)

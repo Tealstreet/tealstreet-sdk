@@ -1,4 +1,6 @@
-use safe_cex_store::{StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
+use safe_cex_store::StoreUpdate;
 use serde_json::{Map, Value, json};
 use std::sync::{Arc, Mutex};
 fn equal(a: &Value, b: &Value) {
@@ -33,7 +35,7 @@ fn full_store_typescript_differential() {
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/p4_store_oracle.mjs"
+            "/../safe-cex-store/tests/p4_store_oracle.mjs"
         ))
         .output()
         .unwrap();
@@ -98,7 +100,7 @@ fn full_store_typescript_differential() {
             }
             "applyPackedTickerDeltas" => store
                 .apply_packed_ticker_deltas(
-                    &serde_json::from_value::<Vec<_>>(args[0].clone()).unwrap(),
+                    serde_json::from_value::<Vec<_>>(args[0].clone()).unwrap(),
                     args.get(1).and_then(Value::as_bool).unwrap_or(false),
                 )
                 .unwrap(),
@@ -143,7 +145,7 @@ fn full_store_typescript_differential() {
             "reset" => store.reset().unwrap(),
             op => panic!("{op}"),
         }
-        let actual = json!({"snapshot":store.serialize(),"marketsVersion":store.get_markets_version(),"tickersVersion":store.get_tickers_version(),"tickersById":&*store.tickers_by_id(),"tickersBySymbol":&*store.tickers_by_symbol(),"marketsById":&*store.markets_by_id(),"marketsBySymbol":&*store.markets_by_symbol(),"userData":store.user_data().as_deref(),"zkLinkConfig":store.zk_link_config().as_deref(),"notifications":*notifications.lock().unwrap(),"result":result});
+        let actual = json!({"snapshot":serde_json::to_value(store.serialize().unwrap()).unwrap(),"marketsVersion":store.get_markets_version(),"tickersVersion":store.get_tickers_version(),"tickersById":&store.tickers_by_id().unwrap(),"tickersBySymbol":&store.tickers_by_symbol().unwrap(),"marketsById":&store.markets_by_id().unwrap(),"marketsBySymbol":&store.markets_by_symbol().unwrap(),"userData":store.user_data().unwrap().as_ref(),"zkLinkConfig":store.zk_link_config().unwrap().as_ref(),"notifications":*notifications.lock().unwrap(),"result":result});
         let compare = std::panic::catch_unwind(|| equal(&actual, &row["expected"]));
         assert!(
             compare.is_ok(),
@@ -167,7 +169,7 @@ fn shared_store_callbacks_can_read_and_reenter_after_mutation() {
     let cleanup = store.subscribe(Box::new(move |state, from_worker| {
         assert!(!from_worker);
         let store = weak.upgrade().unwrap();
-        assert_eq!(store.options().is_hedged, state.options.is_hedged);
+        assert_eq!(store.options().unwrap().is_hedged, state.options.is_hedged);
         counter.set(counter.get() + 1);
         if state.options.is_hedged {
             store.set_setting("isHedged", false).unwrap();
@@ -176,7 +178,7 @@ fn shared_store_callbacks_can_read_and_reenter_after_mutation() {
     }));
     store.set_setting("isHedged", true).unwrap();
     assert_eq!(observed.get(), 2);
-    assert!(!store.options().is_hedged);
+    assert!(!store.options().unwrap().is_hedged);
     cleanup();
     store.set_setting("isHedged", true).unwrap();
     assert_eq!(observed.get(), 2);
@@ -189,7 +191,7 @@ fn packed_masks_with_no_known_bits_do_not_dereference_an_invalid_index() {
     for mask in [f64::NAN, 2048.0] {
         store
             .apply_packed_ticker_deltas(
-                &[PackedTickerDelta {
+                vec![PackedTickerDelta {
                     index: f64::NAN,
                     mask,
                     values: vec![],
@@ -202,7 +204,8 @@ fn packed_masks_with_no_known_bits_do_not_dereference_an_invalid_index() {
 
 #[test]
 fn populated_stub_is_lossless_through_the_shared_store_model() {
-    let original: Value = serde_json::from_str(include_str!("../src/store_stub.json")).unwrap();
+    let original: Value =
+        serde_json::from_str(include_str!("../../safe-cex-store/src/store_stub.json")).unwrap();
     equal(
         &serde_json::to_value(&*safe_cex_store::store_stub::STUB_STORE).unwrap(),
         &original,

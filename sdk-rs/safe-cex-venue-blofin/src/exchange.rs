@@ -969,16 +969,22 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
 }
 
 impl<H: BlofinExchangeHost> BlofinExchange<H> {
-    pub fn symbol_to_market_id(&self, symbol: &str) -> Option<String> {
+    pub fn symbol_to_market_id(
+        &self,
+        symbol: &str,
+    ) -> Result<Option<String>, safe_cex_types::StoreReadError> {
         crate::symbols::symbol_to_market_id(symbol, self.context.store.as_ref())
     }
-    pub fn market_id_to_symbol(&self, id: &str) -> Option<String> {
+    pub fn market_id_to_symbol(
+        &self,
+        id: &str,
+    ) -> Result<Option<String>, safe_cex_types::StoreReadError> {
         crate::symbols::market_id_to_symbol(id, self.context.store.as_ref())
     }
     pub fn map_orders(
         &self,
         rows: &crate::orders::OrdersInput,
-    ) -> Result<Vec<Order>, safe_cex_types::js_coercion::JsCoercionError> {
+    ) -> Result<Vec<Order>, crate::reads::MappingError> {
         crate::orders::map_orders(rows, self.context.store.as_ref(), || self.host.clock_ms())
     }
     pub fn map_positions(
@@ -998,7 +1004,8 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
             Some(rows) => crate::tickers::format_tickers(rows, self.context.store.as_ref(), |s| {
                 self.host
                     .emit_and_log_error(&self.base, Some(&Value::String(s.into())))
-            }),
+            })
+            .map_err(|error| self.host.service_error(read_error(error))),
             None => {
                 self.host.emit_and_log_error(
                     &self.base,
@@ -1006,7 +1013,11 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
                         "Cannot read properties of undefined (reading 'reduce')".into(),
                     )),
                 )?;
-                Ok(self.context.store.tickers().to_vec())
+                Ok(self
+                    .context
+                    .store
+                    .tickers()
+                    .map_err(|error| self.host.service_error(ServiceError::Store(error.into())))?)
             }
         }
     }
@@ -1129,7 +1140,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
     pub fn add_inline_tpsl_fallback_orders(
         &self,
         orders: &[Order],
-    ) -> Result<Vec<Order>, safe_cex_types::js_coercion::JsCoercionError> {
+    ) -> Result<Vec<Order>, safe_cex_num::JsCoercionError> {
         crate::inline_tpsl::add_inline_tpsl_fallback_orders(orders, || self.host.clock_ms())
     }
     pub async fn start(self: &Rc<Self>) -> Result<(), ServiceError<H::Error>> {
@@ -1154,6 +1165,7 @@ fn read_error<E>(error: crate::reads::ReadError<E>) -> ServiceError<E> {
     match error {
         crate::reads::ReadError::Ingress(e) => ServiceError::Ingress(e),
         crate::reads::ReadError::Emitter(e) => ServiceError::Host(e),
+        crate::reads::ReadError::Store(e) => ServiceError::Store(e.into()),
     }
 }
 struct ExchangeLifecycle<'a, H: BlofinExchangeHost> {
@@ -1275,7 +1287,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
                         owner.context.store.as_ref(),
                         || owner.host.clock_ms(),
                     )
-                    .map_err(crate::private_stream_data::PrivateDataError::Coercion)
+                    .map_err(crate::private_stream_data::PrivateDataError::from)
                 }),
                 map_positions: Rc::new(move |rows| {
                     let owner = positions.upgrade().ok_or_else(|| {
@@ -1293,6 +1305,9 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
                             }
                             crate::positions::PositionMapError::Emitter(e) => {
                                 crate::private_stream_data::PrivateDataError::Host(e)
+                            }
+                            crate::positions::PositionMapError::Store(e) => {
+                                crate::private_stream_data::PrivateDataError::Store(e.into())
                             }
                         })
                 }),

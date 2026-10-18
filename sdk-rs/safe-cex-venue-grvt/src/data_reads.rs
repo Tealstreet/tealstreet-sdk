@@ -66,17 +66,17 @@ impl MarketHit {
         }
     }
 }
-fn market(store: &dyn Store, symbol: &str) -> MarketHit {
-    if let Some(market) = store.markets_by_symbol().get(symbol) {
-        return MarketHit::Stored(market.clone());
+fn market(store: &dyn Store, symbol: &str) -> Result<MarketHit, ExchangeError> {
+    if let Some(market) = store.markets_by_symbol()?.get(symbol) {
+        return Ok(MarketHit::Stored(market.clone()));
     }
     if matches!(
         safe_cex_num::js_table_lookup::<&str, ()>(&[], symbol),
         TableHit::Inherited(_)
     ) {
-        MarketHit::Inherited
+        Ok(MarketHit::Inherited)
     } else {
-        MarketHit::Missing
+        Ok(MarketHit::Missing)
     }
 }
 
@@ -109,7 +109,7 @@ pub fn fetch_ohlcv<'a, F: Future<Output = Result<Value, ExchangeError>> + 'a>(
     mut log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError> + 'a,
 ) -> impl Future<Output = Result<Vec<Candle>, ExchangeError>> + 'a {
     let begin = (|| {
-        let market = market(store, &opts.symbol);
+        let market = market(store, &opts.symbol)?;
         if matches!(market, MarketHit::Missing) {
             log(
                 &format!("Market {} not found", opts.symbol),
@@ -246,7 +246,7 @@ pub fn fetch_order_book<'a, F: Future<Output = Result<Value, ExchangeError>> + '
     mut log: impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError> + 'a,
 ) -> impl Future<Output = Result<OrderBook, ExchangeError>> + 'a {
     let begin = (|| {
-        let market = market(store, symbol);
+        let market = market(store, symbol)?;
         if matches!(market, MarketHit::Missing) {
             log(&format!("Market {symbol} not found"), LogSeverity::Warning)?;
             return Ok(None);
@@ -346,7 +346,7 @@ fn leverage(value: f64) -> FetchedLeverage {
     }
 }
 fn cache(store: &dyn Store, symbol: &str, value: &FetchedLeverage) -> Result<(), ExchangeError> {
-    let mut updated = store.fetched_leverage().clone();
+    let mut updated = store.fetched_leverage()?.clone();
     updated.insert(symbol.into(), value.clone());
     store.update(
         StoreUpdate {
@@ -495,7 +495,7 @@ pub fn fetch_leverage_for_symbol<
         if !has_client {
             return Err(ExchangeError::new("GRVT SDK client not initialized"));
         }
-        let market = market(store, symbol);
+        let market = market(store, symbol)?;
         if matches!(market, MarketHit::Missing) {
             log(&format!("Market {symbol} not found"), LogSeverity::Warning)?;
             return Ok(Err(None));
@@ -622,7 +622,7 @@ pub fn set_leverage<
         account()
             .filter(|value| !value.is_empty())
             .ok_or_else(|| ExchangeError::new("Trading account ID required to set leverage"))?;
-        let market = market(store, symbol);
+        let market = market(store, symbol)?;
         let value = match &market {
             MarketHit::Missing => {
                 return Err(ExchangeError::new(format!("Market {symbol} not found")));
@@ -697,7 +697,7 @@ pub fn set_leverage<
             )?;
             cache(store, symbol, &leverage(value))?;
             let position = store
-                .positions()
+                .positions()?
                 .iter()
                 .find(|position| position.symbol == symbol)
                 .cloned();

@@ -4,6 +4,32 @@ Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
 
+## Canonical Store owner
+
+`native_store::DefaultStore` owns one material `Js` graph. State arrays, rows and
+all four dictionaries expose their actual referents through the native facade;
+granular writes mutate existing rows, while full replacement and reset publish
+new generations. Retained values have no back-reference to the Store owner.
+Native mutations use the shared property/iterator algorithms and notify the live
+ordered listener registry. Typed subscribers project only at their reached slot.
+Graph-backed typed reads return `StoreReadError` with property/projection phase
+and the opaque original cause; conversion recovers that cause before diagnostics.
+The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
+
+Native snapshots retain their own undefined properties; JSON serialization is a
+separate boundary. Retained config reads keep absence distinct from an own
+undefined or null value. Source `for` loops recheck live input lengths, while
+`forEach`, `map`, `filter` and `findIndex` keep their captured iteration lengths.
+Object literal spreads finish before evaluating the following explicit fields.
+Position audits read each reached row after earlier id getters and evaluate
+diagnostic arguments before the terminal sink, preserving prethrow writes and
+skipping later revision/notification statements on failure.
+`Object.seal` and `Object.freeze` share the canonical descriptor integrity
+operation; sealing preserves existing writable bits and both retain accessors.
+Strict writes to string primitives distinguish existing read-only length/index
+slots from missing properties. The actual Bitget dictionary facade witness pins
+both errors against the maintained Store and preserves the typed projection refusal.
+
 ## Abstract venue hooks
 
 `Exchange` is the object-safe venue protocol surface. Venue implementations
@@ -1896,3 +1922,9 @@ prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
 boundary for an already-ready result. It does not insert suspension points into
 arbitrary ready Rust leaf futures. Venue probes must still check their actual
 ready and pending I/O phases.
+
+`REST_ERROR_ORIGIN_REVIEW.md` describes the shared typed REST rejection boundary.
+`JsRestAdapter` retains observable error fields in its existing OwnedCallbackError;
+materialization follows that source chain and the canonical retained response.
+Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
+signed requests before JSON. Original JS object identity remains an owned-tree residual.

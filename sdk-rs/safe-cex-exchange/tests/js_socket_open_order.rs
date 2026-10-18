@@ -103,7 +103,7 @@ async fn native_open_trace(headers: bool, asynchronous: bool) -> Vec<String> {
         released.await.unwrap();
     });
     let runtime = native_runtime();
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let http = client::rest_http_host(
         runtime.clone(),
         Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),

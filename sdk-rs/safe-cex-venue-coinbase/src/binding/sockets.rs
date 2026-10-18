@@ -34,12 +34,16 @@ type PublicFailure = Rc<PublicStreamFailure>;
 fn public(error: PortfolioFailure) -> PublicFailure {
     let error = exchange_error(&error);
     Rc::new(PublicStreamFailure {
-        name: error.name,
-        message: error.message,
+        name: error.name.clone(),
+        message: error.message.clone(),
+        native: Some(error),
     })
 }
 fn thrown(error: PublicFailure) -> Thrown {
-    Thrown::error(&error.name, &error.message)
+    match &error.native {
+        Some(native) => Thrown::from(native.clone()),
+        None => Thrown::error(&error.name, &error.message),
+    }
 }
 
 #[derive(Clone)]
@@ -262,6 +266,7 @@ impl PublicStreamHost for SocketHost {
             .shared
             .store
             .markets()
+            .map_err(|error| public(failure(error.into())))?
             .iter()
             .map(|market| market.symbol.clone())
             .collect())
@@ -695,6 +700,7 @@ impl CoinbasePrivateClassHost for SocketHost {
                 .shared
                 .store
                 .markets_by_id()
+                .map_err(|error| failure(error.into()))?
                 .iter()
                 .map(|(key, value)| (key.clone(), Rc::new(RefCell::new(value.clone()))))
                 .collect(),
@@ -728,8 +734,18 @@ impl CoinbasePrivateClassHost for SocketHost {
         Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn private_orders_loaded(&self) -> Result<Frame, PortfolioFailure> {
-        value::from_js(&from_typed(&*self.host.shared.store.loaded()).map_err(from_thrown)?)?
-            .ok_or_else(|| failure(ExchangeError::new("Missing loaded state")))
+        value::from_js(
+            &from_typed(
+                &self
+                    .host
+                    .shared
+                    .store
+                    .loaded()
+                    .map_err(|error| failure(error.into()))?,
+            )
+            .map_err(from_thrown)?,
+        )?
+        .ok_or_else(|| failure(ExchangeError::new("Missing loaded state")))
     }
     fn publish_private_order_snapshot(
         &self,

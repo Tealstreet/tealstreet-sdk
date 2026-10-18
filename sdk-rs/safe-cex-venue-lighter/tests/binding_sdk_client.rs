@@ -1,6 +1,7 @@
 //! The venue's LighterApiClient (from createLighterSDKClient) reached through the
 //! public `Exchange` surface over a scripted JsHttpHost. Direct per-method
 //! coverage lives in src/binding/sdk_client/tests.rs (the realm is crate-private).
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -11,7 +12,6 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{TransportProvider, TransportRegistry, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use safe_cex_venue_lighter::binding::exchange::{LighterDependencies, LighterNativeExchange};

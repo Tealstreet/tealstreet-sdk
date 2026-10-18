@@ -119,7 +119,7 @@ fn unknown_market_private_position_aborts_the_entire_frame() {
         );
     }
     h.store.add_or_update_positions(positions).unwrap();
-    let before = h.store.positions().to_vec();
+    let before = h.store.positions().unwrap().to_vec();
     let private = h
         .runtime
         .sockets
@@ -141,7 +141,7 @@ fn unknown_market_private_position_aborts_the_entire_frame() {
     assert_eq!(*h.runtime.report_names.borrow(), ["TypeError"]);
     assert_eq!(*h.runtime.reports.borrow(), ["this.log is not a function"]);
     assert_eq!(
-        h.store.positions().as_ref(),
+        h.store.positions().unwrap().as_slice(),
         before.as_slice(),
         "all row mapping finishes before Store writes"
     );
@@ -187,6 +187,7 @@ fn known_market_private_position_updates_store_and_answers_ping() {
     assert_eq!(
         h.store
             .positions()
+            .unwrap()
             .iter()
             .find(|p| p.id == "BTC-USDC:long")
             .unwrap()

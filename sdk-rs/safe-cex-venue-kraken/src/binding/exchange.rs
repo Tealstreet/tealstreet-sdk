@@ -6,11 +6,26 @@ mod accepted_additional_receivers;
 #[path = "../../tests/support/accepted_api_receivers.rs"]
 mod accepted_api_receivers;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_client_id_alias.rs"]
+mod accepted_client_id_alias;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_construction_aliases.rs"]
+mod accepted_construction_aliases;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_diagnostic_receivers.rs"]
 mod accepted_diagnostic_receivers;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_handle_alias.rs"]
 mod accepted_handle_alias;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_member_aliases.rs"]
+mod accepted_member_aliases;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_page_aliases.rs"]
+mod accepted_page_aliases;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_polling_aliases.rs"]
+mod accepted_polling_aliases;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_read_receivers.rs"]
 mod accepted_read_receivers;
@@ -179,7 +194,7 @@ impl KrakenExchange {
         };
         let js_name = from_typed(&name).map_err(err)?;
         let js_options = from_typed(&options).map_err(err)?;
-        let js_store = store::facade(store.clone());
+        let js_store = store::facade(store.clone())?;
         let h = |v| Rc::new(v);
         let receiver = match venue {
             Venue::Futures => {

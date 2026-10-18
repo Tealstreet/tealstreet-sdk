@@ -33,7 +33,7 @@ pub fn host() -> Scope<crate::binding::Extra> {
     let shared = Rc::new(ScopeShared::new(
         runtime.clone(),
         api.clone(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         Js::object(vec![]),
         crate::binding::Extra {
             supers: RefCell::default(),

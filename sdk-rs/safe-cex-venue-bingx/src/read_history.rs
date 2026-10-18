@@ -172,7 +172,7 @@ impl BingxReadHistory {
         }
         if data.get("code").is_some_and(Input::is_truthy) {
             self.report(text(data.get("msg"))?)?;
-            return Ok(self.reads.base.store.orders().to_vec());
+            return Ok(self.reads.base.store.orders()?.to_vec());
         }
         let content = data.get("data");
         let rows = content
@@ -183,7 +183,7 @@ impl BingxReadHistory {
         for raw in rows.into_iter().flatten() {
             if let Some(mut order) = map_order(
                 raw,
-                &self.reads.base.store.orders(),
+                &self.reads.base.store.orders()?,
                 safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )? {
                 if order.r#type == OrderType::StopLoss {
@@ -191,7 +191,7 @@ impl BingxReadHistory {
                         .reads
                         .base
                         .store
-                        .tickers_by_symbol()
+                        .tickers_by_symbol()?
                         .get(&order.symbol)
                         .map(|t| t.mark);
                     if mark.is_some_and(|m| {
@@ -235,7 +235,7 @@ impl BingxReadHistory {
             .reads
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&opts.symbol)
             .cloned();
         let Some(market) = market else {
@@ -327,12 +327,12 @@ impl BingxReadHistory {
                 .reads
                 .base
                 .store
-                .markets_by_symbol()
+                .markets_by_symbol()?
                 .get(symbol)
                 .cloned();
             let native = match market.filter(|m| !m.id.is_empty()) {
                 Some(m) => m.id,
-                None => venue_symbol(&self.reads, symbol),
+                None => venue_symbol(&self.reads, symbol)?,
             };
             let mut params = json!({"symbol":native});
             let limit = opts.limit.unwrap_or(100.0);
@@ -511,7 +511,7 @@ impl BingxReadHistory {
                     if owner.reads.base.is_disposed() {
                         return Ok(());
                     }
-                    let mut loaded = owner.reads.base.store.loaded().clone();
+                    let mut loaded = owner.reads.base.store.loaded()?.clone();
                     loaded.orders = true;
                     owner
                         .reads
@@ -532,21 +532,14 @@ impl BingxReadHistory {
                     if owner.reads.base.is_disposed() {
                         return Ok(());
                     }
-                    let mut loaded = owner.reads.base.store.loaded().clone();
+                    let mut loaded = owner.reads.base.store.loaded()?.clone();
                     loaded.balance = true;
-                    owner
-                        .reads
-                        .base
-                        .store
-                        .update(
-                            StoreUpdate {
-                                balance: Some((*balance).clone()),
-                                loaded: Some(loaded),
-                                ..Default::default()
-                            },
-                            false,
-                        )
-                        .map_err(ExchangeError::from)?;
+                    safe_cex_exchange::native_store::update_balance_and_loaded(
+                        owner.reads.base.store.as_ref(),
+                        &balance,
+                        &loaded,
+                    )
+                    .map_err(ExchangeError::from)?;
                 }
                 let positions = owner.reads.fetch_positions(None).await?;
                 if owner.reads.base.is_disposed() {
@@ -590,20 +583,22 @@ pub fn dispose_exchange<E>(
     private()
 }
 
-pub(crate) fn venue_symbol(reads: &BingxDataReads, symbol: &str) -> String {
+pub(crate) fn venue_symbol(reads: &BingxDataReads, symbol: &str) -> Result<String, ExchangeError> {
     let by_symbol = reads
         .base
         .store
-        .markets_by_symbol()
+        .markets_by_symbol()?
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect::<Vec<_>>();
     let by_id = reads
         .base
         .store
-        .markets_by_id()
+        .markets_by_id()?
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect::<Vec<_>>();
-    crate::market_utils::to_bingx_symbol(symbol, &by_symbol, &by_id)
+    Ok(crate::market_utils::to_bingx_symbol(
+        symbol, &by_symbol, &by_id,
+    ))
 }

@@ -154,7 +154,7 @@ fn market_filter_errors_precede_typed_output_admission() {
         // Native Store effects are inspected directly, including every rejected helper result.
         if row["label"] == "missing-config" {
             native::native_eq(
-                &native::retained(store.zk_link_config().as_deref().unwrap()),
+                &native::retained(store.zk_link_config().unwrap().as_ref().unwrap()),
                 &J::Object(vec![
                     ("id".into(), J::String("old".into())),
                     ("l2Key".into(), J::String("old-key".into())),
@@ -176,7 +176,7 @@ fn market_filter_errors_precede_typed_output_admission() {
             );
         } else {
             native::check_fields(
-                &native::retained(store.zk_link_config().as_deref().unwrap()),
+                &native::retained(store.zk_link_config().unwrap().as_ref().unwrap()),
                 &row["zk"],
                 &format!("{label} native config retained before filter error"),
             );

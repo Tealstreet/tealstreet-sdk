@@ -653,7 +653,7 @@ impl ReadHost for Host {
                     self.number(
                         safe_cex_venue_bitrue::read_helpers::resolve_trade_qty(
                             e.as_object().unwrap(),
-                            &safe_cex_store::store::DefaultStore::default(),
+                            &safe_cex_exchange::native_store::DefaultStore::default(),
                             &String::from_utf16(&string(&args[1])).unwrap(),
                             num(&args[2]),
                         )

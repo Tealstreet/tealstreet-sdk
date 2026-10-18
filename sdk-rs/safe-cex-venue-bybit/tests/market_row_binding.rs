@@ -86,6 +86,7 @@ fn mixed_rows(name: ExchangeName) {
         assert_eq!(
             h.store
                 .markets()
+                .unwrap()
                 .iter()
                 .map(|m| m.symbol.as_str())
                 .collect::<Vec<_>>(),
@@ -172,6 +173,7 @@ fn mixed_symbol_rows(name: ExchangeName) {
         assert_eq!(
             h.store
                 .markets()
+                .unwrap()
                 .iter()
                 .map(|m| m.symbol.as_str())
                 .collect::<Vec<_>>(),
@@ -319,7 +321,7 @@ fn distinct_fee_symbols(name: ExchangeName) {
                 .any(|line| line.contains("Refused Bybit market row") && line.contains("symbol="))
         );
         h.drive(h.venue().refresh_markets()).unwrap();
-        assert_eq!(h.store.markets().len(), 2);
+        assert_eq!(h.store.markets().unwrap().len(), 2);
     }
 }
 #[test]

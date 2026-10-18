@@ -145,13 +145,15 @@ fn input<E>(text: impl Into<String>) -> ServiceError<E> {
 fn parse<E>(v: Option<&Value>) -> Result<f64, ServiceError<E>> {
     Ok(parse_float(&js_string(v).map_err(ServiceError::Coercion)?))
 }
-fn selected(store: &dyn Store, symbol: Option<&str>) -> Vec<Position> {
-    store
-        .positions()
-        .iter()
+fn selected(
+    store: &dyn Store,
+    symbol: Option<&str>,
+) -> Result<Vec<Position>, safe_cex_types::StoreReadError> {
+    Ok(store
+        .positions()?
+        .into_iter()
         .filter(|p| symbol.is_none_or(|s| p.symbol == s))
-        .cloned()
-        .collect()
+        .collect())
 }
 pub async fn fetch_positions_helper<E: std::fmt::Display>(
     symbol: Option<&str>,
@@ -163,7 +165,7 @@ pub async fn fetch_positions_helper<E: std::fmt::Display>(
     let outcome = async {
         let params = match symbol {
             Some(s) => {
-                symbol_to_market_id(s, store).map_or_else(|| json!({}), |id| json!({"instId":id}))
+                symbol_to_market_id(s, store)?.map_or_else(|| json!({}), |id| json!({"instId":id}))
             }
             None => json!({}),
         };
@@ -177,7 +179,7 @@ pub async fn fetch_positions_helper<E: std::fmt::Display>(
                 .cloned()
                 .unwrap_or_else(|| json!("No data found"));
             emit(host.service, Some(&message))?;
-            return Ok(selected(store, symbol));
+            return Ok(selected(store, symbol)?);
         }
         map_positions(
             &PositionsInput::from_retained(data.expect("truthy").clone()),
@@ -187,6 +189,7 @@ pub async fn fetch_positions_helper<E: std::fmt::Display>(
         .map_err(|e| match e {
             PositionMapError::Coercion(e) => ServiceError::Coercion(e),
             PositionMapError::Emitter(e) => e,
+            PositionMapError::Store(e) => ServiceError::Store(e.into()),
         })
     }
     .await;
@@ -194,7 +197,7 @@ pub async fn fetch_positions_helper<E: std::fmt::Display>(
         Ok(v) => Ok(v),
         Err(e) => {
             emit(host.service, Some(&error_value(&e, false, None)))?;
-            Ok(selected(store, symbol))
+            Ok(selected(store, symbol)?)
         }
     }
 }
@@ -208,7 +211,7 @@ pub async fn fetch_positions<E: std::fmt::Display>(
     if host.auth_failure_streak.get() > 0.0 {
         return Ok(match symbols {
             Some(symbols) => store
-                .positions()
+                .positions()?
                 .iter()
                 .filter(|p| symbols.contains(&p.symbol))
                 .cloned()
@@ -279,7 +282,7 @@ pub async fn fetch_position_metadata<E: std::fmt::Display>(
         let mut out=Vec::new();
         for batch in symbols.chunks(20){
             if host.disposed.get(){continue;}
-            let ids:Vec<_>=batch.iter().map(|s|symbol_to_market_id(s,store).unwrap_or_default()).collect();
+            let ids:Vec<_>=batch.iter().map(|s|symbol_to_market_id(s,store).map(Option::unwrap_or_default)).collect::<Result<_,_>>()?;
             let response=get(xhr,"LEVERAGE",json!({"instId":ids.join(","),"marginMode":if margin==MarginType::Isolated{"isolated"}else{"cross"}})).await?;
             let response=response.json();
             if field(response,"code")?.and_then(Value::as_str)!=Some("0"){emit(host.service,response.get("msg"))?;}else if !js_truthy(response.get("data")){(host.console_warn)("No leverage data found").map_err(ServiceError::Host)?;}
@@ -287,8 +290,8 @@ pub async fn fetch_position_metadata<E: std::fmt::Display>(
             let rows=rows.as_array().ok_or_else(||input("Leverage data is outside the native array model"))?;
             for row in rows {
                 let id=js_string(field(row,"instId")?).map_err(ServiceError::Coercion)?;
-                let symbol=market_id_to_symbol(&id,store).ok_or_else(||input("Metadata symbol is outside the native string model"))?;
-                if field(row,"instId")?.is_none_or(|v|!v.is_string()) && !store.markets_by_id().contains_key(&id){return Err(input("Metadata symbol is outside the native string model"));}
+                let symbol=market_id_to_symbol(&id,store)?.ok_or_else(||input("Metadata symbol is outside the native string model"))?;
+                if field(row,"instId")?.is_none_or(|v|!v.is_string()) && !store.markets_by_id()?.contains_key(&id){return Err(input("Metadata symbol is outside the native string model"));}
                 let side=field(row,"positionSide")?.and_then(Value::as_str);
                 out.push(PositionMetadata {symbol,leverage:parse(field(row,"leverage")?)?,margin_type:if field(row,"marginMode")?.and_then(Value::as_str)==Some("cross"){MarginType::Cross}else{MarginType::Isolated},position_mode:if side==Some("net"){PositionMode::OneWay}else{PositionMode::Hedged},side:if matches!(side,Some("net"|"long")){PositionSide::Long}else{PositionSide::Short}});
             }
@@ -369,20 +372,23 @@ pub async fn fetch_balance_and_positions<E: std::fmt::Display>(
         Err(e) => {
             emit(host.service, Some(&error_value(&e, false, None)))?;
             Ok(BalanceAndPositions {
-                balance: store.balance().clone(),
-                positions: store.positions().to_vec(),
+                balance: store.balance()?.clone(),
+                positions: store.positions()?.to_vec(),
             })
         }
     }
 }
-fn selected_market_id(store: &dyn Store, symbol: Option<&str>) -> Option<Option<String>> {
+fn selected_market_id(
+    store: &dyn Store,
+    symbol: Option<&str>,
+) -> Result<Option<Option<String>>, safe_cex_types::StoreReadError> {
     let Some(symbol) = symbol.filter(|s| !s.is_empty()) else {
-        return Some(None);
+        return Ok(Some(None));
     };
-    store
-        .markets_by_symbol()
+    Ok(store
+        .markets_by_symbol()?
         .get(symbol)
-        .map(|m| Some(m.id.clone()))
+        .map(|m| Some(m.id.clone())))
 }
 fn query<E>(
     market_id: Option<&str>,
@@ -444,7 +450,7 @@ pub async fn fetch_income_history<E: std::fmt::Display>(
         return Ok(Vec::new());
     }
     let symbol = opts.and_then(|o| o.symbol.as_deref());
-    let Some(market_id) = selected_market_id(store, symbol) else {
+    let Some(market_id) = selected_market_id(store, symbol)? else {
         return Ok(Vec::new());
     };
     let start = opts.and_then(|o| o.start_time);
@@ -488,9 +494,9 @@ pub async fn fetch_income_history<E: std::fmt::Display>(
                 records.extend(
                     map_blofin_fill_to_income_records(
                         &IncomeInput::from_retained(row.clone()),
-                        |id| store.markets_by_id().get(id).map(|m| m.symbol.clone()),
+                        |id| Ok(store.markets_by_id()?.get(id).map(|m| m.symbol.clone())),
                     )
-                    .map_err(ServiceError::Coercion)?,
+                    .map_err(ServiceError::from)?,
                 );
             }
             if reached_start || rows.len() < 100 || added == 0 {
@@ -549,7 +555,7 @@ pub async fn fetch_closed_position_rows<E>(
     if public_only {
         return Ok(Vec::new());
     }
-    let Some(market_id) = selected_market_id(store, Some(&opts.symbol)) else {
+    let Some(market_id) = selected_market_id(store, Some(&opts.symbol))? else {
         return Ok(Vec::new());
     };
     let mut collected = Vec::new();
@@ -604,8 +610,8 @@ pub async fn fetch_historical_positions<E>(
     let rows = fetch_closed_position_rows(&query_opts, public_only, store, xhr).await?;
     let mut records = Vec::new();
     for row in rows {
-        let mut symbol = |id: &str| store.markets_by_id().get(id).map(|m| m.symbol.clone());
-        let mut settle = |id: &str| store.markets_by_id().get(id).map(|m| m.quote.clone());
+        let mut symbol = |id: &str| Ok(store.markets_by_id()?.get(id).map(|m| m.symbol.clone()));
+        let mut settle = |id: &str| Ok(store.markets_by_id()?.get(id).map(|m| m.quote.clone()));
         let mut deps = BlofinPositionAdapterDeps {
             account: &opts.account,
             resolve_symbol: &mut symbol,
@@ -613,7 +619,7 @@ pub async fn fetch_historical_positions<E>(
             contract_size: None,
         };
         if let Some(record) =
-            map_blofin_position_history(row.json(), &mut deps).map_err(ServiceError::Input)?
+            map_blofin_position_history(row.json(), &mut deps).map_err(ServiceError::from)?
         {
             records.push(record)
         }
@@ -630,7 +636,7 @@ pub async fn fetch_closed_pnl<E: std::fmt::Display>(
     if public_only {
         return Ok(Vec::new());
     }
-    let Some(market_id) = selected_market_id(store, Some(&opts.symbol)) else {
+    let Some(market_id) = selected_market_id(store, Some(&opts.symbol))? else {
         return Ok(Vec::new());
     };
     let outcome = async {
@@ -658,10 +664,10 @@ pub async fn fetch_closed_pnl<E: std::fmt::Display>(
                 added += 1;
                 if let Some(entry) = map_blofin_closed_position(
                     &IncomeInput::from_retained(row.clone()),
-                    |id| store.markets_by_id().get(id).map(|m| m.symbol.clone()),
+                    |id| Ok(store.markets_by_id()?.get(id).map(|m| m.symbol.clone())),
                     opts.account_name.as_deref().unwrap_or(""),
                 )
-                .map_err(ServiceError::Coercion)?
+                .map_err(ServiceError::from)?
                 {
                     entries.push(entry)
                 }

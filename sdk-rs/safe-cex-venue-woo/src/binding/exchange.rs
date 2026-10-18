@@ -93,7 +93,7 @@ impl WooExchange {
                 vec![
                     from_typed(&name).map_err(err)?,
                     from_typed(&options).map_err(err)?,
-                    store::facade(store.clone()),
+                    store::facade(store.clone())?,
                 ],
                 None,
             )
@@ -376,3 +376,7 @@ mod divergence_audit_tests;
 #[cfg(test)]
 #[path = "../../tests/support/fix_audit_binding.rs"]
 mod fix_audit_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "native_error_tests.rs"]
+mod native_error_tests;
