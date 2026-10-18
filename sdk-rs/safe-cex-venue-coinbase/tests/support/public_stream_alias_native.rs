@@ -11,8 +11,8 @@ use crate::{
     },
     starbase_public_frames::CoinbaseStarbaseFrameValue as Frame,
 };
-use safe_cex_exchange::{js_runtime::client, native::native_runtime};
 use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_exchange::{js_runtime::client, native::native_runtime};
 use safe_cex_types::ExchangeName;
 use serde_json::json;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
