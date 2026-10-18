@@ -308,7 +308,7 @@ impl PrivateStream {
                 return Ok(());
             };
             if data.is_object() || data.is_array() {
-                data = safe_cex_transport::signing::try_parse_json(Value::String(raw));
+                data = safe_cex_transport::signing::try_parse_params_json(Value::String(raw));
             }
             if !js_truthy(Some(&data)) {
                 return Ok(());

@@ -56,7 +56,11 @@ impl BingxPrivateDispatcher {
             }
         };
         self.host.diagnostic_receive(&raw)?;
-        let json = safe_cex_transport::how::big_int_as_string_json_parse(&raw);
+        let json = safe_cex_transport::how::big_int_as_string_json_parse(&raw)
+            .into_value()
+            .map_err(|_| {
+                ExchangeError::new("BingX private frame UTF-8 boundary refuses a lone surrogate")
+            })?;
         if json.is_null()
             && serde_json::from_str::<Box<serde_json::value::RawValue>>(&raw).is_ok()
             && serde_json::from_str::<Value>(&raw).is_err()

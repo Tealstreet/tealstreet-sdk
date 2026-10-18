@@ -366,3 +366,19 @@ millisecond timestamps, truthy fallback, reverse REST order and callback cleanup
 It compares all six native fields against unchanged maintained-source captures,
 including NaN, infinities and signed zero. Run `tests/candle-binding-controls.mjs`
 alone for two compiling live-volume substitutions and exact restoration proof.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` covers 1,000 cases /
+3,000 frames across lite/full snapshots, deltas, sparse mark fallbacks and
+subscribed candle-close updates. Every numeric alias
+receives ten independent values, including nonfinite results and distinct later
+fallbacks. Volume aggregation, percentage derivation and string nanoseconds versus
+numeric funding-time conversion use the real socket and Store. All eleven native
+numbers match maintained TS bits; the shared fault runner swaps mark for index
+and requires a compiled assertion failure followed by exact restoration.
+
+The concrete public feed host passes an object with the market id to Store's
+updateTicker, matching TS. A raw string selector silently misses every ticker;
+the real startup/socket regression proves that master failure. The source candle
+subscription uses the actual source WebSocket factory connected to a loopback
+peer, while native frames enter the actual runtime sockets. Candle callbacks,
+and zero/existing-last mark fallback have independent fixed assertions.

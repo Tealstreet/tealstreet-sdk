@@ -2,7 +2,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 mod support;
 use hmac::{Hmac, Mac};
-use safe_cex_exchange::runtime::{Cleanup, RemoteSigner};
+use safe_cex_exchange::{
+    js_runtime::value::Js,
+    runtime::{Cleanup, RemoteSigner},
+};
 use safe_cex_transport::{
     TransportFuture,
     signing::{HttpSigningResponse, RemoteSignerRequest, RemoteSignerResponse, SignedConfig},
@@ -19,6 +22,142 @@ fn signature(payload: &str) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+#[test]
+fn bybit_ticker_socket_preserves_coercion_type_errors_through_native_registry() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_transport::socket::SocketFrame;
+
+    support::run_local(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            let h = support::venue_harness(
+                name.clone(),
+                Rc::new(account),
+                json!({"key":"native-bybit-key","secret":support::SECRET}),
+                None,
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            let slot = if name == ExchangeName::Bybitinverse {
+                SocketSlot::PublicSecondary
+            } else {
+                SocketSlot::Public
+            };
+            let socket = h.exchange.base().get_socket(slot).unwrap();
+            let error = socket.on_message(&SocketFrame::Text(
+                r#"{"topic":"tickers.BTCUSDT","data":{"symbol":{"toString":null},"lastPrice":"42"}}"#.into(),
+            )).unwrap_err();
+            assert_eq!(
+                error.name, "TypeError",
+                "native socket retains coercion error class: {name:?}"
+            );
+            assert_eq!(error.message, "Cannot convert object to primitive value");
+            assert!(
+                h.store.tickers().is_empty(),
+                "coercion fails before ticker mutation"
+            );
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
+    use safe_cex_exchange::{runtime::ExchangeError, socket_lifecycle::SocketSlot};
+    use safe_cex_store::StoreUpdate;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::cell::Cell;
+
+    support::run_local(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            let h = support::venue_harness(
+                name.clone(),
+                Rc::new(account),
+                json!({"key":"native-bybit-key","secret":support::SECRET}),
+                None,
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            h.store
+                .update(
+                    StoreUpdate {
+                        tickers: Some(vec![
+                            serde_json::from_value(json!({
+                                "id":"BTCUSDT","symbol":"BTCUSDT","bid":1,"ask":1,"last":1,
+                                "mark":1,"index":1,"percentage":0,"openInterest":0,
+                                "fundingRate":0,"fundingTime":0,"volume":0,"quoteVolume":0
+                            }))
+                            .unwrap(),
+                        ]),
+                        ..Default::default()
+                    },
+                    false,
+                )
+                .unwrap();
+            let mut original = ExchangeError::new("ticker subscriber rejected");
+            original.name = "TickerSubscriberError".into();
+            original.response = Some(json!({"status":418,"data":{"reason":"listener"}}));
+            original.store_subscriber_ids = vec![71];
+            let cause: safe_cex_types::StoreSubscriberError = original.clone().into();
+            let thrown = cause.clone();
+            let first = h.store.subscribe(Box::new(move |data, _| {
+                if data.tickers[0].last == 42. {
+                    Err(thrown.clone())
+                } else {
+                    Ok(())
+                }
+            }));
+            let later = Rc::new(Cell::new(0));
+            let observed = later.clone();
+            let second = h.store.subscribe(Box::new(move |data, _| {
+                if data.tickers[0].last == 42. {
+                    observed.set(observed.get() + 1);
+                }
+                Ok(())
+            }));
+            let slot = if name == ExchangeName::Bybitinverse {
+                SocketSlot::PublicSecondary
+            } else {
+                SocketSlot::Public
+            };
+            let socket = h.exchange.base().get_socket(slot).unwrap();
+            let error = socket
+                .on_message(&SocketFrame::Text(
+                    r#"{"topic":"tickers.BTCUSDT","data":{"symbol":"BTCUSDT","lastPrice":"42"}}"#
+                        .into(),
+                ))
+                .unwrap_err();
+            assert_eq!(
+                h.store.tickers()[0].last,
+                42.,
+                "mutation commits before rejection: {name:?}"
+            );
+            assert_eq!(later.get(), 0, "the throwing listener stops fanout");
+            assert_eq!(
+                error.name, original.name,
+                "native socket retains error name: {name:?}"
+            );
+            assert_eq!(error.message, original.message);
+            assert_eq!(error.response, original.response);
+            assert_eq!(error.store_subscriber_cause, Some(cause));
+            assert_eq!(error.store_subscriber_ids.len(), 2);
+            assert_eq!(error.store_subscriber_ids[0], 71);
+            first();
+            second();
+            h.exchange.dispose().unwrap();
+        }
+    });
 }
 
 #[test]
@@ -146,6 +285,75 @@ fn bybit_and_demo_construct_and_sign_through_native_registry() {
             let seen = h.seen.borrow();
             assert_eq!(seen.len(), 1);
             assert_signed(&seen[0]);
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn bybit_response_error_listener_rejection_reaches_native_registry() {
+    support::run_local(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            let h = support::venue_harness(
+                name.clone(),
+                Rc::new(|request| {
+                    (request.path == "/v5/user/query-api").then(|| json!({
+                        "retCode":10016,"retMsg":"service unavailable",
+                        "raw_response":"There might be too much traffic or a configuration error",
+                        "result":{"userID":12345}
+                    }))
+                }),
+                json!({"key":"native-bybit-key","secret":support::SECRET}),
+                None,
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            let calls = Rc::new(std::cell::Cell::new(0));
+            let observed = calls.clone();
+            let cleanup = h.exchange.base().on(
+                "error",
+                Rc::new(move |_, _| {
+                    observed.set(observed.get() + 1);
+                    let mut error = safe_cex_exchange::runtime::ExchangeError::new(
+                        "subscriber refused diagnostic",
+                    );
+                    error.name = "DiagnosticSubscriberError".into();
+                    error.code = Some(Js::object(vec![
+                        ("retry", Js::Bool(false)),
+                        ("sentinel", Js::Number(f64::NAN)),
+                        ("ownUndefined", Js::Undefined),
+                    ]));
+                    Err(error)
+                }),
+            );
+            let error =
+                tokio::time::timeout(std::time::Duration::from_secs(10), h.exchange.get_account())
+                    .await
+                    .expect("native account rejection completes")
+                    .unwrap_err();
+            assert_eq!(
+                calls.get(),
+                1,
+                "{name:?}: real error subscriber was reached"
+            );
+            assert_eq!(h.seen.borrow().len(), 1, "callback refusal stops retry");
+            assert_signed(&h.seen.borrow()[0]);
+            assert_eq!(
+                error.name, "DiagnosticSubscriberError",
+                "{name:?}: preserve callback error name"
+            );
+            assert_eq!(error.message, "subscriber refused diagnostic");
+            let code = error.code.as_ref().expect("retained callback code");
+            assert!(code.get("sentinel").unwrap().to_number().unwrap().is_nan());
+            assert!(code.has_own("ownUndefined"));
+            assert!(code.get("ownUndefined").unwrap().is_undefined());
+            assert!(matches!(code.get("retry").unwrap(), Js::Bool(false)));
+            h.exchange.base().off("error", Some(&cleanup));
             h.exchange.dispose().unwrap();
         }
     });
