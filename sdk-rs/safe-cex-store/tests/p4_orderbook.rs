@@ -47,22 +47,63 @@ fn current_source_orderbook_sort_and_totals() {
     }
 }
 #[test]
-fn malformed_nan_price_permutation_is_explicitly_divergent() {
-    let mut book = OrderBook {
-        bids: vec![],
-        asks: [3.0, f64::NAN, 2.0, 1.0]
-            .into_iter()
-            .enumerate()
-            .map(|(i, price)| OrderBookOrders {
-                price,
-                amount: 1.0,
-                total: i as f64,
-            })
-            .collect(),
-    };
-    sort_order_book(&mut book);
-    assert_eq!(
-        book.asks.iter().map(|x| x.total).collect::<Vec<_>>(),
-        [3.0, 2.0, 0.0, 1.0]
+fn native_nan_book_order_matches_ci_v8_source() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/book-sort-source.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rows.len(), 112, "complete native orderbook profiles");
+    let mut failures = Vec::new();
+    for (case, row) in rows.iter().enumerate() {
+        let prices: Vec<f64> = row["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|bits| f64::from_bits(u64::from_str_radix(bits.as_str().unwrap(), 16).unwrap()))
+            .collect();
+        let levels = || {
+            prices
+                .iter()
+                .enumerate()
+                .map(|(id, price)| OrderBookOrders {
+                    price: *price,
+                    amount: (id + 1) as f64,
+                    total: -(id as f64),
+                })
+                .collect()
+        };
+        let mut book = OrderBook {
+            bids: levels(),
+            asks: levels(),
+        };
+        sort_order_book(&mut book);
+        for (side, actual) in [("bids", &book.bids), ("asks", &book.asks)] {
+            let expected = row[side].as_array().unwrap();
+            assert_eq!(actual.len(), prices.len());
+            assert_eq!(expected.len(), prices.len());
+            for (level, id) in actual.iter().zip(expected) {
+                let id = id.as_u64().unwrap() as usize;
+                if level.price.to_bits() != prices[id].to_bits()
+                    || level.amount.to_bits() != ((id + 1) as f64).to_bits()
+                    || level.total.to_bits() != (-(id as f64)).to_bits()
+                {
+                    failures.push((case, side));
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "STORE-BOOK-SORT exact Node permutation/retained fields: {failures:?}"
     );
 }

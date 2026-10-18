@@ -80,11 +80,11 @@ sortOrderBook remains pending for the later utility block.
 
 sortOrderBook now has an independent public implementation and facade alias.
 200 maintained live-source finite-book cases compare order, stable ties, retained
-totals and subsequent accumulator results. Deliberate CHOSEN divergence for
-nontransitive NaN-price comparator permutations: portable stable merge sort
-instead of a pinned JS-engine sort. It preserves source NaN-as-equality, with a
-ts-bug marker; TS [3,NaN,2,1] keeps IDs[0,1,3,2], Rust emits[3,2,0,1]. Both are
-pinned so a source correction forces revisiting this choice. All7 independent
+totals and subsequent accumulator results. The former NaN-price permutation divergence is repaired by the shared V8
+TimSort. The live 112-profile native/source gate covers both sides, preserves
+all price/amount/total bits and pins CI Node 24.20.0 / V8 13.6. The old recursive
+merge fails the named STORE-BOOK-SORT assertion before the direct cutover.
+All7 independent
 negative/restored store+facade gates pass (`/tmp/p4-orderbook-*.log`); reversing
 asks rejects specifically current_source_orderbook_sort_and_totals. No sorting
 was added to the accumulator.
