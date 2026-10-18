@@ -111,10 +111,10 @@ requires exactly the specified owners to fail native value/admission assertions,
 then byte-exact restoration and a passing eleven-owner run. A compilation error
 or missing receipt cannot count as proof.
 
-The measured native baseline passed all eleven runtime owners, zero explicit
-classifications and zero failures. Fresh ordinary inventory still discovers the
-original 184 owners and eight aliases, with no new decoder owners from the three
-remote companions or the private output projection. The final distinct corpus
+At the original review checkpoint, the native baseline passed all eleven runtime
+owners, zero explicit classifications and zero failures. Its ordinary inventory
+discovered 184 owners and eight aliases, with no new decoder owners from the three
+remote companions or the private output projection. The distinct corpus
 contains 738 inputs; its source gate and the 150 runtime null comparisons pass.
 All eleven faults compiled and failed the exact named native observations. The
 filter and STP faults each failed two related owners; the other nine each failed
@@ -125,4 +125,21 @@ Other original Aster owners, lexical Wire decoders, private companions' separate
 capabilities, aliases, features and WASM remain outside this selected execution.
 The canonical [string boundary](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
 and [typed output boundary](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary)
-still apply. Queue ddi2il-32 remains open for the other assigned owners and venues.
+still apply.
+
+## Master integration
+
+The normal master merge retains all 140 existing contract records, including
+the separately reviewed Wire owners from #868, and adds only these eleven keys.
+The selected runner does not assert the historical package-wide owner total.
+
+Both ExecutionOrder helper sets have production callers. The binding's
+placeOrder/placeOrders decode ExecutionOrder; its private Wire/output projection
+preserves whole-input numeric capture. OrderExecution's placement and amendment
+workflows consume PreparedExecutionOrder. The latter carries already prepared
+options; neither helper set replaces or falls back to the other.
+
+The refreshed three ordinary workflow regressions, 738 actual-source observations,
+150 runtime null comparisons and local parity pass after this merge. Core optional
+model fields in these records are observed through their JSON presence/value;
+retained native undefined admission is outside this JSON decoder corpus.
