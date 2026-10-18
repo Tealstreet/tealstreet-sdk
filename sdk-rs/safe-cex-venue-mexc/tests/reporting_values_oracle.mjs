@@ -107,6 +107,8 @@ for (const worker of [false, true]) for (const fixture of fixtures) for (const m
   totalReports += reports.length; totalPositionReads += positionReads;
   rows.push({worker, label: fixture.label, method, result: result ?? null, error: caught ?? null,
     event: events.length ? events[0][0] : null, reported: !coercion ? shapes(worker ? events[0][1].sentryData.error : reports[0].error) : null,
+    // Observe the real Error getters above separately from its enumerable wire shape.
+    reportedJson: worker && !coercion ? JSON.stringify(events[0][1].sentryData.error) : null,
     positionReads, after, report});
 }
 assert.equal(rows.length, 120, 'SOURCE independent raw reporting method root floor');
@@ -132,10 +134,16 @@ console.log(JSON.stringify(rows));
       xhr:{async get() { gets++; trace.push('get'); throw {message:'transport',response:{data:{message:7}}}; }},
       store:{get positions() { positionReads++; return []; }}});
     const original = Object.assign(new Error('listener failed'), {code:'LISTENER'});
+    let reportedJson = null;
     emitter.on('error', (value, metadata) => {
       firstCalls++; trace.push('first');
       assert.equal(value, '7', 'SOURCE decoded listener raw formatted value');
-      if (worker) assert.equal(metadata.sentryData.error, 7, 'SOURCE worker raw report before listener');
+      if (worker) {
+        assert.equal(metadata.sentryData.error, 7, 'SOURCE worker raw report before listener');
+        assert.equal(typeof metadata.sentryData.error, 'number');
+        reportedJson = JSON.stringify(metadata.sentryData.error);
+        assert.equal(reportedJson, '7', 'SOURCE native Number stringify before listener');
+      }
       throw original;
     });
     emitter.on('error', () => { secondCalls++; });
@@ -146,7 +154,7 @@ console.log(JSON.stringify(rows));
     assert.deepEqual(trace, worker ? ['get','error','trace','first'] : ['get','error','trace','report','first'], 'SOURCE exact listener child-call order');
     assert.equal(firstCalls,1); assert.equal(secondCalls,0); assert.equal(gets,1); assert.equal(positionReads,0);
     assert.equal(reports.length,worker ? 0 : 1);
-    rows.push({worker,method,error:{name:caught.name,message:caught.message,code:caught.code},trace,gets,positionReads});
+    rows.push({worker,method,error:{name:caught.name,message:caught.message,code:caught.code},trace,gets,positionReads,reportedJson});
   }
   assert.equal(rows.length,6,'SOURCE independent throwing-listener root floor');
   console.log(JSON.stringify(rows));

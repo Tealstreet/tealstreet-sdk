@@ -213,19 +213,35 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                 exchange.xhr = failure.clone();
                 let events = Rc::new(RefCell::new(Vec::<Value>::new()));
                 let observed = events.clone();
-                exchange.base.on_args(
-                    "error",
-                    Rc::new(move |event, value| {
+                // Keep the actual worker value: Error.message is a non-enumerable getter
+                // observation, whereas JSON.stringify must only see enumerable fields.
+                let worker_reports = Rc::new(RefCell::new(Vec::new()));
+                let captured_reports = worker_reports.clone();
+                safe_cex_webworker::exchange_worker_start::install_exchange_event_bridge(
+                    &exchange.base,
+                    safe_cex_webworker::data_post::WorkerDataPost::new(Rc::new(move |payload| {
+                        assert_eq!(
+                            payload.op,
+                            safe_cex_webworker::payload::StoreWorkerOp::Error
+                        );
+                        let value = payload
+                            .data
+                            .array_values()
+                            .expect("worker posts emitted args once");
+                        if worker {
+                            captured_reports
+                                .borrow_mut()
+                                .push(value[1].get("sentryData")?.get("error")?);
+                        }
                         let value: Vec<serde_json::Value> = value
                             .iter()
                             .map(|value| {
                                 safe_cex_exchange::js_runtime::value::to_json(value).unwrap()
                             })
                             .collect();
-                        assert_eq!(event, "error", "native actual reporting event");
                         observed.borrow_mut().push(serde_json::json!(value));
                         Ok(())
-                    }),
+                    })),
                 );
                 exchange.base.note_http_response(
                     &json!({"status":503,"statusText":"Unavailable"}),
@@ -329,7 +345,15 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                         &format!("native raw formatted value {label}/{method}"),
                     );
                     reported = if worker {
-                        events.borrow()[0][1]["sentryData"]["error"].clone()
+                        let raw = &worker_reports.borrow()[0];
+                        if selected.is_string() {
+                            json!({
+                                "name": safe_cex_exchange::js_runtime::value::to_json(&raw.get("name").unwrap()).unwrap(),
+                                "message": safe_cex_exchange::js_runtime::value::to_json(&raw.get("message").unwrap()).unwrap(),
+                            })
+                        } else {
+                            safe_cex_exchange::js_runtime::value::to_json(raw).unwrap()
+                        }
                     } else {
                         assert_eq!(
                             runtime.reports.borrow().len(),
@@ -383,6 +407,11 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                         }
                     }
                 }
+                let reported_json = if worker && !coercion {
+                    json!(native_stringify(&worker_reports.borrow()[0]))
+                } else {
+                    Value::Null
+                };
                 let after = if coercion {
                     assert!(
                         runtime.reports.borrow().is_empty(),
@@ -411,7 +440,7 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                 report_calls += runtime.reports.borrow().len();
                 fallback_reads += store.position_reads.get();
                 observations.push(json!({"worker":worker,"label":label,"method":method,"result":value,"error":error,
-                    "event":events.borrow()[0][0],"reported":reported,"positionReads":store.position_reads.get(),"after":after,"report":report}));
+                    "event":events.borrow()[0][0],"reported":reported,"reportedJson":reported_json,"positionReads":store.position_reads.get(),"after":after,"report":report}));
             }
         }
     }
@@ -483,9 +512,25 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
             let first_calls = first.clone();
             let trace = runtime.trace.clone();
             let thrown = original.clone();
+            let reported_json = Rc::new(RefCell::new(Value::Null));
+            let captured_json = reported_json.clone();
             exchange.base.on_args(
                 "error",
                 Rc::new(move |_, args| {
+                    if worker {
+                        let raw = args[1].get("sentryData")?.get("error")?;
+                        match &raw {
+                            safe_cex_exchange::js_runtime::value::Js::Number(number) => {
+                                assert_eq!(
+                                    number.to_bits(),
+                                    7_f64.to_bits(),
+                                    "native report Number bits before projection"
+                                );
+                            }
+                            _ => panic!("raw worker report must retain Number type"),
+                        }
+                        *captured_json.borrow_mut() = json!(native_stringify(&raw));
+                    }
                     let args: Vec<serde_json::Value> = args
                         .iter()
                         .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
@@ -544,10 +589,10 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
                 "native main raw reporting before listener"
             );
             if !worker {
-                assert_eq!(
-                    runtime.reports.borrow()[0]["error"],
-                    7,
-                    "native raw main report type before listener"
+                assert_source_tree(
+                    &json!(7),
+                    &runtime.reports.borrow()[0]["error"],
+                    "native raw main report Number bits before listener",
                 );
             }
             let expected = if worker {
@@ -561,7 +606,7 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
                 "native exact throwing-listener call order"
             );
             observations.push(json!({"worker":worker,"method":method,"error":{"name":error.name,"message":error.message,"code":observed_error_code(&error.code)},
-                "trace":*runtime.trace.borrow(),"gets":failure.gets.get(),"positionReads":store.position_reads.get()}));
+                "trace":*runtime.trace.borrow(),"gets":failure.gets.get(),"positionReads":store.position_reads.get(),"reportedJson":*reported_json.borrow()}));
         }
     }
     assert_eq!(
@@ -592,4 +637,12 @@ fn observed_error_code(
     code.as_ref().map(|value| {
         safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
     })
+}
+
+// Exercise the same operation installed as JSON.stringify, never serde's formatter.
+fn native_stringify(value: &safe_cex_exchange::js_runtime::value::Js) -> String {
+    let units = safe_cex_exchange::js_runtime::globals::stringify_json(value)
+        .expect("native reporting JSON.stringify")
+        .expect("report value is JSON serializable");
+    String::from_utf16(&units).expect("report JSON contains valid UTF-16")
 }
