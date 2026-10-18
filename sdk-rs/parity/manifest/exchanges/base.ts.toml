@@ -350,9 +350,9 @@ note = "Source default and dynamic override dispatch safe-cex-exchange/src/excha
 ts = "BaseExchange.log"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::log"
+rs = ["safe-cex-exchange/src/exchange.rs::BaseExchange::log", "safe-cex-exchange/src/exchange.rs::BaseExchange::log_value"]
 status = "ported"
-note = "Console precedes the fallible log event. TinyEmitter snapshots listeners and stops at the first throw, preserving the original ExchangeError name and metadata; callback invocation holds no listener-map borrow."
+note = "Typed log delegates to the canonical retained-message log_value; console receives original native message/severity and the event prefix preserves UTF16. Console precedes the fallible log event. TinyEmitter snapshots listeners and stops at the first throw, preserving the original ExchangeError name and metadata; callback invocation holds no listener-map borrow."
 
 [[symbol]]
 ts = "BaseExchange.start"

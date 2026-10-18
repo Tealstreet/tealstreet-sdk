@@ -1822,3 +1822,11 @@ thrown values. Native builtin adapters keep their existing separate surfaces.
 `js_builtins_native` compares eight actual NativeRuntime operator hook cases with
 Node; the unchanged Dayjs, Breakout, Kraken candle and Paradex ticker consumers
 cover malformed objects reaching their source Date/arithmetic branches.
+
+BaseExchange::log_value is the canonical log path. It forwards the original native
+message and severity to console_values before constructing the UTF16-prefixed
+log event. The typed log(&str) convenience delegates there without another logger.
+The JS log facade passes its original message; source coercion runs only for the
+event template. The real PM repeated-snapshot warning and native facade witnesses
+cover lone UTF16 units; native_console_default separately executes the runtime's
+typed console default and Base logging so both forwarding paths remain observed.

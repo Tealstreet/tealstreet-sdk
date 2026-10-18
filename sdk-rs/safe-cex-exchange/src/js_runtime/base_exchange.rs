@@ -275,7 +275,7 @@ pub fn create(
                 } else {
                     text(&severity)?
                 };
-                base.log(&text(&arg(&a, 0))?, &severity)?;
+                base.log_value(&arg(&a, 0), &severity)?;
                 Ok(Js::Undefined)
             }),
         );

@@ -315,31 +315,46 @@ fn native_pm_order_errors_report_retained_cause_message_units() {
 
 #[test]
 fn native_pm_repeated_error_warning_retains_message_units() {
-    let raw = r#"{"msg":"\ud800"}"#;
-    let expected = source_input(json!({"pm":true,"raw":raw,"warning":true}));
-    let (owner, runtime, http) = owner(raw, true);
-    let logs = Rc::new(RefCell::new(vec![]));
-    let seen = logs.clone();
-    owner.base.on_args(
-        "log",
-        Rc::new(move |_, args| {
-            seen.borrow_mut().push(args.to_vec());
-            Ok(())
-        }),
-    );
-    for _ in 0..2 {
-        let rows = run(&runtime, owner.invoke(Method::Orders, vec![]))
-            .expect("source returns cached rows after each malformed snapshot");
-        assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+    for raw in [
+        r#"{"msg":"\ud800"}"#,
+        r#"{"msg":"\udc00"}"#,
+        r#"{"msg":"a\ud800b\udc00"}"#,
+        r#"{"msg":"\ud83d\ude80"}"#,
+    ] {
+        let expected = source_input(json!({"pm":true,"raw":raw,"warning":true}));
+        let (owner, runtime, http) = owner(raw, true);
+        let logs = Rc::new(RefCell::new(vec![]));
+        let seen = logs.clone();
+        owner.base.on_args(
+            "log",
+            Rc::new(move |_, args| {
+                seen.borrow_mut().push(args.to_vec());
+                Ok(())
+            }),
+        );
+        for _ in 0..2 {
+            let rows = run(&runtime, owner.invoke(Method::Orders, vec![]))
+                .expect("source returns cached rows after each malformed snapshot");
+            assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+        }
+        assert_eq!(logs.borrow().len(), 1);
+        assert_eq!(json!(units(&logs.borrow()[0][0])), expected["log"][0]);
+        assert_eq!(
+            units(&logs.borrow()[0][1]),
+            "warning".encode_utf16().collect::<Vec<_>>()
+        );
+        let frames = runtime.console_frames.borrow();
+        let (_, warning) = frames
+            .iter()
+            .find(|(level, _)| level == "warning")
+            .expect("source console warning");
+        assert_eq!(
+            json!(warning.iter().map(units).collect::<Vec<_>>()),
+            expected["console"][0]
+        );
+        drop(frames);
+        assert_eq!(&*runtime.reported.borrow(), &["ExchangeError"]);
+        assert_eq!(http.paths.lock().unwrap().len(), 2);
+        owner.dispose().unwrap();
     }
-    assert_eq!(logs.borrow().len(), 1);
-    assert_eq!(json!(units(&logs.borrow()[0][0])), expected["log"][0]);
-    assert_eq!(units(&logs.borrow()[0][1]), "warning".encode_utf16().collect::<Vec<_>>());
-    let frames = runtime.console_frames.borrow();
-    let (_, warning) = frames.iter().find(|(level, _)| level == "warning").expect("source console warning");
-    assert_eq!(json!(units(&warning[0])), expected["console"][0][0]);
-    drop(frames);
-    assert_eq!(&*runtime.reported.borrow(), &["ExchangeError"]);
-    assert_eq!(http.paths.lock().unwrap().len(), 2);
-    owner.dispose().unwrap();
 }
