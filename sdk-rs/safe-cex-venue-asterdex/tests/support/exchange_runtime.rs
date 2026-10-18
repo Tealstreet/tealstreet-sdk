@@ -1,4 +1,4 @@
-//! Scripted AsterDEX transport and deterministic scheduler.
+// Scripted AsterDEX transport and deterministic scheduler.
 mod virtual_time {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -240,16 +240,8 @@ impl RestAdapter for Wire {
         })
     }
 }
-pub fn fixture(
-    options: Value,
-) -> (
-    Rc<safe_cex_venue_asterdex::native_exchange::AsterDEXExchange>,
-    Rc<Runtime>,
-    Rc<safe_cex_store::store::DefaultStore>,
-    Arc<Wire>,
-) {
-    use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
-    let runtime = Rc::new(Runtime {
+pub fn runtime() -> Rc<Runtime> {
+    Rc::new(Runtime {
         sleep_wakers: virtual_time::SleepWakers::default(),
         now: Rc::new(Cell::new(1700000000000.0)),
         jobs: RefCell::default(),
@@ -260,7 +252,19 @@ pub fn fixture(
         urls: RefCell::default(),
         sockets: RefCell::default(),
         http_options: RefCell::default(),
-    });
+    })
+}
+
+pub fn fixture(
+    options: Value,
+) -> (
+    Rc<safe_cex_venue_asterdex::native_exchange::AsterDEXExchange>,
+    Rc<Runtime>,
+    Rc<safe_cex_store::store::DefaultStore>,
+    Arc<Wire>,
+) {
+    use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
+    let runtime = runtime();
     #[expect(clippy::arc_with_non_send_sync)]
     let wire = Arc::new(Wire::default());
     let store = Rc::new(safe_cex_store::store::DefaultStore::new());

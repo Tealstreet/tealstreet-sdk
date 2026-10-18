@@ -21,6 +21,12 @@ const selected = [
     .map(name => `binding::members::${name}`),
 ].map(name => `safe_cex_venue_asterdex::${name}`).sort();
 assert.equal(selected.length, 19);
+const source = spawnSync(process.execPath, [fileURLToPath(new URL('./accepted-builder-binding-source.cjs', import.meta.url))], {
+  cwd: workspace, encoding: 'utf8',
+  env: { ...process.env, SAFE_CEX_TYPESCRIPT_PATH: process.env.SAFE_CEX_TYPESCRIPT_PATH ?? fileURLToPath(import.meta.resolve('typescript')) },
+});
+assert.equal(source.status, 0, `${source.error ?? ''}\n${source.stderr}`);
+process.stdout.write(source.stdout);
 function cargo(args, extraEnv = {}) {
   const result = spawnSync('cargo', args, {
     cwd: workspace, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
@@ -56,5 +62,8 @@ const results = runProbes(workspace, metadata, [{
 fs.writeFileSync(path.join(metadata.target_directory, 'asterdex-builder-binding-results.json'), `${JSON.stringify(results, null, 2)}\n`);
 assert.deepEqual(results.map(row => row.name).sort(), selected);
 for (const row of results) assert.deepEqual(row.failures, [], row.name);
+assert.deepEqual(results.filter(row => row.classificationOnly).map(row => row.name),
+  ['safe_cex_venue_asterdex::builder_approval::no_wallet']);
+assert.equal(results.filter(row => !row.classificationOnly).length, 18);
 console.log('Aster builder/binding cohort: 19 compiler owners, zero failed classifications.');
 console.log('Scope excludes other owners, aliases, locals, features and wasm; this is not a full package gate.');
