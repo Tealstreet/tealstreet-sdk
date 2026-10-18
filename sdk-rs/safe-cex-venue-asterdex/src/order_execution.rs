@@ -1,6 +1,9 @@
 //! Configured REST execution and open-interest ownership. API construction and
 //! the complete exchange lifecycle remain separate manifest rows.
-use crate::{builder, exchange_helpers as h, helpers, types::*};
+use crate::{
+    builder, exchange_helpers as h, helpers,
+    types::{AsterDEXAPIVersion, AsterDEXPlaceOrderOpts, AsterDEXStpMode},
+};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},

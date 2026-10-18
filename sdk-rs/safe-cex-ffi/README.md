@@ -131,6 +131,13 @@ Node process. Open accounts own JS signer and proxy-token callbacks; venue runti
 closures hold weak references so disposal releases callbacks even when a venue
 runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.
 
+`updateSymbolMetadata` reuses the worker's keyed 500ms leading/trailing throttle.
+It acknowledges immediately with null while the venue request runs separately;
+late failures follow the existing runtime exception reporting. Close and
+venue deactivation clear pending trailing metadata calls. The Rust
+`native_account_metadata` and Node `native-account-metadata.test.mjs` targets
+observe real Bitrue leverage-bracket HTTP requests and disposal.
+
 The parity manifest records native Store delivery as worker split members:
 construction reuses `_throttledStoreUpdate`, subscribed updates follow
 `_setupExchangeEventListeners`, snapshots follow `sendSnapshot`, and teardown
