@@ -189,12 +189,7 @@ pub fn create(
                     "emit",
                     Js::function("emit", move |_, a| {
                         let event = text(&arg(&a, 0))?;
-                        let args = a
-                            .iter()
-                            .skip(1)
-                            .map(to_json)
-                            .collect::<Result<Vec<_>, _>>()?;
-                        base.emit_args(&event, &args)?;
+                        base.emit_args(&event, a.get(1..).unwrap_or_default())?;
                         Ok(Js::Bool(true))
                     }),
                 ),
@@ -207,8 +202,7 @@ pub fn create(
                         let id = on_base.on_args(
                             &event,
                             Rc::new(move |_, data| {
-                                let args = data.iter().map(super::value::from_json).collect();
-                                callee.call(Js::Undefined, args)?;
+                                callee.call(Js::Undefined, data.to_vec())?;
                                 Ok(())
                             }),
                         );
@@ -292,16 +286,7 @@ pub fn create(
             "emitAndLogError",
             Js::function("emitAndLogError", move |_, a| {
                 let error = arg(&a, 0);
-                let input = match &error {
-                    Js::Undefined => ExchangeErrorInput::Missing,
-                    Js::String(s) => ExchangeErrorInput::Message(String::from_utf16_lossy(s)),
-                    Js::Object(o) if o.class == "Error" || o.class == "AxiosError" => {
-                        ExchangeErrorInput::Error(Box::new(
-                            Thrown::new(error.clone()).to_exchange_error(),
-                        ))
-                    }
-                    other => ExchangeErrorInput::Raw(to_json(other)?),
-                };
+                let input = ExchangeErrorInput::Raw(error);
                 let msg = arg(&a, 1);
                 let msg = if msg.is_undefined() {
                     None
@@ -648,9 +633,7 @@ fn worker_rpc(context: &Weak<JsSocketContext>, args: Vec<Js>) -> Result<Js, Thro
                         thrown.value.define("stack", Js::str(&stack))?;
                     }
                     if let Some(code) = code {
-                        thrown
-                            .value
-                            .define("code", super::value::from_json(&code))?;
+                        thrown.value.define("code", code)?;
                     }
                     return Err(thrown);
                 }

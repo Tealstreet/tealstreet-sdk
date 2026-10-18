@@ -30,6 +30,7 @@ import { setProxyToken, setTokenRefreshFunction } from '@tealstreet/safe-cex/src
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import type { ExchangeName } from '@tealstreet/safe-cex/src/types';
 import { defaultProxyRegion, resolveAccountTransport } from '@tealstreet/safe-cex/src/transport/tealstreet/transportResolution';
+import { BRAND } from './brand';
 
 // Default timeout for exchange operations (30 seconds)
 const EXCHANGE_OPERATION_TIMEOUT = 30000;
@@ -223,7 +224,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
 
       if (requiresAuth) {
         if (!isLoggedIn()) {
-          throw new Error('Tealstreet proxy/tunnel requires authentication. Run "login" first.');
+          throw new Error(`${BRAND.displayName} proxy/tunnel requires authentication. Run "login" first.`);
         }
         await checkAndRefreshToken();
 

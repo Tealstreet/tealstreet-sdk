@@ -12,6 +12,7 @@ import { sendAccountsSnapshot, ACCOUNTS_TOPIC } from './account-broadcast';
 import { sendTasksSnapshot, TASKS_TOPIC } from './tasks-broadcast';
 import { sendCrossTradeSnapshot, CROSS_TRADE_TOPIC } from './cross-trade-broadcast';
 import { isAccountSyncEnabled } from './config';
+import { BRAND } from '../brand';
 
 export interface WsSessionData {
   origin: string;
@@ -75,7 +76,7 @@ function maybeWarnCrossTradeBoth(adapter: StandalonePlatformAdapter, ws: ServerW
   const label = ws.data.label || ws.data.clientId?.slice(0, 8) || '(unknown)';
   adapter.printWarning(
     `cross-trade warning: web client ${label} is also running cross-trade — both engines will place orders. ` +
-      `Disable one (web's leader-tab or "tealstreet cross-trade run") to avoid double-trading.`,
+      `Disable one (web's leader-tab or "${BRAND.binName} cross-trade run") to avoid double-trading.`,
   );
 }
 

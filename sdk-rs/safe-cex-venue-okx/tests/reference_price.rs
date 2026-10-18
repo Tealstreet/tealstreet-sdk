@@ -39,7 +39,9 @@ impl ReferenceTicker<Error> for Ticker {
 fn error() -> Error {
     let mut error = ExchangeError::new("reference failure");
     error.name = "TypeError".into();
-    error.code = Some(json!("PRICE"));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "PRICE"
+    )));
     error.store_subscriber_ids = vec![7, 3];
     Rc::new(error)
 }

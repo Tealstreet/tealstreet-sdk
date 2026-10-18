@@ -133,18 +133,18 @@ note = "CHOSEN: stateless helper mapped to safe-cex-venue-bitunix/src/tpsl_helpe
 [[symbol]]
 ts = "BitunixExchange#getInternalTriggerType"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "mirror"
+rs = [ "safe-cex-venue-bitunix/src/order_models.rs::get_internal_trigger_type" ]
+status = "divergent"
+note = "Renamed source body and extracted host leaves to safe-cex-venue-bitunix/src/order_models.rs::get_internal_trigger_type. CHOSEN: source coercion over retained JSON plus absent values and the shared UTF-8 boundary; executable host objects and lone-surrogate strings stay outside the existing order-model ingress. Maps LAST/LAST_PRICE to last_price and every other spelling to mark_price. Real public native_identity attached-amendment controls compare both retained protection legs to actual TypeScript."
 
 [[symbol]]
 ts = "BitunixExchange#isUnsupportedOrderOperation"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "mirror"
+rs = [ "safe-cex-venue-bitunix/src/order_models.rs::is_unsupported_order_operation" ]
+status = "divergent"
+note = "Renamed source body and extracted host leaves to safe-cex-venue-bitunix/src/order_models.rs::is_unsupported_order_operation. CHOSEN: string-only message input follows the existing native error projection and shared UTF-8 boundary, excluding arbitrary JavaScript error objects and lone-surrogate strings. Case-insensitive source substring recognition; real public native_identity controls retain non-matching-error throws and ordinary-parent refusal."
 
 [[symbol]]
 ts = "BitunixExchange.getBitunixReduceOnly"
@@ -413,10 +413,10 @@ note = "Generic native symbols and orders retain identity and full string repres
 [[symbol]]
 ts = "BitunixExchange#recreateAttachedTpslParentOrder"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "mirror"
+rs = [ "safe-cex-venue-bitunix/src/order_models.rs::recreate_attached_tpsl_parent_order", "safe-cex-venue-bitunix/src/order_models.rs::OrderModelHost::post_limited", "safe-cex-venue-bitunix/src/order_models.rs::OrderModelHost::update_status", "safe-cex-venue-bitunix/src/order_models.rs::OrderModelHost::place_replacement" ]
+status = "divergent"
+note = "Renamed source body and extracted host leaves to safe-cex-venue-bitunix/src/order_models.rs::recreate_attached_tpsl_parent_order, safe-cex-venue-bitunix/src/order_models.rs::OrderModelHost::post_limited, safe-cex-venue-bitunix/src/order_models.rs::OrderModelHost::update_status, safe-cex-venue-bitunix/src/order_models.rs::OrderModelHost::place_replacement. CHOSEN: retained reconciled target snapshot and the string payload already constructed by update_order replace executable/getter inputs, parent mutation across await and lone-surrogate strings, using the existing shared model/coercion boundary. Rust owns finite positive price/quantity and MARKET-leg preflight, limited-client cancel/code guard, live Store exact-parent/double-underscore-child selection, canceled status before real placement and first replacement child identity. Host leaves directly invoke the constructed venue limited REST lane, real Store and existing placement body. Actual-source native_identity regression has8 public-binding controls: TP, SL, nonmatching error, ordinary parent, both LIMIT execution refusals, cancel failure and replacement failure; exact payload/order, visible errors, sibling/neighbor statuses are compared. Master compiles and fails the successful-recovery assertion before the port."
 
 [[symbol]]
 ts = "BitunixExchange#updateStandaloneTpslOrder"

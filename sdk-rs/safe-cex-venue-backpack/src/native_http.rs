@@ -118,7 +118,9 @@ impl Client {
                     let mut e = ExchangeError::new(error.message);
                     e.metadata.is_axios_error = true;
                     e.metadata.config = Some(json!({"url":req.url,"method":req.method}));
-                    e.metadata.code = error.code.map(Value::String);
+                    e.metadata.code = error
+                        .code
+                        .map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
                     if let Some(response) = error.response {
                         let data = response.body.clone().into_data();
                         let data = if let Value::String(s) = &data {
@@ -359,8 +361,19 @@ impl api::Host for Factory {
         )
     }
     fn emit_error(&mut self, message: String) -> Result<(), ExchangeError> {
-        self.base
-            .emit("error", json!({"name":"Error","message":message}))
+        self.base.emit(
+            "error",
+            safe_cex_exchange::js_runtime::value::Js::object(vec![
+                (
+                    "name",
+                    safe_cex_exchange::js_runtime::value::Js::str("Error"),
+                ),
+                (
+                    "message",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                ),
+            ]),
+        )
     }
     fn append_http_failure(
         &mut self,

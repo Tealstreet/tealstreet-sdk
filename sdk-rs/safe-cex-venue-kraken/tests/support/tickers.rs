@@ -96,7 +96,9 @@ fn futures_tickers_live_oracle() {
         let calls = RefCell::new(vec![]);
         let traces = RefCell::new(vec![]);
         let mut read_error = ExchangeError::new("ticker read failure");
-        read_error.metadata.code = Some(json!("READ-TICKERS"));
+        read_error.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::str(
+            "READ-TICKERS",
+        ));
         read_error.metadata.store_subscriber_ids = vec![151, 157];
         let read_pointer = read_error.metadata.as_ref() as *const _;
         let mut read_error = Some(read_error);
@@ -129,7 +131,7 @@ fn futures_tickers_live_oracle() {
             },
             |error| {
                 let same = std::ptr::eq(error.metadata.as_ref(), read_pointer);
-                traces.borrow_mut().push(json!({"name":error.name,"message":error.message,"sameError":same,"code":error.metadata.code}));
+                traces.borrow_mut().push(json!({"name":error.name,"message":error.message,"sameError":same,"code":error.metadata.code.as_ref().map(safe_cex_exchange::js_runtime::value::to_json).transpose().expect("finite fixture error code")}));
                 if case["mode"] == "sync" || case["mode"] == "async" {
                     assert_eq!(
                         error.metadata.store_subscriber_ids,

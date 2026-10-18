@@ -243,6 +243,7 @@ pub(crate) fn call(h: &mut Host, name: &'static str, a: Vec<Js>) -> Result<Js, T
             h.rt.clear_timeout(&arg(&a, 0));
             Ok(Js::Undefined)
         }
+        "log" => parent(h)?.call("log", a),
         "dateNow" => Ok(Js::Number(h.rt.now())),
         "processBook" => {
             ws::process_order_book_update(h, arg(&a, 0), arg(&a, 1))?;

@@ -98,18 +98,19 @@ tealstreet account exchanges
 
 ### HyroTrader trial accounts
 
-HyroTrader trial accounts use Tealstreet's `hyrotrader` exchange adapter,
-but the standalone CLI needs the Hyro simulator REST origin in your shell
+HyroTrader challenge accounts use Tealstreet's `hyrotrader` exchange adapter,
+but the standalone CLI needs the HyroTrader production REST origin in your shell
 environment before it can connect. Without it, connection fails with:
 
 ```text
-HyroTrader simulator REST URL is not configured
+HyroTrader production REST URL is not configured
 ```
 
-Set the simulator origin, then add the account:
+Set the production origin, then add the challenge account with the API key and
+secret HyroTrader provides for that challenge:
 
 ```bash
-export NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL="https://<hyro-simulator-origin>"
+export NEXT_PUBLIC_HYROTRADER_PROD_REST_URL="https://<hyro-production-origin>"
 
 tealstreet account add -n hyro-trial -e hyrotrader -k <KEY> -s <SECRET> --default
 tealstreet interactive --account hyro-trial

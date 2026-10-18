@@ -377,7 +377,7 @@ impl dispatch::TradeHost for Rt {
         unit(self.this.get("parent")?.get("store")?.call_method(
             "updateTicker",
             vec![
-                id.clone(),
+                Js::object(vec![("id", id.clone())]),
                 Js::object(vec![
                     ("id", p.id),
                     ("symbol", p.symbol),

@@ -506,8 +506,7 @@ impl ApiWire for Wire {
                     native.response = to_json(&response).ok();
                 }
                 if let Ok(code) = error.value.get("code")
-                    && !code.is_undefined()
-                    && let Ok(code) = to_json(&code)
+                    && (error.value.has_own("code") || !code.is_undefined())
                 {
                     native.code = Some(code);
                 }

@@ -285,8 +285,8 @@ pub(super) fn approve_nonce(params: &Js) -> Result<Option<BigInt>, Thrown> {
 pub(super) fn approve_integrator(
     params: &Js,
     nonce: Option<BigInt>,
-) -> Result<ApproveIntegratorParams, Thrown> {
-    Ok(ApproveIntegratorParams {
+) -> Result<(ApproveIntegratorParams, Js), Thrown> {
+    let parsed = ApproveIntegratorParams {
         integrator_account_index: big(params, "integratorAccountIndex")?,
         max_perps_taker_fee: number(params, "maxPerpsTakerFee")?,
         max_perps_maker_fee: number(params, "maxPerpsMakerFee")?,
@@ -294,8 +294,9 @@ pub(super) fn approve_integrator(
         max_spot_maker_fee: number(params, "maxSpotMakerFee")?,
         approval_expiry: big(params, "approvalExpiry")?,
         nonce,
-        l1_signature: optional(params, "l1Signature", as_text)?,
-    })
+        l1_signature: None,
+    };
+    Ok((parsed, params.get("l1Signature")?))
 }
 
 pub(super) fn deadline(value: &Js) -> Result<BigInt, Thrown> {
@@ -485,7 +486,7 @@ pub(super) fn update_leverage_tx(tx: &L2UpdateLeverageTxInfo) -> Js {
 }
 
 // ts: L2ApproveIntegratorTxInfo
-pub(super) fn approve_integrator_tx(tx: &L2ApproveIntegratorTxInfo) -> Js {
+pub(super) fn approve_integrator_tx(tx: &L2ApproveIntegratorTxInfo, l1_signature: &Js) -> Js {
     let d = &tx.approve_integrator_details;
     let details = Js::object(vec![
         (
@@ -498,7 +499,7 @@ pub(super) fn approve_integrator_tx(tx: &L2ApproveIntegratorTxInfo) -> Js {
         ("maxSpotMakerFee", Js::Number(d.max_spot_maker_fee)),
         ("approvalExpiry", bigint(&d.approval_expiry)),
         ("expiredAt", opt(d.expired_at.as_ref(), bigint)),
-        ("l1Signature", opt(d.l1_signature.as_deref(), Js::utf16)),
+        ("l1Signature", l1_signature.clone()),
     ]);
     header(
         TransactionKind::ApproveIntegrator,
@@ -537,7 +538,16 @@ pub(super) fn transaction_ref(tx: &TransactionRef) -> Js {
         TransactionRef::CancelOrder(v) => cancel_order_tx(&v.borrow()),
         TransactionRef::Transfer(v) => transfer_tx(&v.borrow()),
         TransactionRef::UpdateLeverage(v) => update_leverage_tx(&v.borrow()),
-        TransactionRef::ApproveIntegrator(v) => approve_integrator_tx(&v.borrow()),
+        TransactionRef::ApproveIntegrator(v) => {
+            let tx = v.borrow();
+            approve_integrator_tx(
+                &tx,
+                &opt(
+                    tx.approve_integrator_details.l1_signature.as_deref(),
+                    Js::utf16,
+                ),
+            )
+        }
     }
 }
 

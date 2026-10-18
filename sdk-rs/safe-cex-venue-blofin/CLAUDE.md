@@ -332,3 +332,29 @@ pong latencies and pushes private orders/fills/positions/account frames into the
 production handlers, asserting Store contents and the complete emitted fill.
 The baseline ping regression fails at latency 0 versus 13 ms; all five scoped
 checks pass after the timestamp forwarding.
+
+Already-gone normal cancellation response IDs use shared ECMAScript String
+coercion before the native Store key lookup, matching TS DefaultStore's object
+keys. This differs from protective cancellation's strict root-ID comparison,
+where numeric123 cannot remove string123's legs. `tests/native_cancel.rs` drives
+public cancel_orders through the real signed REST host and Store for eight
+actual-source cases, including nonstring normal IDs, a falsy-ID refusal and
+numeric/string protective controls. The optional goneIdLookup oracle mode uses
+actual cancelOrders/cancelNormalOrders/cancelAlgoOrders and TS DefaultStore;
+the original53-case orchestration corpus remains unchanged.
+
+Money-path cancellation receipt: native_cancel compiles/fails on master with
+stale string123, then passes all8 source cases after normal-ID coercion. The
+14 existing order_rest tests, native/Wasm all-target strict Clippy, required
+all-features inventories (cancellation6+export-ignore, override7+live-TS-ignore,
+binding25), parity7459/16581 and extraction0 pass after normal master refresh.
+Logs: /tmp/blofin-gone-{native-red,final-native,native-clippy,wasm-clippy,
+inventories,parity,extract}.log. No reviewed fixture or source corpus replaced.
+
+The constructed ticker census in `tests/native_ping_latency.rs` drives 64
+field-independent cases through 192 real public ticker/funding frames. Null,
+strings, NaN-producing values, malformed objects, overflow, signed zero and
+false are checked with distinct good rows and finite Store resets. All native
+Ticker numeric bits match the constructed TS exchange and DefaultStore. The
+shared control runner misroutes the live last-price field and requires compiled
+failure followed by exact-restored success.
