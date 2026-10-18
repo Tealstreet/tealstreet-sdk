@@ -428,3 +428,18 @@ and sixteen compressed fast-context frames; Spot covers eight mids frames.
 Malformed input sits between distinct good rows, with finite Store resets.
 The shared control runner misroutes midPrice independently in both live socket
 bodies and requires compiled native failures followed by exact-restored passes.
+
+
+## Legacy Realm Store hook failures
+
+Exotic lookup and key hooks return Result; property reads, presence checks,
+enumeration, spread, for-in and JSON propagate the original thrown value.
+Callbacks run outside property borrows. Existing Realm objects may retain one
+opaque canonical ExchangeError origin; native escape recovers it before reading
+message/code/response, and property reflection or serialization never copies it.
+The successful legacy DTO snapshot profile remains until the atomic family
+Realm consolidation. Store table enumeration must read canonical map keys without
+projecting unrelated rows; selected lookup projects only its captured row.
+The table_hook_tests target compares 13 real Node operations, checks native cause
+identity/release and reentry, and scripts/realm-table-hook-controls.py proves both
+lookup/key swallowing mutations fail before exact restoration passes.

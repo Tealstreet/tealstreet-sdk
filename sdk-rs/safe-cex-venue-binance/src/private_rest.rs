@@ -17,7 +17,7 @@ use crate::{
     request_weight::{Failure, type_error},
 };
 use safe_cex_types::{OrderStatus, OrderType};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     cell::Cell,
     future::{Future, poll_fn},
@@ -94,84 +94,24 @@ fn endpoint(v: Venue, key: &str) -> &'static str {
 fn empty() -> EventValue {
     EventValue::Array(Default::default())
 }
-// Observation for existing decoded-JSON shape/get-key dependencies, never an
-// output gate or roundtrip. Native graph values remain the returned referents.
-fn json_data(v: &EventValue) -> Option<Value> {
-    match v {
-        EventValue::Undefined => None,
-        EventValue::Null => Some(Value::Null),
-        EventValue::Bool(b) => Some(Value::Bool(*b)),
-        EventValue::Number(n) => Some(json!(n)),
-        EventValue::String(_) => Some(json!(v.text().expect("native UTF-8 projection"))),
-        EventValue::Array(a) => Some(Value::Array(
-            a.borrow()
-                .iter()
-                .map(|v| v.as_ref().and_then(json_data).unwrap_or(Value::Null))
-                .collect(),
-        )),
-        EventValue::Object(_) => Some(Value::Object(
-            v.spread()
-                .into_iter()
-                .filter_map(|(k, v)| json_data(&v).map(|v| (k, v)))
-                .collect(),
-        )),
-        EventValue::Builtin(reference) => {
-            if reference.is_callable() {
-                None
-            } else {
-                Some(Value::Object(
-                    reference
-                        .own_fields()
-                        .into_iter()
-                        .filter_map(|(key, value)| {
-                            json_data(&EventValue::from_prototype(value.into()))
-                                .map(|value| (key, value))
-                        })
-                        .collect(),
-                ))
-            }
-        }
-        _ => None,
-    }
-}
 pub(crate) fn keyed(o: &EventValue, key: &str) -> Result<EventValue, Failure> {
     if o.nullish() {
         return Ok(EventValue::Undefined);
     }
-    if matches!(o, EventValue::Object(_)) {
-        for name in [
-            key.to_owned(),
-            safe_cex_num::lodash_snake_case(key),
-            safe_cex_num::lodash_camel_case(key),
-        ] {
-            if o.has_own(&name) {
-                return o.read(&name);
-            }
+    for name in [
+        key.to_owned(),
+        safe_cex_num::lodash_snake_case(key),
+        safe_cex_num::lodash_camel_case(key),
+    ] {
+        if safe_cex_exchange::js_runtime::library::in_operator(o, &name).map_err(Rc::from)? {
+            return o.read(&name);
         }
-        return Ok(EventValue::Undefined);
     }
-    let data = json_data(o);
-    safe_cex_num::get_key::v_unknown(data.as_ref(), key).map_err(|e| type_error(e.message))?;
     Ok(EventValue::Undefined)
 }
 pub(crate) fn pm_rows(v: EventValue, ep: &str) -> Result<EventValue, Failure> {
-    // Shape validation observes native kind. JSON projection maps nonfinite
-    // Numbers to null, which would report the wrong type for this boundary.
-    if matches!(v, EventValue::Number(_)) {
-        return Err(Rc::new(safe_cex_exchange::runtime::ExchangeError::new(
-            format!("Binance PM {ep} response malformed: expected array, received number"),
-        )));
-    }
-    if matches!(v, EventValue::Array(_)) {
-        return Ok(v);
-    }
-    let data = json_data(&v);
-    crate::response_shape::require_binance_pm_array_response(ep, data.as_ref()).map_err(|e| {
-        let mut out = safe_cex_exchange::runtime::ExchangeError::new(e.message);
-        out.name = e.name.into();
-        Rc::new(out)
-    })?;
-    unreachable!("nonarray validator")
+    crate::response_shape::native_array_guard("Binance PM", ep, &v).map_err(Rc::from)?;
+    Ok(v)
 }
 pub(crate) fn map(
     v: EventValue,
@@ -462,7 +402,11 @@ pub(crate) fn error_message(e: &Failure) -> EventValue {
         .cloned()
         .map(EventValue::from_json)
         .unwrap_or(EventValue::Undefined);
-    fallback(venue, string(&e.message))
+    let message = safe_cex_exchange::js_runtime::value::Thrown::from((**e).clone())
+        .value
+        .get("message")
+        .expect("fresh canonical error message");
+    fallback(venue, message)
 }
 fn console(b: &mut impl SnapshotBindings, args: Vec<SnapshotArgument>) -> Result<(), Failure> {
     b.capture(SnapshotMethod::ConsoleError)?(args)
@@ -497,18 +441,16 @@ pub async fn fetch_futures_orders(
                 ],
             )?;
             let call = b.capture(SnapshotMethod::Log)?;
-            let data = json_data(&a);
-            let text = if let Some(data) = data {
-                safe_cex_num::js_json_stringify(&safe_cex_num::JsJsonValue::from(data))
-                    .map_err(|e| type_error(e.message))?
-                    .expect("defined JSON")
-            } else {
-                "undefined".into()
-            };
+            let text = safe_cex_exchange::js_runtime::globals::stringify_json(&a)
+                .map_err(Rc::from)?
+                .map(|units| EventValue::utf16(&units))
+                .unwrap_or_else(|| string("undefined"));
             call(vec![
-                arg(string(format!(
-                    "fetchOrders received non-array response: {text}"
-                ))),
+                arg(safe_cex_exchange::js_runtime::ops::add(
+                    &string("fetchOrders received non-array response: "),
+                    &text,
+                )
+                .map_err(Rc::from)?),
                 arg(string("error")),
             ])?;
         }

@@ -1,11 +1,17 @@
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
 #[cfg(feature = "native")]
+#[path = "support/delegated_native_routes.rs"]
+mod delegated_native_routes;
+#[cfg(feature = "native")]
 #[path = "support/lifecycle_aliases.rs"]
 mod lifecycle_aliases;
 #[cfg(feature = "native")]
 #[path = "support/private_order_aliases.rs"]
 mod private_order_aliases;
+#[cfg(feature = "native")]
+#[path = "support/private_rest_native.rs"]
+mod private_rest_native;
 #[cfg(feature = "native")]
 #[path = "support/public_frame_guard.rs"]
 mod public_frame_guard;
@@ -5118,6 +5124,16 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
             .public
             .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"-0","a":"123.25"}"#)
             .unwrap();
+        assert_eq!(
+            row.borrow().bid.to_bits(),
+            (-0.0_f64).to_bits(),
+            "constructor subscription updates captured bid before dictionary reread {venue:?}"
+        );
+        assert_eq!(
+            row.borrow().ask.to_bits(),
+            123.25_f64.to_bits(),
+            "constructor subscription updates captured ask before dictionary reread {venue:?}"
+        );
         let patched: Dictionary = capture.dictionary();
         assert!(
             Rc::ptr_eq(&initial, &patched),
@@ -5195,6 +5211,10 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
 #[cfg(feature = "native")]
 #[path = "support/snapshot_aliases.rs"]
 mod snapshot_aliases;
+
+#[cfg(feature = "native")]
+#[path = "support/public_dispatch_contracts.rs"]
+mod public_dispatch_contracts;
 
 #[test]
 #[cfg(feature = "native")]
@@ -5622,6 +5642,10 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
         owner.dispose().unwrap();
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "support/live_flag_binding.rs"]
+mod live_flag_binding;
 
 #[test]
 #[cfg(feature = "native")]

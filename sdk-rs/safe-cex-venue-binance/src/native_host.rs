@@ -1454,7 +1454,13 @@ impl ListenerHost for NativeListenerOperations {
         sync: SyncState,
         previous: bool,
     ) -> Result<BinanceOrderBookApplyResult, Failure> {
-        let Value::Object(map) = to_json(&data)? else {
+        // Native depth input still has JSON.parse Number semantics here;
+        // JSON.stringify would change infinities to null before sequence checks.
+        let Value::Object(map) = safe_cex_exchange::js_runtime::value::to_retained_input(&data)
+            .map_err(|error| exchange_failure(error.to_exchange_error()))?
+            .into_value()
+            .map_err(|error| failure(error.to_string()))?
+        else {
             return Err(failure("depth update must be an object"));
         };
         apply_binance_depth_update(
