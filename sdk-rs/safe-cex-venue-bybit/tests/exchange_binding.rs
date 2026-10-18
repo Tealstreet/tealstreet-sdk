@@ -1788,3 +1788,28 @@ fn margin_control_switch_publishes_native_position_numbers() {
 fn position_control_switch_publishes_native_position_numbers() {
     control_switch_keeps_native_position_numbers(false);
 }
+
+#[test]
+fn retained_info_position_selection_keeps_nonempty_utf16_price() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/retained-position-source.cjs"))
+        .output().unwrap();
+    assert!(source.status.success(), "{}", String::from_utf8_lossy(&source.stderr));
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    let h = harness(options(), |wire| {
+        let first = json!({"symbol":"BTCUSDT","side":"Buy","size":"2","avgPrice":" ","positionValue":"0","leverage":"5","unrealisedPnl":"0","curRealisedPnl":"0","liqPrice":"0","positionIdx":0,"positionIM":"0","updatedTime":"1700000000000","seq":7,"positionStatus":"Normal"});
+        let mut second = first.clone();
+        second["avgPrice"] = json!("@@PRICE@@");
+        let body = json!({"retCode":0,"retMsg":"OK","result":{"list":[first,second],"nextPageCursor":""},"time":1})
+            .to_string().replace("\"@@PRICE@@\"", "\"\\ud800\"");
+        wire.ok("GET", "/v5/position/list", json!({"list":[]}));
+        wire.encoded_routes.borrow_mut().push(("/v5/position/list".into(),body.into_bytes()));
+    });
+    let positions = h.drive(h.venue().fetch_positions(None)).expect("native dedupe admits retained UTF16 metadata");
+    assert_eq!(positions.len(),2,"one selected row per settle coin");
+    for position in positions {
+        let info = position.info.as_ref().unwrap();
+        let units = info.get("avgPrice").unwrap().as_text().unwrap();
+        assert_eq!(serde_json::json!(units),expected["units"]);
+    }
+}

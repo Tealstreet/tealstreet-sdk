@@ -3882,7 +3882,7 @@
         ],
         "output": {
           "resolved_path": {
-            "path": "serde_json::value::Value",
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
             "args": null
           }
         },

@@ -27741,6 +27741,485 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "decode_native",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "present_fields",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "T"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::error::Error",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the shared native reader at the fixed Balance model and observe retained info variants, UTF16 keys/values, number bits and own undefined before JSON. Production Store wrapper witnesses independently cover the same path.",
+        "call": "{ fn build(v:&serde_json::Value)->crate::retained_json::RetainedJsonInput{use crate::retained_json::RetainedJsonInput as I;match v[\"kind\"].as_str().unwrap(){\"undefined\"=>I::Undefined,\"null\"=>I::Null,\"bool\"=>I::Bool(v[\"value\"].as_bool().unwrap()),\"number\"=>I::Float(f64::from_bits(u64::from_str_radix(v[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>I::Text(v[\"units\"].as_array().unwrap().iter().map(|n|n.as_u64().unwrap() as u16).collect()),\"array\"=>I::Array(v[\"values\"].as_array().unwrap().iter().map(build).collect()),\"object\"=>I::Object(v[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|n|n.as_u64().unwrap()as u16).collect(),build(&e[\"value\"]))).collect()),_=>panic!(\"authored native input\")}} fn observe(v:&crate::retained_json::RetainedJsonInput)->serde_json::Value{use crate::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),I::Null=>serde_json::json!({\"kind\":\"null\"}),I::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),I::Float(value)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:x}\",value.to_bits())}),I::Lexeme(_)=>panic!(\"native values retain bits\"),I::Text(units)=>serde_json::json!({\"kind\":\"text\",\"units\":units}),I::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.iter().map(observe).collect::<Vec<_>>()}),I::Object(entries)=>serde_json::json!({\"kind\":\"object\",\"entries\":entries.iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()})}} let info=build($value);let record=$type::Object(vec![(\"used\".encode_utf16().collect(),$type::Float(0.0)),(\"free\".encode_utf16().collect(),$type::Float(1.0)),(\"total\".encode_utf16().collect(),$type::Float(1.0)),(\"upnl\".encode_utf16().collect(),$type::Float(0.0)),(\"info\".encode_utf16().collect(),info)]);let native:crate::Balance=record.decode_native(false).expect(\"native retained Balance\");{let value=observe(native.info.as_ref().expect(\"own info\"));serde_json::json!({\"ok\":true,\"kind\":value[\"kind\"],\"value\":value})} }",
+        "cases": [
+          {
+            "input": {
+              "kind": "undefined"
+            },
+            "output": {
+              "ok": true,
+              "kind": "undefined",
+              "value": {
+                "kind": "undefined"
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "null"
+            },
+            "output": {
+              "ok": true,
+              "kind": "null",
+              "value": {
+                "kind": "null"
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            "output": {
+              "ok": true,
+              "kind": "number",
+              "value": {
+                "kind": "number",
+                "bits": "7ff8000000000000"
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "number",
+              "bits": "7ff0000000000000"
+            },
+            "output": {
+              "ok": true,
+              "kind": "number",
+              "value": {
+                "kind": "number",
+                "bits": "7ff0000000000000"
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "number",
+              "bits": "fff0000000000000"
+            },
+            "output": {
+              "ok": true,
+              "kind": "number",
+              "value": {
+                "kind": "number",
+                "bits": "fff0000000000000"
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            "output": {
+              "ok": true,
+              "kind": "number",
+              "value": {
+                "kind": "number",
+                "bits": "8000000000000000"
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "number",
+              "bits": "0"
+            },
+            "output": {
+              "ok": true,
+              "kind": "number",
+              "value": {
+                "kind": "number",
+                "bits": "0"
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "bool",
+              "value": false
+            },
+            "output": {
+              "ok": true,
+              "kind": "bool",
+              "value": {
+                "kind": "bool",
+                "value": false
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "text",
+              "units": [
+                55296
+              ]
+            },
+            "output": {
+              "ok": true,
+              "kind": "text",
+              "value": {
+                "kind": "text",
+                "units": [
+                  55296
+                ]
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "array",
+              "values": [
+                {
+                  "kind": "undefined"
+                },
+                {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                },
+                {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                {
+                  "kind": "text",
+                  "units": [
+                    57343
+                  ]
+                }
+              ]
+            },
+            "output": {
+              "ok": true,
+              "kind": "array",
+              "value": {
+                "kind": "array",
+                "values": [
+                  {
+                    "kind": "undefined"
+                  },
+                  {
+                    "kind": "number",
+                    "bits": "7ff8000000000000"
+                  },
+                  {
+                    "kind": "number",
+                    "bits": "8000000000000000"
+                  },
+                  {
+                    "kind": "text",
+                    "units": [
+                      57343
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "object",
+              "entries": [
+                {
+                  "key": [
+                    110,
+                    97,
+                    110
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "7ff8000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    105,
+                    110,
+                    102,
+                    105,
+                    110,
+                    105,
+                    116,
+                    121
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "7ff0000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    122,
+                    101,
+                    114,
+                    111
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "8000000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    111,
+                    119,
+                    110,
+                    85,
+                    110,
+                    100,
+                    101,
+                    102,
+                    105,
+                    110,
+                    101,
+                    100
+                  ],
+                  "value": {
+                    "kind": "undefined"
+                  }
+                },
+                {
+                  "key": [
+                    57343
+                  ],
+                  "value": {
+                    "kind": "text",
+                    "units": [
+                      55296
+                    ]
+                  }
+                },
+                {
+                  "key": [
+                    36,
+                    115,
+                    101,
+                    114,
+                    100,
+                    101,
+                    95,
+                    106,
+                    115,
+                    111,
+                    110,
+                    58,
+                    58,
+                    112,
+                    114,
+                    105,
+                    118,
+                    97,
+                    116,
+                    101,
+                    58,
+                    58,
+                    78,
+                    117,
+                    109,
+                    98,
+                    101,
+                    114
+                  ],
+                  "value": {
+                    "kind": "text",
+                    "units": [
+                      49,
+                      55
+                    ]
+                  }
+                }
+              ]
+            },
+            "output": {
+              "ok": true,
+              "kind": "object",
+              "value": {
+                "kind": "object",
+                "entries": [
+                  {
+                    "key": [
+                      110,
+                      97,
+                      110
+                    ],
+                    "value": {
+                      "kind": "number",
+                      "bits": "7ff8000000000000"
+                    }
+                  },
+                  {
+                    "key": [
+                      105,
+                      110,
+                      102,
+                      105,
+                      110,
+                      105,
+                      116,
+                      121
+                    ],
+                    "value": {
+                      "kind": "number",
+                      "bits": "7ff0000000000000"
+                    }
+                  },
+                  {
+                    "key": [
+                      122,
+                      101,
+                      114,
+                      111
+                    ],
+                    "value": {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    }
+                  },
+                  {
+                    "key": [
+                      111,
+                      119,
+                      110,
+                      85,
+                      110,
+                      100,
+                      101,
+                      102,
+                      105,
+                      110,
+                      101,
+                      100
+                    ],
+                    "value": {
+                      "kind": "undefined"
+                    }
+                  },
+                  {
+                    "key": [
+                      57343
+                    ],
+                    "value": {
+                      "kind": "text",
+                      "units": [
+                        55296
+                      ]
+                    }
+                  },
+                  {
+                    "key": [
+                      36,
+                      115,
+                      101,
+                      114,
+                      100,
+                      101,
+                      95,
+                      106,
+                      115,
+                      111,
+                      110,
+                      58,
+                      58,
+                      112,
+                      114,
+                      105,
+                      118,
+                      97,
+                      116,
+                      101,
+                      58,
+                      58,
+                      78,
+                      117,
+                      109,
+                      98,
+                      101,
+                      114
+                    ],
+                    "value": {
+                      "kind": "text",
+                      "units": [
+                        49,
+                        55
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "input": {
+              "kind": "object",
+              "entries": []
+            },
+            "output": {
+              "ok": true,
+              "kind": "object",
+              "value": {
+                "kind": "object",
+                "entries": []
+              }
+            }
+          }
+        ],
+        "nativeFields": [
+          "kind",
+          "value"
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "json_stringify",
           "signature": {
             "inputs": [
@@ -47726,7 +48205,571 @@
           }
         ]
       }
-    ]
+    ],
+    "nativeObservation": {
+      "call": "{ fn build(v:&serde_json::Value)->crate::retained_json::RetainedJsonInput{use crate::retained_json::RetainedJsonInput as I;match v[\"kind\"].as_str().unwrap(){\"undefined\"=>I::Undefined,\"null\"=>I::Null,\"bool\"=>I::Bool(v[\"value\"].as_bool().unwrap()),\"number\"=>I::Float(f64::from_bits(u64::from_str_radix(v[\"bits\"].as_str().unwrap(),16).unwrap())),\"text\"=>I::Text(v[\"units\"].as_array().unwrap().iter().map(|n|n.as_u64().unwrap() as u16).collect()),\"array\"=>I::Array(v[\"values\"].as_array().unwrap().iter().map(build).collect()),\"object\"=>I::Object(v[\"entries\"].as_array().unwrap().iter().map(|e|(e[\"key\"].as_array().unwrap().iter().map(|n|n.as_u64().unwrap()as u16).collect(),build(&e[\"value\"]))).collect()),_=>panic!(\"authored native input\")}} fn observe(v:&crate::retained_json::RetainedJsonInput)->serde_json::Value{use crate::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),I::Null=>serde_json::json!({\"kind\":\"null\"}),I::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),I::Float(value)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:x}\",value.to_bits())}),I::Lexeme(_)=>panic!(\"native values retain bits\"),I::Text(units)=>serde_json::json!({\"kind\":\"text\",\"units\":units}),I::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.iter().map(observe).collect::<Vec<_>>()}),I::Object(entries)=>serde_json::json!({\"kind\":\"object\",\"entries\":entries.iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()})}} let mut record=crate::retained_json::RetainedJsonInput::from($value[\"record\"].clone());if let Some(info)=$value.get(\"info\"){record.as_object_mut().unwrap().push((\"info\".encode_utf16().collect(),build(info)));}match record.decode_native::<$type>(false){Ok($type::Declared(balance))=>serde_json::json!({\"ok\":true,\"kind\":\"declared\",\"usedBits\":format!(\"{:x}\",balance.used.to_bits()),\"info\":balance.info.as_ref().map(observe)}),Ok($type::AvailableLocked{available,locked})=>serde_json::json!({\"ok\":true,\"kind\":\"available-locked\",\"info\":null,\"availableBits\":format!(\"{:x}\",available.to_bits()),\"lockedBits\":format!(\"{:x}\",locked.to_bits())}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "nativeFields": [
+        "kind",
+        "info"
+      ],
+      "cases": [
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "undefined"
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "undefined"
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "null"
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "null"
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "number",
+              "bits": "7ff8000000000000"
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "number",
+              "bits": "7ff0000000000000"
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "number",
+              "bits": "7ff0000000000000"
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "number",
+              "bits": "fff0000000000000"
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "number",
+              "bits": "fff0000000000000"
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "number",
+              "bits": "8000000000000000"
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "number",
+              "bits": "0"
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "number",
+              "bits": "0"
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "bool",
+              "value": false
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "bool",
+              "value": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "text",
+              "units": [
+                55296
+              ]
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "text",
+              "units": [
+                55296
+              ]
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "array",
+              "values": [
+                {
+                  "kind": "undefined"
+                },
+                {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                },
+                {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                {
+                  "kind": "text",
+                  "units": [
+                    57343
+                  ]
+                }
+              ]
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "array",
+              "values": [
+                {
+                  "kind": "undefined"
+                },
+                {
+                  "kind": "number",
+                  "bits": "7ff8000000000000"
+                },
+                {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                {
+                  "kind": "text",
+                  "units": [
+                    57343
+                  ]
+                }
+              ]
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "object",
+              "entries": [
+                {
+                  "key": [
+                    110,
+                    97,
+                    110
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "7ff8000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    105,
+                    110,
+                    102,
+                    105,
+                    110,
+                    105,
+                    116,
+                    121
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "7ff0000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    122,
+                    101,
+                    114,
+                    111
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "8000000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    111,
+                    119,
+                    110,
+                    85,
+                    110,
+                    100,
+                    101,
+                    102,
+                    105,
+                    110,
+                    101,
+                    100
+                  ],
+                  "value": {
+                    "kind": "undefined"
+                  }
+                },
+                {
+                  "key": [
+                    57343
+                  ],
+                  "value": {
+                    "kind": "text",
+                    "units": [
+                      55296
+                    ]
+                  }
+                },
+                {
+                  "key": [
+                    36,
+                    115,
+                    101,
+                    114,
+                    100,
+                    101,
+                    95,
+                    106,
+                    115,
+                    111,
+                    110,
+                    58,
+                    58,
+                    112,
+                    114,
+                    105,
+                    118,
+                    97,
+                    116,
+                    101,
+                    58,
+                    58,
+                    78,
+                    117,
+                    109,
+                    98,
+                    101,
+                    114
+                  ],
+                  "value": {
+                    "kind": "text",
+                    "units": [
+                      49,
+                      55
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "object",
+              "entries": [
+                {
+                  "key": [
+                    110,
+                    97,
+                    110
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "7ff8000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    105,
+                    110,
+                    102,
+                    105,
+                    110,
+                    105,
+                    116,
+                    121
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "7ff0000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    122,
+                    101,
+                    114,
+                    111
+                  ],
+                  "value": {
+                    "kind": "number",
+                    "bits": "8000000000000000"
+                  }
+                },
+                {
+                  "key": [
+                    111,
+                    119,
+                    110,
+                    85,
+                    110,
+                    100,
+                    101,
+                    102,
+                    105,
+                    110,
+                    101,
+                    100
+                  ],
+                  "value": {
+                    "kind": "undefined"
+                  }
+                },
+                {
+                  "key": [
+                    57343
+                  ],
+                  "value": {
+                    "kind": "text",
+                    "units": [
+                      55296
+                    ]
+                  }
+                },
+                {
+                  "key": [
+                    36,
+                    115,
+                    101,
+                    114,
+                    100,
+                    101,
+                    95,
+                    106,
+                    115,
+                    111,
+                    110,
+                    58,
+                    58,
+                    112,
+                    114,
+                    105,
+                    118,
+                    97,
+                    116,
+                    101,
+                    58,
+                    58,
+                    78,
+                    117,
+                    109,
+                    98,
+                    101,
+                    114
+                  ],
+                  "value": {
+                    "kind": "text",
+                    "units": [
+                      49,
+                      55
+                    ]
+                  }
+                }
+              ]
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "used": 0,
+              "free": 1,
+              "total": 1,
+              "upnl": 0
+            },
+            "info": {
+              "kind": "object",
+              "entries": []
+            }
+          },
+          "output": {
+            "kind": "declared",
+            "usedBits": "0",
+            "info": {
+              "kind": "object",
+              "entries": []
+            },
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "available": 1,
+              "locked": 2
+            }
+          },
+          "output": {
+            "kind": "available-locked",
+            "availableBits": "3ff0000000000000",
+            "lockedBits": "4000000000000000",
+            "ok": true,
+            "info": null
+          }
+        },
+        {
+          "input": {
+            "record": {
+              "available": 1
+            }
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   },
   "safe_cex_types::ExchangeOptionsPolymarket": {
     "shape": "map",
@@ -48086,8 +49129,144 @@
   },
   "safe_cex_types::store_model::strict_codecs::DisplayedPositionVisitor": {
     "shape": "observed",
-    "evidence": "Concrete streaming map visitor constructs the private DisplayedPosition companion without Serde Content. Direct native raw-object witnesses inspect Position and display fields plus decimal/signed-zero bits; array refusal remains explicit. Supplied visit_map only, no claim about arbitrary MapAccess implementations. No owner serialization.",
+    "evidence": "Concrete streaming map visitor constructs the private DisplayedPosition companion without Serde Content. Direct native raw-object witnesses inspect Position and display fields plus decimal/signed-zero bits; array refusal remains explicit. Supplied visit_map only, no claim about arbitrary MapAccess implementations. No owner serialization. The newtype hint executes the same strict map decoder and retains own undefined info through the native bridge.",
     "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_newtype_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "deserializer",
+                {
+                  "generic": "D"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "D"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "D",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::Deserializer",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the record-hint forwarding visitor on the same native field corpus; the inner map visitor retains strict object admission.",
+        "call": "{ let mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw displayed-position visitor witness\")); match serde::de::Visitor::visit_newtype_struct($type,&mut input) { Ok(v) => serde_json::json!({\"ok\":true,\"entryBits\":v.position.entry_price.to_bits().to_string(),\"notionalBits\":v.position.notional.to_bits().to_string(),\"pnlBits\":v.position.unrealized_pnl.to_bits().to_string(),\"contractsBits\":v.position.contracts.to_bits().to_string(),\"oneBits\":v.one_min_upnl.map(|n|n.to_bits().to_string()),\"account\":v.account}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+        "cases": [
+          {
+            "input": "{\"id\":\"A\",\"symbol\":\"P\",\"side\":\"long\",\"entryPrice\":1.25,\"notional\":2.5,\"leverage\":3.75,\"unrealizedPnl\":-4.125,\"contracts\":6.5,\"liquidationPrice\":7.75,\"account\":\"acct-A\",\"oneMinUpnl\":10.25}",
+            "output": {
+              "ok": true,
+              "entryBits": "4608308318706860032",
+              "notionalBits": "4612811918334230528",
+              "pnlBits": "13839702392397889536",
+              "contractsBits": "4619004367821864960",
+              "oneBits": "4621959855077326848",
+              "account": "acct-A"
+            }
+          },
+          {
+            "input": "{\"id\":\"B\",\"symbol\":\"Q\",\"side\":\"short\",\"entryPrice\":-0,\"notional\":1,\"leverage\":2,\"unrealizedPnl\":-0,\"contracts\":-0,\"liquidationPrice\":3,\"account\":\"acct-B\",\"oneMinUpnl\":-0}",
+            "output": {
+              "ok": true,
+              "entryBits": "9223372036854775808",
+              "notionalBits": "4607182418800017408",
+              "pnlBits": "9223372036854775808",
+              "contractsBits": "9223372036854775808",
+              "oneBits": "9223372036854775808",
+              "account": "acct-B"
+            }
+          },
+          {
+            "input": "[]",
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      },
       {
         "api": {
           "kind": "trait",
@@ -48223,39 +49402,6 @@
             }
           }
         ]
-      }
-    ],
-    "call": "{ let mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw displayed-position visitor witness\")); match serde::Deserializer::deserialize_map(&mut input,$type) { Ok(v) => serde_json::json!({\"ok\":true,\"entryBits\":v.position.entry_price.to_bits().to_string(),\"notionalBits\":v.position.notional.to_bits().to_string(),\"pnlBits\":v.position.unrealized_pnl.to_bits().to_string(),\"contractsBits\":v.position.contracts.to_bits().to_string(),\"oneBits\":v.one_min_upnl.map(|n|n.to_bits().to_string()),\"account\":v.account}), Err(_) => serde_json::json!({\"ok\":false}) } }",
-    "cases": [
-      {
-        "input": "{\"id\":\"A\",\"symbol\":\"P\",\"side\":\"long\",\"entryPrice\":1.25,\"notional\":2.5,\"leverage\":3.75,\"unrealizedPnl\":-4.125,\"contracts\":6.5,\"liquidationPrice\":7.75,\"account\":\"acct-A\",\"oneMinUpnl\":10.25}",
-        "output": {
-          "ok": true,
-          "entryBits": "4608308318706860032",
-          "notionalBits": "4612811918334230528",
-          "pnlBits": "13839702392397889536",
-          "contractsBits": "4619004367821864960",
-          "oneBits": "4621959855077326848",
-          "account": "acct-A"
-        }
-      },
-      {
-        "input": "{\"id\":\"B\",\"symbol\":\"Q\",\"side\":\"short\",\"entryPrice\":-0,\"notional\":1,\"leverage\":2,\"unrealizedPnl\":-0,\"contracts\":-0,\"liquidationPrice\":3,\"account\":\"acct-B\",\"oneMinUpnl\":-0}",
-        "output": {
-          "ok": true,
-          "entryBits": "9223372036854775808",
-          "notionalBits": "4607182418800017408",
-          "pnlBits": "9223372036854775808",
-          "contractsBits": "9223372036854775808",
-          "oneBits": "9223372036854775808",
-          "account": "acct-B"
-        }
-      },
-      {
-        "input": "[]",
-        "output": {
-          "ok": false
-        }
       }
     ]
   },
@@ -53069,5 +54215,2745 @@
     "category": "non-decoder",
     "evidence": "Single canonical retained JSON writer moved unchanged below Num; actual Node writer corpus verifies numeric spelling, key order and every UTF16 unit.",
     "reason": "Outbound-only rendering of an already captured node or native scalar into a mutable output string. It neither admits nor decodes input data."
+  },
+  "safe_cex_types::retained_json::native::NativeInput": {
+    "shape": "observed",
+    "evidence": "Existing production native Serde reader moved below Num and reused by the JS bridge and nested currency models. Preserve every prior native visitor witness and exact compiler API; constructor now carries explicit record presence mode. Actual Store source cases additionally prove opaque UTF16, nonfinite numbers, own undefined and wrapper shape guards.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::IntoDeserializer",
+          "name": "into_deserializer",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Returns the already captured native deserializer unchanged; no raw input argument."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_newtype_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::error::Error",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::Visitor",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the real native newtype branch with a bool visitor and fixed type-name metadata; directly observes both native bool results. No claim for other visitors or names.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool newtype\")}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_newtype_struct(native,\"AcceptedBool\",Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_enum",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "variants",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": "'static",
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::error::Error",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::Visitor",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the actual string enum branch with fixed Choice name/variants metadata and a native unit-variant visitor; observes Left/Right labels plus non-enum refusal. Other enum representations/visitors remain outside this finite corpus.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=String;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native enum\")}fn visit_enum<A:serde::de::EnumAccess<'de>>(self,a:A)->Result<String,A::Error>{let (name,variant)=a.variant::<String>()?;serde::de::VariantAccess::unit_variant(variant)?;Ok(name)}}let input=if let Some(text)=$value.as_str(){super::Input::Text(text.encode_utf16().collect())}else{super::Input::Bool(true)};match serde::Deserializer::deserialize_enum($type(input,super::NativeMode::Normal),\"Choice\",&[\"Left\",\"Right\"],Probe){Ok(variant)=>serde_json::json!({\"ok\":true,\"variant\":variant}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": "Left",
+            "output": {
+              "ok": true,
+              "variant": "Left"
+            }
+          },
+          {
+            "input": "Right",
+            "output": {
+              "ok": true,
+              "variant": "Right"
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_bool",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_bool(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_f32",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_f32(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_f64",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_f64(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_char",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_char(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_str",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_str(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_string",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_string(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_bytes",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_bytes(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_byte_buf",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_byte_buf(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_unit",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_unit(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_unit_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_unit_struct(native,\"AcceptedBool\",Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_seq",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_seq(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_tuple",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "len",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_tuple(native,1,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_tuple_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "len",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_tuple_struct(native,\"AcceptedBool\",1,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_map(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "fields",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": "'static",
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_struct(native,\"AcceptedBool\",&[\"value\"],Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_identifier",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_identifier(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_ignored_any",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_ignored_any(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          }
+        ]
+      }
+    ]
   }
 }
