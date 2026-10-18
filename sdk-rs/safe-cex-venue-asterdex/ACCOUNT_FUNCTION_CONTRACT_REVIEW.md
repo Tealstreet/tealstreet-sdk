@@ -68,3 +68,9 @@ SAFE_CEX_TYPESCRIPT_PATH=/absolute/path/to/typescript \
 `--preflight` checks source expectations and fresh compiler classification only;
 it does not execute native probes. This selected cohort does not claim whole-crate,
 local-helper, alias, feature or WASM coverage.
+
+The measured default/native replay passes all eleven owners and 128 observations,
+with zero classification-only receipts, after all 68 actual-source expectations
+pass. The grouped real-body faults compile and fail all eleven owners by name.
+Exact restoration of the four production files returns every native owner to PASS;
+no production change is retained.
