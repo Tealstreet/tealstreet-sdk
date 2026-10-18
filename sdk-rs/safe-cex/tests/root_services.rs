@@ -352,8 +352,8 @@ fn option_and_inverse_toggles_reach_constructors_with_source_metadata_and_overri
     let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         rows.len(),
-        1728,
-        "48 venues x 3 toggles x 3 account states x 4 override states"
+        1764,
+        "49 venues x 3 toggles x 3 account states x 4 override states"
     );
     let constructor: ExchangeConstructor<Fixture> = Rc::new(|name, options, store| {
         Ok(Fixture {
@@ -378,7 +378,7 @@ fn option_and_inverse_toggles_reach_constructors_with_source_metadata_and_overri
         VirtualClock::default(),
         TransportRegistry::default(),
     );
-    assert_eq!(factory.get_available_exchanges().len(), 48);
+    assert_eq!(factory.get_available_exchanges().len(), 49);
     let registry = TransportRegistry::default();
     let warnings = std::cell::RefCell::new(Vec::<String>::new());
     let warn = |message: &str| warnings.borrow_mut().push(message.to_owned());

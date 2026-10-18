@@ -18,6 +18,7 @@ pub type Str = Rc<[u16]>;
 pub type NativeFn = Rc<dyn Fn(Js, Vec<Js>) -> Result<Js, Thrown>>;
 pub type Getter = Rc<dyn Fn(&Js) -> Result<Js, Thrown>>;
 pub type Setter = Rc<dyn Fn(&Js, Js) -> Result<(), Thrown>>;
+pub type WriteObserver = Rc<dyn Fn(&Js, &[u16], &Js) -> Result<(), Thrown>>;
 
 /// The `i`th call argument, `undefined` when absent.
 pub fn arg(args: &[Js], i: usize) -> Js {
@@ -54,6 +55,7 @@ fn same_optional_value(left: &Option<Js>, right: &Option<Js>) -> bool {
 }
 
 pub struct ObjectData {
+    write_observer: RefCell<Option<WriteObserver>>,
     resource: Option<Rc<dyn Any>>,
     extensible: Cell<bool>,
     pub class: &'static str,
@@ -435,6 +437,7 @@ impl Js {
         resource: Option<Rc<dyn Any>>,
     ) -> Js {
         Js::Object(Rc::new(ObjectData {
+            write_observer: RefCell::new(None),
             resource,
             extensible: Cell::new(true),
             class,
@@ -1020,7 +1023,28 @@ impl Js {
     pub fn set(&self, key: &str, value: Js) -> Result<(), Thrown> {
         self.set_key(&utf16(key), value)
     }
+    pub fn set_write_observer(&self, observer: Option<WriteObserver>) -> Result<(), Thrown> {
+        let Js::Object(object) = self else {
+            return Err(Thrown::type_error(
+                "Write observers require an ordinary object",
+            ));
+        };
+        let previous = object.write_observer.replace(observer);
+        drop(previous);
+        Ok(())
+    }
     pub fn set_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
+        self.set_property(key, value.clone())?;
+        let observer = match self {
+            Js::Object(object) => object.write_observer.borrow().clone(),
+            _ => None,
+        };
+        if let Some(observer) = observer {
+            observer(self, key, &value)?;
+        }
+        Ok(())
+    }
+    fn set_property(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
         if let Js::Builtin(reference) = self {
             let key = String::from_utf16(key).map_err(|_| {
                 Thrown::type_error("lone UTF-16 surrogate at an intrinsic boundary")

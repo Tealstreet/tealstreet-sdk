@@ -61,10 +61,10 @@ note = "CHOSEN: native_binance selects the actual source module ./binance/binanc
 [[symbol]]
 ts = "exchangeRegistry.binanceinverse"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-registry/src/loaders.rs::native_binanceinverse", "safe-cex-registry/src/rust_venues.rs::binanceinverse_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::binanceinverse" ]
+status = "divergent"
+note = "CHOSEN: selects source ./binance/binanceinverse.exchange and BinanceInverseExchange through the existing module-host capability and caller-owned continuation profile at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Actual native Rust construction is separately bound in rust_venues.rs and native_host.rs; native_host_binanceinverse proves registry construction, real signed HTTP and disposal. Rust mapping: safe-cex-registry/src/loaders.rs::native_binanceinverse. Split executable native construction into safe-cex-registry/src/rust_venues.rs::binanceinverse_constructor and the required host capability safe-cex-registry/src/rust_venues.rs::RustVenueHost::binanceinverse . The first creates the actual family module BinanceInverseExchange using the supplied name/options/Store; the second supplies runtime/HTTP/gateway dependencies. These are the existing explicit Rust-construction profile, never a fallback from a failed module load. The real registry/HTTP HMAC witness and compiled absent-constructor control cover this route."
 
 [[symbol]]
 ts = "exchangeRegistry.binancepm"

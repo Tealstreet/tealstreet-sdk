@@ -42,6 +42,22 @@ pub fn native_binance(host: &dyn NativeModuleHost) -> NativeConstructorResult {
     module_host::native_load(host, "./binance/binance.exchange", "BinanceExchange")
 }
 
+// ts: exchangeRegistry.binanceinverse (web and native source files)
+pub fn web_binanceinverse(host: &dyn WebModuleHost) -> ConstructorFuture<'_> {
+    module_host::web_load(
+        host,
+        "./binance/binanceinverse.exchange",
+        "BinanceInverseExchange",
+    )
+}
+pub fn native_binanceinverse(host: &dyn NativeModuleHost) -> NativeConstructorResult {
+    module_host::native_load(
+        host,
+        "./binance/binanceinverse.exchange",
+        "BinanceInverseExchange",
+    )
+}
+
 // ts: exchangeRegistry.binancepm (web and native source files)
 pub fn web_binancepm(host: &dyn WebModuleHost) -> ConstructorFuture<'_> {
     module_host::web_load(host, "./binance/binancepm.exchange", "BinancePMExchange")
@@ -526,6 +542,11 @@ pub const EXCHANGE_LOADERS: &[ExchangeLoaderRegistration] = &[
         name: ExchangeName::Binance,
         web: web_binance,
         native: native_binance,
+    },
+    ExchangeLoaderRegistration {
+        name: ExchangeName::Binanceinverse,
+        web: web_binanceinverse,
+        native: native_binanceinverse,
     },
     ExchangeLoaderRegistration {
         name: ExchangeName::Binancepm,
