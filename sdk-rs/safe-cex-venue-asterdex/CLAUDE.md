@@ -177,6 +177,10 @@ companions and their direct shape/native-value witnesses. The focused
 `scripts/accepted-wire-contracts.mjs` retains all 608 observations and every
 compiler field, including each separately executed public-wrapper boundary.
 
+`RUNTIME_HELPER_CONTRACT_REVIEW.md` records six generic runtime-helper contracts,
+45 maintained-source/native cases and six compiled production-body controls.
+Their selected runner isolates rustdoc artifacts from the normal probe build.
+
 `ALTERNATE_OWNER_CONTRACT_REVIEW.md` records the assigned thirty-three-owner
 cohort: eleven Deserialize carriers, fourteen raw-input runtime owners and eight
 explicitly typed APIs. The selected runner uses CI's actual native probe path;
