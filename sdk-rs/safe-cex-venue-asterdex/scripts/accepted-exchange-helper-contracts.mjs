@@ -13,7 +13,20 @@ assert.equal(process.argv.length, 2, 'exchange-helper batch takes no scope-chang
 const workspace = fs.realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
 // Keep proc-macro artifact configuration consistent through discovery and probes.
 process.env.RUSTC_BOOTSTRAP = '1';
-const selected = ["after_method_called_in_worker", "assert_algo_order_capacity", "assert_v3_feature", "fetch_open_interest_map", "get_open_algo_orders_count", "is_raw_algo_order", "map_public_trade", "parse_leverage_brackets_response", "retained_info", "transform_market", "transform_position", "transform_ticker"].map(name => `safe_cex_venue_asterdex::exchange_helpers::${name}`).sort();
+const selected = [
+  'after_method_called_in_worker',
+  'assert_algo_order_capacity',
+  'assert_v3_feature',
+  'fetch_open_interest_map',
+  'get_open_algo_orders_count',
+  'is_raw_algo_order',
+  'map_public_trade',
+  'parse_leverage_brackets_response',
+  'retained_info',
+  'transform_market',
+  'transform_position',
+  'transform_ticker',
+].map(name => `safe_cex_venue_asterdex::exchange_helpers::${name}`).sort();
 assert.equal(selected.length, 12);
 function cargo(args, extraEnv = {}) {
   const result = spawnSync('cargo', args, {
@@ -57,6 +70,8 @@ assert.equal(selected.reduce((count, name) => count + contracts[name].cases.leng
 console.log('Aster exchange-helper batch: 12 actual production-native owners / 48 cases, zero failures.');
 console.log('Scope is exactly these twelve native function owners; other full-matrix obligations remain.');
 
-const source = spawnSync(process.execPath, [fileURLToPath(new URL('./accepted-exchange-helper-source.cjs', import.meta.url))], {cwd: workspace, encoding: 'utf8', env: process.env});
+const source = spawnSync(process.execPath, [fileURLToPath(new URL('./accepted-exchange-helper-source.cjs', import.meta.url))], {
+  cwd: workspace, encoding: 'utf8', env: process.env,
+});
 assert.equal(source.status, 0, `maintained-source expectation check failed: ${source.stderr}`);
 process.stdout.write(source.stdout);
