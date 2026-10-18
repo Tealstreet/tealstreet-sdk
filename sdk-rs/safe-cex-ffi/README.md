@@ -124,3 +124,11 @@ late failures follow the existing runtime exception reporting. Close and
 venue deactivation clear pending trailing metadata calls. The Rust
 `native_account_metadata` and Node `native-account-metadata.test.mjs` targets
 observe real Bitrue leverage-bracket HTTP requests and disposal.
+
+Log, error, warning and Grafana event callbacks carry the worker’s rest-argument
+array, including an empty array for zero arguments. A single array argument stays
+one array element; fill payloads retain their scalar shape. Private websocket
+frame/subscription diagnostics (`grafana-pws`, `grafana-pws-sub`) use this same
+bridge. `tests/native-account-events.test.mjs` drives a real Binance preflight
+error and checks its metadata argument; registry event tests cover emitter arity
+and both diagnostic channels through a real native account.

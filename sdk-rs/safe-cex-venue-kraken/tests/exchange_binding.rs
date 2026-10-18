@@ -1429,3 +1429,94 @@ fn constructed_public_book_frames_keep_source_string_iterables() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn constructed_spot_candles_keep_source_date_input_coercion() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/stream-updates-oracle.cjs"
+        ))
+        .arg("--date-inputs")
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["dates"].as_array().unwrap();
+    assert_eq!(cases.len(), 11);
+    let h = harness(ExchangeName::Krakenspot, options(), |http| {
+        http.ok(
+            "GET",
+            "/0/public/AssetPairs",
+            json!({"error":[],"result":{
+                "XXBTZUSD":{"wsname":"BTC/USD","pair_decimals":1,"lot_decimals":8,
+                "ordermin":"0.0001","status":"online","altname":"XBTUSD"}
+            }}),
+        );
+        http.ok("GET", "/0/public/Ticker", json!({"error":[],"result":{}}));
+    });
+    loaded(&h);
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let sink = candles.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTC/USD","interval":"1m"})).unwrap(),
+            Rc::new(move |candle| sink.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    h.runtime.advance(100.0);
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(socket.sent.borrow().iter().any(|wire| {
+        let wire: Value = serde_json::from_str(wire).unwrap();
+        wire["params"] == json!({"channel":"ohlc","symbol":["BTC/USD"],"interval":1})
+    }));
+    for (index, case) in cases.iter().enumerate() {
+        assert!(case["failure"].is_null(), "{case}");
+        let expected = &case["trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["kind"] == "candle")
+            .unwrap()["fields"];
+        let frame = json!({"channel":"ohlc","type":"update","data":[{
+            "symbol":"BTC/USD","interval":1,"interval_begin":case["input"],
+            "open":"17.25tail","high":19.5,"low":23.75,"close":29.125,"volume":31.5
+        }]});
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+        h.runtime.pump();
+        let candles = candles.borrow();
+        assert_eq!(candles.len(), index + 1, "source delivers {case}");
+        let candle = &candles[index];
+        for (name, actual) in [
+            ("timestamp", candle.timestamp),
+            ("open", candle.open),
+            ("high", candle.high),
+            ("low", candle.low),
+            ("close", candle.close),
+            ("volume", candle.volume),
+        ] {
+            let bits = u64::from_str_radix(expected[name]["number"].as_str().unwrap(), 16).unwrap();
+            if f64::from_bits(bits).is_nan() {
+                assert!(actual.is_nan(), "{name}: input={}", case["input"]);
+            } else {
+                assert_eq!(actual.to_bits(), bits, "{name}: input={}", case["input"]);
+            }
+        }
+    }
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
+}
