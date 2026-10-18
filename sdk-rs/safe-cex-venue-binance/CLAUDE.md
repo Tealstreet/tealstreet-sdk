@@ -917,14 +917,6 @@ private_classes source-case guard keeps all 164 cases live in CI. Preserve the
 208 constructed native Store cases and seven independent compiled body controls
 when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
 
-<<<<<<< HEAD
-`PrivateSocket` has a specific typed constructor/Deref accepted-set record.
-`scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
-including full dependency discovery and actual compiler features, then checks the
-one resulting classification receipt. It does not claim decoder execution;
-`private_owner_binding` and its independently compiled controls establish the
-separate real constructor/Store/authentication effects described above.
-=======
 The four orderbook function contracts execute the real snapshot, borrowed update
 selector, apply algorithm and private indexed-cell reader. Native number bits,
 sequence state, borrowed record identity and partial mutation are observed before
@@ -934,4 +926,10 @@ keeps them current. See ORDERBOOK_FUNCTION_REVIEW.md for the private UTF16 cell'
 immediate numeric-consumption boundary. `scripts/orderbook-function-controls.py`
 requires four independent compiled faults to fail actual constructed native
 socket/HTTP tests, with exact source restoration and a passing rerun after each.
->>>>>>> origin/master
+
+`PrivateSocket` has a specific typed constructor/Deref accepted-set record.
+`scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
+including full dependency discovery and actual compiler features, then checks the
+one resulting classification receipt. It does not claim decoder execution;
+`private_owner_binding` and its independently compiled controls establish the
+separate real constructor/Store/authentication effects described above.
