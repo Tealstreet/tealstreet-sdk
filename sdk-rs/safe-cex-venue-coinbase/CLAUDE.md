@@ -324,6 +324,17 @@ The approved JSON error view and JavaScript input-object identity stay separate.
 `portfolio-alias-controls.py` removes production metadata retention, requires a
 compiled native assertion failure and restores the exact source before GREEN.
 
+Seven public-stream aliases retain explicit non-decoder capability roles. The
+finite `scripts/public-stream-alias-contracts.mjs` runner authenticates compiler
+identities and refuses any future Deserialize capability hidden by a role record.
+`public_stream_alias_native` uses constructed Advanced/Spot classes, production
+frame dispatch, the actual TickHost callback adapter and the native book adapter;
+it observes callback/frame/book roots, live iteration, errors and numeric bits.
+`public-stream-alias-controls.py` changes the real dispatch iteration and book
+price projection independently, requires named compiled failures, restores exact
+source bytes and reruns the corresponding witness. This is a finite capability
+census, not full transport or all-callback coverage.
+
 Eight configuration/signing aliases have specific non-decoder role records.
 The finite `config-alias-contracts.mjs` probe authenticates exact current compiler
 identities and refuses a new Deserialize capability. `config_alias_native` uses

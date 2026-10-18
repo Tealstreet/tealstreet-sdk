@@ -457,3 +457,12 @@ shared `in_operator`; do not restore an own-key-only lookup.
 `scripts/read-receiver-controls.py` requires seven named compiled runtime failures
 and exact-source restoration. Shared Store array identity is separately owned;
 these receiver tests claim only the facade's current slot/value behavior.
+
+### Native diagnostic receiver boundary
+
+`NATIVE_DIAGNOSTIC_REVIEW.md` records the polling/trace native Error cutover.
+Keep original error values and console argument counts through `console_values`;
+terminal rendering belongs to the host. The actual constructed-Scope witnesses
+live in `tests/support/accepted_diagnostic_receivers.rs`; their two original-body
+regression controls are in `scripts/diagnostic-receiver-controls.py`. Refresh
+reviewed impl/file pins whenever those enclosing bodies change.

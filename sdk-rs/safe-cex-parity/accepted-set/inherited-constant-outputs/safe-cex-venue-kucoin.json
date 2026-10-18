@@ -60,15 +60,15 @@
     },
     "source": {
       "begin": [
-        380,
+        388,
         5
       ],
       "end": [
-        382,
+        390,
         6
       ],
       "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs",
-      "sha256": "7a0f311e7fab9f99ccc0aa5103153f4411d2ae36103676a883c348df794be9b5"
+      "sha256": "d3df38cc50af2722460774e985019fdc75fbe019e1cd74fd574fe596eafcd80b"
     },
     "typescript": {
       "base": {
@@ -93,7 +93,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
+      "sha256": "72af0c5f5fe6d60d9c1619d94113fa3df8db645e48157e213fc0f3ecec102eec"
     },
     "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::futures(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_symbol_max_leverage(receiver,symbol).await.map(|_|()) })) }",
     "cases": [
@@ -235,15 +235,15 @@
     },
     "source": {
       "begin": [
-        428,
+        436,
         5
       ],
       "end": [
-        434,
+        442,
         6
       ],
       "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs",
-      "sha256": "7a0f311e7fab9f99ccc0aa5103153f4411d2ae36103676a883c348df794be9b5"
+      "sha256": "d3df38cc50af2722460774e985019fdc75fbe019e1cd74fd574fe596eafcd80b"
     },
     "typescript": {
       "base": {
@@ -268,7 +268,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
+      "sha256": "72af0c5f5fe6d60d9c1619d94113fa3df8db645e48157e213fc0f3ecec102eec"
     },
     "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::futures(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); let limit=$value[\"limit\"].as_f64(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_public_trades(receiver,symbol,limit).await.map(|_|()) })) }",
     "cases": [
@@ -412,15 +412,15 @@
     },
     "source": {
       "begin": [
-        544,
+        552,
         5
       ],
       "end": [
-        550,
+        558,
         6
       ],
       "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs",
-      "sha256": "7a0f311e7fab9f99ccc0aa5103153f4411d2ae36103676a883c348df794be9b5"
+      "sha256": "d3df38cc50af2722460774e985019fdc75fbe019e1cd74fd574fe596eafcd80b"
     },
     "typescript": {
       "base": {
@@ -445,7 +445,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
+      "sha256": "72af0c5f5fe6d60d9c1619d94113fa3df8db645e48157e213fc0f3ecec102eec"
     },
     "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); let limit=$value[\"limit\"].as_f64(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_public_trades(receiver,symbol,limit).await.map(|_|()) })) }",
     "cases": [

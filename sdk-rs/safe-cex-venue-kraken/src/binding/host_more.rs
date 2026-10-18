@@ -276,7 +276,7 @@ impl PollHost for Rt {
     fn console_error(&self, prefix: &'static str, error: Thrown) -> ReadResult<Self, ()> {
         self.shared
             .runtime
-            .console("error", &format!("{prefix} {}", error.value.to_display()));
+            .console_values("error", &[Js::str(prefix), error.value]);
         Ok(())
     }
     fn spawn(&self, future: PollFuture<Self>) {
