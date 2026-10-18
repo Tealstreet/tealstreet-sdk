@@ -1,8 +1,6 @@
 //! Typed SDK projection preserves native numeric fields before the wire boundary.
 use crate::native_value::NativeValue;
-use crate::{
-    adapter::prepared_json, native_value::Value, order_actions as actions, rest_reads as reads,
-};
+use crate::{native_value::Value, order_actions as actions, rest_reads as reads};
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_types::*;
 fn text(s: &[u16]) -> Result<String, ExchangeError> {
@@ -83,7 +81,9 @@ pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
         is_spot: Some(m.is_spot),
         is_perpetual: None,
         is_read_only: None,
-        info: Some(prepared_json(&m.info)?),
+        info: Some(safe_cex_exchange::js_runtime::value::to_retained_input(
+            &m.info,
+        )?),
         taker_fee: None,
         maker_fee: None,
         option: None,
@@ -127,7 +127,9 @@ pub fn ticker(t: reads::Ticker<Value>) -> Result<Ticker, ExchangeError> {
         volume: t.volume,
         quote_volume: t.quote_volume,
         timestamp: None,
-        info: Some(prepared_json(&t.info)?),
+        info: Some(safe_cex_exchange::js_runtime::value::to_retained_input(
+            &t.info,
+        )?),
     })
 }
 pub fn candle(c: reads::Candle) -> Candle {

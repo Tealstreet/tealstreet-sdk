@@ -452,3 +452,9 @@ eight malformed/coercion values between distinct good rows. Native binary64
 fields are checked against the constructed TS exchange and DefaultStore, with
 finite resets before every case. The shared control runner misroutes mark/index
 in the live ingress body and requires compiled failure and restored success.
+
+Model `info` uses canonical `RetainedJsonInput` inside its existing presence
+wrapper. Read numbers and UTF-16 fields directly before any JSON report; source
+computed numbers use `Float`. Consumer coercion uses the shared retained Number,
+parseFloat and String helpers. JSON rendering belongs at the explicit output
+boundary, with no alternate model-info carrier.

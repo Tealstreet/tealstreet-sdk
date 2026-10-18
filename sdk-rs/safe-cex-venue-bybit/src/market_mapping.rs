@@ -1,9 +1,9 @@
 //! Pure mapping slice of fetchMarketsHelper; the request sequence lives with each class.
-use crate::exchange_state::parse_float;
+use safe_cex_num::js_retained_parse_float;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision,
 };
-use serde_json::Value;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Family {
@@ -13,44 +13,58 @@ pub(crate) enum Family {
 }
 
 pub(crate) fn map_market(
-    raw: &Value,
-    fees: &[Value],
+    raw: &Input,
+    fees: &[Input],
     category: &str,
     family: Family,
 ) -> Result<Result<Market, String>, String> {
     let spot = matches!(family, Family::Spot);
-    if raw.is_null() {
-        return Err("Cannot read properties of null (reading 'symbol')".into());
+    if raw.is_nullish() {
+        return Err(format!(
+            "Cannot read properties of {} (reading 'symbol')",
+            if raw.is_null() { "null" } else { "undefined" }
+        ));
     }
     let nested = |parent: &str, key: &str| -> Result<f64, String> {
         let object = raw
             .get(parent)
-            .filter(|value| !value.is_null())
+            .filter(|value| !value.is_nullish())
             .ok_or_else(|| {
                 format!(
                     "Cannot read properties of {} (reading '{key}')",
-                    if raw.get(parent).is_some() {
+                    if raw.get(parent).is_some_and(Input::is_null) {
                         "null"
                     } else {
                         "undefined"
                     }
                 )
             })?;
-        parse_float(object.get(key)).map_err(str::to_owned)
+        js_retained_parse_float(object.get(key)).map_err(|error| error.message.to_owned())
     };
     let mut fee = None;
     if !spot {
         for candidate in fees {
-            if candidate.is_null() {
-                return Err("Cannot read properties of null (reading 'symbol')".into());
+            if candidate.is_nullish() {
+                return Err(format!(
+                    "Cannot read properties of {} (reading 'symbol')",
+                    if candidate.is_null() {
+                        "null"
+                    } else {
+                        "undefined"
+                    }
+                ));
             }
             let same_symbol = match (candidate.get("symbol"), raw.get("symbol")) {
-                (Some(Value::Array(_) | Value::Object(_)), _)
-                | (_, Some(Value::Array(_) | Value::Object(_))) => false,
-                (Some(Value::Number(left)), Some(Value::Number(right))) => {
+                (Some(Input::Array(_) | Input::Object(_)), _)
+                | (_, Some(Input::Array(_) | Input::Object(_))) => false,
+                (Some(left), Some(right))
+                    if left.as_f64().is_some() && right.as_f64().is_some() =>
+                {
                     left.as_f64() == right.as_f64()
                 }
-                (left, right) => left == right,
+                (left, right) => {
+                    left.unwrap_or(&Input::Undefined) == right.unwrap_or(&Input::Undefined)
+                }
             };
             if same_symbol {
                 fee = Some(candidate);
@@ -84,30 +98,58 @@ pub(crate) fn map_market(
     let is_expiring = if spot {
         false
     } else {
-        let value = parse_float(raw.get("deliveryTime"))?;
+        let value = js_retained_parse_float(raw.get("deliveryTime"))
+            .map_err(|error| error.message.to_owned())?;
         value != 0. && !value.is_nan()
     };
     let taker_fee = fee
-        .map(|f| parse_float(f.get("takerFeeRate")))
+        .map(|f| {
+            js_retained_parse_float(f.get("takerFeeRate")).map_err(|error| error.message.to_owned())
+        })
         .transpose()?;
     let maker_fee = fee
-        .map(|f| parse_float(f.get("makerFeeRate")))
+        .map(|f| {
+            js_retained_parse_float(f.get("makerFeeRate")).map_err(|error| error.message.to_owned())
+        })
         .transpose()?;
-    let Some(id) = raw.get("symbol").and_then(Value::as_str) else {
-        let value = raw
-            .get("symbol")
-            .map_or_else(|| "undefined".into(), Value::to_string);
+    let Some(id) = raw
+        .get("symbol")
+        .and_then(Input::as_text)
+        .and_then(|text| String::from_utf16(text).ok())
+    else {
+        let value = raw.get("symbol").map_or_else(
+            || "undefined".into(),
+            |value| {
+                value
+                    .json_stringify()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "undefined".into())
+            },
+        );
         return Ok(Err(format!(
             "Refused Bybit market row id={value} symbol={value}: expected strings"
         )));
     };
     let (Some(base), Some(quote)) = (
-        raw.get("baseCoin").and_then(Value::as_str),
-        raw.get("quoteCoin").and_then(Value::as_str),
+        raw.get("baseCoin")
+            .and_then(Input::as_text)
+            .and_then(|text| String::from_utf16(text).ok()),
+        raw.get("quoteCoin")
+            .and_then(Input::as_text)
+            .and_then(|text| String::from_utf16(text).ok()),
     ) else {
         let field = |key| {
-            raw.get(key)
-                .map_or_else(|| "undefined".into(), Value::to_string)
+            raw.get(key).map_or_else(
+                || "undefined".into(),
+                |value| {
+                    value
+                        .json_stringify()
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| "undefined".into())
+                },
+            )
         };
         return Ok(Err(format!(
             "Refused Bybit market row id={}: base={} quote={}: expected strings",
@@ -118,11 +160,13 @@ pub(crate) fn map_market(
     };
     // Preserve raw instrument metadata independently of typed asset admission.
     Ok(Ok(Market {
-        id: id.into(),
-        symbol: id.into(),
-        base: base.into(),
-        quote: quote.into(),
-        active: raw["status"] == "Trading" || (!spot && raw["status"] == "PreLaunch"),
+        id: id.clone(),
+        symbol: id,
+        base,
+        quote,
+        active: raw.get("status").is_some_and(|value| {
+            value.text_equals("Trading") || (!spot && value.text_equals("PreLaunch"))
+        }),
         precision,
         limits,
         is_expiring: Some(is_expiring),

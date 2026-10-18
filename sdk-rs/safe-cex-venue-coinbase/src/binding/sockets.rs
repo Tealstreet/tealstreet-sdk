@@ -201,16 +201,21 @@ impl SocketHost {
         self.host.global(&format!("console.{severity}"), args)?;
         Ok(())
     }
-    fn order_values(orders: &SyncedOrders<Frame>) -> Vec<safe_cex_types::Order> {
+    fn order_values(
+        orders: &SyncedOrders<Frame>,
+    ) -> Result<Vec<safe_cex_types::Order>, PortfolioFailure> {
         orders
             .borrow()
             .iter()
             .map(|order| {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
-                fields.info =
-                    (Some(to_json(&to_js(&order.info)).expect("parsed private frame"))).into();
-                fields
+                fields.info = (Some(
+                    safe_cex_exchange::js_runtime::value::to_retained_input(&to_js(&order.info))
+                        .map_err(from_thrown)?,
+                ))
+                .into();
+                Ok(fields)
             })
             .collect()
     }
@@ -735,7 +740,7 @@ impl CoinbasePrivateClassHost for SocketHost {
             .store
             .update(
                 StoreUpdate {
-                    orders: Some(Self::order_values(&orders)),
+                    orders: Some(Self::order_values(&orders)?),
                     loaded: Some(
                         safe_cex_exchange::js_runtime::value::to_typed(&to_js(&loaded))
                             .map_err(from_thrown)?,
@@ -750,7 +755,7 @@ impl CoinbasePrivateClassHost for SocketHost {
         self.host
             .shared
             .store
-            .add_or_update_orders(Self::order_values(&orders))
+            .add_or_update_orders(Self::order_values(&orders)?)
             .map_err(|error| Rc::new(error.into()))
     }
     fn emit_private_order_fill(

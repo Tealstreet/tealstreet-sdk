@@ -41,13 +41,15 @@ pub fn is_bybit_env_probe_request(config: &Value) -> bool {
 
 // ts: isBybitSignRejection — Bybit has said both "error sign!" and "Error sign, please
 // check your signature generation algorithm"; 10004 is the code behind either.
-pub fn is_bybit_sign_rejection(data: &Value) -> bool {
-    let meta = crate::response::get_bybit_response_meta(data);
-    meta.ret_code == Some(10004.)
+pub fn is_bybit_sign_rejection(
+    data: &safe_cex_types::retained_json::RetainedJsonInput,
+) -> Result<bool, safe_cex_num::JsCoercionError> {
+    let meta = crate::response::get_bybit_response_meta(data)?;
+    Ok(meta.ret_code == Some(10004.)
         || meta
             .ret_msg
             .as_deref()
             .unwrap_or("")
             .to_ascii_lowercase()
-            .contains("error sign")
+            .contains("error sign"))
 }

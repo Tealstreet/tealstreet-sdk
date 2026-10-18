@@ -46,9 +46,13 @@ fn encode_js_json(value: &JsJsonValue) -> Value {
 
 fn positions(rows: &Value) -> Vec<Position> {
     let market = normalize_market(
-        json!({"symbol":"BTC_USDT","contractSize":1})
-            .as_object()
-            .unwrap(),
+        &serde_json::Value::Object(
+            (json!({"symbol":"BTC_USDT","contractSize":1})
+                .as_object()
+                .unwrap())
+            .clone(),
+        )
+        .into(),
     )
     .unwrap();
     let base = fake_positions_for_market(&market, None, None, None).remove(0);
@@ -61,7 +65,7 @@ fn positions(rows: &Value) -> Vec<Position> {
             position.symbol = row["symbol"].as_str().unwrap().into();
             position.side = serde_json::from_value(row["side"].clone()).unwrap();
             position.contracts = decode_number(&row["contracts"]);
-            position.info = (row.get("info").map(decoded)).into();
+            position.info = (row.get("info").map(decoded).map(Into::into)).into();
             position
         })
         .collect()
@@ -97,7 +101,10 @@ fn mexc_exchange_helpers_live_typescript() {
                 }
                 "formatChangeLeveragePayload" => {
                     let market_raw = decoded(&case["marketRaw"]);
-                    let market = normalize_market(market_raw.as_object().unwrap())?;
+                    let market = normalize_market(
+                        &serde_json::Value::Object((market_raw.as_object().unwrap()).clone())
+                            .into(),
+                    )?;
                     let positions = positions(&args[6]);
                     let margin_type: MarginType = serde_json::from_value(args[4].clone()).unwrap();
                     encode_js_json(&format_change_leverage_payload(
@@ -128,7 +135,7 @@ fn mexc_exchange_helpers_live_typescript() {
                         &|ms| ms,
                     )?
                     .unwrap();
-                    p.info = (raw.as_ref().unwrap().get("info").cloned()).into();
+                    p.info = (raw.as_ref().unwrap().get("info").cloned().map(Into::into)).into();
                     encode(&native_position_id(&p)?)
                 }
                 "planOrderTriggerType" | "stopOrderTrend" | "isRegularPlaceOrder" => {
@@ -167,7 +174,7 @@ fn mexc_exchange_helpers_live_typescript() {
                             *target = decode_number(number);
                         }
                     }
-                    order.info = (value.get("info").cloned()).into();
+                    order.info = (value.get("info").cloned().map(Into::into)).into();
                     if let Some(number) = args[0]
                         .get("extra")
                         .and_then(|v| v.get("remainingNative"))

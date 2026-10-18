@@ -196,3 +196,16 @@ maintained TS exchange and actual TS DefaultStore produce the comparison values;
 eleven native number fields are checked before JSON. The shared ticker census
 records the witness; `parity/scripts/ticker-native-controls.py bitunix` compiles
 a production binding fault, requires the named assertion, restores and reruns.
+
+Model-info reads and private Store patches use canonical RetainedJsonInput through
+OrderModelHost and PrivateMessageHost. Typed model edges use from_typed/to_typed;
+only a completed HTTP payload enters the existing request wire adapter. Native
+info keeps number bits, own undefined, UTF-16 text and nested owned snapshots.
+Raw identifier returns still use the shared String output boundary.
+
+The retained native_identity controls drive real cancel/replacement requests for
+nullish raw IDs, UTF-16 trigger/execution kinds and undefined sibling position IDs.
+Private socket controls retain opaque metadata through position and order patches,
+including a UTF-16 client-key cache miss. Malformed websocket JSON still maps to
+null, matching the maintained jsonParse helper, and does not reconnect the socket.
+Each repair has a compiling pre-fix failure and a restored passing native control.

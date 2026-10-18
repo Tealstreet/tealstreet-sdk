@@ -95,7 +95,7 @@ pub(crate) fn primitive(
                 if i > 0 {
                     text.push(44);
                 }
-                if !matches!(value, Frame::Null) {
+                if !matches!(value, Frame::Null | Frame::Undefined) {
                     text.extend(string(Some(value.clone()))?);
                 }
             }
@@ -106,7 +106,7 @@ pub(crate) fn primitive(
 }
 pub(crate) fn string(value: Option<Frame>) -> Result<Vec<u16>, safe_cex_num::JsCoercionError> {
     Ok(match primitive(value)? {
-        None => "undefined".encode_utf16().collect(),
+        None | Some(Frame::Undefined) => "undefined".encode_utf16().collect(),
         Some(Frame::Null) => "null".encode_utf16().collect(),
         Some(Frame::String(v)) => v,
         Some(Frame::Number(v)) => safe_cex_num::js_number_string(v).encode_utf16().collect(),
@@ -116,7 +116,7 @@ pub(crate) fn string(value: Option<Frame>) -> Result<Vec<u16>, safe_cex_num::JsC
 }
 pub(crate) fn number(value: Option<Frame>) -> Result<f64, safe_cex_num::JsCoercionError> {
     Ok(match primitive(value)? {
-        None => f64::NAN,
+        None | Some(Frame::Undefined) => f64::NAN,
         Some(Frame::Null) => 0.0,
         Some(Frame::Number(v)) => v,
         Some(Frame::Bool(v)) => {

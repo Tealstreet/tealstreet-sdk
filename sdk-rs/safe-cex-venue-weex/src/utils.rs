@@ -3,40 +3,39 @@ use crate::types::{
     MARGIN_TYPE, ORDER_SIDE, ORDER_STATUS, ORDER_TRIGGER_TYPE, ORDER_TYPE, POSITION_MODE,
     POSITION_SIDE,
 };
-use safe_cex_num::numeric_ingress::{JsNumberOutput, js_deserialize_passthrough};
-use safe_cex_num::{JsCoercionError, js_string, js_truthy};
+use safe_cex_num::numeric_ingress::JsNumberOutput;
+use safe_cex_num::{JsCoercionError, js_retained_string as js_string};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode, PositionSide,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 /// Retained JSON argument; absent arguments use `None` at each normalizer.
 /// Capture numeric lexemes before constructing the opaque value, including overflow.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct WeexUtilityInput {
-    #[serde(deserialize_with = "js_deserialize_passthrough")]
-    value: Value,
+    value: Input,
 }
 impl WeexUtilityInput {
     /// Project only values already captured by this input's ingress boundary.
     pub(crate) fn pick_retained(&self, keys: &[&str]) -> Option<Self> {
         keys.iter()
-            .find_map(|key| self.value.get(*key).filter(|value| !value.is_null()))
+            .find_map(|key| self.value.get(key).filter(|value| !value.is_nullish()))
             .map(|value| Self {
                 value: value.clone(),
             })
     }
 
     /// Borrow the captured argument without rebuilding a potentially lossy Value.
-    pub fn as_value(&self) -> &Value {
+    pub fn as_value(&self) -> &Input {
         &self.value
     }
 }
 impl JsNumberOutput for WeexUtilityInput {
     fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self, struct {} passthrough { value });
+        safe_cex_num::js_number_output!(self, struct { value });
     }
 }
 
@@ -44,13 +43,25 @@ impl JsNumberOutput for WeexUtilityInput {
 #[path = "../tests/support/owned_snapshots.rs"]
 mod owned_snapshots;
 
-fn normalized_key(value: Option<&WeexUtilityInput>) -> Result<String, JsCoercionError> {
-    let value = value.map(|input| &input.value);
-    // String(value || '').toUpperCase(), with coercion failures propagated.
-    if !js_truthy(value) {
-        return Ok(String::new());
+fn normalized_key(value: Option<&WeexUtilityInput>) -> Result<Vec<u16>, JsCoercionError> {
+    let Some(value) = value
+        .map(WeexUtilityInput::as_value)
+        .filter(|value| value.is_truthy())
+    else {
+        return Ok(Vec::new());
+    };
+    let units = safe_cex_types::js_coercion::js_retained_string_utf16(value)?;
+    let mut result = Vec::new();
+    for unit in char::decode_utf16(units) {
+        match unit {
+            Ok(c) => result.extend(
+                c.to_uppercase()
+                    .flat_map(|c| c.to_string().encode_utf16().collect::<Vec<_>>()),
+            ),
+            Err(c) => result.push(c.unpaired_surrogate()),
+        }
     }
-    Ok(js_string(value)?.to_uppercase())
+    Ok(result)
 }
 
 pub fn normalize_position_mode(
@@ -59,7 +70,7 @@ pub fn normalize_position_mode(
     let normalized = normalized_key(value)?;
     let found = POSITION_MODE
         .iter()
-        .find(|(key, _)| *key == normalized)
+        .find(|(key, _)| key.encode_utf16().eq(normalized.iter().copied()))
         .map(|(_, value)| *value);
     Ok(found.unwrap_or(PositionMode::OneWay))
 }
@@ -70,7 +81,7 @@ pub fn normalize_margin_type(
     let normalized = normalized_key(value)?;
     let found = MARGIN_TYPE
         .iter()
-        .find(|(key, _)| *key == normalized)
+        .find(|(key, _)| key.encode_utf16().eq(normalized.iter().copied()))
         .map(|(_, value)| *value);
     Ok(found.unwrap_or(MarginType::Cross))
 }
@@ -81,7 +92,7 @@ pub fn normalize_position_side(
     let normalized = normalized_key(value)?;
     let found = POSITION_SIDE
         .iter()
-        .find(|(key, _)| *key == normalized)
+        .find(|(key, _)| key.encode_utf16().eq(normalized.iter().copied()))
         .map(|(_, value)| *value);
     Ok(found.unwrap_or(PositionSide::Long))
 }
@@ -92,7 +103,7 @@ pub fn normalize_order_side(
     let normalized = normalized_key(value)?;
     let found = ORDER_SIDE
         .iter()
-        .find(|(key, _)| *key == normalized)
+        .find(|(key, _)| key.encode_utf16().eq(normalized.iter().copied()))
         .map(|(_, value)| *value);
     Ok(found)
 }
@@ -103,7 +114,7 @@ pub fn normalize_order_status(
     let normalized = normalized_key(value)?;
     let found = ORDER_STATUS
         .iter()
-        .find(|(key, _)| *key == normalized)
+        .find(|(key, _)| key.encode_utf16().eq(normalized.iter().copied()))
         .map(|(_, value)| *value);
     Ok(found.unwrap_or(OrderStatus::Open))
 }
@@ -114,7 +125,7 @@ pub fn normalize_order_type(
     let normalized = normalized_key(value)?;
     let found = ORDER_TYPE
         .iter()
-        .find(|(key, _)| *key == normalized)
+        .find(|(key, _)| key.encode_utf16().eq(normalized.iter().copied()))
         .map(|(_, value)| *value);
     Ok(found.unwrap_or(OrderType::Limit))
 }
@@ -125,7 +136,7 @@ pub fn normalize_trigger_type(
     let normalized = normalized_key(value)?;
     let found = ORDER_TRIGGER_TYPE
         .iter()
-        .find(|(key, _)| *key == normalized)
+        .find(|(key, _)| key.encode_utf16().eq(normalized.iter().copied()))
         .map(|(_, value)| *value);
     Ok(found.unwrap_or(OrderStopTriggerType::LastPrice))
 }
@@ -136,16 +147,16 @@ pub fn to_number(
 ) -> Result<f64, JsCoercionError> {
     let fallback = fallback.unwrap_or(0.0);
     let value = value.map(WeexUtilityInput::as_value);
-    if value.is_none_or(|v| v.is_null() || v.as_str() == Some("")) {
+    if value.is_none_or(|v| v.is_nullish() || v.text_equals("")) {
         return Ok(fallback);
     }
-    let parsed = safe_cex_num::parse_float(&js_string(value)?);
+    let parsed = safe_cex_num::js_retained_parse_float(value)?;
     Ok(if parsed.is_finite() { parsed } else { fallback })
 }
 
 pub fn to_integer_string(value: Option<&WeexUtilityInput>) -> Result<String, JsCoercionError> {
     let value = value.map(WeexUtilityInput::as_value);
-    if value.is_none_or(Value::is_null) {
+    if value.is_none_or(Input::is_nullish) {
         return Ok(String::new());
     }
     js_string(value)
@@ -177,10 +188,10 @@ pub fn normalize_timestamp_to_ms(
     local_to_utc: impl FnOnce(f64) -> f64,
 ) -> Result<f64, JsCoercionError> {
     let value = value.map(WeexUtilityInput::as_value);
-    if value.is_none_or(|v| v.is_null() || v.as_str() == Some("")) {
+    if value.is_none_or(|v| v.is_nullish() || v.text_equals("")) {
         return Ok(0.0);
     }
-    let numeric = safe_cex_num::js_number(value)?;
+    let numeric = safe_cex_num::js_retained_number(value)?;
     if numeric.is_finite() && numeric > 0.0 {
         if numeric >= 1_000_000_000_000_000_000.0 {
             return Ok((numeric / 1_000_000.0).floor());
@@ -193,7 +204,10 @@ pub fn normalize_timestamp_to_ms(
         }
         return Ok((numeric * 1000.0).floor());
     }
-    let parsed_date = safe_cex_num::js_date_parse(&js_string(value)?, local_to_utc);
+    let units = safe_cex_types::js_coercion::js_retained_string_utf16(value.unwrap())?;
+    let parsed_date = String::from_utf16(&units).map_or(f64::NAN, |text| {
+        safe_cex_num::js_date_parse(&text, local_to_utc)
+    });
     Ok(if parsed_date.is_finite() {
         parsed_date
     } else {
@@ -244,30 +258,38 @@ pub fn normalize_order_book_side(
     rows: Option<&WeexUtilityInput>,
 ) -> Result<Vec<safe_cex_types::OrderBookOrders>, WeexUtilityError> {
     let rows = rows.map(WeexUtilityInput::as_value);
-    if !js_truthy(rows) {
+    if !rows.is_some_and(Input::is_truthy) {
         return Ok(Vec::new());
     }
     let rows = rows
-        .and_then(Value::as_array)
+        .and_then(Input::as_array)
         .ok_or_else(|| utility_type_error("(rows || []).reduce is not a function"))?;
     let mut acc = Vec::new();
     for row in rows {
         let chars;
         let values = match row {
-            Value::Array(values) => values,
-            Value::String(value) => {
-                chars = value
-                    .chars()
+            Input::Array(values) => values,
+            Input::Text(value) => {
+                chars = char::decode_utf16(value.iter().copied())
                     .take(2)
-                    .map(|c| Value::String(c.to_string()))
+                    .map(|unit| {
+                        let units = match unit {
+                            Ok(c) => c.to_string().encode_utf16().collect(),
+                            Err(e) => vec![e.unpaired_surrogate()],
+                        };
+                        Input::Text(units)
+                    })
                     .collect::<Vec<_>>();
                 &chars
             }
             other => {
                 let prefix = match other {
-                    Value::Null => "object null".into(),
-                    Value::Bool(value) => format!("boolean {value}"),
-                    Value::Number(_) => format!("number {}", js_string(Some(other))?),
+                    Input::Null => "object null".into(),
+                    Input::Undefined => "undefined".into(),
+                    Input::Bool(value) => format!("boolean {value}"),
+                    Input::Float(_) | Input::Lexeme(_) => {
+                        format!("number {}", js_string(Some(other))?)
+                    }
                     _ => "object".into(),
                 };
                 return Err(utility_type_error(format!(
@@ -298,7 +320,7 @@ pub fn normalize_order_book(
     raw: Option<&WeexUtilityInput>,
 ) -> Result<safe_cex_types::OrderBook, WeexUtilityError> {
     let value = raw.map(WeexUtilityInput::as_value);
-    if value.is_none_or(Value::is_null) {
+    if value.is_none_or(Input::is_nullish) {
         return Err(utility_type_error(format!(
             "Cannot read properties of {} (reading 'bids')",
             if value.is_none() { "undefined" } else { "null" }
@@ -307,7 +329,7 @@ pub fn normalize_order_book(
     let pick = |first: &str, second: &str| {
         value
             .and_then(|v| v.get(first))
-            .filter(|v| !v.is_null())
+            .filter(|v| !v.is_nullish())
             .or_else(|| value.and_then(|v| v.get(second)))
             .map(|v| WeexUtilityInput { value: v.clone() })
     };
@@ -341,7 +363,7 @@ pub fn fake_positions_for_market(
         liquidation_price: 0.0,
         margin_type: (Some(margin_type)).into(),
         position_mode: (Some(position_mode)).into(),
-        info: (Some(serde_json::json!({}))).into(),
+        info: (Some(serde_json::json!({}).into())).into(),
         realized_pnl: (None).into(),
         margin_size: (None).into(),
         extra: (None).into(),
@@ -360,18 +382,18 @@ pub fn normalize_candle(
     local_to_utc: impl FnOnce(f64) -> f64,
 ) -> Result<Option<safe_cex_types::Candle>, WeexUtilityError> {
     let row = row.map(WeexUtilityInput::as_value);
-    if row.is_none_or(Value::is_null) {
+    if row.is_none_or(Input::is_nullish) {
         return Err(utility_type_error(format!(
             "Cannot read properties of {} (reading 'timestamp')",
             if row.is_none() { "undefined" } else { "null" }
         )));
     }
     let pick = |index: usize, keys: &[&str]| {
-        let value = if let Some(values) = row.and_then(Value::as_array) {
+        let value = if let Some(values) = row.and_then(Input::as_array) {
             values.get(index)
         } else {
             keys.iter()
-                .find_map(|key| row.and_then(|v| v.get(*key)).filter(|v| !v.is_null()))
+                .find_map(|key| row.and_then(|v| v.get(key)).filter(|v| !v.is_nullish()))
         };
         value.map(|value| WeexUtilityInput {
             value: value.clone(),
@@ -425,7 +447,7 @@ pub fn normalize_balance(
             ));
         }
         let asset = row.get("asset");
-        let asset = if js_truthy(asset) {
+        let asset = if asset.is_some_and(Input::is_truthy) {
             asset
         } else {
             row.get("coin")
@@ -437,11 +459,12 @@ pub fn normalize_balance(
     }
     let usdt = selected
         .or_else(|| values.first())
-        .filter(|row| js_truthy(Some(row)));
+        .filter(|row| row.is_truthy());
     let number = |keys: &[&str]| {
-        let value = keys
-            .iter()
-            .find_map(|key| usdt.and_then(|row| row.get(*key)).filter(|v| !v.is_null()));
+        let value = keys.iter().find_map(|key| {
+            usdt.and_then(|row| row.get(key))
+                .filter(|v| !v.is_nullish())
+        });
         to_number(
             value
                 .map(|value| WeexUtilityInput {

@@ -7,7 +7,8 @@ use crate::{
     utils::{format_order_state, format_order_type, normalize_cfm_contract_size},
 };
 use indexmap::IndexMap;
-use safe_cex_num::{add, js_string, js_truthy, multiply, parse_float};
+use safe_cex_num::{add, multiply, parse_float};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Order, OrderExtra, OrderSide};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
@@ -26,13 +27,13 @@ pub struct OrderPageQuery {
     pub contract_expiry_type: Option<&'static str>,
     pub order_status: &'static str,
     pub limit: f64,
-    pub cursor: Option<Value>,
+    pub cursor: Option<Input>,
 }
 #[derive(Clone)]
 pub struct OrderPage {
     pub orders: ReadItems,
-    pub has_next: Option<Value>,
-    pub cursor: Option<Value>,
+    pub has_next: Option<Input>,
+    pub cursor: Option<Input>,
 }
 pub trait OrderSnapshotHost {
     fn public_only(&self) -> bool;
@@ -65,21 +66,15 @@ fn error(name: &str, message: &str) -> PortfolioFailure {
         json!({"name":name,"message":message}),
     )))
 }
-fn property(raw: &ReadItem, name: &str) -> Result<Option<Value>, PortfolioFailure> {
+fn property(raw: &ReadItem, name: &str) -> Result<Option<Input>, PortfolioFailure> {
     let raw = raw.borrow();
-    if raw.is_null() {
+    if raw.is_nullish() {
         return Err(error(
             "TypeError",
             &format!("Cannot read properties of null (reading '{name}')"),
         ));
     }
     Ok(raw.get(name).cloned())
-}
-fn text(value: Option<&Value>) -> Result<String, PortfolioFailure> {
-    js_string(value).map_err(|e| error(e.name, e.message))
-}
-fn float(value: Option<&Value>) -> Result<f64, PortfolioFailure> {
-    Ok(parse_float(&text(value)?))
 }
 pub fn fetch_orders<H: OrderSnapshotHost + 'static>(
     r: Rc<OrderSnapshotReceiver<H>>,
@@ -149,29 +144,38 @@ pub fn fetch_open_orders_snapshot<H: OrderSnapshotHost + 'static>(
                             let raw = page.orders.borrow().get(index).cloned();
                             let Some(raw) = raw else { break };
                             index += 1;
-                            let product = text(property(&raw, "product_id")?.as_ref())?;
+                            let product = safe_cex_num::js_retained_string(
+                                property(&raw, "product_id")?.as_ref(),
+                            )
+                            .map_err(|e| error(e.name, e.message))?;
                             let market = r.host.resolve_market_by_product(product)?;
                             let Some(market) = market else {
-                                let product = text(property(&raw, "product_id")?.as_ref())?;
+                                let product = safe_cex_num::js_retained_string(
+                                    property(&raw, "product_id")?.as_ref(),
+                                )
+                                .map_err(|e| error(e.name, e.message))?;
                                 *missing.entry(product).or_default() += 1.0;
                                 continue;
                             };
                             let now = r.host.now_ms()?;
                             let order = r.host.map_rest_order(raw.clone(), market, now)?;
                             let Some(order) = order else {
-                                let product = text(property(&raw, "product_id")?.as_ref())?;
+                                let product = safe_cex_num::js_retained_string(
+                                    property(&raw, "product_id")?.as_ref(),
+                                )
+                                .map_err(|e| error(e.name, e.message))?;
                                 *unsupported.entry(product).or_default() += 1.0;
                                 continue;
                             };
                             let id = order.borrow().fields.id.clone();
                             by_id.insert(id, order);
                         }
-                        cursor = if js_truthy(page.has_next.as_ref()) {
+                        cursor = if page.has_next.as_ref().is_some_and(Input::is_truthy) {
                             page.cursor
                         } else {
                             None
                         };
-                        if !js_truthy(cursor.as_ref()) {
+                        if !cursor.as_ref().is_some_and(Input::is_truthy) {
                             break;
                         }
                     }
@@ -208,7 +212,7 @@ pub struct PrivateOrderEvent {
 }
 pub type PrivateOrderEventRoot = Rc<RefCell<PrivateOrderEvent>>;
 #[derive(Debug, Clone)]
-pub struct PrivateOrderFill<S = Value> {
+pub struct PrivateOrderFill<S = Input> {
     pub id: String,
     pub side: safe_cex_types::ModelField<OrderSide>,
     pub symbol: String,
@@ -224,21 +228,21 @@ pub trait PrivateOrderScalar: Clone {
     fn is_text(&self, expected: &str) -> bool;
     fn from_text(value: &str) -> Self;
 }
-impl PrivateOrderScalar for Value {
+impl PrivateOrderScalar for Input {
     fn float(&self) -> Result<f64, PortfolioFailure> {
-        float(Some(self))
+        safe_cex_num::js_retained_parse_float(Some(self)).map_err(|e| error(e.name, e.message))
     }
     fn text(&self) -> Result<String, PortfolioFailure> {
-        text(Some(self))
+        safe_cex_num::js_retained_string(Some(self)).map_err(|e| error(e.name, e.message))
     }
     fn truthy(&self) -> bool {
-        js_truthy(Some(self))
+        self.is_truthy()
     }
     fn is_text(&self, expected: &str) -> bool {
-        self.as_str() == Some(expected)
+        self.text_equals(expected)
     }
     fn from_text(value: &str) -> Self {
-        Value::from(value)
+        Input::from(Value::from(value))
     }
 }
 impl PrivateOrderScalar for crate::starbase_public_frames::CoinbaseStarbaseFrameValue {
@@ -255,7 +259,7 @@ impl PrivateOrderScalar for crate::starbase_public_frames::CoinbaseStarbaseFrame
     fn truthy(&self) -> bool {
         use crate::starbase_public_frames::CoinbaseStarbaseFrameValue as F;
         match self {
-            F::Null => false,
+            F::Null | F::Undefined => false,
             F::Bool(v) => *v,
             F::Number(v) => *v != 0.0 && !v.is_nan(),
             F::String(v) => !v.is_empty(),
@@ -274,8 +278,8 @@ pub trait PrivateOrderInfo: Clone {
     fn property(&self, name: &str) -> Result<Option<Self::Scalar>, PortfolioFailure>;
 }
 impl PrivateOrderInfo for ReadItem {
-    type Scalar = Value;
-    fn property(&self, name: &str) -> Result<Option<Value>, PortfolioFailure> {
+    type Scalar = Input;
+    fn property(&self, name: &str) -> Result<Option<Input>, PortfolioFailure> {
         property(self, name)
     }
 }
@@ -403,7 +407,7 @@ pub fn handle_user_event_orders<I: PrivateOrderInfo, E: PrivateOrderEventInput<I
             market
                 .borrow()
                 .contract_size
-                .and_then(|v| normalize_cfm_contract_size(&json!(v)))
+                .and_then(|v| normalize_cfm_contract_size(&Input::Float(v)))
         } else {
             Some(1.0)
         };

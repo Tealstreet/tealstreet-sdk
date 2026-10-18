@@ -119,10 +119,10 @@ fn run(scene: &'static str) -> Observed {
         "number-nan" => poison.last = f64::NAN,
         "number-infinity" => poison.last = f64::INFINITY,
         "optional-positive" => poison.mid_price = Some(42.),
-        "truthy-info-stripped" => poison.info = Some(json!({"id":"undefined"})),
-        "info-false" => poison.info = Some(json!(false)),
-        "info-null" => poison.info = Some(Value::Null),
-        "info-id-error-stripped" => poison.info = Some(json!({"id":{"toString":1}})),
+        "truthy-info-stripped" => poison.info = Some(json!({"id":"undefined"}).into()),
+        "info-false" => poison.info = Some(json!(false).into()),
+        "info-null" => poison.info = Some(Value::Null.into()),
+        "info-id-error-stripped" => poison.info = Some(json!({"id":{"toString":1}}).into()),
         _ => {}
     }
     let sentinel = || ticker("undefined", "sentinel");

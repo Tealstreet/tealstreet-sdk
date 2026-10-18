@@ -159,7 +159,15 @@ fn assert_native_type(order: &safe_cex_types::Order, kind: &str) {
     let native = from_typed(order).unwrap();
     assert!(native.has_own("type"));
     assert!(matches!(native.get("type").unwrap(), Js::Undefined));
-    assert_eq!(order.info.value().unwrap()["type"], kind);
+    assert!(
+        order
+            .info
+            .value()
+            .unwrap()
+            .get("type")
+            .unwrap()
+            .text_equals(kind)
+    );
 }
 fn typed_case(kind: &'static str) {
     let f = Fixture::new(kind);

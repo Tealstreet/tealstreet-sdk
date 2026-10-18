@@ -28475,5 +28475,551 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_coinbase::portfolios_balances::PortfolioState": {
+    "shape": "map",
+    "sample": {
+      "uuid": "portfolio-a",
+      "type": "DEFAULT",
+      "opaque": "ordinary"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed maintained Coinbase selection reads uuid/type and retains unobserved metadata. The selected state uses canonical Input for opaque values. Ordinary Deserialize remains a map-shape audit; supplemental execution uses actual native codec with overflow and lone UTF16, then reads uuid/type, metadata count and actual metadata numeric bits/code units. No model JSON serialization or DTO field-default widening.",
+    "nativeObservation": {
+      "call": "{ let input = safe_cex_types::retained_json::RetainedJsonInput::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()).unwrap(); let native = safe_cex_exchange::js_runtime::value::from_retained_input(input); match safe_cex_exchange::js_runtime::value::to_typed::<$type>(&native) { Ok(decoded) => { let units = match decoded.metadata.get(&\"opaque\".encode_utf16().collect::<Vec<_>>()) { Some(safe_cex_types::retained_json::RetainedJsonInput::Text(units)) => Some(units.clone()), _ => None }; let bits = match decoded.metadata.get(&\"number\".encode_utf16().collect::<Vec<_>>()) { Some(safe_cex_types::retained_json::RetainedJsonInput::Float(value)) => Some(format!(\"{:016x}\", value.to_bits())), Some(safe_cex_types::retained_json::RetainedJsonInput::Lexeme(value)) => Some(format!(\"{:016x}\", value.parse::<f64>().unwrap().to_bits())), _ => None }; serde_json::json!({\"ok\":true,\"uuid\":decoded.uuid,\"type\":decoded.r#type,\"metadataCount\":decoded.metadata.len(),\"opaqueUnits\":units,\"numberBits\":bits}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "uuid",
+        "type",
+        "metadataCount",
+        "opaqueUnits",
+        "numberBits"
+      ],
+      "cases": [
+        {
+          "input": "{\"uuid\":\"portfolio-a\",\"type\":\"DEFAULT\",\"opaque\":\"\\ud800\",\"number\":1e999}",
+          "output": {
+            "ok": true,
+            "uuid": "portfolio-a",
+            "type": "DEFAULT",
+            "metadataCount": 2,
+            "opaqueUnits": [
+              55296
+            ],
+            "numberBits": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "{\"uuid\":\"portfolio-b\",\"type\":\"INTX\",\"opaque\":\"\\udfff\",\"number\":-0}",
+          "output": {
+            "ok": true,
+            "uuid": "portfolio-b",
+            "type": "INTX",
+            "metadataCount": 2,
+            "opaqueUnits": [
+              57343
+            ],
+            "numberBits": "8000000000000000"
+          }
+        },
+        {
+          "input": "{\"uuid\":12,\"type\":\"DEFAULT\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::utils::normalize_cfm_contract_size": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalize_cfm_contract_size",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed maintained normalizeCfmContractSize numeric/string guard and positive finite test. Concrete &Input admits retained native values; direct Option/f64 observations cover native number, radix text, signed zero, infinity, NaN text, UTF16 and wrong kinds. Existing actual-source order corpus independently checks these guard outcomes.",
+    "call": "{ let input = safe_cex_types::retained_json::RetainedJsonInput::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()).unwrap(); let result = $type(&input); serde_json::json!({\"ok\":true,\"present\":result.is_some(),\"bits\":result.map(|value| format!(\"{:016x}\", value.to_bits()))}) }",
+    "cases": [
+      {
+        "input": "1.5",
+        "output": {
+          "ok": true,
+          "present": true,
+          "bits": "3ff8000000000000"
+        }
+      },
+      {
+        "input": "\"0x10\"",
+        "output": {
+          "ok": true,
+          "present": true,
+          "bits": "4030000000000000"
+        }
+      },
+      {
+        "input": "-0",
+        "output": {
+          "ok": true,
+          "present": false,
+          "bits": null
+        }
+      },
+      {
+        "input": "1e999",
+        "output": {
+          "ok": true,
+          "present": false,
+          "bits": null
+        }
+      },
+      {
+        "input": "\"NaN\"",
+        "output": {
+          "ok": true,
+          "present": false,
+          "bits": null
+        }
+      },
+      {
+        "input": "\"\\ud800\"",
+        "output": {
+          "ok": true,
+          "present": false,
+          "bits": null
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": true,
+          "present": false,
+          "bits": null
+        }
+      },
+      {
+        "input": "[]",
+        "output": {
+          "ok": true,
+          "present": false,
+          "bits": null
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let input = safe_cex_types::retained_json::RetainedJsonInput::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()).unwrap(); let result = $type(&input); serde_json::json!({\"ok\":true,\"present\":result.is_some(),\"bits\":result.map(|value| format!(\"{:016x}\", value.to_bits()))}) }",
+      "nativeFields": [
+        "present",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": "1.5",
+          "output": {
+            "ok": true,
+            "present": true,
+            "bits": "3ff8000000000000"
+          }
+        },
+        {
+          "input": "\"0x10\"",
+          "output": {
+            "ok": true,
+            "present": true,
+            "bits": "4030000000000000"
+          }
+        },
+        {
+          "input": "-0",
+          "output": {
+            "ok": true,
+            "present": false,
+            "bits": null
+          }
+        },
+        {
+          "input": "1e999",
+          "output": {
+            "ok": true,
+            "present": false,
+            "bits": null
+          }
+        },
+        {
+          "input": "\"NaN\"",
+          "output": {
+            "ok": true,
+            "present": false,
+            "bits": null
+          }
+        },
+        {
+          "input": "\"\\ud800\"",
+          "output": {
+            "ok": true,
+            "present": false,
+            "bits": null
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": true,
+            "present": false,
+            "bits": null
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": true,
+            "present": false,
+            "bits": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::orders::map_coinbase_rest_order": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "map_coinbase_rest_order",
+      "signature": {
+        "inputs": [
+          [
+            "raw_order",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "market",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::Market",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "last_update",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Order",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed maintained mapCoinbaseRestOrder configuration selection and raw info reference. Concrete retained input avoids any whole-response JSON projection. Actual mapper outputs are read as native id/symbol/amount/price and info UTF16/numeric bits, with two independent valid orders and malformed configuration. Existing source order corpus verifies all other sizing/status branches.",
+    "call": "{ let input = safe_cex_types::retained_json::RetainedJsonInput::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()).unwrap(); let market: safe_cex_types::Market = serde_json::from_value(serde_json::json!({\"id\":\"BTC-USD\",\"symbol\":\"BTC-USDC\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":0.001,\"price\":0.01},\"limits\":{\"amount\":{\"min\":0.001,\"max\":100000},\"leverage\":{\"min\":1,\"max\":10}}})).unwrap(); match $type(&input, &market, 12345.0) { Some(decoded) => {let info = decoded.info.as_ref().unwrap(); serde_json::json!({\"ok\":true,\"id\":decoded.id,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":format!(\"{:016x}\",decoded.price.to_number().to_bits()),\"opaqueUnits\":info.get(\"opaque\").and_then(|value| value.as_text()),\"numberBits\":info.get(\"number\").and_then(|value| value.as_f64()).map(|value|format!(\"{:016x}\",value.to_bits()))})}, None => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "{\"order_id\": \"one\", \"product_id\": \"BTC-USD\", \"side\": \"BUY\", \"status\": \"OPEN\", \"filled_size\": \"0.3\", \"order_configuration\": {\"limit_limit_gtc\": {\"base_size\": \"1.5\", \"limit_price\": \"10\"}}, \"opaque\": \"\\ud800\", \"number\": 1e999}",
+        "output": {
+          "ok": true,
+          "id": "one",
+          "symbol": "BTC-USDC",
+          "amountBits": "3ff8000000000000",
+          "priceBits": "4024000000000000",
+          "opaqueUnits": [
+            55296
+          ],
+          "numberBits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": "{\"order_id\": \"two\", \"product_id\": \"BTC-USD\", \"side\": \"SELL\", \"status\": \"FILLED\", \"filled_size\": \"2\", \"order_configuration\": {\"limit_limit_gtc\": {\"base_size\": \"2\", \"limit_price\": \"11\"}}, \"opaque\": \"\\udfff\", \"number\": -0}",
+        "output": {
+          "ok": true,
+          "id": "two",
+          "symbol": "BTC-USDC",
+          "amountBits": "4000000000000000",
+          "priceBits": "4026000000000000",
+          "opaqueUnits": [
+            57343
+          ],
+          "numberBits": "8000000000000000"
+        }
+      },
+      {
+        "input": "{}",
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let input = safe_cex_types::retained_json::RetainedJsonInput::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()).unwrap(); let market: safe_cex_types::Market = serde_json::from_value(serde_json::json!({\"id\":\"BTC-USD\",\"symbol\":\"BTC-USDC\",\"base\":\"BTC\",\"quote\":\"USD\",\"active\":true,\"precision\":{\"amount\":0.001,\"price\":0.01},\"limits\":{\"amount\":{\"min\":0.001,\"max\":100000},\"leverage\":{\"min\":1,\"max\":10}}})).unwrap(); match $type(&input, &market, 12345.0) { Some(decoded) => {let info = decoded.info.as_ref().unwrap(); serde_json::json!({\"ok\":true,\"id\":decoded.id,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":format!(\"{:016x}\",decoded.price.to_number().to_bits()),\"opaqueUnits\":info.get(\"opaque\").and_then(|value| value.as_text()),\"numberBits\":info.get(\"number\").and_then(|value| value.as_f64()).map(|value|format!(\"{:016x}\",value.to_bits()))})}, None => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "symbol",
+        "amountBits",
+        "priceBits",
+        "opaqueUnits",
+        "numberBits"
+      ],
+      "cases": [
+        {
+          "input": "{\"order_id\": \"one\", \"product_id\": \"BTC-USD\", \"side\": \"BUY\", \"status\": \"OPEN\", \"filled_size\": \"0.3\", \"order_configuration\": {\"limit_limit_gtc\": {\"base_size\": \"1.5\", \"limit_price\": \"10\"}}, \"opaque\": \"\\ud800\", \"number\": 1e999}",
+          "output": {
+            "ok": true,
+            "id": "one",
+            "symbol": "BTC-USDC",
+            "amountBits": "3ff8000000000000",
+            "priceBits": "4024000000000000",
+            "opaqueUnits": [
+              55296
+            ],
+            "numberBits": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "{\"order_id\": \"two\", \"product_id\": \"BTC-USD\", \"side\": \"SELL\", \"status\": \"FILLED\", \"filled_size\": \"2\", \"order_configuration\": {\"limit_limit_gtc\": {\"base_size\": \"2\", \"limit_price\": \"11\"}}, \"opaque\": \"\\udfff\", \"number\": -0}",
+          "output": {
+            "ok": true,
+            "id": "two",
+            "symbol": "BTC-USDC",
+            "amountBits": "4000000000000000",
+            "priceBits": "4026000000000000",
+            "opaqueUnits": [
+              57343
+            ],
+            "numberBits": "8000000000000000"
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::rest_reads::format_spot_cfm_tickers": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "format_spot_cfm_tickers",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::Ticker",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed maintained Coinbase spot/CFM ticker conversion. Opaque retained siblings do not participate in typed field reads; observed last-price and percentage keep infinity and signed zero. Two distinct products execute the concrete retained-input formatter and compare native fields. Existing maintained source ticker corpus remains unchanged.",
+    "call": "{ let input = safe_cex_types::retained_json::RetainedJsonInput::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()).unwrap(); match $type(&input) {Ok(decoded) => serde_json::json!({\"ok\":true,\"count\":decoded.len(),\"id\":decoded[0].id,\"priceBits\":format!(\"{:016x}\",decoded[0].last.to_bits()),\"percentageBits\":format!(\"{:016x}\",decoded[0].percentage.to_bits())}), Err(_) => serde_json::json!({\"ok\":false})} }",
+    "cases": [
+      {
+        "input": "{\"products\":[{\"product_id\":\"one\",\"price\":\"1e999\",\"price_percentage_change_24h\":\"-0\",\"opaque\":\"\\ud800\"}]}",
+        "output": {
+          "ok": true,
+          "count": 1,
+          "id": "one",
+          "priceBits": "7ff0000000000000",
+          "percentageBits": "8000000000000000"
+        }
+      },
+      {
+        "input": "{\"products\":[{\"product_id\":\"two\",\"price\":\"12.5\",\"price_percentage_change_24h\":\"2.5\",\"opaque\":\"\\udfff\"}]}",
+        "output": {
+          "ok": true,
+          "count": 1,
+          "id": "two",
+          "priceBits": "4029000000000000",
+          "percentageBits": "4004000000000000"
+        }
+      },
+      {
+        "input": "{}",
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let input = safe_cex_types::retained_json::RetainedJsonInput::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()).unwrap(); match $type(&input) {Ok(decoded) => serde_json::json!({\"ok\":true,\"count\":decoded.len(),\"id\":decoded[0].id,\"priceBits\":format!(\"{:016x}\",decoded[0].last.to_bits()),\"percentageBits\":format!(\"{:016x}\",decoded[0].percentage.to_bits())}), Err(_) => serde_json::json!({\"ok\":false})} }",
+      "nativeFields": [
+        "count",
+        "id",
+        "priceBits",
+        "percentageBits"
+      ],
+      "cases": [
+        {
+          "input": "{\"products\":[{\"product_id\":\"one\",\"price\":\"1e999\",\"price_percentage_change_24h\":\"-0\",\"opaque\":\"\\ud800\"}]}",
+          "output": {
+            "ok": true,
+            "count": 1,
+            "id": "one",
+            "priceBits": "7ff0000000000000",
+            "percentageBits": "8000000000000000"
+          }
+        },
+        {
+          "input": "{\"products\":[{\"product_id\":\"two\",\"price\":\"12.5\",\"price_percentage_change_24h\":\"2.5\",\"opaque\":\"\\udfff\"}]}",
+          "output": {
+            "ok": true,
+            "count": 1,
+            "id": "two",
+            "priceBits": "4029000000000000",
+            "percentageBits": "4004000000000000"
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }

@@ -4323,6 +4323,9 @@ fn owned_callback_error_clone_preserves_independent_native_metadata() {
     assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }
 
+#[path = "support/retained_info.rs"]
+mod retained_info;
+
 #[test]
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 fn native_http_factory_updates_global_request_counts() {

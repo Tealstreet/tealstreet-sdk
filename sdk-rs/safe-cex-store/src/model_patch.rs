@@ -170,9 +170,15 @@ fn decode<T: serde::de::DeserializeOwned + Clone + 'static>(
         )),
     }
 }
-fn passthrough_value(field: &str, value: PatchValueRef<'_>) -> Result<Value, StorePatchError> {
+fn retained_info(
+    field: &str,
+    value: PatchValueRef<'_>,
+) -> Result<safe_cex_types::retained_json::RetainedJsonInput, StorePatchError> {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match value {
-        PatchValueRef::Json(value) => Ok(value.clone()),
+        PatchValueRef::Undefined => Ok(Input::Undefined),
+        PatchValueRef::Json(value) => Ok(value.clone().into()),
+        PatchValueRef::Number(value) => Ok(Input::Float(value)),
         value => decode(field, value),
     }
 }
@@ -199,11 +205,14 @@ fn model_number(
 fn model_info(
     field: &str,
     value: PatchValueRef<'_>,
-) -> Result<safe_cex_types::ModelField<Value>, StorePatchError> {
+) -> Result<
+    safe_cex_types::ModelField<safe_cex_types::retained_json::RetainedJsonInput>,
+    StorePatchError,
+> {
     if matches!(value, PatchValueRef::Undefined) {
         Ok(safe_cex_types::ModelField::Undefined)
     } else {
-        passthrough_value(field, value).map(safe_cex_types::ModelField::Value)
+        retained_info(field, value).map(safe_cex_types::ModelField::Value)
     }
 }
 pub(crate) trait PatchModel {
@@ -364,7 +373,7 @@ impl PatchModel for safe_cex_types::Market {
         field: &str,
         value: PatchValueRef<'_>,
     ) -> Result<(), StorePatchError> {
-        if matches!(value, PatchValueRef::Undefined) {
+        if matches!(value, PatchValueRef::Undefined) && field != "info" {
             return Ok(());
         }
         match field {
@@ -382,7 +391,7 @@ impl PatchModel for safe_cex_types::Market {
             "isSpot" => self.is_spot = Some(decode(field, value)?),
             "isPerpetual" => self.is_perpetual = Some(decode(field, value)?),
             "isReadOnly" => self.is_read_only = Some(decode(field, value)?),
-            "info" => self.info = Some(passthrough_value(field, value)?),
+            "info" => self.info = Some(retained_info(field, value)?),
             "takerFee" => self.taker_fee = Some(number(field, value)?),
             "makerFee" => self.maker_fee = Some(number(field, value)?),
             "option" => self.option = Some(decode(field, value)?),
@@ -412,7 +421,7 @@ impl PatchModel for safe_cex_types::Ticker {
         field: &str,
         value: PatchValueRef<'_>,
     ) -> Result<(), StorePatchError> {
-        if matches!(value, PatchValueRef::Undefined) {
+        if matches!(value, PatchValueRef::Undefined) && field != "info" {
             return Ok(());
         }
         match field {
@@ -431,7 +440,7 @@ impl PatchModel for safe_cex_types::Ticker {
             "volume" => self.volume = number(field, value)?,
             "quoteVolume" => self.quote_volume = number(field, value)?,
             "timestamp" => self.timestamp = Some(number(field, value)?),
-            "info" => self.info = Some(passthrough_value(field, value)?),
+            "info" => self.info = Some(retained_info(field, value)?),
             _ => {}
         }
         Ok(())

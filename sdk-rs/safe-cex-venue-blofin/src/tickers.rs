@@ -1,27 +1,22 @@
 //! BlofinExchange.formatTickers: projection, catch/log, then stored fallback.
-use safe_cex_num::{
-    TableHit, js_table_lookup, numeric_ingress::JsNumberOutput, parse_float, round_usd,
-};
+use safe_cex_num::{TableHit, js_table_lookup, numeric_ingress::JsNumberOutput, round_usd};
 use safe_cex_store::Store;
 use safe_cex_types::{
-    Ticker,
-    js_coercion::{JsCoercionError, js_string},
+    Ticker, js_coercion::JsCoercionError, retained_json::RetainedJsonInput as Input,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct TickerInput {
-    #[serde(deserialize_with = "safe_cex_num::numeric_ingress::js_deserialize_passthrough")]
-    value: Value,
+    value: Input,
 }
 impl TickerInput {
-    pub(crate) fn from_retained(value: Value) -> Self {
+    pub(crate) fn from_retained(value: Input) -> Self {
         Self { value }
     }
-    /// Retained JSON, including original numeric lexemes; not a wire projection.
-    pub fn retained(&self) -> &Value {
+    /// Canonical native data, including UTF-16, own undefined and numeric events.
+    pub fn retained(&self) -> &Input {
         &self.value
     }
 }
@@ -30,8 +25,8 @@ impl JsNumberOutput for TickerInput {
         safe_cex_num::js_number_output!(self, struct {} passthrough { value });
     }
 }
-fn number(value: Option<&Value>) -> Result<f64, JsCoercionError> {
-    Ok(parse_float(&js_string(value)?))
+fn number(value: Option<&Input>) -> Result<f64, JsCoercionError> {
+    safe_cex_num::js_retained_parse_float(value)
 }
 fn project(data: &TickerInput, store: &dyn Store) -> Result<Vec<Ticker>, JsCoercionError> {
     let rows = data.value.as_array().ok_or(JsCoercionError {
@@ -50,7 +45,7 @@ fn project(data: &TickerInput, store: &dyn Store) -> Result<Vec<Ticker>, JsCoerc
                 message: "Cannot read properties of null (reading 'instId')",
             });
         }
-        let key = js_string(row.get("instId"))?;
+        let key = safe_cex_num::js_retained_string(row.get("instId"))?;
         let markets = store.markets_by_id();
         let Some(market) = markets.get(&key) else {
             if matches!(

@@ -9,7 +9,8 @@ use crate::{
     },
     utils::{normalize_cfm_contract_size, normalize_coinbase_usd_equivalent_product_id},
 };
-use safe_cex_num::{js_number, js_string, js_truthy, parse_float};
+use safe_cex_num::{js_number, js_truthy, parse_float};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Candle, Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision,
 };
@@ -77,13 +78,11 @@ fn error(name: &str, message: &str) -> PortfolioFailure {
         json!({"name":name,"message":message}),
     )))
 }
-fn float(v: Option<&Value>) -> Result<f64, PortfolioFailure> {
-    js_string(v)
-        .map(|v| parse_float(&v))
-        .map_err(|e| error(&e.name, &e.message))
+fn float(v: Option<&Input>) -> Result<f64, PortfolioFailure> {
+    safe_cex_num::js_retained_parse_float(v).map_err(|e| error(&e.name, &e.message))
 }
-fn text(v: Option<&Value>) -> Result<String, PortfolioFailure> {
-    js_string(v).map_err(|e| error(&e.name, &e.message))
+fn text(v: Option<&Input>) -> Result<String, PortfolioFailure> {
+    safe_cex_num::js_retained_string(v).map_err(|e| error(&e.name, &e.message))
 }
 fn js_round(v: f64) -> f64 {
     if !v.is_finite() || v == 0.0 {
@@ -250,7 +249,7 @@ pub fn fetch_markets<H: PublicMarketReadHost + 'static>(
                     // CFM skip are read from the next retained item at iteration time.
                     let row = item.borrow().clone();
                     let details = row.get("future_product_details");
-                    if row.is_null() {
+                    if row.is_nullish() {
                         return Err(error(
                             "TypeError",
                             "Cannot read properties of null (reading 'price_increment')",
@@ -259,7 +258,9 @@ pub fn fetch_markets<H: PublicMarketReadHost + 'static>(
                     let spot = details.is_none();
                     let expiring = details
                         .and_then(|v| v.get("contract_expiry_type"))
-                        .and_then(Value::as_str)
+                        .and_then(Input::as_text)
+                        .and_then(|v| String::from_utf16(v).ok())
+                        .as_deref()
                         == Some("EXPIRING");
                     let cfm = if expiring {
                         details
@@ -279,8 +280,8 @@ pub fn fetch_markets<H: PublicMarketReadHost + 'static>(
                         v
                     } else {
                         let size = details.and_then(|v| v.get("contract_size"));
-                        let default = json!("1");
-                        float(if js_truthy(size) {
+                        let default = Input::from(json!("1"));
+                        float(if size.is_some_and(Input::is_truthy) {
                             size
                         } else {
                             Some(&default)
@@ -289,21 +290,23 @@ pub fn fetch_markets<H: PublicMarketReadHost + 'static>(
                     let id = text(row.get("product_id"))?;
                     let root = details.and_then(|v| v.get("contract_root_unit"));
                     let base = row.get("base_currency_id");
-                    let base = if js_truthy(root) {
+                    let base = if root.is_some_and(Input::is_truthy) {
                         text(root)?
-                    } else if js_truthy(base) {
+                    } else if base.is_some_and(Input::is_truthy) {
                         text(base)?
                     } else {
                         let product = row.get("product_id");
                         match product {
-                            Some(Value::String(v)) => v.split('-').next().unwrap_or("").into(),
+                            Some(v @ Input::Text(_)) => {
+                                text(Some(v))?.split('-').next().unwrap_or("").into()
+                            }
                             None => {
                                 return Err(error(
                                     "TypeError",
                                     "Cannot read properties of undefined (reading 'split')",
                                 ));
                             }
-                            Some(Value::Null) => {
+                            Some(Input::Null | Input::Undefined) => {
                                 return Err(error(
                                     "TypeError",
                                     "Cannot read properties of null (reading 'split')",
@@ -321,7 +324,11 @@ pub fn fetch_markets<H: PublicMarketReadHost + 'static>(
                         id,
                         base,
                         text(row.get("quote_currency_id"))?,
-                        row.get("status").and_then(Value::as_str) == Some("TRADING"),
+                        row.get("status")
+                            .and_then(Input::as_text)
+                            .and_then(|v| String::from_utf16(v).ok())
+                            .as_deref()
+                            == Some("TRADING"),
                         float(row.get("base_increment"))?,
                         float(row.get("price_increment"))?,
                         float(row.get("base_min_size"))?,
@@ -407,14 +414,24 @@ pub fn fetch_markets_from_intx_instruments<H: PublicMarketReadHost + 'static>(
                 for i in 0..len {
                     let item = reply.borrow()[i].clone();
                     let row = item.borrow();
-                    if row.is_null() {
+                    if row.is_nullish() {
                         return Err(error(
                             "TypeError",
                             "Cannot read properties of null (reading 'trading_state')",
                         ));
                     }
-                    if row.get("trading_state").and_then(Value::as_str) == Some("TRADING")
-                        && row.get("type").and_then(Value::as_str) == Some("PERP")
+                    if row
+                        .get("trading_state")
+                        .and_then(Input::as_text)
+                        .and_then(|v| String::from_utf16(v).ok())
+                        .as_deref()
+                        == Some("TRADING")
+                        && row
+                            .get("type")
+                            .and_then(Input::as_text)
+                            .and_then(|v| String::from_utf16(v).ok())
+                            .as_deref()
+                            == Some("PERP")
                     {
                         selected.push(item.clone());
                     }
@@ -424,10 +441,10 @@ pub fn fetch_markets_from_intx_instruments<H: PublicMarketReadHost + 'static>(
                     let row = item.borrow().clone();
                     let min = row.get("min_quantity");
                     let notional = row.get("min_notional_value");
-                    let default = json!("0.001");
-                    let min = if js_truthy(min) {
+                    let default = Input::from(json!("0.001"));
+                    let min = if min.is_some_and(Input::is_truthy) {
                         min
-                    } else if js_truthy(notional) {
+                    } else if notional.is_some_and(Input::is_truthy) {
                         notional
                     } else {
                         Some(&default)
@@ -524,14 +541,14 @@ pub fn fetch_ohlcv<H: PublicMarketReadHost + 'static>(
             for i in 0..len {
                 let item = reply.items.borrow()[i].clone();
                 let row = item.borrow().clone();
-                if row.is_null() {
+                if row.is_nullish() {
                     return Err(error(
                         "TypeError",
                         "Cannot read properties of null (reading 'start')",
                     ));
                 }
                 let candle = Rc::new(RefCell::new(Candle {
-                    timestamp: js_number(row.get("start"))
+                    timestamp: safe_cex_num::js_retained_number(row.get("start"))
                         .map_err(|e| error(&e.name, &e.message))?,
                     open: float(row.get("open"))?,
                     high: float(row.get("high"))?,

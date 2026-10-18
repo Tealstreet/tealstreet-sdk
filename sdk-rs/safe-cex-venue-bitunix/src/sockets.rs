@@ -17,6 +17,7 @@ use safe_cex_num::{
 };
 use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_transport::socket::SocketFrame;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Candle, ExchangeOptions, Order, OrderBook, OrderBookOrders};
 use serde_json::Value;
 use std::{
@@ -1764,14 +1765,16 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
             .base
             .emit_ws_diagnostic_receive(&Value::String(raw.clone()), &Default::default())?)
     }
-    fn parse(&mut self, raw: String) -> Result<Value, Fault> {
-        Ok(serde_json::from_str(&raw).unwrap_or(Value::Null))
+    fn parse(&mut self, raw: String) -> Result<Input, Fault> {
+        // Source jsonParse maps malformed websocket text to null.
+        Ok(Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap_or(Input::Null))
     }
-    fn balance_notice(&mut self, json: &Value) -> Result<(), Fault> {
+    fn balance_notice(&mut self, json: &Input) -> Result<(), Fault> {
         self.venue()?.runtime.console(
             "info",
             &format!(
-                "bitunix: received balance message, but we will fetch it from the exchange {json}"
+                "bitunix: received balance message, but we will fetch it from the exchange {}",
+                safe_cex_num::js_retained_json_stringify(json)?.unwrap_or("undefined".into())
             ),
         );
         Ok(())
@@ -1779,15 +1782,21 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
     fn refresh(&mut self, kind: &'static str) -> Result<(), Fault> {
         Ok(self.socket.refresh(kind)?)
     }
-    fn orders(&mut self) -> Result<Vec<Value>, Fault> {
+    fn orders(&mut self) -> Result<Vec<Input>, Fault> {
         let orders = self.venue()?.base.store.orders().to_vec();
-        Ok(orders.iter().map(to_value).collect::<Result<_, _>>()?)
+        Ok(orders
+            .iter()
+            .map(crate::adapter::to_input)
+            .collect::<Result<_, _>>()?)
     }
-    fn positions(&mut self) -> Result<Vec<Value>, Fault> {
+    fn positions(&mut self) -> Result<Vec<Input>, Fault> {
         let positions = self.venue()?.base.store.positions().to_vec();
-        Ok(positions.iter().map(to_value).collect::<Result<_, _>>()?)
+        Ok(positions
+            .iter()
+            .map(crate::adapter::to_input)
+            .collect::<Result<_, _>>()?)
     }
-    fn add_orders(&mut self, orders: Vec<JsJsonValue>) -> Result<(), Fault> {
+    fn add_orders(&mut self, orders: Vec<Input>) -> Result<(), Fault> {
         let venue = self.venue()?;
         let orders: Vec<Order> = venue.orders_from(orders)?;
         Ok(venue
@@ -1796,30 +1805,40 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
             .add_or_update_orders(orders)
             .map_err(ExchangeError::from)?)
     }
-    fn key(&mut self, row: &Value, name: &'static str) -> Result<Option<Value>, Fault> {
-        Ok(match v(row.as_object().map(GetKeyObject::Json), name) {
-            TableHit::Mapped(GetKeyValue::Json(value)) => Some(value.clone()),
-            _ => None,
-        })
+    fn key(&mut self, row: &Input, name: &'static str) -> Result<Option<Input>, Fault> {
+        for name in [
+            name.to_owned(),
+            safe_cex_num::lodash_snake_case(name),
+            safe_cex_num::lodash_camel_case(name),
+        ] {
+            if let Some(value) = row.get(&name) {
+                return Ok(Some(value.clone()));
+            }
+            if safe_cex_num::js_table_lookup::<&str, ()>(&[], &name).is_present() {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
+
     fn reduce_only(
         &mut self,
-        raw: Option<&Value>,
-        client: Option<&Value>,
-        fallback: Option<&Value>,
+        raw: Option<&Input>,
+        client: Option<&Input>,
+        fallback: Option<&Input>,
     ) -> Result<bool, Fault> {
         let venue = self.venue()?;
         let state = venue.state.borrow();
         Ok(crate::tpsl_helpers::get_bitunix_reduce_only(
             raw,
             client,
-            safe_cex_num::js_truthy(fallback),
+            fallback.is_some_and(Input::is_truthy),
             &state.order_reduce_only_cache,
         )?)
     }
-    fn cache_tif(&mut self, client: &Value, tif: JsJsonValue) -> Result<(), Fault> {
-        let client = js_string(Some(client))?;
-        let tif = js_string(Some(&adapter_json(&tif)?))?;
+    fn cache_tif(&mut self, client: &Input, tif: Input) -> Result<(), Fault> {
+        let client = safe_cex_num::js_retained_string(Some(client))?;
+        let tif = safe_cex_num::js_retained_string(Some(&tif))?;
         self.venue()?
             .state
             .borrow_mut()
@@ -1827,11 +1846,11 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
             .insert(client, tif);
         Ok(())
     }
-    fn cache_position(&mut self, key: String, id: Option<&Value>) -> Result<(), Fault> {
+    fn cache_position(&mut self, key: String, id: Option<&Input>) -> Result<(), Fault> {
         let venue = self.venue()?;
         match id {
             Some(id) => {
-                let id = js_string(Some(id))?;
+                let id = safe_cex_num::js_retained_string(Some(id))?;
                 venue.state.borrow_mut().position_id_cache.insert(key, id);
             }
             None => {
@@ -1840,10 +1859,10 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
         }
         Ok(())
     }
-    fn update_position_info(&mut self, position: &Value, info: JsJsonValue) -> Result<(), Fault> {
-        let id = js_string(position.get("id"))?;
-        let mut patch = serde_json::Map::new();
-        patch.insert("info".into(), adapter_json(&info)?);
+    fn update_position_info(&mut self, position: &Input, info: Input) -> Result<(), Fault> {
+        let id = safe_cex_num::js_retained_string(position.get("id"))?;
+        let mut patch = safe_cex_store::model_patch::ModelPatch::default();
+        patch.set_native("info", info);
         Ok(self
             .venue()?
             .base
@@ -1856,8 +1875,8 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
     }
     fn leg_id(
         &mut self,
-        raw: Option<&Value>,
-        position: Option<&Value>,
+        raw: Option<&Input>,
+        position: Option<&Input>,
         leg: &'static str,
         disambiguate: bool,
     ) -> Result<String, Fault> {

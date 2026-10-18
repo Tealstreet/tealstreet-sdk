@@ -94,7 +94,14 @@ fn actual_returned_units_and_native_admission_are_distinct() {
     }
     let raw = r#"{"r":[{"i":"btc_perp","b":"scalaré","q":"USD","k":"PERPETUAL"},{"i":"eth_perp","b":"ETH","q":"USD"}]}"#;
     let future = fetch_markets(
-        |_, _| std::future::ready(Ok(serde_json::from_str(raw).unwrap())),
+        |_, _| {
+            std::future::ready(Ok(
+                safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                    &raw.encode_utf16().collect::<Vec<_>>(),
+                )
+                .unwrap(),
+            ))
+        },
         |_, _| Ok(()),
     );
     let mut future = std::pin::pin!(future);

@@ -1,8 +1,6 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
-use safe_cex_num::numeric_ingress::{
-    js_from_str, js_from_value, js_from_value_ref, js_value_as_f64,
-};
+use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_types::js_coercion::JsCoercionError;
 use safe_cex_types::{MarginType, Market, Position, PositionMode, PositionSide};
@@ -12,14 +10,24 @@ use std::{process::Command, rc::Rc};
 fn bits(value: f64) -> Value {
     json!({"number":if value.is_nan(){"nan".into()}else{format!("{:016x}",value.to_bits())}})
 }
-fn info(value: Value) -> Value {
+fn info(value: safe_cex_types::retained_json::RetainedJsonInput) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match value {
-        Value::Number(_) => bits(js_value_as_f64(&value).unwrap()),
-        Value::Array(v) => Value::Array(v.into_iter().map(info).collect()),
-        Value::Object(v) => Value::Object(v.into_iter().map(|(k, v)| (k, info(v))).collect()),
-        other => other,
+        Input::Float(v) => bits(v),
+        Input::Lexeme(v) => bits(v.parse().unwrap()),
+        Input::Array(v) => Value::Array(v.into_iter().map(info).collect()),
+        Input::Object(v) => Value::Object(
+            v.into_iter()
+                .map(|(k, v)| (String::from_utf16(&k).unwrap(), info(v)))
+                .collect(),
+        ),
+        Input::Text(v) => Value::String(String::from_utf16(&v).unwrap()),
+        Input::Bool(v) => Value::Bool(v),
+        Input::Null => Value::Null,
+        Input::Undefined => panic!("source corpus has no native undefined in JSON info"),
     }
 }
+
 fn native(p: Position) -> Value {
     assert!(
         p.realized_pnl.is_none() && p.margin_size.is_none() && p.last_update.is_none(),
@@ -184,14 +192,21 @@ fn live_positions_corpus() {
                 );
                 if let Some(first) = rows.first_mut() {
                     let before = serde_json::to_value(&input).unwrap();
-                    let row = first.info.as_mut().unwrap().as_object_mut().unwrap();
-                    row.insert("__ownership_probe".into(), json!(true));
+                    let safe_cex_types::retained_json::RetainedJsonInput::Object(row) =
+                        first.info.as_mut().unwrap()
+                    else {
+                        panic!("info object")
+                    };
+                    row.push((
+                        "__ownership_probe".encode_utf16().collect(),
+                        json!(true).into(),
+                    ));
                     assert_eq!(
                         serde_json::to_value(&input).unwrap(),
                         before,
                         "positions_owned_info_boundary"
                     );
-                    row.remove("__ownership_probe");
+                    row.pop();
                 }
             }
             let actual = match result {

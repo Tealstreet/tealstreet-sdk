@@ -32,9 +32,10 @@ fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
     panic!("scripted call must settle");
 }
 fn script(wire: &support::Wire, path: &str, data: Value) {
-    wire.bodies
-        .borrow_mut()
-        .insert(path.into(), json!({"success":true,"code":0,"data":data}));
+    wire.bodies.borrow_mut().insert(
+        path.into(),
+        json!({"success":true,"code":0,"data":data}).into(),
+    );
 }
 fn calls(wire: &support::Wire) -> Vec<(String, String, Value)> {
     wire.requests.borrow_mut().drain(..).collect()
@@ -64,6 +65,103 @@ const CANCEL_ALL: &str = "/api/v1/private/order/cancel_all";
 const PLAN_PLACE: &str = "/api/v1/private/planorder/place/v2";
 const CHANGE_LEVERAGE: &str = "/api/v1/private/position/change_leverage";
 const CHANGE_MODE: &str = "/api/v1/private/position/change_position_mode";
+
+#[test]
+fn retained_position_info_drives_real_margin_derivation_without_json_projection() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, from_typed, to_typed};
+    use safe_cex_store::Store;
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-info-margin-source.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.len(), 10);
+    for (index, case) in cases.iter().enumerate() {
+        let (venue, rt, store, wire) = support::fixture();
+        let units = case["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| u16::try_from(n.as_u64().unwrap()).unwrap())
+            .collect::<Vec<_>>();
+        let position = from_json(
+            &json!({"id":"retained","symbol":"BTCUSDT","side":"long","contracts":1,"entryPrice":100,"notional":100,"leverage":7,"unrealizedPnl":0,"liquidationPrice":0,"marginType":"cross","positionMode":"oneway"}),
+        );
+        position
+            .define("marginType", Js::str(case["marginType"].as_str().unwrap()))
+            .unwrap();
+        let open_type = match case["kind"].as_str().unwrap() {
+            "undefined" => Js::Undefined,
+            "null" => Js::Null,
+            "text" => Js::utf16(&units),
+            _ => panic!("source input kind"),
+        };
+        position
+            .define(
+                "info",
+                Js::object(vec![
+                    ("openType", open_type.clone()),
+                    ("unread", Js::Number(f64::NAN)),
+                    ("negativeZero", Js::Number(-0.0)),
+                    ("ownUndefined", Js::Undefined),
+                ]),
+            )
+            .unwrap();
+        let position: safe_cex_types::Position =
+            to_typed(&position).expect("native Position.info must retain non-JSON data");
+        let observed = from_typed(&position).unwrap().get("info").unwrap();
+        assert!(observed.get("unread").unwrap().as_f64().unwrap().is_nan());
+        assert_eq!(
+            observed
+                .get("negativeZero")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert!(observed.get("ownUndefined").unwrap().is_undefined());
+        assert!(observed.own_entries().unwrap().iter().any(|(key, value)| {
+            key.iter().copied().eq("ownUndefined".encode_utf16()) && value.is_undefined()
+        }));
+        assert!(observed.get("openType").unwrap().strict_equals(&open_type));
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                positions: Some(vec![position]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let result = drive(
+            &rt,
+            (&*venue as &dyn Exchange).fetch_leverage_for_symbol("BTCUSDT".into()),
+        )
+        .expect("retained margin derivation must not narrow UTF16")
+        .unwrap();
+        let expected = match case["expected"].as_str().unwrap() {
+            "isolated" => MarginType::Isolated,
+            "cross" => MarginType::Cross,
+            _ => panic!("source margin variant"),
+        };
+        assert_eq!(result.margin_type, Some(expected), "source margin {index}");
+        assert_eq!(result.buy_leverage, 7.0);
+        assert!(
+            calls(&wire).is_empty(),
+            "missing market keeps the source local derivation path"
+        );
+        venue.dispose().unwrap();
+    }
+}
 
 fn script_venue(wire: &support::Wire) {
     script(
@@ -845,4 +943,162 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         runtime.errors.borrow()
     );
     venue.dispose().unwrap();
+}
+
+#[test]
+fn retained_raw_amount_alias_drives_real_cancel_and_replace() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_typed, to_typed};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-info-amount-source.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = cases.as_array().unwrap();
+    assert_eq!(cases.len(), 6);
+    for (index, case) in cases.iter().enumerate() {
+        let (venue, rt, store, wire) = support::fixture();
+        script_venue(&wire);
+        drive(&rt, venue.start()).unwrap();
+        calls(&wire);
+        let mut order = store
+            .orders()
+            .iter()
+            .find(|order| order.id == "9001")
+            .unwrap()
+            .clone();
+        order.amount = 5.0;
+        order.extra.as_mut().unwrap().remaining_native = Some(f64::NAN);
+        let native = from_typed(&order).unwrap();
+        let vol = match case["vol"]["kind"].as_str().unwrap() {
+            "undefined" => Js::Undefined,
+            "null" => Js::Null,
+            "number" => Js::Number(f64::from_bits(
+                u64::from_str_radix(case["vol"]["bits"].as_str().unwrap(), 16).unwrap(),
+            )),
+            "text" => Js::utf16(
+                &case["vol"]["units"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|unit| unit.as_u64().unwrap() as u16)
+                    .collect::<Vec<_>>(),
+            ),
+            _ => unreachable!(),
+        };
+        let info = Js::object(vec![
+            ("vol", vol.clone()),
+            ("quantity", Js::utf16(&[50, 0xD800])),
+            ("origQty", Js::Number(8.0)),
+            ("unreadNaN", Js::Number(f64::NAN)),
+            ("ownUndefined", Js::Undefined),
+        ]);
+        native.define("info", info.clone()).unwrap();
+        let order: Order = to_typed(&native).unwrap();
+        let ids = drive(
+            &rt,
+            venue.update_order(UpdateOrderOpts {
+                order,
+                update: serde_json::from_value(json!({"price":59100})).unwrap(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(ids, ["1234567"]);
+        let requests = calls(&wire);
+        assert_eq!(bodies(&requests, "POST", CANCEL), [json!(["9001"])]);
+        let cancel = requests
+            .iter()
+            .position(|(method, path, _)| method == "POST" && path == CANCEL)
+            .unwrap();
+        let submit = requests
+            .iter()
+            .position(|(method, path, _)| method == "POST" && path == SUBMIT)
+            .unwrap();
+        assert!(cancel < submit);
+        assert_eq!(
+            bodies(&requests, "POST", SUBMIT)[0]["vol"]
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            case["expected"].as_f64().unwrap().to_bits(),
+            "retained replacement quantity case {index}"
+        );
+        assert!(info.get("vol").unwrap().same_value_zero(&vol));
+        assert!(info.get("unreadNaN").unwrap().to_number().unwrap().is_nan());
+        assert!(info.has_own("ownUndefined"));
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
+fn fetch_markets_retains_opaque_native_info_before_normalization() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let (venue, rt, store, wire) = support::fixture();
+    let mut row = Input::from(
+        json!({"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","contractSize":1,"state":0}),
+    );
+    row.as_object_mut().unwrap().extend([
+        (
+            "opaque".encode_utf16().collect(),
+            Input::Text(vec![0xd800, 65, 0xdc00]),
+        ),
+        ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
+        (
+            "infinity".encode_utf16().collect(),
+            Input::Float(f64::INFINITY),
+        ),
+        ("zero".encode_utf16().collect(), Input::Float(-0.0)),
+        ("undefined".encode_utf16().collect(), Input::Undefined),
+    ]);
+    wire.bodies.borrow_mut().insert(
+        DETAIL.into(),
+        Input::Object(vec![(
+            "data".encode_utf16().collect(),
+            Input::Array(vec![row.clone()]),
+        )]),
+    );
+    let markets = drive(&rt, venue.fetch_markets()).unwrap();
+    assert_eq!(
+        markets.len(),
+        1,
+        "actual configured market fetch admits opaque metadata"
+    );
+    safe_cex_store::Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let markets = store.markets();
+    let info = markets[0].info.as_ref().unwrap();
+    assert_eq!(
+        info.get("opaque").unwrap().as_text().unwrap(),
+        &[0xd800, 65, 0xdc00]
+    );
+    assert!(info.get("nan").unwrap().as_f64().unwrap().is_nan());
+    assert_eq!(
+        info.get("infinity").unwrap().as_f64().unwrap().to_bits(),
+        f64::INFINITY.to_bits()
+    );
+    assert_eq!(
+        info.get("zero").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0f64).to_bits()
+    );
+    assert!(matches!(info.get("undefined"), Some(Input::Undefined)));
+    assert_eq!(
+        info.as_object().unwrap().len(),
+        row.as_object().unwrap().len()
+    );
+    assert_eq!(markets[0].symbol, "BTCUSDT");
+    assert!(sent(&calls(&wire), "GET", DETAIL));
 }

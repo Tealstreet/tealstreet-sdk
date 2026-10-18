@@ -353,6 +353,7 @@ fn bit(value: f64, e: &Value, label: &str) {
 }
 fn frame(value: &Frame, e: &Value) {
     match value {
+        Frame::Undefined => assert_eq!(e["$undefined"], true, "native undefined"),
         Frame::Null => assert!(e.is_null()),
         Frame::Bool(v) => assert_eq!(Some(*v), e.as_bool()),
         Frame::Number(v) => bit(*v, e, "class native Frame number"),

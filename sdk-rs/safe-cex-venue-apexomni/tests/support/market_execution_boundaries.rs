@@ -71,7 +71,7 @@ fn market_filter_errors_precede_typed_output_admission() {
         if row["label"] == "missing-config" {
             store
                 .update_zk_link_config(Some(
-                    json!({"id":"old","l2Key":"old-key","contractConfig":{"stale":true}}),
+                    json!({"id":"old","l2Key":"old-key","contractConfig":{"stale":true}}).into(),
                 ))
                 .unwrap();
         }
@@ -100,9 +100,9 @@ fn market_filter_errors_precede_typed_output_admission() {
             };
             assert!(
                 message.contains(if nonboolean {
-                    "active=String(\"truthy\")"
+                    "active=Text([116, 114, 117, 116, 104, 121]); JSON=\"truthy\""
                 } else {
-                    "id=Number(17.0)"
+                    "id=Float(17.0); JSON=17"
                 }),
                 "{message}"
             );
@@ -154,9 +154,13 @@ fn market_filter_errors_precede_typed_output_admission() {
         // Native Store effects are inspected directly, including every rejected helper result.
         if row["label"] == "missing-config" {
             native::native_eq(
-                &J::from(store.zk_link_config().as_deref().cloned().unwrap()),
-                &J::from(json!({"id":"old","l2Key":"old-key"})),
-                &format!("{label} native stale config removed before error"),
+                &native::retained(store.zk_link_config().as_deref().unwrap()),
+                &J::Object(vec![
+                    ("id".into(), J::String("old".into())),
+                    ("l2Key".into(), J::String("old-key".into())),
+                    ("contractConfig".into(), J::Undefined),
+                ]),
+                &format!("{label} native stale config replaced by own undefined before error"),
             );
             let J::Object(source_config) = native::input(&row["zk"]) else {
                 panic!("source config")
@@ -172,7 +176,7 @@ fn market_filter_errors_precede_typed_output_admission() {
             );
         } else {
             native::check_fields(
-                &J::from(store.zk_link_config().as_deref().cloned().unwrap()),
+                &native::retained(store.zk_link_config().as_deref().unwrap()),
                 &row["zk"],
                 &format!("{label} native config retained before filter error"),
             );
@@ -214,7 +218,7 @@ fn websocket_coercion_failures_keep_source_type_error() {
         let exchange = venue(&host, fixture(&host));
         host.operations.borrow_mut().clear();
         let error = exchange
-            .record_ws_execution(&native::input(&row["input"]))
+            .record_ws_execution(&native::capture(&native::input(&row["input"])))
             .expect_err("APEX-BOUNDARY native coercion must throw");
         assert_eq!(error.name, "TypeError", "{label} native error kind");
         assert_eq!(
@@ -277,7 +281,7 @@ fn executions_assets(history: bool) {
         let exchange = venue(&host, fixture(&host));
         if row["hasCache"] == true {
             exchange
-                .record_ws_execution(&native::input(&row["cached"]))
+                .record_ws_execution(&native::capture(&native::input(&row["cached"])))
                 .unwrap();
         }
         let cache_before = exchange.recent_ws_executions.borrow().clone();
@@ -302,7 +306,7 @@ fn executions_assets(history: bool) {
             futures::executor::block_on(exchange.fetch_historical_fills(&options, &J::Undefined))
         } else {
             exchange
-                .record_ws_execution(&native::input(&row["input"]))
+                .record_ws_execution(&native::capture(&native::input(&row["input"])))
                 .map(|()| exchange.recent_ws_executions.borrow().clone())
         };
         if unsupported {

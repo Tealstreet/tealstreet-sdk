@@ -9,6 +9,7 @@ use std::fmt;
 /// The native serializer/decoder use these hints; ordinary JSON still omits
 /// absent/undefined object properties and refuses null for a non-nullable T.
 pub const MODEL_RECORD: &str = "$safe_cex::ModelRecord";
+pub const INFO_RECORD: &str = "$safe_cex::InfoRecord";
 pub const MODEL_FIELD: &str = "$safe_cex::ModelField";
 pub const UNDEFINED: &str = "$safe_cex::Undefined";
 
@@ -208,15 +209,8 @@ impl ModelField<f64> {
 
 pub fn deserialize_info<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<ModelField<serde_json::Value>, D::Error> {
-    match ModelField::<crate::retained_json::RetainedJsonInput>::deserialize(deserializer)? {
-        ModelField::Absent => Ok(ModelField::Absent),
-        ModelField::Undefined => Ok(ModelField::Undefined),
-        ModelField::Value(value) => value
-            .into_value()
-            .map(ModelField::Value)
-            .map_err(de::Error::custom),
-    }
+) -> Result<ModelField<crate::retained_json::RetainedJsonInput>, D::Error> {
+    ModelField::deserialize(deserializer)
 }
 
 impl PartialEq<ModelField<f64>> for f64 {

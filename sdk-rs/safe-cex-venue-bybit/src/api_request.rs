@@ -237,13 +237,25 @@ async fn prepare_request(
 mod tests;
 
 /// The tunnel wraps a non-JSON body as `{ raw_response }`; a direct adapter hands the string.
-pub(crate) fn blocked_by_cdn(data: &Value) -> bool {
-    let raw = match data {
-        Value::String(text) => Some(text.as_str()),
-        Value::Object(map) => map.get("raw_response").and_then(Value::as_str),
-        _ => None,
-    };
-    raw.is_some_and(|text| text.to_ascii_lowercase().contains("cloudfront"))
+pub(crate) fn blocked_by_cdn(data: &safe_cex_types::retained_json::RetainedJsonInput) -> bool {
+    let raw = data
+        .as_text()
+        .or_else(|| data.get("raw_response").and_then(|value| value.as_text()));
+    raw.is_some_and(|text| {
+        text.windows(10).any(|window| {
+            window
+                .iter()
+                .copied()
+                .map(|unit| {
+                    if unit <= 127 {
+                        (unit as u8).to_ascii_lowercase() as u16
+                    } else {
+                        unit
+                    }
+                })
+                .eq("cloudfront".encode_utf16())
+        })
+    })
 }
 
 /// CloudFront refusing the egress address answers 403 before Bybit sees the request:

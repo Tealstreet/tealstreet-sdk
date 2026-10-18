@@ -136,7 +136,9 @@ fn full_store_typescript_differential() {
                 .set_setting(args[0].as_str().unwrap(), args[1].as_bool().unwrap())
                 .unwrap(),
             "updateStarkConfig" => store.update_stark_config(Some(args[0].clone())).unwrap(),
-            "updateZkLinkConfig" => store.update_zk_link_config(Some(args[0].clone())).unwrap(),
+            "updateZkLinkConfig" => store
+                .update_zk_link_config(Some(args[0].clone().into()))
+                .unwrap(),
             "updateUserData" => store.update_user_data(Some(args[0].clone())).unwrap(),
             "reset" => store.reset().unwrap(),
             op => panic!("{op}"),

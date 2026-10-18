@@ -38,6 +38,7 @@ pub struct Runtime {
     pub jobs: RefCell<Vec<Job>>,
     pub errors: RefCell<Vec<String>>,
     pub console: RefCell<Vec<(String, String)>>,
+    pub diagnostics: Cell<bool>,
     /// When set, dials open a scripted socket instead of failing.
     pub dial: Cell<bool>,
     pub dialed: RefCell<Vec<(String, Rc<FakeSocket>)>>,
@@ -200,7 +201,7 @@ impl WsRuntime for Runtime {
         3000.0
     }
     fn diagnostics_enabled(&self) -> bool {
-        false
+        self.diagnostics.get()
     }
     fn lifecycle_logs_enabled(&self) -> bool {
         false

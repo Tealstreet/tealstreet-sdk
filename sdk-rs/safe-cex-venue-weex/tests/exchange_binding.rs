@@ -1813,3 +1813,60 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     );
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn ticker_info_keeps_source_own_undefined_and_opaque_native_rows() {
+    use safe_cex_transport::RestResponseBody;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let h = setup();
+    seed(&h);
+    h.http.replace("GET", endpoint("BOOK_TICKER"), json!([]));
+    let tickers = h.drive(h.venue().fetch_tickers()).unwrap();
+    assert_eq!(tickers.len(), 1);
+    let info = tickers[0].info.as_ref().unwrap();
+    assert!(
+        matches!(info.get("bookTicker"), Some(Input::Undefined)),
+        "source owns undefined bookTicker"
+    );
+    let mut row = Input::from(json!({"symbol":"BTCUSDT","lastPrice":"101.5"}));
+    row.as_object_mut().unwrap().extend([
+        (
+            "opaque".encode_utf16().collect(),
+            Input::Text(vec![0xd800, 65, 0xdc00]),
+        ),
+        ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
+        (
+            "infinity".encode_utf16().collect(),
+            Input::Float(f64::INFINITY),
+        ),
+        ("zero".encode_utf16().collect(), Input::Float(-0.0)),
+        ("undefined".encode_utf16().collect(), Input::Undefined),
+    ]);
+    h.http.replace_body(
+        endpoint("TICKER_24HR"),
+        RestResponseBody::Transformed(Input::Array(vec![row])),
+    );
+    let tickers = h.drive(h.venue().fetch_tickers()).unwrap();
+    assert_eq!(
+        tickers.len(),
+        1,
+        "opaque row reaches constructed ticker mapper"
+    );
+    let info = tickers[0].info.as_ref().unwrap();
+    assert!(matches!(info.get("bookTicker"), Some(Input::Undefined)));
+    let raw = info.get("ticker").unwrap();
+    assert_eq!(
+        raw.get("opaque").unwrap().as_text().unwrap(),
+        &[0xd800, 65, 0xdc00]
+    );
+    assert!(raw.get("nan").unwrap().as_f64().unwrap().is_nan());
+    assert_eq!(
+        raw.get("infinity").unwrap().as_f64().unwrap().to_bits(),
+        f64::INFINITY.to_bits()
+    );
+    assert_eq!(
+        raw.get("zero").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0f64).to_bits()
+    );
+    assert!(matches!(raw.get("undefined"), Some(Input::Undefined)));
+}
