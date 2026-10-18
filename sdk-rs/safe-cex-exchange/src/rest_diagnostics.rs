@@ -1,13 +1,17 @@
 //! Typed HTTP receipts feed the existing process-local diagnostics adapter.
 use crate::js_runtime::value::{Js, Thrown};
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 use safe_cex_store::venue_rest_diagnostics::{
     self as diagnostics, DiagnosticHeaders, RestDiagnosticConfig, RestDiagnosticError,
     RestDiagnosticResponse,
 };
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 use safe_cex_transport::{RestFailure, RestRequest, RestResponse};
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 use safe_cex_types::{ExchangeName, retained_json::RetainedJsonInput as Input};
 use serde_json::Value;
 
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 fn exchange_key(exchange: &ExchangeName) -> String {
     serde_json::to_value(exchange)
         .expect("exchange name")
@@ -15,6 +19,7 @@ fn exchange_key(exchange: &ExchangeName) -> String {
         .expect("exchange string")
         .into()
 }
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 fn headers(headers: &std::collections::BTreeMap<String, String>) -> DiagnosticHeaders {
     DiagnosticHeaders {
         values: headers
@@ -24,6 +29,7 @@ fn headers(headers: &std::collections::BTreeMap<String, String>) -> DiagnosticHe
         get: None,
     }
 }
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 fn config(request: &RestRequest) -> RestDiagnosticConfig {
     let mut config = RestDiagnosticConfig {
         url: Some(request.url.clone()),
@@ -55,6 +61,7 @@ fn config(request: &RestRequest) -> RestDiagnosticConfig {
     }
     config
 }
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 fn response(
     response: &RestResponse,
     request: &RestRequest,
@@ -83,6 +90,7 @@ fn response(
             .flatten(),
     }
 }
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub(crate) fn success(
     exchange: &ExchangeName,
     reply: &RestResponse,
@@ -95,6 +103,7 @@ pub(crate) fn success(
         now,
     );
 }
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub(crate) fn failure(exchange: &ExchangeName, error: &RestFailure, now: f64) {
     let error = RestDiagnosticError {
         config: Some(config(&error.request)),

@@ -456,15 +456,15 @@ impl HttpHost for NativeHttpHost {
         response: &RestResponse,
         request: &RestRequest,
     ) {
-        crate::rest_diagnostics::success(exchange, response, request, wall_clock_ms() as f64);
+        crate::rest_diagnostics::success(exchange, response, request, wall_clock_ms());
     }
     fn note_failure(&self, exchange: &ExchangeName, error: &RestFailure) {
-        crate::rest_diagnostics::failure(exchange, error, wall_clock_ms() as f64);
+        crate::rest_diagnostics::failure(exchange, error, wall_clock_ms());
     }
     fn mark_start(&self, request: &mut RestRequest) {
         request.config_extensions.insert(
             "safeCexRestDiagStartedAt".into(),
-            safe_cex_types::retained_json::RetainedJsonInput::Float(wall_clock_ms() as f64),
+            safe_cex_types::retained_json::RetainedJsonInput::Float(wall_clock_ms()),
         );
     }
     fn signing_capture(&self, request: &RestRequest) -> bool {

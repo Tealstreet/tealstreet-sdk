@@ -593,7 +593,7 @@ impl safe_cex_transport::signing::RemoteSigner for DiagnosticSigner {
             let mut headers = request.config.headers;
             headers.insert(
                 "X-BAPI-TIMESTAMP".into(),
-                (safe_cex_transport::native::wall_clock_ms() - 2000).to_string(),
+                (safe_cex_transport::native::wall_clock_ms() - 2000.0).to_string(),
             );
             Ok(RemoteSignerResponse::Http(HttpSigningResponse {
                 id: request.id,
