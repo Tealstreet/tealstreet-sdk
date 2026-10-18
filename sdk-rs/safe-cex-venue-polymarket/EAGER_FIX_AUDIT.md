@@ -45,3 +45,25 @@ Wasm library Clippy, fmt, full parity index, override controls, all-features
 cancellation and its Node controls, plus CI wiring after retiring the old test
 targets. All Cargo invocations use the pinned SDK toolchain, jobs 2 and disabled
 incremental compilation.
+
+Measured production controls all reached their named compiled RED and exact-byte
+restoration GREEN. The error-alias control first survived a synchronous-only
+probe; adding a rejected-Promise case exposed that fault. The synchronous throw
+identity assertions remain enabled alongside the new asynchronous checks.
+
+After normally inheriting master `ef6ce47921` (including shared CONNECTING socket
+PR #1150), the full venue suite passes 210 tests across 26 targets. The full
+parity index passes 7,563 rows / 16,341 public Rust items; all-features cancellation
+passes six tests plus 11 Node controls, and override checks pass all eight tests,
+including the existing no-super/chosen-base rejection controls. Scoped fmt,
+strict host all-target/all-feature Clippy and strict Wasm library Clippy pass.
+The registered CI wiring audit passes all 376 checks after retiring the two
+obsolete timestamp test targets.
+
+The original source oracles remain byte-identical: `public_reads_oracle.cjs`
+SHA-256 `8e07a2ec0a89fba0f6abf3bb6fe6dd28ebd43e42227f3c602474d9cfc42868eb`
+and `class_cost_http.cjs` SHA-256
+`54074bd074a8213f1dc9cd52b6e6852bcec7eaf01d5365b57345326d4a4f8117`.
+The repository extraction check reports only inherited Lighter transaction-client
+manifest drift (zero added/orphaned symbols), routed by the coordinator to its
+owner; no Polymarket extraction diff is reported.
