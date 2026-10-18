@@ -241,3 +241,10 @@ native numeric-bit expectations. Fresh TS receivers and advancing native clocks
 isolate numeric mapping from throttle timing. `ticker-native-controls.py paradex paradex-book`
 compiles a live publication fault, requires a native assertion failure, then
 restores exact source bytes and requires the named test to pass.
+
+The constructed candle poll dispatches `maybeRecoverOhlcvTradeStream` to the
+existing ingress helper. Its raw Date.now read and live per-key trade/recovery
+caches preserve the stale guard, cooldown, warning-before-forced-subscribe order.
+The real Exchange candle regression compares resubscription counts and warnings
+at initial, three-second and thirty-second polls with the maintained TS method,
+then verifies cleanup still cancels REST polling and callback delivery.
