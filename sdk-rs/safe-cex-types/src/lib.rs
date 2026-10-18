@@ -3442,7 +3442,11 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         inverse: Option<bool>,
-        #[serde(default, deserialize_with = "deserialize_present")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
         fees: Option<super::MarketFees>,
     }
     impl<'de> serde::Deserialize<'de> for super::MarketRuntime {
