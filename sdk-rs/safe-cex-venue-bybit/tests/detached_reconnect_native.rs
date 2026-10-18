@@ -99,7 +99,8 @@ async fn observe(name: ExchangeName) {
         store
             .socket_health()
             .unwrap()
-            .as_object()
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
             .is_some_and(|health| !health.is_empty()),
         "health commits before notification throws"
     );
