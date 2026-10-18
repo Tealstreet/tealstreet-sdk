@@ -64,6 +64,20 @@ test('Coinbase public-only reads follow INTX startup without authenticated broke
     );
   }
 });
+test('Orderly broker candles require signing even though markets and tickers are public', () => {
+  for (const venue of ['woofi', 'kodiakfi', 'mode', 'salsadex', 'tealstreet-dex', 'what']) {
+    const { plan } = publicRestPlan(
+      venue,
+      { markets: [{ active: true, symbol: 'PERP_BTC_USDC' }], methods: [] },
+      1710000000000,
+    );
+    const candles = plan.filter((s) => s.method === 'fetchOHLCV');
+    assert.equal(candles.length, 3);
+    assert.ok(candles.every((s) => s.skip.startsWith('AUTH_REQUIRED')));
+    assert.equal(plan.find((s) => s.label === 'markets').skip, undefined);
+    assert.equal(plan.find((s) => s.label === 'tickers-funding-open-interest').skip, undefined);
+  }
+});
 test('posted public reads preserve all business parameters when removing correlation envelopes', () => {
   const url = new URL('https://api.crypto.com/exchange/v1/public/get-candlestick');
   const key = (body) => readKey('POST', url, JSON.stringify(body));

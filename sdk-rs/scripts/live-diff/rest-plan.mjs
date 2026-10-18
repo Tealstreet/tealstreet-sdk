@@ -19,6 +19,7 @@ export const publicReadMethods = [
 
 export function publicRestPlan(exchange, description, epoch, { enableOptions = true } = {}) {
   const coinbase = ['coinbase', 'coinbasespot'].includes(exchange);
+  const orderly = ['woofi', 'kodiakfi', 'mode', 'salsadex', 'tealstreet-dex', 'what'].includes(exchange);
   const markets = description.markets ?? [];
   const market =
     markets.find((m) => m.active && m.base === 'BTC' && m.quote === 'USDT') ??
@@ -42,6 +43,8 @@ export function publicRestPlan(exchange, description, epoch, { enableOptions = t
       args: [{ symbol, interval, from: to - duration * 10, to, limit: 10 }],
       ...(exchange === 'bitrue' ? { skip: 'WS_REQUIRED: TS fetchOHLCV uses its live public socket' } : {}),
       ...(coinbase ? { skip: 'AUTH_REQUIRED: TS Coinbase candles use the authenticated brokerage endpoint' } : {}),
+      // createAPI signs every path outside /public/, including /v1/kline.
+      ...(orderly ? { skip: 'AUTH_REQUIRED: TS Orderly candles require a signed /v1/kline request' } : {}),
     });
   }
   plan.push({

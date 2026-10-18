@@ -246,6 +246,8 @@ prove populated open-interest coverage. Signed account reads, leverage-bracket
 reads and operator-only origins are excluded explicitly.
 Coinbase uses the maintained public-only startup's INTX ticker method; its
 brokerage candles and spot/CFM product helpers require JWT and are excluded.
+Orderly broker candles also require signing in TS (`/v1/kline`); their public
+markets and tickers remain in the keyless plan.
 
 Both sides use the #1082 diagnostic clock host. Each operation starts at the
 same predetermined logical minute, then advances in1s steps only while the
