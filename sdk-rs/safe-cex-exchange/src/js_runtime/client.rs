@@ -338,6 +338,18 @@ fn axios_error(response: &Js, config: &Js) -> Result<Thrown, Thrown> {
     error.define("response", response.clone())?;
     error.define("config", config.clone())?;
     error.define("isAxiosError", Js::Bool(true))?;
+    if let Js::Number(status) = &status {
+        let code = if (400.0..500.0).contains(status) {
+            Some("ERR_BAD_REQUEST")
+        } else if (500.0..600.0).contains(status) {
+            Some("ERR_BAD_RESPONSE")
+        } else {
+            None
+        };
+        if let Some(code) = code {
+            error.define("code", Js::str(code))?;
+        }
+    }
     error.define("status", status)?;
     Ok(Thrown::new(error))
 }
@@ -513,7 +525,7 @@ async fn dispatch_request(host: &Host, config: Js) -> Result<Js, Thrown> {
     if !custom_adapter {
         let status = response.get("status")?.to_number().unwrap_or(200.0);
         if !(200.0..300.0).contains(&status) {
-            return Err(axios_error(&response, &config)?);
+            return Err(axios_error(&response, &response.get("config")?)?);
         }
     }
     Ok(response)

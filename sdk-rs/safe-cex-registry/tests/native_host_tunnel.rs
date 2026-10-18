@@ -678,6 +678,7 @@ async fn native_rest_diagnostics(name: safe_cex_types::ExchangeName) {
             assert_eq!(samples.len(), 1);
             assert!(samples[0].endpoint.is_some());
             assert_eq!(samples[0].status, Some(404.0));
+            assert_eq!(samples[0].code.as_deref(), Some("ERR_BAD_REQUEST"));
             if hosted {
                 assert!(
                     samples[0]
