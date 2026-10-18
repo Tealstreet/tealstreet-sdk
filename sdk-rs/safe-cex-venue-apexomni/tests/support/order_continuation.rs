@@ -107,7 +107,7 @@ fn order_coercions_and_clocks_precede_typed_admission() {
                     s("console"),
                     s("warn"),
                     s(
-                        "[APEX OMNI] Refused order row: Order.reduceOnly must be boolean, got Float(17.0)"
+                        "[APEX OMNI] Refused order row: Order.reduceOnly must be boolean, got Float(17.0); JSON=17"
                     ),
                     J::Undefined,
                 ]))

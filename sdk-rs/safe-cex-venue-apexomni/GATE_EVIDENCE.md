@@ -995,3 +995,16 @@ Strict named string/bool row refusals remain visible and keep valid siblings.
 The obsolete nested `fields::retained` local-function key is retired: that nested
 function no longer exists; canonical typed diagnostic projection and prepared
 request capture have distinct direct call sites.
+
+
+Compiled terminal projection control: temporarily replace terminal Input capture
+with the old whole-body `to_js_json` projection, then restore the native value for
+capture. This compiled and made all three real opaque order/balance/market-config
+witnesses fail at exit101 on D800->FFFD; the unrelated wallet control still passed.
+Exact source restoration passed all four selected tests. The initial control
+harness's unused-import compiler failure was rejected as evidence and corrected.
+
+Restored integration gates: binding54, exchange72 (maintained source corpora),
+native_clock2 passed. Strict-field reports use canonical text at the actual warning
+boundary, retaining the source value and native kind; the final continuation and
+unmapped checks exercise that diagnostic without weakening refusal assertions.

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/apexomni/apexomni.exchange.ts"
-rust_files = [ "safe-cex-crypto/src/lib.rs", "safe-cex-num/src/lib.rs", "safe-cex-venue-apexomni/src/data.rs", "safe-cex-venue-apexomni/src/response.rs", "safe-cex-venue-apexomni/src/exchange.rs", "safe-cex-venue-apexomni/src/exchange_utils.rs", "safe-cex-venue-apexomni/src/executions.rs", "safe-cex-venue-apexomni/src/historical_fills.rs", "safe-cex-venue-apexomni/src/lifecycle.rs", "safe-cex-venue-apexomni/src/trading.rs", "safe-cex-venue-apexomni/src/binding/exchange.rs", "safe-cex-venue-apexomni/src/binding/hosts.rs", "safe-cex-venue-apexomni/src/binding/http.rs", "safe-cex-venue-apexomni/src/binding/sockets.rs", "safe-cex-venue-apexomni/src/binding/signer.rs", "safe-cex-venue-apexomni/src/lib.rs" ]
+rust_files = [ "safe-cex-crypto/src/lib.rs", "safe-cex-num/src/lib.rs", "safe-cex-venue-apexomni/src/data.rs", "safe-cex-venue-apexomni/src/exchange.rs", "safe-cex-venue-apexomni/src/exchange_utils.rs", "safe-cex-venue-apexomni/src/executions.rs", "safe-cex-venue-apexomni/src/historical_fills.rs", "safe-cex-venue-apexomni/src/lifecycle.rs", "safe-cex-venue-apexomni/src/trading.rs", "safe-cex-venue-apexomni/src/binding/exchange.rs", "safe-cex-venue-apexomni/src/binding/hosts.rs", "safe-cex-venue-apexomni/src/binding/http.rs", "safe-cex-venue-apexomni/src/binding/sockets.rs", "safe-cex-venue-apexomni/src/binding/signer.rs", "safe-cex-venue-apexomni/src/lib.rs" ]
 
 [[symbol]]
 ts = "isoTimestampToEpochHours"
