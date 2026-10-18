@@ -1,3 +1,6 @@
+#[cfg(feature = "native")]
+#[path = "support/public_subscription_receipts.rs"]
+mod public_subscription_receipts;
 #[path = "support/canonical_value.rs"]
 mod canonical_value;
 #[cfg(feature = "native")]
