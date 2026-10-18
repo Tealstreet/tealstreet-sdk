@@ -157,16 +157,20 @@ fn combined_source_parity() {
                 }
             }
         }
-        let left = js_from_str(case["left"].as_str().unwrap());
-        let right = js_from_str(case["right"].as_str().unwrap());
+        let left = js_from_str::<JsNumberInput>(case["left"].as_str().unwrap());
+        let right = js_from_str::<JsNumberInput>(case["right"].as_str().unwrap());
         if name == "surrogate" {
             assert_eq!(case["expected"]["ok"][1]["instrumentUnit"], 55296);
-            assert!(
-                left.is_err() && right.is_err(),
-                "COMBINED-UTF8 ingress boundary"
+            let captured: safe_cex_types::retained_json::RetainedJsonInput =
+                left.as_ref().unwrap().clone().decode().unwrap();
+            assert_eq!(
+                captured.get("instruments").unwrap().as_array().unwrap()[0]
+                    .get("symbol")
+                    .unwrap()
+                    .as_text(),
+                Some([0xd800].as_slice())
             );
-            comparisons += 1;
-            continue;
+            assert!(right.is_ok(), "retained right input admission");
         }
         let mut original = ExchangeError::new("original-rejection");
         original.store_subscriber_ids = vec![19, 31];
@@ -202,6 +206,27 @@ fn combined_source_parity() {
                 original,
                 "COMBINED-ERROR unchanged metadata"
             );
+        } else if name == "surrogate" {
+            let output: safe_cex_types::retained_json::RetainedJsonInput =
+                result.unwrap().decode().unwrap();
+            let rows = output.as_array().unwrap();
+            assert_eq!(rows.len(), counts[i], "native retained join count");
+            for (row, expected) in rows.iter().zip(case["expected"]["ok"].as_array().unwrap()) {
+                for (key, field) in [
+                    ("instrument", "instrumentUnit"),
+                    ("instrumentDetails", "detailUnit"),
+                ] {
+                    let units = row
+                        .get(key)
+                        .unwrap()
+                        .get("symbol")
+                        .unwrap()
+                        .as_text()
+                        .unwrap();
+                    assert_eq!(u64::from(units[0]), expected[field].as_u64().unwrap());
+                    assert_eq!(units.len(), 1, "source join symbols are one code unit");
+                }
+            }
         } else {
             let output = native(result.unwrap());
             assert_eq!(

@@ -14985,6 +14985,244 @@
     "reason": "This exact alias resolves to the fallible Action callback returned by the production listener. Its work removes the registered parser, resets the retained book and sends through the actual socket; it does not parse raw input.",
     "evidence": "tests/private_classes.rs::public_listener_aliases::production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe constructs native_dependencies and actual ExchangeOwner for Futures, PM and Spot; the returned cleanup sends UNSUBSCRIBE, clears the same retained Book, and prevents later frame delivery. The separate compiled semantic control for Unsubscribe must fail this named native witness, then exact source restoration must pass. Trait receipts classify the real compiler alias; they do not execute a replacement callback or claim arbitrary host behavior."
   },
+  "safe_cex_venue_binance::account_leverage_overlay::LeverageFuture": {
+    "category": "non-decoder",
+    "reason": "An owned pinned continuation produces the account market transformation after the configured HTTP reply; it accepts no external serialized input.",
+    "evidence": "Production ExchangeOwner::invoke(Method::Overlay) reaches ExchangeState::load_overlay, then load_futures_account_max_leverage or load_pm_account_max_leverage. The actual native dependency/owner witness starts each configured signed brackets request and asserts Store market publication, zero/missing bracket retention and all untouched fields. Independent endpoint and maximum faults each fail that compiled native binding witness; exact source restoration passes. The maintained native alias probes determine Deserialize and alternate traits on the actual public types; no raw-input admission or feature-matrix claim is made.",
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_venue_binance::account_leverage_overlay::LeverageOverlay",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "resolved_path": {
+                                                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                                              "args": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_binance::account_leverage_overlay::LeverageLoader": {
+    "category": "non-decoder",
+    "reason": "This mutable callback starts the configured leverage request and returns its owned continuation; it is an executable capability, not a parser.",
+    "evidence": "Production ExchangeOwner::invoke(Method::Overlay) reaches ExchangeState::load_overlay, then load_futures_account_max_leverage or load_pm_account_max_leverage. The actual native dependency/owner witness starts each configured signed brackets request and asserts Store market publication, zero/missing bracket retention and all untouched fields. Independent endpoint and maximum faults each fail that compiled native binding witness; exact source restoration passes. The maintained native alias probes determine Deserialize and alternate traits on the actual public types; no raw-input admission or feature-matrix claim is made.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::boxed::Box",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::FnMut",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::pin::Pin",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::boxed::Box",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "dyn_trait": {
+                                                          "traits": [
+                                                            {
+                                                              "trait": {
+                                                                "path": "core::future::future::Future",
+                                                                "args": {
+                                                                  "angle_bracketed": {
+                                                                    "args": [],
+                                                                    "constraints": [
+                                                                      {
+                                                                        "name": "Output",
+                                                                        "args": null,
+                                                                        "binding": {
+                                                                          "equality": {
+                                                                            "type": {
+                                                                              "resolved_path": {
+                                                                                "path": "core::result::Result",
+                                                                                "args": {
+                                                                                  "angle_bracketed": {
+                                                                                    "args": [
+                                                                                      {
+                                                                                        "type": {
+                                                                                          "resolved_path": {
+                                                                                            "path": "safe_cex_venue_binance::account_leverage_overlay::LeverageOverlay",
+                                                                                            "args": null
+                                                                                          }
+                                                                                        }
+                                                                                      },
+                                                                                      {
+                                                                                        "type": {
+                                                                                          "resolved_path": {
+                                                                                            "path": "alloc::rc::Rc",
+                                                                                            "args": {
+                                                                                              "angle_bracketed": {
+                                                                                                "args": [
+                                                                                                  {
+                                                                                                    "type": {
+                                                                                                      "resolved_path": {
+                                                                                                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                                                                        "args": null
+                                                                                                      }
+                                                                                                    }
+                                                                                                  }
+                                                                                                ],
+                                                                                                "constraints": []
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    ],
+                                                                                    "constraints": []
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                }
+                                                              },
+                                                              "generic_params": []
+                                                            }
+                                                          ],
+                                                          "lifetime": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
   "safe_cex_venue_binance::orderbook::BinanceDepthUpdate": {
     "category": "decoder",
     "shape": "map",
