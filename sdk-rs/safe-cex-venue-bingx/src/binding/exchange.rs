@@ -11,10 +11,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::Store;
 use safe_cex_types::*;
-use std::{
-    rc::Rc,
-    task::{Context, Poll, Waker},
-};
+use std::rc::Rc;
 
 pub struct BingxDependencies {
     pub runtime: Rc<dyn WsRuntime>,
@@ -31,12 +28,7 @@ pub struct BingxExchange {
 }
 impl Drop for BingxExchange {
     fn drop(&mut self) {
-        if let Err(error) = self.dispose() {
-            self.host.scope.runtime.report_exception(
-                &error,
-                &serde_json::json!({"operation":"BingX drop"}).into(),
-            );
-        }
+        let _ = self.dispose();
     }
 }
 impl BingxExchange {
@@ -248,31 +240,22 @@ impl Exchange for BingxExchange {
         inherited()
     }
     fn fetch_ohlcv(&self, opts: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
-        let mut operation: ExchangeFuture<'_, Vec<Candle>> =
-            Box::pin(async move { self.inner.history.fetch_ohlcv(&opts).await });
-        // Source async arrows execute their prefix before returning a promise.
-        // Keep the original pending future, including its live request/receiver.
-        match operation
-            .as_mut()
-            .poll(&mut Context::from_waker(Waker::noop()))
-        {
-            Poll::Ready(result) => Box::pin(async move { result }),
-            Poll::Pending => operation,
-        }
+        let history = self.inner.history.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(
+            &runtime,
+            async move { history.fetch_ohlcv(&opts).await },
+        )
     }
     fn fetch_historical_fills(
         &self,
         opts: ExecutionsOptions,
     ) -> ExchangeFuture<'_, Vec<Execution>> {
-        let mut operation: ExchangeFuture<'_, Vec<Execution>> =
-            Box::pin(async move { self.inner.history.fetch_historical_fills(&opts).await });
-        match operation
-            .as_mut()
-            .poll(&mut Context::from_waker(Waker::noop()))
-        {
-            Poll::Ready(result) => Box::pin(async move { result }),
-            Poll::Pending => operation,
-        }
+        let history = self.inner.history.clone();
+        let runtime = self.inner.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            history.fetch_historical_fills(&opts).await
+        })
     }
     fn listen_ohlcv(
         &self,
@@ -307,9 +290,9 @@ impl Exchange for BingxExchange {
         Ok(Box::new(move || cleanup()))
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
-        self.inner.dispose()?;
+        let result = self.inner.dispose();
         self.host.dispose_timers();
-        Ok(())
+        result
     }
 }
 

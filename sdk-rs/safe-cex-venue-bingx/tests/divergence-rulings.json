@@ -52,7 +52,8 @@
     "ts": "BingxPrivateWebsocket#scheduleListenKeyRecovery",
     "manifest": "sdk-rs/parity/manifest/exchanges/bingx/bingx.ws-private.ts.toml",
     "verdict": "FIX",
-    "reason": "Live recovery replaces the refresh timer, fires at 30 seconds and creates one replacement socket. Final-handle drop now cancels recovery and closes the old socket.",
-    "production_test": "real_recovery_final_handle_drop_tears_down_everything"
+    "reason": "Live recovery replaces the refresh timer, fires at 30 seconds and creates one replacement socket. Final-handle drop now cancels recovery and closes the old socket. The timer callback now starts rebuild before the next queued runtime job using the shared typed eager driver.",
+    "production_test": "real_recovery_final_handle_drop_tears_down_everything",
+    "additional_production_test": "real_timer_recovery_closes_stale_socket_before_next_runtime_job"
   }
 ]

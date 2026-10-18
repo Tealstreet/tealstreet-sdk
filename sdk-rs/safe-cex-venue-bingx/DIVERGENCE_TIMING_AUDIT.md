@@ -30,7 +30,7 @@ retention. The original constructed exchange left its socket open on drop.
 Two compiled named drop probes fail on that production behavior; the Drop
 implementation runs the same teardown as explicit disposal. Both refresh and
 recovery stay live while the exchange is held, and both cancel on final drop.
-Rejected teardown is reported through the existing runtime exception channel.
+Drop is silent; host timers are cancelled even if a Store-reset observer rejects disposal.
 
 The discarded initial tick assertion expected wire HTTP before call return.
 Axios itself schedules transport asynchronously, so that assertion was too early.
@@ -39,3 +39,10 @@ No output from that discarded assertion is treated as qualifying evidence.
 
 Other pre-existing row boundaries (typed inputs, source error objects and UTF-8)
 remain recorded in the original manifest notes. No identity or alias guard changes.
+
+The recovery timer also has a compiled call-turn RED: the original host queued
+rebuild's prefix behind the next runtime job. The existing typed Host::spawn
+boundary now uses the same shared start_eager driver before scheduling its result
+reporter; it does not spawn an existing JS Promise again. The tick timer callback
+also invokes the already-eager tick before returning its waiter. The private
+message bridge retains its original Promise ownership.

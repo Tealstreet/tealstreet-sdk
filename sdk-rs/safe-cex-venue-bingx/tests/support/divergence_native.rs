@@ -203,3 +203,53 @@ fn real_open_refresh_final_handle_drop_tears_down_everything() {
 fn real_recovery_final_handle_drop_tears_down_everything() {
     dropped_timer(true);
 }
+
+#[test]
+fn real_timer_recovery_closes_stale_socket_before_next_runtime_job() {
+    use safe_cex_exchange::runtime::ExchangeRuntime;
+    let h = fixture();
+    open(&h);
+    h.exchange
+        .inner
+        .private_websocket
+        .keys
+        .schedule_listen_key_recovery()
+        .unwrap();
+    let stale = h.runtime.sockets.borrow()[0].1.clone();
+    h.runtime.now.set(h.runtime.now.get() + 30_000.0);
+    let observed = std::rc::Rc::new(std::cell::Cell::new(false));
+    let capture = observed.clone();
+    h.runtime.spawn_local(Box::pin(async move {
+        assert!(
+            stale.closed.get(),
+            "source recovery prefix runs inside the timer callback, before the next queued job"
+        );
+        capture.set(true);
+    }));
+    h.runtime.pump();
+    assert!(observed.get());
+    h.exchange.dispose().unwrap();
+}
+
+#[test]
+fn real_final_drop_cancels_host_timers_even_if_store_reset_observer_rejects() {
+    let h = fixture();
+    open(&h);
+    let callbacks = std::rc::Rc::new(std::cell::Cell::new(0));
+    let capture = callbacks.clone();
+    let _unsubscribe = safe_cex_store::Store::subscribe(h.store.as_ref(), Box::new(move |_, _| {
+        capture.set(capture.get() + 1);
+        Err(safe_cex_types::StoreSubscriberError::new("reset observer failed"))
+    }));
+    let host = h.exchange.host.clone();
+    let runtime = h.runtime.clone();
+    let http = h.http.clone();
+    let socket = runtime.sockets.borrow()[0].1.clone();
+    drop(h);
+    assert!(callbacks.get() > 0, "actual teardown invoked the rejecting Store observer");
+    assert!(socket.closed.get());
+    assert!(host.tasks.borrow().is_empty(), "Store rejection cannot bypass timer cancellation");
+    runtime.advance(1_800_000.0);
+    assert_eq!(http.calls(KEYS).len(), 1);
+    assert!(runtime.reports.borrow().is_empty(), "final teardown is silent");
+}

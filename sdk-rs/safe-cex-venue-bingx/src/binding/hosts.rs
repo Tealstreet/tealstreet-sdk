@@ -193,7 +193,8 @@ impl Host {
         }
     }
     pub fn spawn(&self, future: ExchangeFuture<'static, ()>) {
-        let runtime = self.scope.runtime.clone();
+        let runtime = self.base().runtime.clone();
+        let future = safe_cex_exchange::eager::start_eager(&runtime, future);
         self.scope.runtime.spawn_local(Box::pin(async move {
             if let Err(e) = future.await {
                 runtime.report_exception(
