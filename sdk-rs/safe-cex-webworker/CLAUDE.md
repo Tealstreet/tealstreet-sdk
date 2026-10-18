@@ -709,3 +709,8 @@ canonical eager Promise waiter, so even ready/no-op/error results yield before
 an awaiting caller continues. Posting failures preserve earlier state commits
 and stop later cleanup/removal; tests compare actual source instances before
 polling as well as after settlement.
+
+Chaser placement/completion use the canonical eager Promise driver. Caller waiter
+abandonment cannot cancel late-placement cleanup or fill reconciliation. Typed
+leaf results cross source await checkpoints before logs, retries, fills or events;
+ready, failed, no-op and held results are compared with the actual TS manager.
