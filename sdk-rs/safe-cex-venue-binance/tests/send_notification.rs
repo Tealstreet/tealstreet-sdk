@@ -271,7 +271,12 @@ impl Fixture {
             store.as_ref(),
             Box::new(move |data, _| {
                 count.set(count.get() + 1);
-                let healthy = data.socket_health.as_ref().unwrap()["publicHealthy"]
+                let healthy = data
+                    .socket_health
+                    .as_ref()
+                    .unwrap()
+                    .get("publicHealthy")
+                    .unwrap()
                     .as_bool()
                     .unwrap();
                 assert!(
@@ -290,7 +295,11 @@ impl Fixture {
                 count.set(count.get() + 1);
                 events.borrow_mut().push(json!([
                     "second",
-                    data.socket_health.as_ref().unwrap()["publicHealthy"]
+                    data.socket_health
+                        .as_ref()
+                        .unwrap()
+                        .get("publicHealthy")
+                        .unwrap()
                 ]));
                 Ok(())
             }),
@@ -513,9 +522,13 @@ fn native_case(input: Input) -> Value {
         "native discarded rejection is deferred beyond caller return"
     );
     if sends {
-        let health = Store::socket_health(h.store.as_ref()).unwrap().unwrap();
+        let health = Store::socket_health(h.store.as_ref())
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .unwrap();
         // Source publishes four health flags and three defined diagnostics per
-        // socket family; absent timestamps/close codes are omitted by this carrier.
+        // socket family; this explicit JSON assertion omits own undefined scalar fields.
         assert_eq!(
             health
                 .as_object()
@@ -551,7 +564,11 @@ fn native_case(input: Input) -> Value {
             );
         }
         assert_eq!(
-            Store::socket_health(h.store.as_ref()).unwrap().unwrap()["publicHealthy"],
+            Store::socket_health(h.store.as_ref())
+                .unwrap()
+                .unwrap()
+                .into_value()
+                .unwrap()["publicHealthy"],
             true,
             "native health commits before failure"
         );
@@ -971,7 +988,7 @@ fn nested_store_cause_native() {
         Store::subscribe(&first_store, Box::new(move |_, _| Err(first_cause.clone())));
     let health = json!({"publicHealthy":true,"updatedAt":7});
     let first: ExchangeError = first_store
-        .update_socket_health(health.as_object().unwrap())
+        .update_socket_health(&health.clone().into())
         .unwrap_err()
         .into();
     assert!(
@@ -989,7 +1006,7 @@ fn nested_store_cause_native() {
         Box::new(move |_, _| Err(first.clone().into())),
     );
     let second: ExchangeError = second_store
-        .update_socket_health(health.as_object().unwrap())
+        .update_socket_health(&health.clone().into())
         .unwrap_err()
         .into();
     assert_eq!(

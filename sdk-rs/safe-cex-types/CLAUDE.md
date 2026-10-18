@@ -275,3 +275,5 @@ adapter. UTF-16 units decode into validated u16 storage without an intermediate
 Float-node tree or f64 vector. The tagged payload schema and malformed-unit
 refusals are unchanged. JSON string parsing copies unescaped spans together;
 escape/control validation and duplicate-property order keep their existing rules.
+
+StoreData.socketHealth uses RetainedJsonInput so own undefined diagnostic fields survive typed notifications and native Store payloads. Ordinary JSON output omits those keys. StoreUpdate and the Store health getter/merge use the same carrier; a JSON map is an explicit ingress conversion.

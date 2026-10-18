@@ -990,3 +990,9 @@ getter failures reject the original Promise. Position-mode mapping binds the
 mapper once and uses native Array.map with row/index/original-array arguments.
 Run the receiver tests, execution_guards source target and
 `scripts/position-index-controls.py`; the latter restores every compiled fault.
+
+The retained FIX-audit receiver batch covers Spot startup warnings and market
+metadata plus primary/Spot ticker parsing without a whole-input JSON projection.
+`retained_audit_*` observes held startup, original cache/lookup identity, UTF-16,
+nonfinite bits and visible cache rejection. Placement extension refusal stays
+strictly input-only; malformed market strings remain row-only decision3 refusals.
