@@ -434,3 +434,10 @@ fixtures retain the actual underlyingSymbol lookup. No throttle timing parity
 is claimed. The finite oracle exits after flushing captured output because the
 maintained disposal does not release all timer handles. A live last/bid mutation
 must compile and fail, then pass after exact source restoration.
+
+`native_bindings::Prepared<V>` has one reviewed retained-input tuple instantiation
+for accepted-set decoder coverage. It remains the live method/receiver pair in
+BoundHost; native constructor-backed tests prove original referents, getter order,
+UTF-16, own undefined and exact numeric bits. Run `scripts/public-alias-contracts.mjs`
+from sdk-rs for the finite guarded inventory; `scripts/prepared-alias-controls.py`
+compiles pair-order and receiver mutations and requires exact restored passes.
