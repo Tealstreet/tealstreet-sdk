@@ -571,8 +571,34 @@ fn okx_family_signed_rest_uses_the_authenticated_bigint_tunnel() {
     });
 }
 
+fn typed_api_status_source() -> &'static Value {
+    static SOURCE: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    SOURCE.get_or_init(|| {
+        let compiler = std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+        });
+        let output = std::process::Command::new("node")
+            .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/typed_api_status_source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "actual source: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(source.as_array().unwrap().len(), 3);
+        source
+    })
+}
+
 #[test]
 fn bybit_validation_keeps_the_api_hosts_settled_how_404() {
+    let source = typed_api_status_source();
     run_local(async {
         use safe_cex_types::ExchangeName;
         for name in [
@@ -614,7 +640,7 @@ fn bybit_validation_keeps_the_api_hosts_settled_how_404() {
                 if tunneled {
                     assert_eq!(
                         result.error.as_value(),
-                        &json!("Cannot read properties of undefined (reading 'includes')"),
+                        &source[0]["how"]["error"],
                         "{name:?}: HOW 404 resolves through the API interceptor into validateAccount's TypeError catch"
                     );
                     assert_eq!(
@@ -650,6 +676,7 @@ fn bybit_validation_keeps_the_api_hosts_settled_how_404() {
 
 #[test]
 fn kucoin_validation_keeps_the_api_hosts_settled_how_404() {
+    typed_api_status_source();
     run_local(async {
         use safe_cex_types::ExchangeName;
         for (name, message, count) in [
