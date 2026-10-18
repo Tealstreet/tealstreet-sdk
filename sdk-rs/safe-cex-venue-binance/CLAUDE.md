@@ -828,3 +828,10 @@ Their classification receipts do not execute signing or establish arbitrary-JS
 parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
+
+The seven `public_ticker_events` function contracts execute the real raw-data
+readers; they are not typed/non-decoder exemptions. Native bit and ordered-effect
+observations are compared with the maintained TS constructors. The ordinary
+private_classes source-case guard keeps all 164 cases live in CI. Preserve the
+208 constructed native Store cases and seven independent compiled body controls
+when changing these handlers; see PUBLIC_TICKER_REVIEW.md.
