@@ -47,6 +47,36 @@ function load(filename) {
   const exports={};cache.set(filename,exports);
   return Object.assign(exports,evaluate(fs.readFileSync(filename,'utf8'),filename,exports));
 }
+function evaluateFactory(file, bindings = {}, selected) {
+  const text = fs.readFileSync(file, 'utf8');
+  const ast = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  assert.equal(ast.parseDiagnostics.length, 0, file);
+  const nodes = ast.statements.filter(node => !ts.isImportDeclaration(node) && !ts.isExportDeclaration(node) && (!selected || ts.isVariableStatement(node) && node.declarationList.declarations.some(decl => selected.includes(decl.name.text))));
+  const js = ts.transpileModule(nodes.map(node => node.getText(ast)).join('\n'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+  const exports = {};
+  new Function('exports', ...Object.keys(bindings), js)(exports, ...Object.values(bindings));
+  return exports;
+}
+const axios = dependencies('axios');
+const retry = dependencies('axios-retry');
+const noop = () => {};
+const factory = evaluateFactory(source('safeCexAxiosCreate.ts'), {
+  axios, ...evaluateFactory(source('utils/axiosErrorEnhancer.ts')),
+  isDevelopment:false, isSigningCaptureRequest:()=>false,
+  markRestRequestStart:noop, noteRestFailure:noop, noteRestSuccess:noop,
+  getTransport:()=>({rest:()=>({proxied:false,baseURL:'https://terminal.invalid'})}),
+  createRemoteSigningAdapter:()=>{throw Error('unexpected remote signing');},
+});
+const privateAPI = evaluateFactory(source('exchanges/binance/binanceinverse.api.ts'), {
+  ...factory,
+  ...evaluateFactory(source('exchanges/binance/binanceinverse.types.ts'), {}, ['BASE_URL','ENDPOINTS','PUBLIC_ENDPOINTS','RECV_WINDOW']),
+  ...evaluateFactory(source('utils/retryReadsOnly.ts'), {isNetworkError:retry.isNetworkError}),
+  ...evaluateFactory(source('utils/signatureRejection.ts')),
+  AxiosHeaders:axios.AxiosHeaders, retry:retry.default, qs:dependencies('qs'),
+  bigIntAsStringJsonParse:load(path.join(root,'packages/json-parse/src/jsonParse.ts')).bigIntAsStringJsonParse,
+  ...evaluateFactory(source('remoteSigningAdapter.ts'), {}, ['SKIP_REMOTE_SIGNING','markSkipRemoteSigning']),
+  signBinanceRequest:()=>{throw Error('listen keys must bypass signing');},
+});
 class BasePorts {
   constructor(parent){this.parent=parent;this.sent=[];this.errors=[];this.stats=[];this.cleaned=[];this.received=0;this.pongs=0;this.orderBookInnerState={};this.isConnected=true;this.isForceClosed=false;this.onClose=()=>{};installBaseReset.call(this);}
   get store(){return this.parent.store;}
@@ -162,12 +192,22 @@ let cases=0;
   assert.equal(p.store.tickersBySymbol[SYMBOL].last,50020.5,'maintained source accepts escaped lone surrogate in ignored field');cases++;
  }
  {
-  for(const method of ['connectAndSubscribe','updateListenKey'])for(const structured of [false,true]){
-   timers=new Map();const p=parent(),s=new Private(p);const value=structured?new Error('\ud800'):'\ud800';
-   p.xhr={async post(){throw value;},async put(){throw value;}};
-   await s[method]();const prefix=method==='connectAndSubscribe'?'Binance COIN-M user data stream unavailable: ':'Binance COIN-M user data stream keepalive failed: ';
-   assert.equal(s.errors[0],prefix+'\ud800');assert.equal(s.errors[0].charCodeAt(prefix.length),0xd800);
+  for(const method of ['connectAndSubscribe','updateListenKey'])for(const kind of ['primitive','Error','venue-response']){
+   timers=new Map();const p=parent(),s=new Private(p);let requests=0;
+   Object.assign(p,{name:'binanceinverse',grafanaEndpointsEvery:[],grafanaEndpointsPeriodic:[],emitAndLogError:noop});
+   p.xhr=privateAPI.createAPI({},p);
+   p.xhr.defaults.adapter=async config=>{
+    requests++;assert.equal(config.url,'/dapi/v1/listenKey');
+    assert.equal(config.method,method==='connectAndSubscribe'?'post':'put');
+    if(kind==='venue-response')return{status:200,statusText:'OK',headers:{},config,data:{code:-2011,msg:'\ud800'}};
+    throw kind==='Error'?new Error('\ud800'):'\ud800';
+   };
+   await s[method]();assert.equal(requests,1);
+   const prefix=method==='connectAndSubscribe'?'Binance COIN-M user data stream unavailable: ':'Binance COIN-M user data stream keepalive failed: ';
+   const message=kind==='venue-response'?'\ud800':`[binanceinverse] Request setup error: ${kind==='Error'?'\ud800':'undefined'}`;
+   assert.equal(s.errors[0],prefix+message,`${method}/${kind}: complete source API/factory`);
+   if(kind!=='primitive')assert.equal(s.errors[0].charCodeAt(s.errors[0].length-1),0xd800);
   }cases++;
  }
- assert.equal(cases,11);console.log('Maintained inverse socket classes/imported algorithms: 11 actual source groups PASS (streams, timers, stale REST, UTF16 frame/warnings); Base IO ports only.');
+ assert.equal(cases,11);console.log('Maintained inverse socket classes/imported algorithms: 11 actual source groups PASS (streams, timers, stale REST, UTF16 frame/warnings); warning cases include actual API/factory/Axios.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

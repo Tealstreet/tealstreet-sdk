@@ -359,7 +359,11 @@ impl BreakoutRuntime {
         Box::pin(async move {
             let external = pending.await?;
             if !ctx.public_only() {
-                ctx.reads.get_account_code().await?;
+                let account = ctx.reads.get_account_code().await;
+                if ctx.exchange.base.is_disposed() {
+                    return Ok(());
+                }
+                account?;
             }
             if !external {
                 let markets = ctx.reads.fetch_markets().await?;

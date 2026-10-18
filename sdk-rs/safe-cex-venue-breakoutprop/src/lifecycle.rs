@@ -111,7 +111,18 @@ impl BreakoutpropExchange {
         Ok(exchange)
     }
     pub fn dispose(&self) -> Result<(), ExchangeError> {
-        self.base.dispose()?;
+        let disposed = self.base.dispose();
+        let login = self.session_token_request.borrow_mut().take();
+        if let Some(login) = login.filter(|login| login.result.borrow().is_none()) {
+            let mut error = ExchangeError::new("Breakout Prop login cancelled after disposal");
+            error.name = "AbortError".into();
+            *login.future.borrow_mut() = None;
+            *login.result.borrow_mut() = Some(Err(error));
+            for waiter in std::mem::take(&mut *login.waiters.borrow_mut()) {
+                waiter.wake();
+            }
+        }
+        disposed?;
         self.socket_for("dispose")?.dispose()
     }
     pub fn socket(&self) -> Result<Rc<BreakoutpropPublicWebsocket>, ExchangeError> {
