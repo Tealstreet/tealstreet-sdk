@@ -4968,5 +4968,1071 @@
         }
       }
     }
+  },
+  "safe_cex_venue_kraken::private_accounts::PageFuture": {
+    "category": "non-decoder",
+    "reason": "At the actual Scope<KrakenExtra> IncomeHost this is an owning pinned native future returning the page Rc<Js> or original Thrown; it waits for the signed account-log request rather than decoding wire text itself. Only the reviewed static Rt instantiation is covered.",
+    "evidence": "Fresh maintained acceptedAliasContext compiler/artifact/public-source claims and stock native alias probes in scripts/page-alias-contracts.mjs, with independently authored invariant expected types and all Serde/conversion detectors unchanged. tests/support/accepted_page_aliases.rs drives the real constructed production Scope and signed history client: held response admission, independent native income bits, synchronous native error identity/UTF16/-0, asynchronous refusal, exact request count and lower-bound/page-limit fields. scripts/page-alias-controls.py requires named compiled semantic assertion failures in the actual page producer and callback consumer, exact restoration, then passing runtime witnesses. PAGE_ALIAS_REVIEW.md scopes the proof; other hosts/lifetimes/aliases remain independent.",
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "H"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "generic": "H"
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "qualified_path": {
+                                                                              "name": "Value",
+                                                                              "args": null,
+                                                                              "self_type": {
+                                                                                "generic": "H"
+                                                                              },
+                                                                              "trait": {
+                                                                                "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                                                "args": null
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "qualified_path": {
+                                                                  "name": "Error",
+                                                                  "args": null,
+                                                                  "self_type": {
+                                                                    "generic": "H"
+                                                                  },
+                                                                  "trait": {
+                                                                    "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::private_accounts::PageCallback": {
+    "category": "non-decoder",
+    "reason": "At the actual Scope<KrakenExtra> IncomeHost this is a boxed native page-fetch capability: Rc<Js> request parameters produce a native PageFuture or synchronous original Thrown. It is not an input deserializer; the actual income-range callback delegates to the live assembled account-log member. Only the reviewed static Rt instantiation is covered.",
+    "evidence": "Fresh maintained acceptedAliasContext compiler/artifact/public-source claims and stock native alias probes in scripts/page-alias-contracts.mjs, with independently authored invariant expected types and all Serde/conversion detectors unchanged. tests/support/accepted_page_aliases.rs drives the real constructed production Scope and signed history client: held response admission, independent native income bits, synchronous native error identity/UTF16/-0, asynchronous refusal, exact request count and lower-bound/page-limit fields. scripts/page-alias-controls.py requires named compiled semantic assertion failures in the actual page producer and callback consumer, exact restoration, then passing runtime witnesses. PAGE_ALIAS_REVIEW.md scopes the proof; other hosts/lifetimes/aliases remain independent.",
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::boxed::Box",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "H"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_kraken::private_accounts::PageFuture",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "lifetime": "'a"
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "generic": "H"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": "'a"
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::boxed::Box",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::rc::Rc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "qualified_path": {
+                                                "name": "Value",
+                                                "args": null,
+                                                "self_type": {
+                                                  "generic": "H"
+                                                },
+                                                "trait": {
+                                                  "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "core::pin::Pin",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "alloc::boxed::Box",
+                                                          "args": {
+                                                            "angle_bracketed": {
+                                                              "args": [
+                                                                {
+                                                                  "type": {
+                                                                    "dyn_trait": {
+                                                                      "traits": [
+                                                                        {
+                                                                          "trait": {
+                                                                            "path": "core::future::future::Future",
+                                                                            "args": {
+                                                                              "angle_bracketed": {
+                                                                                "args": [],
+                                                                                "constraints": [
+                                                                                  {
+                                                                                    "name": "Output",
+                                                                                    "args": null,
+                                                                                    "binding": {
+                                                                                      "equality": {
+                                                                                        "type": {
+                                                                                          "resolved_path": {
+                                                                                            "path": "core::result::Result",
+                                                                                            "args": {
+                                                                                              "angle_bracketed": {
+                                                                                                "args": [
+                                                                                                  {
+                                                                                                    "type": {
+                                                                                                      "resolved_path": {
+                                                                                                        "path": "alloc::rc::Rc",
+                                                                                                        "args": {
+                                                                                                          "angle_bracketed": {
+                                                                                                            "args": [
+                                                                                                              {
+                                                                                                                "type": {
+                                                                                                                  "qualified_path": {
+                                                                                                                    "name": "Value",
+                                                                                                                    "args": null,
+                                                                                                                    "self_type": {
+                                                                                                                      "generic": "H"
+                                                                                                                    },
+                                                                                                                    "trait": {
+                                                                                                                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                                                                                      "args": null
+                                                                                                                    }
+                                                                                                                  }
+                                                                                                                }
+                                                                                                              }
+                                                                                                            ],
+                                                                                                            "constraints": []
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    }
+                                                                                                  },
+                                                                                                  {
+                                                                                                    "type": {
+                                                                                                      "qualified_path": {
+                                                                                                        "name": "Error",
+                                                                                                        "args": null,
+                                                                                                        "self_type": {
+                                                                                                          "generic": "H"
+                                                                                                        },
+                                                                                                        "trait": {
+                                                                                                          "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                                                                          "args": null
+                                                                                                        }
+                                                                                                      }
+                                                                                                    }
+                                                                                                  }
+                                                                                                ],
+                                                                                                "constraints": []
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                ]
+                                                                              }
+                                                                            }
+                                                                          },
+                                                                          "generic_params": []
+                                                                        }
+                                                                      ],
+                                                                      "lifetime": "'a"
+                                                                    }
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "constraints": []
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "qualified_path": {
+                                              "name": "Error",
+                                              "args": null,
+                                              "self_type": {
+                                                "generic": "H"
+                                              },
+                                              "trait": {
+                                                "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": "'a"
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::construction::Factory": {
+    "category": "non-decoder",
+    "reason": "An owning callable that builds the live signed Futures/Spot API client from native options, receiver and BaseUrl, returning Rc<Js> or the original Thrown. It is a constructor dependency, not a wire decoder. Only the reviewed static binding::rt::Rt instantiation is covered.",
+    "evidence": "Fresh maintained acceptedAliasContext authenticates compiler artifacts, external roots and public declaration claims; scripts/construction-alias-contracts.mjs executes the stock finite native alias identity, Serde and conversion probes with independently authored invariant expected types. tests/support/accepted_construction_aliases.rs drives actual constructed Futures/Spot Scope callbacks and signed clients: distinct API bases, native option-getter error identity/UTF16/-0, client identity, exact five-request window and separate unlimited client. scripts/construction-alias-controls.py requires named compiled constructor Factory/base and RateLimit/rate faults plus exact-source restored native passes. CONSTRUCTION_ALIAS_REVIEW.md records proof scope; other hosts/lifetimes and remaining aliases remain independent.",
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "H"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "H"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_kraken::construction::BaseUrl",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "generic": "H"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": "'a"
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::rc::Rc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "qualified_path": {
+                                                "name": "Value",
+                                                "args": null,
+                                                "self_type": {
+                                                  "generic": "H"
+                                                },
+                                                "trait": {
+                                                  "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::rc::Rc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "qualified_path": {
+                                                "name": "Value",
+                                                "args": null,
+                                                "self_type": {
+                                                  "generic": "H"
+                                                },
+                                                "trait": {
+                                                  "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_kraken::construction::BaseUrl",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "qualified_path": {
+                                                          "name": "Value",
+                                                          "args": null,
+                                                          "self_type": {
+                                                            "generic": "H"
+                                                          },
+                                                          "trait": {
+                                                            "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                            "args": null
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "qualified_path": {
+                                              "name": "Error",
+                                              "args": null,
+                                              "self_type": {
+                                                "generic": "H"
+                                              },
+                                              "trait": {
+                                                "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": "'a"
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_kraken::construction::RateLimit": {
+    "category": "non-decoder",
+    "reason": "An owning callable that configures and returns the same live native API client through ConstructorHost::rate_limit. It is a request-scheduling capability, not a wire decoder. Only the reviewed static binding::rt::Rt instantiation is covered.",
+    "evidence": "Fresh maintained acceptedAliasContext authenticates compiler artifacts, external roots and public declaration claims; scripts/construction-alias-contracts.mjs executes the stock finite native alias identity, Serde and conversion probes with independently authored invariant expected types. tests/support/accepted_construction_aliases.rs drives actual constructed Futures/Spot Scope callbacks and signed clients: distinct API bases, native option-getter error identity/UTF16/-0, client identity, exact five-request window and separate unlimited client. scripts/construction-alias-controls.py requires named compiled constructor Factory/base and RateLimit/rate faults plus exact-source restored native passes. CONSTRUCTION_ALIAS_REVIEW.md records proof scope; other hosts/lifetimes and remaining aliases remain independent.",
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "H"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_kraken::rest_account::ReadResult",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "H"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_kraken::rest_account::Handle",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "generic": "H"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": "'a"
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::rc::Rc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "qualified_path": {
+                                                "name": "Value",
+                                                "args": null,
+                                                "self_type": {
+                                                  "generic": "H"
+                                                },
+                                                "trait": {
+                                                  "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "qualified_path": {
+                                                          "name": "Value",
+                                                          "args": null,
+                                                          "self_type": {
+                                                            "generic": "H"
+                                                          },
+                                                          "trait": {
+                                                            "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                            "args": null
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "qualified_path": {
+                                              "name": "Error",
+                                              "args": null,
+                                              "self_type": {
+                                                "generic": "H"
+                                              },
+                                              "trait": {
+                                                "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": "'a"
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }

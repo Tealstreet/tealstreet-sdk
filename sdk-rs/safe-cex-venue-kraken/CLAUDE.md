@@ -516,3 +516,17 @@ from `sdk-rs`; discovery stays in its separate accepted-inventory target. The
 constructed-Scope tests and three compiled consumer controls are described in
 [READ_ALIAS_REVIEW.md](READ_ALIAS_REVIEW.md). These contracts do not classify
 other hosts, payloads, following aliases, or runtime method behavior by default.
+
+`PAGE_ALIAS_REVIEW.md` covers the following two income-page aliases at the same
+actual Scope host. `page-alias-contracts.mjs` measures their finite native types;
+`accepted_page_aliases` drives the real signed account-log client and pager with
+held completion, native error identity, wire parameters and native income fields.
+`page-alias-controls.py` requires named compiled faults and exact restored passes.
+These continuation contracts do not classify other Kraken aliases.
+
+`CONSTRUCTION_ALIAS_REVIEW.md` covers the two finite Factory/RateLimit callback
+profiles over the real Scope. `construction-alias-contracts.mjs` measures their
+actual compiler identities and decoder traits; `accepted_construction_aliases`
+observes signed client bases, native thrown values and source throttle timing.
+The two compiled constructor faults in `construction-alias-controls.py` must fail
+named witnesses and restore exact bytes before readiness.

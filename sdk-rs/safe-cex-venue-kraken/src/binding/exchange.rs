@@ -6,11 +6,17 @@ mod accepted_additional_receivers;
 #[path = "../../tests/support/accepted_api_receivers.rs"]
 mod accepted_api_receivers;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_construction_aliases.rs"]
+mod accepted_construction_aliases;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_diagnostic_receivers.rs"]
 mod accepted_diagnostic_receivers;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_handle_alias.rs"]
 mod accepted_handle_alias;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_page_aliases.rs"]
+mod accepted_page_aliases;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_read_receivers.rs"]
 mod accepted_read_receivers;
