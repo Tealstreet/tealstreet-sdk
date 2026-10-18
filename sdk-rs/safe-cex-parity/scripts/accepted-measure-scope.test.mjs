@@ -31,7 +31,7 @@ test('module measurement includes descendants and aliases, excludes prefix sibli
     [prefix + 'signing::encode', prefix + 'signing::nested::parse']);
   assert.deepEqual(result[0].publicAliases.map(row => row.name), [prefix + 'signing::Callback']);
   assert.deepEqual(result[0].defaultWitnesses, []);
-  assert.deepEqual(result[0].locals.map(row => row.label), ['inside']);
+  assert.deepEqual(result[0].locals.map(row => row.label), ['inside', 'end-boundary', 'after']);
   assert.deepEqual(result[0].delegatedLocals.map(row => row.name), ['helper']);
   assert.deepEqual(result[0].declarations, ['full inventory']);
   assert.deepEqual(packages, original);
@@ -55,6 +55,22 @@ test('every selector must resolve even when another selector matches', () => {
   assert.throws(() => scopedMeasurements([], scope('--module=signing'), '/workspace'), /package absent/);
 });
 
+test('compiler owner namespaces are independent of Cargo package spelling', () => {
+  const renamed = [{package: packageName, types: [{name: 'different_library::signing::encode'}]}];
+  for (const selector of ['--module=signing', '--module=different_library::signing',
+    '--owner=signing::encode', '--owner=different_library::signing::encode']) {
+    assert.deepEqual(scopedMeasurements(renamed, scope(selector), '/workspace')[0].types, renamed[0].types);
+  }
+});
+
+test('owner measurements preserve impl-local helpers outside the type declaration', () => {
+  const type = owner('order_records::Iso8601', [8, 1], [11, 1]);
+  const helper = {file: type.span.filename, line: 14, column: 32, label: 'TimestampVisitor'};
+  const result = scopedMeasurements([{package: packageName, types: [type], locals: [helper]}],
+    scope('--owner=order_records::Iso8601'), '/workspace');
+  assert.deepEqual(result[0].locals, [helper]);
+});
+
 test('selectors cannot scope the normal gate or silently accept malformed requests', () => {
   assert.throws(() => measurementScope([`--package=${packageName}`, '--module=signing'], packageName), /require --measure/);
   assert.throws(() => measurementScope(['--measure', '--inventory', `--package=${packageName}`, '--owner=x'], packageName), /without --inventory/);
@@ -62,5 +78,5 @@ test('selectors cannot scope the normal gate or silently accept malformed reques
   assert.throws(() => scope('--module='), /nonempty names/);
   assert.throws(() => scope('--owner= '), /nonempty names/);
   assert.throws(() => scope('--module=sign*'), /exact Rust module paths/);
-  assert.throws(() => scope('--owner=signing::encode', `--owner=${prefix}signing::encode`), /duplicate/);
+  assert.throws(() => scope('--owner=signing::encode', '--owner=signing::encode'), /duplicate/);
 });

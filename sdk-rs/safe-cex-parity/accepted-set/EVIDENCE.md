@@ -23,7 +23,9 @@ Native receipt investigations can select a finite cohort with repeatable
 `--package=safe-cex-venue-binance --measure`. Selectors form a union, include
 module descendants, and must each match compiler owners. Exact canonical owner
 names work too. Inventory discovery and source checks remain complete; only
-native measurement receipts are scoped, including their nested/delegated helpers.
+native measurement receipts are scoped. All local helpers in selected source files
+are retained conservatively, including helpers in separate Deserialize impls;
+delegated helper obligations follow their selected native runtime owner.
 Filters are rejected by the enforcing gate and recorded in receipt configuration.
 
 Base: `7fcffd57e8`, branch `feat/rust-accepted-set-gate`. All 26 venue crates

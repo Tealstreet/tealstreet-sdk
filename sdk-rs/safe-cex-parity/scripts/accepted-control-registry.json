@@ -179,6 +179,8 @@
       "module measurement includes descendants and aliases, excludes prefix siblings and dependencies",
       "exact owner selectors union with modules without duplicate receipts",
       "every selector must resolve even when another selector matches",
+      "compiler owner namespaces are independent of Cargo package spelling",
+      "owner measurements preserve impl-local helpers outside the type declaration",
       "selectors cannot scope the normal gate or silently accept malformed requests"
     ],
     "accepted-model-field-native.test.mjs": [
