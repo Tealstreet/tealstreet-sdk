@@ -205,7 +205,7 @@ pub async fn sign_binance_request_native(
         config.get("params")?
     };
     let data = input.spread_object()?;
-    data.delete(&utf16("signature"));
+    data.delete(&utf16("signature"))?;
     data.set("timestamp", Js::Number(clock.get_current_time_ms()))?;
     data.set("recvWindow", recv_window)?;
     let query = qs_stringify(&data, &Js::object(vec![("arrayFormat", Js::str("repeat"))]))?;
@@ -238,6 +238,6 @@ pub async fn sign_binance_request_native(
         }
         next.set("headers", axios_headers_from(&merged)?)?;
     }
-    next.delete(&utf16("data"));
+    next.delete(&utf16("data"))?;
     Ok(next)
 }

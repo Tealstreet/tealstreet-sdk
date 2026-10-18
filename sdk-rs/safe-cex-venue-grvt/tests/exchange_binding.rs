@@ -1314,7 +1314,7 @@ fn market_info_preserves_source_own_keys_and_native_metadata() {
         let h = setup();
         let raw = from_json(&instrument());
         for key in ["ih", "bd", "qd"] {
-            raw.delete(&key.encode_utf16().collect::<Vec<_>>());
+            raw.delete(&key.encode_utf16().collect::<Vec<_>>()).unwrap();
         }
         if let Some((ih, bd, qd)) = metadata.clone() {
             raw.define("ih", ih).unwrap();

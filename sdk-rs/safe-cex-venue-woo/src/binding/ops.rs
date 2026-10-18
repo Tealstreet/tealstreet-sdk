@@ -150,7 +150,7 @@ pub(crate) fn stream(weak: Weak<Shared>, runtime: Runtime) -> Rc<StreamOps<Js, T
         lifecycle: lifecycle(weak, runtime),
         set: Rc::new(|o, k, v| o.set_key(&key(&k)?, v)),
         delete: Rc::new(|o, k| {
-            o.delete(&key(&k)?);
+            o.delete(&key(&k)?)?;
             Ok(())
         }),
         divide: Rc::new(|a, b| ops::divide(&a, &b)),

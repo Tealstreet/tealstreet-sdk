@@ -41,7 +41,7 @@ function probe(ownerName, reviewedSourceSha) {
   const found = inventory(JSON.parse(fs.readFileSync(path.join(metadata.target_directory,'doc','safe_cex_types.json'))),{onlyOwners:[ownerName]});
   assert.deepEqual(found.types.map(owner=>owner.name),[ownerName]); // independent, exact single-owner floor
   assert.equal(path.resolve(root,found.types[0].span.filename),sourcePath);
-  const receipts = runProbes(root,metadata,[{package:member.name,target,types:found.types,locals:[]}],contracts);
+  const receipts = runProbes(root,metadata,[{package:member.name,target,features:[],types:found.types,locals:[]}],contracts);
   assert.deepEqual(receipts.map(row=>row.name),[ownerName]);
   assert.ok(receipts.every(row=>row.failures.length===0),JSON.stringify(receipts));
 }

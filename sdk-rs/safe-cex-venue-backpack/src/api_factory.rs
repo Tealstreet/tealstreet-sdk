@@ -1,6 +1,7 @@
 //! HTTP client composition and executable request/response interceptors.
 use crate::api;
 use safe_cex_num::JsJsonValue;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc};
 pub type Task<T, E> = Pin<Box<dyn Future<Output = Result<T, E>>>>;
 pub type Headers = Rc<RefCell<Vec<(String, JsJsonValue)>>>;
@@ -17,7 +18,7 @@ pub struct Config {
 pub type Options = safe_cex_types::ExchangeOptions;
 #[derive(Clone)]
 pub struct Response {
-    pub data: JsJsonValue,
+    pub data: Input,
     pub config: Option<Rc<Config>>,
     pub status: Option<f64>,
 }
@@ -72,7 +73,7 @@ pub trait Host: 'static {
         window: f64,
     ) -> Result<Task<Vec<(String, JsJsonValue)>, Self::Error>, Self::Error>;
     fn error_text(&mut self, error: &Self::Error) -> Result<String, Self::Error>;
-    fn error_message(&mut self, error: &Self::Error) -> Result<JsJsonValue, Self::Error>;
+    fn error_message(&mut self, error: &Self::Error) -> Result<Input, Self::Error>;
     fn response(&mut self, error: &Self::Error) -> Result<Option<Rc<Response>>, Self::Error>;
     fn error_config(&mut self, error: &Self::Error) -> Result<Option<Rc<Config>>, Self::Error>;
     fn emit_and_log(&mut self, message: String) -> Result<(), Self::Error>;
@@ -85,36 +86,17 @@ pub trait Host: 'static {
     fn make_error(&mut self, message: String) -> Self::Error;
     fn coercion_error(&mut self, error: safe_cex_num::JsCoercionError) -> Self::Error;
 }
-fn field<'a>(v: &'a JsJsonValue, key: &str) -> &'a JsJsonValue {
-    match v {
-        JsJsonValue::Object(o) => o
-            .iter()
-            .rev()
-            .find(|(k, _)| k == key)
-            .map_or(&JsJsonValue::Undefined, |(_, v)| v),
-        _ => &JsJsonValue::Undefined,
-    }
+fn field<'a>(v: &'a Input, key: &str) -> &'a Input {
+    v.get(key).unwrap_or(&Input::Undefined)
 }
-fn truth(v: &JsJsonValue) -> bool {
-    match v {
-        JsJsonValue::Undefined | JsJsonValue::Null => false,
-        JsJsonValue::Bool(b) => *b,
-        JsJsonValue::Number(n) => *n != 0.0 && !n.is_nan(),
-        JsJsonValue::String(s) => !s.is_empty(),
-        JsJsonValue::BigInt(n) => n.to_string() != "0",
-        _ => true,
-    }
+fn truth(v: &Input) -> bool {
+    safe_cex_num::js_retained_truthy(v)
 }
-fn text<H: Host>(h: &mut H, v: &JsJsonValue) -> Result<String, H::Error> {
-    match v {
-        JsJsonValue::Undefined => Ok("undefined".into()),
-        JsJsonValue::Null => Ok("null".into()),
-        _ => safe_cex_num::js_string(Some(&crate::signing::string_input(v)))
-            .map_err(|e| h.coercion_error(e)),
-    }
+fn text<H: Host>(h: &mut H, v: &Input) -> Result<String, H::Error> {
+    safe_cex_num::js_retained_string(Some(v)).map_err(|e| h.coercion_error(e))
 }
-fn json<H: Host>(h: &mut H, v: &JsJsonValue) -> Result<String, H::Error> {
-    Ok(safe_cex_num::js_json_stringify(v)
+fn json<H: Host>(h: &mut H, v: &Input) -> Result<String, H::Error> {
+    Ok(safe_cex_num::js_retained_json_stringify(v)
         .map_err(|e| h.coercion_error(e))?
         .unwrap_or_else(|| "undefined".into()))
 }
@@ -283,8 +265,8 @@ pub fn create_api<H: Host>(
                     }
                 } else if truth(msg) {
                     full += &format!(": {}", text(&mut *h, msg)?);
-                } else if let JsJsonValue::String(s) = data {
-                    full += &format!(": {s}");
+                } else if let Input::Text(_) = data {
+                    full += &format!(": {}", text(&mut *h, data)?);
                 } else {
                     full += &format!(": {}", json(&mut *h, data)?);
                 }

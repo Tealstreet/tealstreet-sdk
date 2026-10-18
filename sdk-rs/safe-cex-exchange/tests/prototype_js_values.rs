@@ -120,7 +120,9 @@ fn captured_intrinsic_prototype_keeps_original_receiver_and_own_shadow() {
             .unwrap()
             .strict_equals(&prototype)
     );
-    object.delete(&"__proto__".encode_utf16().collect::<Vec<_>>());
+    object
+        .delete(&"__proto__".encode_utf16().collect::<Vec<_>>())
+        .unwrap();
     object.set("__proto__", Js::Null).unwrap();
     assert!(data.proto.borrow().is_none());
     assert!(object.get("__proto__").unwrap().is_undefined());

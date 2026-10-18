@@ -94,7 +94,7 @@ fn option_patch<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
 ) -> Result<ModelPatch, Thrown> {
     let fields = value.spread_object()?;
     let option = fields.get("option")?;
-    fields.delete(&super::value::utf16("option"));
+    fields.delete(&super::value::utf16("option"))?;
     let mut changes = patch(&fields)?;
     if !option.is_undefined() {
         changes.set_native("option", to_typed::<T>(&option)?);

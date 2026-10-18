@@ -310,7 +310,7 @@ fn apply_changes(config: &Js, before: &Js, after: &Js) -> Result<(), Thrown> {
             let headers = config.get("headers")?;
             for old in previous.own_keys() {
                 if !value.own_keys().iter().any(|key| key == &old) {
-                    headers.delete(&old);
+                    headers.delete(&old)?;
                 }
             }
             for (name, value) in value.own_entries()? {

@@ -15,6 +15,8 @@ import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition, numberOutpu
 import { genericAliasProbe } from './accepted-callable-alias.mjs';
 import { buildScanner } from './accepted-scanner.mjs';
 import { measurementScope, scopedMeasurements } from './accepted-measure-scope.mjs';
+import { featurePlan, requireFeatureReceipts } from './accepted-feature-contracts.mjs';
+import { contractFor } from './accepted-contracts.mjs';
 
 const args = process.argv.slice(2);
 const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? defaultContractDirectory;
@@ -27,7 +29,6 @@ assert.match(jobs, /^[12]$/, 'accepted-set: --jobs must be 1 or 2');
 const configuration = { target: args.find(arg => arg.startsWith('--target='))?.slice(9) ?? 'native', features: args.find(arg => arg.startsWith('--features='))?.slice(11).split(',').filter(Boolean) ?? [], jobs: Number(jobs) };
 assert.ok(['native', 'wasm32-unknown-unknown'].includes(configuration.target), 'accepted-set: unsupported execution target');
 const targetArgs = configuration.target === 'native' ? [] : ['--target', configuration.target];
-const featureArgs = configuration.features.length ? ['--features', configuration.features.join(',')] : [];
 const selected = args.find(arg => arg.startsWith('--package='))?.slice(10);
 assert.ok(args.every(arg => arg === '--inventory' || arg === '--census' || arg === '--measure' || arg.startsWith('--package=') || arg.startsWith('--workspace=') || arg.startsWith('--contracts=') || arg.startsWith('--target=') || arg.startsWith('--features=') || arg.startsWith('--jobs=') || arg.startsWith('--module=') || arg.startsWith('--owner=')), 'accepted-set: unsupported argument');
 const scope = measurementScope(args, selected);
@@ -41,13 +42,24 @@ function cargo(args, options = {}) {
 }
 const metadata = JSON.parse(cargo(['metadata', '--locked', '--format-version', '1', '--manifest-path', 'Cargo.toml', ...(configuration.features.length ? ['--features', configuration.features.map(feature => selected ? `${selected}/${feature}` : feature).join(',')] : [])]));
 const workspaceMembers = metadata.packages.filter(pkg => metadata.workspace_members.includes(pkg.id));
-const members = workspaceMembers.filter(pkg => !selected || pkg.name === selected);
+const members = workspaceMembers.filter(pkg => !selected || pkg.name === selected)
+  .map(pkg => ({...pkg, probeFeatures: configuration.features}));
 assert.ok(members.length, `accepted-set: no workspace packages matched ${selected ?? 'workspace'}`);
 const scanner = buildScanner(jobs);
 const found = [];
-const queued = new Set(members.map(pkg => pkg.id));
+const featureKey = (id, features) => JSON.stringify([id, [...features].sort()]);
+const queued = new Set(members.map(pkg => featureKey(pkg.id, pkg.probeFeatures)));
+const compiled = new Set();
+function queuePackage(pkg, features) {
+  const key = featureKey(pkg.id, features);
+  if (queued.has(key)) return;
+  queued.add(key);
+  members.push({...pkg, probeFeatures: features});
+}
 let compilerSysroot;
 for (const pkg of members) {
+  if (compiled.has(featureKey(pkg.id, pkg.probeFeatures))) continue;
+  const featureArgs = pkg.probeFeatures.length ? ['--features', pkg.probeFeatures.join(',')] : [];
   const targets = pkg.targets.filter(target => target.kind.some(kind => ['lib', 'cdylib', 'bin'].includes(kind)));
   assert.ok(targets.length, `accepted-set: missing production target for ${pkg.name}`);
   for (const target of targets) {
@@ -59,6 +71,8 @@ for (const pkg of members) {
   const artifacts = cargo(['check', '--locked', '-p', pkg.name, '--jobs', jobs, ...selector, ...targetArgs, ...featureArgs, '--message-format=json']).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(item => item.reason === 'compiler-artifact');
   const ownArtifact = artifacts.find(item => item.package_id === pkg.id && item.target.name === target.name);
   assert.ok(ownArtifact, `${pkg.name}: accepted-set assertion: missing production compiler artifact`);
+  compiled.add(featureKey(pkg.id, ownArtifact.features));
+  queued.add(featureKey(pkg.id, ownArtifact.features));
   if (!compilerSysroot) {
     const sysroot = spawnSync('rustc', ['--print', 'sysroot'], { cwd: root, encoding: 'utf8' });
     assert.equal(sysroot.status, 0, sysroot.stderr);
@@ -89,10 +103,7 @@ for (const pkg of members) {
       compilerSysroot = result.stdout.trim();
     }
     alias.artifact = aliasTargetIdentity(alias, artifacts, workspaceMembers, compilerSysroot);
-    if (alias.artifact.kind === 'workspace' && !queued.has(alias.artifact.packageId)) {
-      queued.add(alias.artifact.packageId);
-      members.push(alias.artifact.owner);
-    }
+    if (alias.artifact.kind === 'workspace') queuePackage(alias.artifact.owner, alias.artifact.features);
   }
   const aliasCompilerContext = { macroOrigins, externalTypeAliases: result.externalTypeAliases, packageMetadata: pkg, workspace: root };
   if (result.publicAliases.length) {
@@ -182,19 +193,23 @@ for (const pkg of members) {
     const owners = workspaceMembers.filter(member => member.id === alias.artifact.packageId);
     assert.equal(owners.length, 1, `${label}: accepted-set assertion: external reexport requires a unique workspace compiler owner`);
 
-    if (!queued.has(owners[0].id)) { queued.add(owners[0].id); members.push(owners[0]); }
+    queuePackage(owners[0], alias.artifact.features);
   }
   found.push({ package: pkg.name, packageId: pkg.id, features: ownArtifact.features.slice().sort(), target, ...result, macroOrigins, locals, delegatedLocals, ...(nativeEntry ? { nativeEntry } : {}) });
   console.log(`${pkg.name}: ${result.types.filter(type => type.deserialize).length} compiler-confirmed Deserialize types; ${result.types.filter(type => !type.deserialize).length} alternate-only owners; ${result.externalReexports.length} external reexports`);
   }
 }
 for (const pkg of found) for (const alias of pkg.externalReexports) {
-  const owner = found.find(owner => owner.packageId === alias.artifact.packageId && owner.declarations.some(item => item.name === alias.canonical && item.kind === alias.kind));
+  const owner = found.find(owner => owner.packageId === alias.artifact.packageId
+    && featureKey(owner.packageId, owner.features) === featureKey(alias.artifact.packageId, alias.artifact.features)
+    && owner.declarations.some(item => item.name === alias.canonical && item.kind === alias.kind));
   assert.ok(owner, `${pkg.package}::${alias.name} (${alias.source} -> ${alias.canonical}): accepted-set assertion: canonical reexport declaration absent from compiler owner inventory`);
   assert.deepEqual(owner.features, alias.artifact.features, `${pkg.package}::${alias.name} (${alias.canonical}): accepted-set assertion: consumer and canonical owner compiler features differ`);
 }
 for (const pkg of found) for (const alias of pkg.externalTypeAliases.filter(alias => alias.artifact.kind === 'workspace')) {
-  const owner = found.find(owner => owner.packageId === alias.artifact.packageId && owner.declarations.some(item => item.name === alias.canonical && item.kind === alias.kind));
+  const owner = found.find(owner => owner.packageId === alias.artifact.packageId
+    && featureKey(owner.packageId, owner.features) === featureKey(alias.artifact.packageId, alias.artifact.features)
+    && owner.declarations.some(item => item.name === alias.canonical && item.kind === alias.kind));
   assert.ok(owner, `${pkg.package}::${alias.name}: accepted-set assertion: canonical alias target absent from workspace compiler owner inventory`);
   assert.deepEqual(owner.features, alias.artifact.features, `${pkg.package}::${alias.name}: accepted-set assertion: alias consumer and canonical owner compiler features differ`);
 }
@@ -205,8 +220,34 @@ if (!args.includes('--inventory')) {
   const contracts = args.includes('--census') ? undefined : allContracts;
   const measured = scopedMeasurements(found, scope, root);
   if (scope) console.log(`accepted-set: scoped --measure ${JSON.stringify(scope)}; full compiler inventory preserved`);
-  const results = runProbes(root, metadata, measured, contracts,
-    scope ? {...configuration, measurementScope: scope} : configuration);
+  const probeConfiguration = scope ? {...configuration, measurementScope: scope} : configuration;
+  const plan = featurePlan(measured, contracts, metadata, probeConfiguration);
+  const gatedNames = new Set(plan.gated.map(row => row.name));
+  for (const pkg of measured) for (const owner of pkg.types.filter(owner => gatedNames.has(owner.name))) {
+    contractFor(owner, contracts, {packageMetadata: metadata.packages.find(item => item.id === pkg.packageId),
+      readSource: file => fs.readFileSync(path.resolve(root, file))});
+  }
+  const results = runProbes(root, metadata, plan.ordinary, contracts, probeConfiguration);
+  for (const row of plan.gated) console.log(`accepted-set: ${row.name}: native-gated; required features ${row.requiredFeatures.join(',')}`);
+  for (const group of plan.groups) {
+    const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url),
+      ...(args.some(arg => arg.startsWith('--workspace=')) ? [`--workspace=${root}`] : []),
+      `--contracts=${contractPath instanceof URL ? fileURLToPath(contractPath) : path.resolve(contractPath)}`,
+      '--measure', `--package=${group.package}`, '--target=native',
+      `--features=${group.features.filter(feature => feature !== 'default').join(',')}`, `--jobs=${jobs}`,
+      ...group.owners.map(name => `--owner=${name}`)],
+    {cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
+    process.stdout.write(child.stdout ?? '');
+    process.stderr.write(child.stderr ?? '');
+    assert.ok(!child.error && child.status === 0, `accepted-set: required native feature measurement failed for ${group.package}`);
+    const receipts = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, 'accepted-set-results.json'), 'utf8'));
+    requireFeatureReceipts(group, receipts);
+    results.push(...receipts);
+  }
+  for (const group of plan.groups) requireFeatureReceipts(group, results);
+  results.push(...plan.gated);
+  fs.writeFileSync(output, `${JSON.stringify(found, null, 2)}\n`);
+  fs.writeFileSync(path.join(metadata.target_directory, 'accepted-set-results.json'), `${JSON.stringify(results, null, 2)}\n`);
   const failures = results.filter(row => row.failures.length);
   if (!args.includes('--measure')) assert.equal(failures.length, 0, `accepted-set: ${failures.length} failed types\n${failures.map(row => `${row.name}: ${row.failures.join('; ')}`).join('\n')}`);
 }
