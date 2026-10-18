@@ -432,6 +432,7 @@ mod interval_binding_tests {
 #[path = "signing_admission_tests.rs"]
 mod signing_admission_tests;
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "update_diagnostic_tests.rs"]
 mod update_diagnostic_tests;
