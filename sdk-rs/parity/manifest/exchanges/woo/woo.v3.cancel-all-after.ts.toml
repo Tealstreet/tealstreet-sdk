@@ -1,75 +1,75 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.cancel-all-after.ts"
-rust_files = [ "safe-cex-venue-woo/src/cancel_all_after.rs" ]
+rust_files = []
 
 [[symbol]]
 ts = "WooV3CancelAllAfterRequest"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/cancel_all_after.rs::WooV3CancelAllAfterRequest", "safe-cex-venue-woo/src/cancel_all_after.rs::WooV3CancelAllAfterBody" ]
-status = "divergent"
-note = "CHOSEN: Owned request/body declaration codecs coexist with the existing Value-returning builder. Reused method/endpoint enums have wider direct construction than the POST/specific-path literals; declaration ingress enforces both. Body triggerAfter retains unrestricted declared f64, including signed zero and infinity before runtime bounds are applied by the separate builder. Native method, endpoint and body bits are inspected. Supporting anonymous body target: safe-cex-venue-woo/src/cancel_all_after.rs::WooV3CancelAllAfterBody. Maps to safe-cex-venue-woo/src/cancel_all_after.rs::WooV3CancelAllAfterRequest."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."
 
 [[symbol]]
 ts = "WooV3CancelAllAfterResponse"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/cancel_all_after.rs::WooV3CancelAllAfterResponse"
-status = "divergent"
-note = "CHOSEN: Owned native response replaces the Readonly declaration; public accepted bool construction is wider than the true literal, enforced at declaration ingress. Timestamp and expectedTriggerTime retain unrestricted declared f64 rather than applying the operation decoder safe-integer minima. Distinct decoded native bits are asserted before any wire claim; symmetric field swapping must fail those assertions. Maps to safe-cex-venue-woo/src/cancel_all_after.rs::WooV3CancelAllAfterResponse."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."
 
 [[symbol]]
 ts = "WOO_V3_CANCEL_ALL_AFTER_LIMITS"
 kind = "const"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/cancel_all_after.rs::WOO_V3_CANCEL_ALL_AFTER_LIMITS"
-status = "ported"
-note = "Named limits match the actual TS export, with per-key native assertions. Static immutable Rust table retains all three entries."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."
 
 [[symbol]]
 ts = "WOO_V3_CANCEL_ALL_AFTER_PARITY"
 kind = "const"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/cancel_all_after.rs::WOO_V3_CANCEL_ALL_AFTER_PARITY"
-status = "ported"
-note = "All nine flags match actual TS exports by name, including three false activation/ownership flags; no runtime route or timer is enabled."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."
 
 [[symbol]]
 ts = "requireRecord"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/cancel_all_after.rs::require_record"
-status = "divergent"
-note = "CHOSEN: shared-utf8-string-boundary at sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for diagnostic paths and JSON string contents. JSON-backed input intentionally excludes executable properties and non-JSON object instances; supporting those would add a second host object model beside the transport representation. Missing, null, arrays, scalars and ordinary records are witnessed against the actual source."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."
 
 [[symbol]]
 ts = "requireExactKeys"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/cancel_all_after.rs::require_exact_keys"
-status = "divergent"
-note = "CHOSEN: shared-utf8-string-boundary at sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for diagnostic paths and key strings. Own JSON map keys use UTF-16 ordering, not byte ordering; executable object surfaces are outside this transport representation. Exact lengths, sorted key identity and diagnostic text are observed from actual source."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."
 
 [[symbol]]
 ts = "requireNonnegativeSafeInteger"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/cancel_all_after.rs::require_nonnegative_safe_integer"
-status = "divergent"
-note = "CHOSEN: shared-utf8-string-boundary at sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for diagnostic paths. JSON-backed input uses shared lexeme-aware numeric observation and preserves negative zero/underflow; native non-JSON inputs are not an additional host input surface. Source safe-integer range, rejection text and numeric bits are witnessed."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."
 
 [[symbol]]
 ts = "buildWooV3CancelAllAfterRequest"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/cancel_all_after.rs::build_woo_v3_cancel_all_after_request"
-status = "divergent"
-note = "CHOSEN: Rust returns owned mutable JSON where TS freezes the outer request and nested body. A readonly descriptor type could mirror this; the mutable Value surface is an implementation simplification, not a necessity claim, with no demonstrated parity reason that a readonly descriptor would be worse. Source freeze and Rust mutation witnesses pin both views. The output declaration now has a separate native codec; this operation still returns Value. Actual-source bounds, wrong input kinds, endpoint/method identity and signed-zero bits are pinned, including negative underflow; no transport or timer activation."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."
 
 [[symbol]]
 ts = "decodeWooV3CancelAllAfterResponse"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/cancel_all_after.rs::decode_woo_v3_cancel_all_after_response"
-status = "divergent"
-note = "CHOSEN: Rust returns owned mutable JSON where TS freezes its response. A readonly output type could mirror this; the mutable Value surface is an implementation simplification, not a necessity claim, with no demonstrated parity reason that a readonly result would be worse. The declaration now has a separate native codec; this operation still returns Value. JSON-backed input excludes executable getters and non-JSON object instances rather than adding a host object model. Source freeze and Rust mutation witnesses pin both views. Actual-source validation precedence is response shape, exact keys, strict success, data shape/keys, timestamp then expectedTriggerTime. Each native numeric output is observed before serialization; timestamp/expectedTriggerTime swap and negative-zero controls protect field identity and sign."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "ACCEPT: inactive V3 cancel-all-after scaffold has no production TS import or Rust runtime caller; its Rust descriptor/response module, facade tests and orphaned tooling are removed. The constructed maintained WOO class inherits BaseExchange.scheduleCancel (packages/safe-cex/src/exchanges/base.ts:989-991), rejecting with name Error and message Not implemented; four native/source inputs agree and send no HTTP or socket request. Actual signed legacy cancelAllOrders still sends DELETE /v3/orders/pending. See FIX_AUDIT_LEDGER.md row 9; no V3 timer or write route is enabled."

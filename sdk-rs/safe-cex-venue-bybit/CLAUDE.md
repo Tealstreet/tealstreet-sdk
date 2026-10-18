@@ -946,3 +946,10 @@ stock prototype members, own shadows, dictionary prototype tickers, parse
 failures, notifications and the real `undefined` ID target. The handler uses
 Store's canonical lookup instead of the borrowed own-entry map. SDK timing and
 onMessage handler-table prototype dispatch remain separate rows.
+
+The three no-socket send/subscribe rejection-timing rows now have a real native
+reconciliation witness in `tests/detached_reconnect_native.rs`: constructed
+primary/demo exchanges, actual Store notification and native stderr reporting.
+Its compiled core controls distinguish synchronous caller rejection from a
+detached report and require both continuation and reporting. This closes stale
+notification timing notes; it does not change the public SDK wrapper family.
