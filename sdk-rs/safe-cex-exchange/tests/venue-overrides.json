@@ -440,6 +440,106 @@
     "file": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts"
   },
   {
+    "method": "afterMethodCalledInWorker",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "cancelOrders",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "cancelSymbolOrders",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "changeMarginType",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "changePositionMode",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "dispose",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "fetchMarkets",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "fetchOHLCV",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "fetchOrders",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "fetchPositions",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "fetchPublicTrades",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "fetchTickers",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "listenOHLCV",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "listenOrderBook",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "placeOrder",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "placeOrders",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "setLeverage",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "start",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "updateOrder",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
+    "method": "validateAccount",
+    "class": "BinanceInverseExchange",
+    "file": "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
+  },
+  {
     "method": "cancelOrders",
     "class": "BinancePMExchange",
     "file": "packages/safe-cex/src/exchanges/binance/binancepm.exchange.ts"
