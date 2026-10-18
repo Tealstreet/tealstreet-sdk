@@ -405,6 +405,13 @@ struct Depth {
     sync: RefCell<orderbook::BinanceOrderBookSyncState>,
     busy: Cell<bool>,
 }
+// Covers unpolled/dropped native async work in addition to normal finally.
+struct SnapshotFlight(Rc<Depth>);
+impl Drop for SnapshotFlight {
+    fn drop(&mut self) {
+        self.0.busy.set(false);
+    }
+}
 impl Depth {
     fn rt(&self) -> Result<Rt, Thrown> {
         Ok(scope_of(&self.weak)?.with_this(self.socket.clone()))
@@ -440,11 +447,12 @@ impl Depth {
         Ok(())
     }
     fn fetch(self: &Rc<Self>) -> Result<(), Thrown> {
+        let rt = self.rt()?;
         if self.busy.replace(true) {
             return Ok(());
         }
-        let rt = self.rt()?;
         let state = self.clone();
+        let flight = SnapshotFlight(state.clone());
         rt.clone().spawn(Box::pin(async move {
             let result = async {
                 let result = await_js(rt.call_path(
@@ -516,7 +524,7 @@ impl Depth {
                 Ok(Js::Undefined)
             }
             .await;
-            state.busy.set(false);
+            drop(flight);
             result
         }));
         Ok(())

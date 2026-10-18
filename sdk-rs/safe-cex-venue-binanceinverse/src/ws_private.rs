@@ -224,7 +224,7 @@ async fn connect(rt: &Rt) -> Result<Js, Thrown> {
         return Ok(Js::Undefined);
     }
     rt.this.set("connecting", Js::Bool(true))?;
-    let listen_key = match await_js(rt.call_path("fetchListenKey", vec![])?).await {
+    let listen_key = match async { await_js(rt.call_path("fetchListenKey", vec![])?).await }.await {
         Ok(key) => key,
         Err(error) => {
             let message = Js::str(&format!(
@@ -446,14 +446,18 @@ fn orders(rt: &Rt, events: Js) -> Result<(), Thrown> {
             )?;
             let reason = rt.call_path("getOrderRejectReason", vec![data.clone()])?;
             if reason.truthy() {
-                let existing = rt
+                let mut existing = Js::Undefined;
+                for candidate in rt
                     .path("store.orders")?
                     .array_values()
                     .ok_or_else(|| Thrown::type_error("orders.find is not a function"))?
-                    .into_iter()
-                    .find(|o| o.get("id").is_ok_and(|v| v.strict_equals(&id)));
-                let extra =
-                    optional(&existing.unwrap_or(Js::Undefined), "extra")?.spread_object()?;
+                {
+                    if candidate.get("id")?.strict_equals(&id) {
+                        existing = candidate;
+                        break;
+                    }
+                }
+                let extra = optional(&existing, "extra")?.spread_object()?;
                 extra.set("rejectReason", reason)?;
                 rt.call_path(
                     "store.updateOrder",
@@ -628,6 +632,19 @@ fn throttle_positions(rt: &Rt) -> Result<(), Thrown> {
     }
     Ok(())
 }
+// The runtime owns discarded async calls; cancelling that owner must release
+// the native in-flight latch as well as the source's normal finally path.
+struct PositionFlight {
+    socket: Js,
+    armed: bool,
+}
+impl Drop for PositionFlight {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.socket.set("positionFetchInFlight", Js::Bool(false));
+        }
+    }
+}
 async fn execute_positions(rt: &Rt) -> Result<Js, Thrown> {
     if flag(rt, "positionFetchInFlight")?
         || flag(rt, "isDisposed")?
@@ -639,6 +656,10 @@ async fn execute_positions(rt: &Rt) -> Result<Js, Thrown> {
     }
     let version = rt.call_path("parent.getPositionStateVersion", vec![])?;
     rt.this.set("positionFetchInFlight", Js::Bool(true))?;
+    let mut flight = PositionFlight {
+        socket: rt.this.clone(),
+        armed: true,
+    };
     rt.this
         .set("lastPositionFetchTime", global(rt, "Date.now", vec![])?)?;
     rt.this.set("hasPendingPositionEvents", Js::Bool(false))?;
@@ -653,6 +674,7 @@ async fn execute_positions(rt: &Rt) -> Result<Js, Thrown> {
     }
     .await;
     rt.this.set("positionFetchInFlight", Js::Bool(false))?;
+    flight.armed = false;
     if !flag(rt, "isDisposed")? && flag(rt, "hasPendingPositionEvents")? {
         rt.call_path("throttledFetchPositions", vec![])?;
     }
