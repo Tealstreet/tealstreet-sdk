@@ -1370,3 +1370,160 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn recorded_business_candle_tracks_registered_handlers_and_unsubscribe() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(ExchangeName::Okx, options(), okx);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.advance(50.0);
+    let transport = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/ws/v5/business"))
+        .unwrap()
+        .1
+        .clone();
+    let socket = h.venue().base().get_socket(SocketSlot::Business).unwrap();
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let seen = candles.clone();
+    let stop = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSDT", "interval":"1m"})).unwrap(),
+            Rc::new(move |candle| seen.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    // A second listener exercises replacement of the source callback array,
+    // followed by removal of just one parser and then the last parser.
+    let second = Rc::new(RefCell::new(Vec::new()));
+    let seen = second.clone();
+    let stop_second = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSDT", "interval":"1m"})).unwrap(),
+            Rc::new(move |candle| seen.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    let recorded: Value = serde_json::from_str(include_str!("recorded-candle.json")).unwrap();
+    let payload = recorded["payload"].as_str().unwrap();
+    let deliver = || {
+        transport
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(payload.into())));
+        h.runtime.pump();
+    };
+    deliver();
+    assert_eq!(
+        candles.borrow().len(),
+        1,
+        "recorded candle reaches actual subscription"
+    );
+    assert_eq!(candles.borrow()[0].close, 81057.2);
+    let key = "candle.1m.BTC-USDT-SWAP";
+    let stats = socket.message_handlers_stats.borrow()[key].clone();
+    assert_eq!(
+        stats.had_handlers,
+        Some(true),
+        "recorded candle has the source handler registration"
+    );
+    assert!(matches!(
+        stats.last_callbacks_count,
+        safe_cex_num::PrototypeScalar::Number(2.0)
+    ));
+    assert_eq!(second.borrow().len(), 1);
+    assert_eq!(
+        socket.message_handlers.borrow()[key].borrow().len(),
+        2,
+        "registration updates the core before a public frame can rebuild it"
+    );
+    stop().unwrap();
+    assert_eq!(
+        socket.message_handlers.borrow()[key].borrow().len(),
+        1,
+        "unsubscribing one listener updates only its selected core slot"
+    );
+    deliver();
+    assert_eq!(candles.borrow().len(), 1);
+    assert_eq!(second.borrow().len(), 2);
+    assert!(matches!(
+        socket.message_handlers_stats.borrow()[key].last_callbacks_count,
+        safe_cex_num::PrototypeScalar::Number(1.0)
+    ));
+    stop_second().unwrap();
+    assert_eq!(
+        socket.message_handlers.borrow()[key].borrow().len(),
+        0,
+        "the final empty own slot still shadows inherited names"
+    );
+    assert!(
+        !socket.message_handlers_stats.borrow().contains_key(key),
+        "unsubscribe removes statistics"
+    );
+    deliver();
+    assert_eq!(
+        candles.borrow().len(),
+        1,
+        "unsubscribed parser stays silent"
+    );
+    assert!(
+        !socket.message_handlers_stats.borrow().contains_key(key),
+        "late frame cannot restore statistics"
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn constructed_socket_registry_is_initialized_before_first_public_frame() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    let h = harness(ExchangeName::Okx, options(), okx);
+    let public = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+    for key in [
+        "tickers",
+        "mark-price",
+        "index-tickers",
+        "open-interest",
+        "funding-rate",
+    ] {
+        assert_eq!(
+            public
+                .message_handlers
+                .borrow()
+                .get(key)
+                .map(|list| list.borrow().len()),
+            Some(1),
+            "static handler {key} initialized once without a frame"
+        );
+    }
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.advance(50.0);
+    let stop = h
+        .venue()
+        .listen_order_book("BTCUSDT".into(), std::rc::Rc::new(|_| {}))
+        .unwrap();
+    assert_eq!(
+        public
+            .message_handlers
+            .borrow()
+            .get("books.BTC-USDT-SWAP")
+            .map(|list| list.borrow().len()),
+        Some(1),
+        "dynamic book registration before dispatch"
+    );
+    stop().unwrap();
+    assert_eq!(
+        public
+            .message_handlers
+            .borrow()
+            .get("books.BTC-USDT-SWAP")
+            .map(|list| list.borrow().len()),
+        Some(0),
+        "book unsubscribe before dispatch"
+    );
+    h.venue().dispose().unwrap();
+}
