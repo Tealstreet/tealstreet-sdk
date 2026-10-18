@@ -1,5 +1,9 @@
 //! Production Phemex venue: the assembled class graph behind the typed Exchange trait.
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "divergence_regressions.rs"]
+mod divergence_regressions;
+#[cfg(test)]
 #[path = "order_regressions.rs"]
 mod order_regressions;
 use super::{
@@ -159,26 +163,22 @@ impl PhemexExchange {
         member: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
-        let this = self.rt.this.clone();
+        let runtime = self.rt.exchange_runtime();
+        let result = self.rt.this.call_method(member, args);
         Box::pin(async move {
-            let value = await_js(
-                &self.rt.exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            let value = await_js(&runtime, result.map_err(err)?)
+                .await
+                .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
-        let this = self.rt.this.clone();
+        let runtime = self.rt.exchange_runtime();
+        let result = self.rt.this.call_method(member, args);
         Box::pin(async move {
-            await_js(
-                &self.rt.exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            await_js(&runtime, result.map_err(err)?)
+                .await
+                .map_err(err)?;
             Ok(())
         })
     }
