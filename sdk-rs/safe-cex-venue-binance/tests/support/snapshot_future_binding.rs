@@ -161,11 +161,10 @@ fn exercise(rejected: bool) {
             1,
             "caught request rejection reaches actual emitter"
         );
-        assert!(
-            errors.borrow()[0]
-                .text()
-                .unwrap()
-                .contains("snapshot continuation refusal")
+        assert_eq!(
+            errors.borrow()[0].text().unwrap(),
+            "Exchange Error: snapshot continuation refusal",
+            "source catch forwards rejected response.data.msg through Base formatting"
         );
     } else {
         let rows = rows.borrow();
