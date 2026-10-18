@@ -689,3 +689,7 @@ mod tests {
         assert!(missing.is_empty(), "unbound globals: {missing:?}");
     }
 }
+
+#[cfg(test)]
+#[path = "exchange_alias_tests.rs"]
+mod alias_tests;

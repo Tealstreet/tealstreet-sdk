@@ -221,3 +221,44 @@ fn native_emitter_case(row: &serde_json::Value) -> serde_json::Value {
     owner.dispose().unwrap();
     result
 }
+
+#[test]
+fn native_log_facade_retains_utf16_before_console_and_event() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&rt, async {
+        let (this, _shared, owner) = facade();
+        let observed = Rc::new(RefCell::new(vec![]));
+        let captured = observed.clone();
+        owner.base().on_args(
+            "log",
+            Rc::new(move |_, args| {
+                captured.borrow_mut().push(args.to_vec());
+                Ok(())
+            }),
+        );
+        for units in [
+            vec![0xd800],
+            vec![0xdc00],
+            vec![0x61, 0xd800, 0x62, 0xdc00],
+            vec![0xd83d, 0xde80],
+            vec![],
+        ] {
+            let message = Js::utf16(&units);
+            this.call_method("log", vec![message, Js::str("warning")])
+                .unwrap();
+            let events = observed.borrow();
+            let args = events.last().unwrap();
+            let mut prefixed = "[bybit] ".encode_utf16().collect::<Vec<_>>();
+            prefixed.extend(units);
+            assert_eq!(args[0].as_str().unwrap().as_ref(), prefixed);
+            assert_eq!(
+                args[1].as_str().unwrap().as_ref(),
+                "warning".encode_utf16().collect::<Vec<_>>()
+            );
+        }
+        owner.base().dispose().unwrap();
+    });
+}

@@ -252,6 +252,19 @@
     ],
     "accepted-ws-auth-native.test.mjs": [
       "WS four native families reject field and presence mutations before wire assertions"
+    ],
+    "accepted-feature-contracts.test.mjs": [
+      "required feature declarations reject empty duplicate unknown and classification-only escapes",
+      "feature planning preserves ordinary locals and visibly gates owners until their native build",
+      "default measurements and required native observations cannot be replaced by classification or missing receipts"
+    ],
+    "accepted-feature-contracts-native.test.mjs": [
+      "required features visibly gate the default owner and execute the real native decoder with controls",
+      "native feature compiler provenance follows real reexports without passing foreign feature names to dependencies"
+    ],
+    "accepted-woo-alias.test.mjs": [
+      "exact WOO book array refuses slot root and caller redirects",
+      "WOO five structural aliases execute actual native traits and decoded values"
     ]
   },
   "mutations": [
@@ -438,6 +451,9 @@
     "NAPI alias caller redirection",
     "authored JSON contract source retention",
     "authored JSON dispatch token retention",
-    "authored JSON native key ordering"
+    "authored JSON native key ordering",
+    "required feature actual native output",
+    "required feature native dispatch removal",
+    "WOO array expanded slots"
   ]
 }

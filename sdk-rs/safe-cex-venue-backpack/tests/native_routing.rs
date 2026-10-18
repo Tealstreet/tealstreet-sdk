@@ -422,3 +422,103 @@ fn synced_clock_reaches_native_rest_auth_and_position_mapping() {
         "synced source time {before}..={after}; REST auth={auth_time}, position lastUpdate={position_time}"
     );
 }
+
+#[test]
+fn native_market_response_interceptor_preserves_unread_utf16_fields() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    use std::io::Write;
+    let raw = r#"[{"symbol":"BTC_USDC","marketType":"SPOT","opaque":"\ud800","\udc00":"kept"}]"#;
+    let mut child = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained_response_source.cjs"
+        ))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(raw.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let runtime = Rc::new(support::Runtime::default());
+    let wire = Arc::new(support::Wire::default());
+    wire.bodies.lock().unwrap().insert(
+        "/api/v1/markets".into(),
+        RestResponseBody::Encoded(raw.as_bytes().to_vec()),
+    );
+    let options =
+        serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true})).unwrap();
+    let owner = construct(options, runtime.clone(), wire.clone()).unwrap();
+    let rows = drive(&runtime, Exchange::fetch_markets(owner.as_ref()))
+        .expect("source returns the market through its response interceptor");
+    assert_eq!(rows.len(), 1);
+    let info = rows[0].info.as_ref().expect("original market info");
+    let Input::Text(units) = info.get("opaque").unwrap() else {
+        panic!("retained text")
+    };
+    assert_eq!(json!(units), expected[0]["opaque"]);
+    assert_eq!(rows[0].symbol, expected[0]["symbol"]);
+    let Input::Object(fields) = info else {
+        panic!("retained row")
+    };
+    assert_eq!(
+        json!(fields.iter().map(|(key, _)| key).collect::<Vec<_>>()),
+        expected[0]["keys"]
+    );
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method.to_uppercase(), "GET");
+    assert_eq!(requests[0].url, "/api/v1/markets");
+    drop(requests);
+    owner.dispose().unwrap();
+}
+
+#[test]
+fn native_market_response_interceptor_keeps_nonfinite_native_info() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let mut row = Input::from_value(json!({"symbol":"BTC_USDC","marketType":"SPOT"})).unwrap();
+    let Input::Object(fields) = &mut row else {
+        unreachable!()
+    };
+    fields.extend([
+        ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
+        (
+            "infinity".encode_utf16().collect(),
+            Input::Float(f64::INFINITY),
+        ),
+        ("negativeZero".encode_utf16().collect(), Input::Float(-0.0)),
+        ("ownUndefined".encode_utf16().collect(), Input::Undefined),
+    ]);
+    let runtime = Rc::new(support::Runtime::default());
+    let wire = Arc::new(support::Wire::default());
+    wire.bodies.lock().unwrap().insert(
+        "/api/v1/markets".into(),
+        RestResponseBody::Untransformed(Input::Array(vec![row])),
+    );
+    let options =
+        serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true})).unwrap();
+    let owner = construct(options, runtime.clone(), wire.clone()).unwrap();
+    let rows = drive(&runtime, Exchange::fetch_markets(owner.as_ref()))
+        .expect("native info is never a wire projection");
+    assert_eq!(rows.len(), 1);
+    let info = rows[0].info.as_ref().unwrap();
+    assert!(matches!(info.get("nan"),Some(Input::Float(n)) if n.is_nan()));
+    assert!(matches!(info.get("infinity"),Some(Input::Float(n)) if *n==f64::INFINITY));
+    assert!(
+        matches!(info.get("negativeZero"),Some(Input::Float(n)) if n.to_bits()==(-0.0f64).to_bits())
+    );
+    assert!(matches!(info.get("ownUndefined"), Some(Input::Undefined)));
+    assert_eq!(wire.requests.lock().unwrap().len(), 1);
+    owner.dispose().unwrap();
+}

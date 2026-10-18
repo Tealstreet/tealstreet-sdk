@@ -367,3 +367,226 @@ fn production_native_depth_overflow_final_id_requests_resnapshot() {
     }
     assert_eq!(completed, 3);
 }
+
+#[test]
+fn production_native_public_listener_functions_preserve_two_subscriptions() {
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let runtime = Rc::new(Runtime::default());
+        let socket = Rc::new(PublicSocket {
+            events: Rc::new(RefCell::new(std::collections::VecDeque::from([
+                WsEvent::Open,
+            ]))),
+            sent: RefCell::default(),
+        });
+        *runtime.dial_socket.borrow_mut() = Some(socket.clone());
+        let http = Arc::new(HeldDepth {
+            released: AtomicBool::new(false),
+            requests: Mutex::default(),
+        });
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            http.clone(),
+            Rc::new(|_, _| panic!("unexpected external data")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let name = match venue {
+            Venue::Futures => "binance",
+            Venue::PM => "binancepm",
+            Venue::Spot => "binancespot",
+        };
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(name)).unwrap(),
+            serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            dependencies,
+        )
+        .unwrap();
+        let callbacks = Rc::new(RefCell::new(Vec::<(usize, Book)>::new()));
+        let capture = |index| {
+            let callbacks = callbacks.clone();
+            Rc::new(move |book| {
+                callbacks.borrow_mut().push((index, book));
+                Ok(())
+            })
+                as Rc<dyn Fn(Book) -> Result<(), safe_cex_venue_binance::request_weight::Failure>>
+        };
+        let first_cleanup = owner
+            .public
+            .listen_order_book("BTCUSDT".into(), capture(0))
+            .unwrap();
+        assert!(socket.sent.borrow().is_empty());
+        owner.public_socket().connect_and_subscribe().unwrap();
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        runtime.sleep_clock.set(100.0);
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        let first_parser = safe_cex_venue_binance::public_listeners::ListenerHost::handlers(
+            owner.public.as_ref(),
+            "depthUpdate.BTCUSDT",
+        )
+        .unwrap()[0]
+            .clone();
+        let second_cleanup = owner
+            .public
+            .listen_order_book("BTCUSDT".into(), capture(1))
+            .unwrap();
+        let parsers = safe_cex_venue_binance::public_listeners::ListenerHost::handlers(
+            owner.public.as_ref(),
+            "depthUpdate.BTCUSDT",
+        )
+        .unwrap()
+        .clone();
+        assert_eq!(parsers.len(), 2);
+        assert!(Rc::ptr_eq(&parsers[0], &first_parser));
+        assert!(!Rc::ptr_eq(&parsers[0], &parsers[1]));
+        assert_eq!(
+            owner
+                .public
+                .listeners
+                .topics
+                .borrow()
+                .get("btcusdt@depth")
+                .copied()
+                .unwrap()
+                .to_bits(),
+            2.0_f64.to_bits()
+        );
+        let messages = || {
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .map(|text| serde_json::from_str::<Value>(text).unwrap())
+                .filter(|row| row["params"] == json!(["btcusdt@depth"]))
+                .collect::<Vec<_>>()
+        };
+        let subscribes = messages();
+        assert_eq!(subscribes.len(), 2);
+        for message in subscribes {
+            assert_eq!(
+                message
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["method", "params", "id"]
+            );
+            assert_eq!(message["method"], "SUBSCRIBE");
+            assert_eq!(message["id"].as_f64().unwrap().to_bits(), 3.0_f64.to_bits());
+        }
+        let push = |id: u64, amount: &str| {
+            socket.events.borrow_mut().push_back(WsEvent::Message(SocketFrame::Text(
+                json!({"e":"depthUpdate","s":"BTCUSDT","U":id,"u":id,"pu":id-1,"b":[["99.25",amount]],"a":[]}).to_string()
+            )));
+            for _ in 0..12 {
+                runtime.pump();
+            }
+        };
+        push(101, "5.5");
+        assert!(callbacks.borrow().is_empty());
+        assert_eq!(
+            http.requests.lock().unwrap().len(),
+            2,
+            "separate listener jobs {venue:?}"
+        );
+        http.released.store(true, Ordering::SeqCst);
+        for _ in 0..16 {
+            runtime.pump();
+        }
+        assert_eq!(
+            callbacks
+                .borrow()
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        let first = callbacks.borrow()[0].1.clone();
+        let second = callbacks.borrow()[1].1.clone();
+        assert!(
+            !Rc::ptr_eq(&first, &second),
+            "each invocation owns its book {venue:?}"
+        );
+        for book in [&first, &second] {
+            assert_eq!(book.borrow().bids[0].amount.to_bits(), 5.5_f64.to_bits());
+        }
+        first_cleanup().unwrap();
+        let remaining = safe_cex_venue_binance::public_listeners::ListenerHost::handlers(
+            owner.public.as_ref(),
+            "depthUpdate.BTCUSDT",
+        )
+        .unwrap()
+        .clone();
+        assert_eq!(remaining.len(), 1);
+        assert!(
+            Rc::ptr_eq(&remaining[0], &parsers[1]),
+            "remove exact parser, retain sibling {venue:?}"
+        );
+        assert_eq!(
+            owner
+                .public
+                .listeners
+                .topics
+                .borrow()
+                .get("btcusdt@depth")
+                .copied()
+                .unwrap()
+                .to_bits(),
+            1.0_f64.to_bits()
+        );
+        assert_eq!(
+            messages().len(),
+            2,
+            "first cleanup must not unsubscribe sibling {venue:?}"
+        );
+        assert!(first.borrow().bids.is_empty() && first.borrow().asks.is_empty());
+        assert_eq!(second.borrow().bids[0].amount.to_bits(), 5.5_f64.to_bits());
+        push(102, "6.75");
+        assert_eq!(
+            callbacks
+                .borrow()
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            [0, 1, 1]
+        );
+        assert!(Rc::ptr_eq(&callbacks.borrow()[2].1, &second));
+        assert_eq!(second.borrow().bids[0].amount.to_bits(), 6.75_f64.to_bits());
+        second_cleanup().unwrap();
+        assert!(
+            !owner
+                .public
+                .listeners
+                .topics
+                .borrow()
+                .contains_key("btcusdt@depth")
+        );
+        assert!(
+            safe_cex_venue_binance::public_listeners::ListenerHost::handlers(
+                owner.public.as_ref(),
+                "depthUpdate.BTCUSDT"
+            )
+            .unwrap()
+            .is_empty(),
+            "legacy depth cleanup retains empty handler row"
+        );
+        let wires = messages();
+        assert_eq!(wires.len(), 3);
+        assert_eq!(wires[2]["method"], "UNSUBSCRIBE");
+        assert_eq!(
+            wires[2]["id"].as_f64().unwrap().to_bits(),
+            3.0_f64.to_bits()
+        );
+        assert!(second.borrow().bids.is_empty() && second.borrow().asks.is_empty());
+        push(103, "9");
+        assert_eq!(callbacks.borrow().len(), 3);
+        assert!(runtime.reported.borrow().is_empty());
+        owner.dispose().unwrap();
+    }
+}

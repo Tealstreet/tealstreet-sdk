@@ -30,6 +30,10 @@ mod private {
 }
 pub use private::Record as Exported;
 
+pub fn native_contract_enabled() -> bool {
+    cfg!(feature = "native")
+}
+
 pub fn has_private_helper() {
     struct LocalHelper;
     let _ = std::mem::size_of::<LocalHelper>();

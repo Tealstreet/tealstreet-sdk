@@ -445,3 +445,10 @@ and unrelated lookup, then one reached getter and its exact Projection cause.
 The table_hook_tests target compares 13 real Node operations, checks native cause
 identity/release and reentry, and scripts/realm-table-hook-controls.py proves both
 lookup/key swallowing mutations fail before exact restoration passes.
+
+The public Cloid, FundingHistory, UserOpenOrders and perpetual/Spot
+CancelOrderRequests aliases execute their actual native decoder traits through
+`scripts/wire-alias-contracts.mjs`. Authenticated compiler claims and root types
+remain guarded. Observations read every member and list position directly,
+including signed-zero bits; all five String conversion routes retain direct
+unit/byte witnesses. This is wire-alias evidence, not a Realm/HTTP behavior claim.

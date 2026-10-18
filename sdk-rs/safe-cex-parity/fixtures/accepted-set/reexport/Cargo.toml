@@ -3,6 +3,9 @@ name = "accepted-set-reexport-control"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+native = ["accepted-set-control/native"]
+
 [dependencies]
 accepted-set-control = { path = ".." }
 serde_json = { workspace = true }

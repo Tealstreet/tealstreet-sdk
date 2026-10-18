@@ -389,6 +389,9 @@ hooks also dispatch through `Exchange`; multi-symbol subscriptions emit one
 `SubscribedCandle` carrying `candle`, `symbol`, and `interval` (flattened on wire).
 The committed health-feature policy test checks Cargo's actual default graphs:
 regex stays out of the core graph and remains present through the host facade.
+Regenerate health patterns and the monitor oracle together with
+`node safe-cex-exchange/scripts/generate-health.cjs` from `sdk-rs` after TS changes.
+The focused auth regression covers spaced API keys and Hyro's labelled code 10003.
 
 Proxy JWT expiration lives in `proxy_token::is_token_expired(token, &VirtualClock)`. Hosts return a clone of their existing service clock through `ProxyTokenHost::virtual_clock`; both proxy token client and future access-token adapters must use this shared helper.
 
@@ -1845,6 +1848,14 @@ thrown values. Native builtin adapters keep their existing separate surfaces.
 `js_builtins_native` compares eight actual NativeRuntime operator hook cases with
 Node; the unchanged Dayjs, Breakout, Kraken candle and Paradex ticker consumers
 cover malformed objects reaching their source Date/arithmetic branches.
+
+BaseExchange::log_value is the canonical log path. It forwards the original native
+message and severity to console_values before constructing the UTF16-prefixed
+log event. The typed log(&str) convenience delegates there without another logger.
+The JS log facade passes its original message; source coercion runs only for the
+event template. The real PM repeated-snapshot warning and native facade witnesses
+cover lone UTF16 units; native_console_default separately executes the runtime's
+typed console default and Base logging so both forwarding paths remain observed.
 
 
 ## Property deletion

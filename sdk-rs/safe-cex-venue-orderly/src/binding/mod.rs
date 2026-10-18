@@ -1,5 +1,6 @@
 //! Concrete primitive bindings for the existing Orderly source bodies.
 mod host;
+pub(crate) use host::Host;
 mod members;
 mod primitives;
 mod sockets;
@@ -76,7 +77,7 @@ pub(crate) fn assemble(
         this: Js::Undefined,
     };
     let this = crate::classes::construct(
-        &host::Host::new(&rt),
+        &Host::new(&rt),
         kind,
         vec![Rc::new(name), Rc::new(options), Rc::new(store)],
     )?;

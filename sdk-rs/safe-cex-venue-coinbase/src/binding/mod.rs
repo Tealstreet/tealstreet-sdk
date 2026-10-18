@@ -4,7 +4,7 @@ mod classes;
 mod crypto;
 mod error;
 mod reads;
-mod rt;
+pub(crate) mod rt;
 mod sockets;
 mod value;
 
