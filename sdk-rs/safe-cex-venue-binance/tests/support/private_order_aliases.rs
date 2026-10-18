@@ -12,6 +12,7 @@ struct Http {
     requests: Mutex<Vec<RestRequest>>,
     routes: Mutex<std::collections::BTreeMap<String, (u16, String)>>,
     held: AtomicBool,
+    released: Mutex<std::collections::BTreeSet<String>>,
 }
 impl Http {
     fn response(&self, path: &str, status: u16, data: Value) {
@@ -41,7 +42,7 @@ impl RestAdapter for Http {
             .cloned()
             .unwrap_or_else(|| panic!("unscripted actual native request: {path}"));
         Box::pin(std::future::poll_fn(move |_| {
-            if self.held.load(Ordering::SeqCst) {
+            if self.held.load(Ordering::SeqCst) && !self.released.lock().unwrap().contains(&path) {
                 return Poll::Pending;
             }
             let response = RestResponse {
@@ -241,6 +242,22 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
             assert!(request.url.contains("signature="));
             assert!(!request.url.contains("ETHUSDT"));
         }
+        http.released
+            .lock()
+            .unwrap()
+            .insert("/fapi/v1/allOpenOrders".into());
+        assert!(
+            poll(&runtime, &mut call).is_pending(),
+            "algo reply is still held"
+        );
+        assert!(
+            owner
+                .base
+                .store
+                .orders()
+                .iter()
+                .all(|row| row.status == OrderStatus::Open)
+        );
         http.held.store(false, Ordering::SeqCst);
         let result = run(&runtime, call);
         assert_eq!(result.is_ok(), algo_status == 200);
