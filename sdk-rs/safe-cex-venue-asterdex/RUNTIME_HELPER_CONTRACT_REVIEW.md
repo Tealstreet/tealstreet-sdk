@@ -50,3 +50,15 @@ These contracts obey the shared [string](../parity/MANIFEST-SPEC.md#shared-utf8-
 [output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) and
 [alias](../parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias) boundaries.
 They do not cover other owners, local decoders or the full feature/WASM matrix.
+
+The measured baseline on master `9c52bf430a` compiled and failed exactly the six
+missing classifications. After adding the six rows, all six native owners and
+45 maintained-source cases passed with zero classification-only receipts. On the
+normal merge of `53befec583`, all six compiled faults failed exactly their named
+owner with a function-output mismatch, and each exact restoration passed all
+six owners and the source expectations again. The later `d72aa34492` merge changes
+only BloFin; Aster, the shared JS runtime and these contracts remain identical.
+The all-features cancellation/override/venue inventories then passed 7/8/25 tests
+on `9ebd137174`. No production Rust source bytes differ in this PR.
+Strict all-target Clippy passed for native and `wasm32-unknown-unknown` on the
+same refreshed head. The final evidence note is documentation only.
