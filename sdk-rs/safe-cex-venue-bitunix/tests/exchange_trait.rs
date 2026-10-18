@@ -804,3 +804,76 @@ fn signed_start_logs_in_on_the_private_socket_before_its_ping_loop() {
         rt.errors.borrow()
     );
 }
+
+#[test]
+fn position_adapter_dependencies_use_real_account_and_store_quote_resolution() {
+    let (venue, rt, store, wire) = support::fixture_with(false);
+    let mut markets = store.markets().to_vec();
+    markets[0].quote = "USDC".into();
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let rows: Vec<Value> = ["BTCUSDT", "ETHUSDT"]
+        .into_iter()
+        .map(|symbol| {
+            json!({
+                "positionId":format!("dependency-{symbol}"), "symbol":symbol, "qty":"2", "maxQty":"3",
+                "entryPrice":"100", "closePrice":"110", "side":"BUY", "positionMode":"HEDGE",
+                "leverage":"20", "fee":"2", "funding":"1", "realizedPNL":"8",
+                "ctime":"1700000000000", "mtime":"1700000100000"
+            })
+        })
+        .collect();
+    script(
+        &wire,
+        "/api/v1/futures/position/get_history_positions",
+        json!({"code":0,"data":{"positionList":rows,"total":"2"}}),
+    );
+    let account = "history-account-α";
+    let records = drive(
+        &rt,
+        venue.fetch_historical_positions(safe_cex_exchange::journal::HistoricalPositionOptions {
+            account: account.into(),
+            from: None,
+            to: None,
+        }),
+    )
+    .unwrap();
+    assert_eq!(records.len(), 2);
+    for (record, symbol, quote) in [
+        (&records[0], "BTCUSDT", "USDC"),
+        (&records[1], "ETHUSDT", "USDT"),
+    ] {
+        assert_eq!(record["account"], account);
+        assert_eq!(record["symbol"], symbol);
+        assert_eq!(
+            record["settleCurrency"], quote,
+            "actual dependency reads Store then source USDT fallback"
+        );
+        assert_eq!(
+            record["key"],
+            format!("{account}|{symbol}|long|dependency-{symbol}")
+        );
+        assert_eq!(
+            record["realizedPnl"], 10.0,
+            "production dependency keeps realized-is-net-of-funding false"
+        );
+        assert_eq!(record["fees"], 2.0);
+        assert_eq!(record["funding"], 1.0);
+    }
+    let requests = wire.requests.lock().unwrap();
+    let request = requests
+        .iter()
+        .find(|request| request.url == "/api/v1/futures/position/get_history_positions")
+        .unwrap();
+    assert_eq!(request.headers["api-key"], "fixture-key");
+    assert_eq!(request.headers["sign"].len(), 64);
+    drop(requests);
+    venue.dispose().unwrap();
+}
