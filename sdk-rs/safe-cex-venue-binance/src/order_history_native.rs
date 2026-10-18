@@ -1,6 +1,9 @@
 //! Source mapper over native values; the typed historical-order adapter remains
 //! separately available for callers choosing its closed categorical output.
-use crate::{private_event_value::*, request_weight::Failure};
+use crate::{
+    private_event_value::{EventOps, EventValue, PrivateEnum, number, string},
+    request_weight::Failure,
+};
 use safe_cex_num::{PrototypeRealm, TableHit, js_table_lookup};
 use safe_cex_types::{
     BothPositionSide, ExecutionPositionSide, OrderSide, OrderStatus, OrderType, PositionSide,
