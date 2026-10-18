@@ -202,7 +202,11 @@ impl ApexOmniPrivateWebsocket {
         }
         self.host.track_last_received()?;
         self.host.diagnostic_receive(raw)?;
-        let json = J::from(safe_cex_transport::how::json_parse(raw));
+        let json = J::from(
+            safe_cex_transport::how::json_parse(raw)
+                .into_value()
+                .map_err(|error| ExchangeError::new(error.to_string()))?,
+        );
         if get(&json, "success") == &J::Bool(false) && truthy(get(&json, "ret_msg")) {
             self.parent.base.log(
                 &format!(
@@ -390,23 +394,28 @@ impl ApexOmniPrivateWebsocket {
                 let order = &orders[0];
                 self.parent.base.emit(
                     "fill",
-                    crate::exchange::fields(&object([
-                        ("id", J::String(order.id.clone())),
+                    safe_cex_exchange::js_runtime::value::Js::object(vec![
+                        (
+                            "id",
+                            safe_cex_exchange::js_runtime::value::Js::str(&order.id),
+                        ),
                         (
                             "side",
-                            J::String(
-                                if order.side == safe_cex_types::OrderSide::Buy {
-                                    "buy"
-                                } else {
-                                    "sell"
-                                }
-                                .into(),
-                            ),
+                            safe_cex_exchange::js_runtime::value::from_typed(&order.side)?,
                         ),
-                        ("symbol", J::String(order.symbol.clone())),
-                        ("price", J::Number(price)),
-                        ("amount", J::Number(amount)),
-                    ]))?,
+                        (
+                            "symbol",
+                            safe_cex_exchange::js_runtime::value::Js::str(&order.symbol),
+                        ),
+                        (
+                            "price",
+                            safe_cex_exchange::js_runtime::value::Js::Number(price),
+                        ),
+                        (
+                            "amount",
+                            safe_cex_exchange::js_runtime::value::Js::Number(amount),
+                        ),
+                    ]),
                 )?;
             }
             if filled || canceled {

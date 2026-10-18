@@ -42,11 +42,15 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
     if let Some(response) = native.response.as_mut()
         && let Some(serde_json::Value::String(raw)) = response.get("data")
     {
-        response["data"] = safe_cex_transport::how::big_int_as_string_json_parse(raw);
+        response["data"] = safe_cex_exchange::runtime::response_json_view(
+            &safe_cex_transport::RestResponseBody::Transformed(
+                safe_cex_transport::how::big_int_as_string_json_parse(raw),
+            ),
+        );
     }
     native.config = field("config");
     native.request = field("request");
-    native.code = field("code");
+    // The common thrown-error projection already retains code as a native value.
     native
 }
 pub(super) struct Host {

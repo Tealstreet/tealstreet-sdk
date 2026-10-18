@@ -1,5 +1,8 @@
 //! Native JS value model handed to host-trait-generic ported venue bodies.
 //! Strings are UTF-16, arrays keep holes, objects keep own-key order and accessors.
+pub mod owned;
+pub use owned::OwnedJsValue;
+
 use crate::runtime::ExchangeError;
 use indexmap::IndexMap;
 use safe_cex_num::{JsCoercionError, js_number_string, parse_float};
@@ -112,16 +115,13 @@ impl Thrown {
     }
     pub fn to_exchange_error(&self) -> ExchangeError {
         let mut error = self.error_fields();
-        if self.native.is_some() || !self.value.is_object() {
+        if !self.value.is_object() {
             return error;
         }
-        let code = self.value.get("code").and_then(|code| {
-            if code.is_undefined() {
-                Ok(None)
-            } else {
-                to_json(&code).map(Some)
-            }
-        });
+        let code = self
+            .value
+            .get("code")
+            .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
         match code {
             Ok(code) => error.code = code,
             Err(cause) => return cause.error_fields(),
@@ -139,6 +139,30 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
+        if let Some(failure) = error.origin.as_ref().and_then(|origin| {
+            origin
+                .error()
+                .downcast_ref::<safe_cex_transport::RestFailure>()
+        }) && let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+            failure.transport_error.as_deref()
+            && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
+        {
+            for (field, projected) in [("name", &error.name), ("message", &error.message)] {
+                if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                    && String::from_utf16(units).is_err()
+                    && String::from_utf16_lossy(units) == *projected
+                {
+                    value
+                        .set(field, Js::String(units.clone().into()))
+                        .expect("fresh error metadata property");
+                }
+            }
+        }
+        if let Some(code) = &error.code {
+            value
+                .define("code", code.clone())
+                .expect("fresh error code property");
+        }
         Self {
             value,
             native: Some(Rc::new(error)),
@@ -1354,7 +1378,7 @@ pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown>
 pub fn to_retained_input(
     value: &Js,
 ) -> Result<safe_cex_types::retained_json::RetainedJsonInput, Thrown> {
-    typed::capture(value, 0, false)
+    typed::capture(value, 0, false, true)
 }
 /// Restore the canonical retained data carrier without a JSON roundtrip.
 pub fn from_retained_input(value: safe_cex_types::retained_json::RetainedJsonInput) -> Js {

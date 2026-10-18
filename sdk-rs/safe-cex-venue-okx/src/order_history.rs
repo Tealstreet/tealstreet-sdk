@@ -11,11 +11,11 @@ pub fn to_optional_number(value: &Value) -> Result<Option<f64>, JsCoercionError>
     Ok((parsed.is_finite() && parsed != 0.0).then_some(parsed))
 }
 
-pub fn map_okx_historical_order(
+pub fn map_okx_historical_order<E: From<JsCoercionError>>(
     row: &serde_json::Map<String, Value>,
     market: Option<&Market>,
-    to_base: impl Fn(f64, &Market, Option<f64>) -> f64,
-) -> Result<Option<HistoricalOrder>, JsCoercionError> {
+    to_base: impl Fn(f64, &Market, Option<f64>) -> Result<f64, E>,
+) -> Result<Option<HistoricalOrder>, E> {
     let id = nullish_string(row.get("ordId").unwrap_or(&Value::Null), "")?;
     let instrument = nullish_string(row.get("instId").unwrap_or(&Value::Null), "")?;
     let created_time = safe_cex_num::parse_int(
@@ -85,12 +85,12 @@ pub fn map_okx_historical_order(
         to_number(row.get("sz").unwrap_or(&Value::Null))?,
         market,
         reference_price,
-    );
+    )?;
     let filled = to_base(
         to_number(row.get("accFillSz").unwrap_or(&Value::Null))?,
         market,
         reference_price,
-    );
+    )?;
     let reduce_only =
         nullish_string(row.get("reduceOnly").unwrap_or(&Value::Null), "")?.to_lowercase() == "true";
     let updated = safe_cex_num::parse_int(
@@ -101,7 +101,8 @@ pub fn map_okx_historical_order(
         return Err(JsCoercionError {
             name: "RepresentationError",
             message: "OKX inherited history field cannot cross the closed typed output boundary",
-        });
+        }
+        .into());
     };
     Ok(Some(HistoricalOrder {
         id,

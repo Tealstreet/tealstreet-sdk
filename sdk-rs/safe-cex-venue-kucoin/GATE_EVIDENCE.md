@@ -1155,6 +1155,23 @@ mutation/census findings above were not remeasured. This evidence covers the
 named code SHA; the following evidence-only commit adds this record and does
 not claim new code validation.
 
+## Native reconnect dispatch
+
+The two `native_reconnect_tests::typed_*` regressions construct KucoinExchange
+with NativeRuntime, NativeHttpHost, the reqwest adapter and real loopback HTTP
+and WebSocket peers. Both futures sockets acquire a token, connect, receive a
+typed reconnect, synchronously clear source session fields, obtain another
+signed bullet response and dial with its fresh token. The expected reset fields
+come from executing the maintained TypeScript reconnect method bodies in Node.
+`tests/reconnect-controls.py` runs both tests against pre-fix master production
+files, requires the named token-reset failures, restores exact source bytes and
+requires both tests to pass again.
+
+Four additional native tests deliver private orders, match/fill, position and
+wallet frames through the actual binding. They assert the order Store and bare
+incremental fill event. Position/wallet frames trigger the source's delayed
+orders-only snapshot and preserve seeded positions/balance, matching the
+inherited TypeScript BaseExchange.fetchAndSetPrivateSnapshot implementation.
 
 ## Production order-reader cleanup (2026-10-18 SGT)
 

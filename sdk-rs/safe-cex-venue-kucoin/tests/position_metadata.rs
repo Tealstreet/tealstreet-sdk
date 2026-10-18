@@ -53,7 +53,7 @@ impl ExchangeRuntime for Runtime {
         self.tasks.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -63,7 +63,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -315,7 +319,7 @@ fn actual_core_fetch_is_awaited_and_dependency_errors_are_retained() {
 
     let mut failure = ExchangeError::new("position dependency failure");
     failure.name = "TypeError".into();
-    failure.code = Some("DEPENDENCY".into());
+    failure.code = Some(safe_cex_exchange::js_runtime::value::Js::str("DEPENDENCY"));
     failure.response = Some(json!({"data":{"msg":"distinct response"}}));
     let (venue, runtime) = setup(vec![], true, Err(failure.clone()));
     let mut future = Box::pin(get_or_fetch_margin_type(venue.clone(), "BTC/USDT"));

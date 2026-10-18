@@ -75,7 +75,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(f);
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -85,7 +85,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -2549,7 +2553,7 @@ fn exchange_class_sdk_external_listener_setup_and_cleanup_keep_errors() {
     let owner = class_owner(Venue::Futures, Rc::new(Imports::default()), runtime);
     let exchange = sdk_class(Venue::Futures, owner.clone());
     let mut error = ExchangeError::new("authored external listener error");
-    error.code = Some(json!(731));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(731)));
     let provider = Rc::new(ThrowingExternal {
         error: error.clone(),
         setup_fails: Cell::new(false),
@@ -3454,6 +3458,7 @@ fn native_fill_events(owner: &ExchangeOwner) -> Rc<RefCell<Vec<Value>>> {
     owner.base.on(
         "fill",
         Rc::new(move |_, payload| {
+            let payload = safe_cex_exchange::js_runtime::value::to_json(payload).unwrap();
             saved.borrow_mut().push(payload.clone());
             Ok(())
         }),
@@ -4292,7 +4297,8 @@ fn market_asset_refusal_case(venue: Venue) {
                 );
                 let errors = errors.borrow();
                 assert_eq!(errors.len(), 1, "one visible row refusal");
-                let message = errors[0].as_str().unwrap();
+                let message = String::from_utf16(errors[0].as_str().unwrap())
+                    .expect("market refusal is a scalar Unicode message");
                 let expected = value
                     .as_ref()
                     .map_or_else(|| "undefined".into(), Value::to_string);
@@ -4424,7 +4430,7 @@ fn market_field_refusal_case(venue: Venue, leverage: bool) {
             );
             let errors = errors.borrow();
             assert_eq!(errors.len(), 1);
-            let message = errors[0].as_str().unwrap();
+            let message = String::from_utf16(errors[0].as_str().unwrap()).unwrap();
             let expected = value
                 .as_ref()
                 .map_or_else(|| "undefined".into(), Value::to_string);
@@ -4656,4 +4662,58 @@ fn production_depth_binding_preserves_the_source_type_error_and_recovers() {
         cleanup().unwrap();
         exchange.dispose().unwrap();
     }
+}
+
+#[cfg(feature = "native")]
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[cfg(feature = "native")]
+fn native_ticker_coercion(venue: Venue, name: &str, count: usize) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let source = ticker_coercion::source(name);
+    assert_eq!(source["cases"].as_array().unwrap().len(), count);
+    let owner = production_native_owner(venue);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            owner.base.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed(name)),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = if venue != Venue::Spot && case["channel"] != "bookTicker" {
+            owner
+                .public
+                .market_websocket
+                .get()
+                .expect("production market socket")
+        } else {
+            &owner.public
+        };
+        for frame in case["frames"].as_array().unwrap() {
+            socket.on_message(frame.as_str().unwrap()).unwrap();
+        }
+        ticker_coercion::assert_native(&owner.base.store.tickers(), case);
+    }
+    owner.base.dispose().unwrap();
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Futures, "binance", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_pm_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::PM, "binancepm", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Spot, "binancespot", 48);
 }

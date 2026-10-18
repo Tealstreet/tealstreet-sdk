@@ -258,3 +258,11 @@ undefined is not reconciled as false. The real native updateOrder test supplies
 own undefined without a raw reduce-only alias, exercises position-side lookup,
 and compares the entire signed cancel-replace body to the maintained TypeScript
 class plus actual API signer/qs/HMAC. Undefined reduceOnly is omitted at the wire.
+
+The constructed native ticker corpus in `tests/binding.rs` covers 140 three-row
+market.contracts frames, including every camel/snake numeric alias and distinct
+later fallback values. Ten independent inputs include null, strings, malformed
+objects, NaN, overflow and signed zero; large finite values exercise derived
+prices. All eleven stored numeric fields are compared by bits with the maintained
+TS constructor and actual DefaultStore. The shared fault runner misroutes mark
+to index and requires a compiled native assertion failure and exact restored pass.

@@ -147,7 +147,9 @@ impl ExchangeRuntime for Host {
         self.tasks.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         if severity == "error" {
             self.logs
                 .borrow_mut()
@@ -163,7 +165,11 @@ impl ExchangeRuntime for Host {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -184,7 +190,11 @@ impl ReadTransport for Transport {
         if let Some(hook) = self.hook.borrow().as_ref() {
             hook(&request);
         }
-        let body = request.body.as_ref().map(|b| b.untransformed().unwrap());
+        let body_value = request
+            .body
+            .as_ref()
+            .map(|b| b.untransformed().unwrap().clone().into_value().unwrap());
+        let body = body_value.as_ref();
         let args = if request.method == "POST" {
             body.cloned().unwrap()
         } else {
@@ -289,6 +299,7 @@ fn fixture(
     base.on(
         "error",
         Rc::new(move |_, v| {
+            let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
             events.borrow_mut().push(v.as_str().unwrap().into());
             Ok(())
         }),

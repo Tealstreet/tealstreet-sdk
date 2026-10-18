@@ -45,14 +45,22 @@ impl RestAdapter for Adapter {
         Box::pin(async move {
             self.requests.lock().unwrap().push(request.clone());
             request.url = self.url.into();
-            request.body = Some(RestBody::Untransformed(self.body.clone()));
+            request.body = Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(self.body.clone())
+                    .unwrap(),
+            ));
             *self.effective.lock().unwrap() = Some(request.clone());
             Ok(RestExecution {
                 response: RestResponse {
                     status: 200,
                     reason: Some("OK".into()),
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(self.response.clone()),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            self.response.clone(),
+                        )
+                        .unwrap(),
+                    ),
                 },
                 config: request,
             })
@@ -157,7 +165,7 @@ fn effective_receipt_url_and_action_classification() {
             }),
         );
         let original_body = json!({"action":{"type":original_action},"receiptMarker":"original"});
-        let request = client.build_request(original_url, &original_body);
+        let request = client.build_request(original_url, &original_body).unwrap();
         let result = ready(client.execute(request, false));
         assert_eq!(
             result.is_err(),
@@ -173,7 +181,8 @@ fn effective_receipt_url_and_action_classification() {
         assert_eq!(input[0].url, original_url);
         assert_eq!(
             input[0].body.as_ref().unwrap().untransformed().unwrap(),
-            &original_body
+            &safe_cex_types::retained_json::RetainedJsonInput::from_value(original_body.clone())
+                .unwrap()
         );
         drop(input);
         if let Err(error) = result {

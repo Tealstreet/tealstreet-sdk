@@ -19,12 +19,16 @@ use std::{
 #[derive(Default)]
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
+    next_id: std::cell::Cell<u64>,
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    console_arguments: RefCell<Vec<Vec<Js>>>,
+    raw_exceptions: RefCell<Vec<Js>>,
     exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
+    worker: std::cell::Cell<bool>,
     dial_socket: RefCell<Option<Rc<dyn safe_cex_exchange::websocket::WsSocket>>>,
     dials: RefCell<
         Vec<(
@@ -56,16 +60,21 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.console_arguments.borrow_mut().push(message.to_vec());
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.consoled
             .borrow_mut()
             .push((severity.into(), message.into()));
     }
     fn unique_id(&self) -> String {
-        "id".into()
+        let id = self.next_id.get();
+        self.next_id.set(id + 1);
+        format!("fixture-{id}")
     }
     fn is_worker(&self) -> bool {
-        false
+        self.worker.get()
     }
     fn random(&self) -> f64 {
         0.5
@@ -75,7 +84,9 @@ impl ExchangeRuntime for Runtime {
             .borrow_mut()
             .push((error.to_string(), context.clone()));
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {}
+    fn report_raw_exception(&self, error: &Js, _: &Value) {
+        self.raw_exceptions.borrow_mut().push(error.clone());
+    }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
     }
@@ -146,7 +157,7 @@ fn base_worker_rpc_forwards_arguments_results_errors_and_completion_hook() {
             1,
             "source async prefix emits one worker request"
         );
-        let request = requests.borrow()[0].clone();
+        let request = to_json(&requests.borrow()[0]).unwrap();
         assert_eq!(request["method"], json!("removeOrders"));
         assert_eq!(request["args"], json!([[{"id":"wire-7"}],17.0]));
         let result = if success {
@@ -158,7 +169,9 @@ fn base_worker_rpc_forwards_arguments_results_errors_and_completion_hook() {
             .base
             .emit(
                 "callMethod:done",
-                json!({"requestId":request["requestId"],"success":success,"result":result}),
+                safe_cex_exchange::js_runtime::value::from_json(
+                    &json!({"requestId":request["requestId"],"success":success,"result":result}),
+                ),
             )
             .unwrap();
         let reply = settle(&assembled.runtime, promise);
@@ -1405,9 +1418,13 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
                             let RestResponseBody::Untransformed(body) = response.body else {
                                 panic!("adapter bodies are untransformed JSON");
                             };
-                            Ok(safe_cex_exchange::js_runtime::value::from_json(
-                                &json!({"status": response.status, "body": body}),
-                            ))
+                            Ok(Js::object(vec![
+                                ("status", Js::Number(response.status.into())),
+                                (
+                                    "body",
+                                    safe_cex_exchange::js_runtime::value::from_retained_input(body),
+                                ),
+                            ]))
                         }
                         Err(failure) => Err(adapter.thrown(failure)),
                     }
@@ -1642,7 +1659,9 @@ fn rest_http_host_text_response_preserves_raw_big_integer_tokens() {
     );
     assert_eq!(raw.to_display(), r#"{ "orderId":9007199254740993 }"#);
     assert_eq!(
-        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())["orderId"],
+        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())
+            .into_value()
+            .unwrap()["orderId"],
         "9007199254740993"
     );
     let failed = settle(
@@ -2113,17 +2132,19 @@ fn array_from_reads_iterables_and_array_likes() {
 }
 
 #[test]
-fn console_error_and_warn_join_string_conversions_with_spaces() {
+fn console_error_and_warn_preserve_original_argument_lists() {
     let (runtime, shared) = scoped_globals();
     let g = &shared.globals;
+    let object = Js::object(vec![("a", Js::Number(1.0))]);
+    let array = Js::array(vec![Js::Number(1.0), Js::Null, Js::Number(2.0)]);
     run(
         g,
         "console.error",
         vec![
             Js::str("reject in updatePositionsInWebworker"),
             Js::Number(1.0),
-            Js::object(vec![("a", Js::Number(1.0))]),
-            Js::array(vec![Js::Number(1.0), Js::Null, Js::Number(2.0)]),
+            object.clone(),
+            array.clone(),
             Js::Undefined,
         ],
     );
@@ -2133,16 +2154,25 @@ fn console_error_and_warn_join_string_conversions_with_spaces() {
         vec![Js::str("No positions found for BTC")],
     );
     run(g, "console.warn", vec![]);
+    let values = runtime.console_arguments.borrow();
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0].len(), 5);
+    assert!(values[0][0].strict_equals(&Js::str("reject in updatePositionsInWebworker")));
+    assert!(values[0][1].strict_equals(&Js::Number(1.0)));
+    assert!(values[0][2].same_reference(&object));
+    assert!(values[0][3].same_reference(&array));
+    assert!(values[0][4].is_undefined());
+    assert_eq!(values[1].len(), 1);
+    assert!(values[1][0].strict_equals(&Js::str("No positions found for BTC")));
+    assert!(values[2].is_empty());
     assert_eq!(
-        *runtime.consoled.borrow(),
-        [
-            (
-                "error".to_owned(),
-                "reject in updatePositionsInWebworker 1 [object Object] 1,,2 undefined".to_owned()
-            ),
-            ("warn".to_owned(), "No positions found for BTC".to_owned()),
-            ("warn".to_owned(), String::new()),
-        ]
+        runtime
+            .consoled
+            .borrow()
+            .iter()
+            .map(|(severity, _)| severity.as_str())
+            .collect::<Vec<_>>(),
+        ["error", "warn", "warn"]
     );
 }
 
@@ -2922,7 +2952,12 @@ mod http_factory {
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"ok":true})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"ok":true}),
+                        )
+                        .unwrap(),
+                    ),
                 })
             })
         }
@@ -3396,7 +3431,7 @@ fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
             row["error"],
             "cleanup throw identity"
         );
-        base.emit("update", json!({})).unwrap();
+        base.emit("update", Js::object(vec![])).unwrap();
         assert_eq!(
             observed.get(),
             1,
@@ -3537,13 +3572,25 @@ fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
             let RemoteSignerRequest::Http(request) = request else {
                 panic!("HTTP expected")
             };
-            self.0.borrow_mut().push(request.config.data.clone());
+            self.0.borrow_mut().push(
+                request
+                    .config
+                    .data
+                    .clone()
+                    .map(|value| value.into_value().unwrap()),
+            );
             let data = request.config.data.map(|value| {
-                if value.is_object() || value.is_array() {
-                    Value::String(
-                        safe_cex_num::js_json_stringify(&value.into())
+                if matches!(
+                    value,
+                    safe_cex_types::retained_json::RetainedJsonInput::Object(_)
+                        | safe_cex_types::retained_json::RetainedJsonInput::Array(_)
+                ) {
+                    safe_cex_types::retained_json::RetainedJsonInput::Text(
+                        safe_cex_num::js_retained_json_stringify(&value)
                             .unwrap()
-                            .unwrap(),
+                            .unwrap()
+                            .encode_utf16()
+                            .collect(),
                     )
                 } else {
                     value
@@ -4009,6 +4056,9 @@ fn promise_combinators_keep_pending_values_and_native_identity() {
     }
 }
 
+#[path = "support/emitter_retained.rs"]
+mod emitter_retained;
+
 #[test]
 fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_config() {
     use safe_cex_exchange::js_runtime::value::from_retained_input;
@@ -4101,4 +4151,164 @@ fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_con
             assert_eq!(array.get("1").unwrap().as_f64(), Some(f64::NEG_INFINITY));
         }
     }
+}
+
+#[test]
+fn retained_rest_adapter_reaches_real_client_interceptor_before_json_projection() {
+    use safe_cex_exchange::js_runtime::value::{from_retained_input, to_retained_input};
+    use safe_cex_transport::{RestAdapter, RestBody, RestRequest};
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    fn body() -> Input {
+        Input::Object(vec![
+            (
+                "nan".encode_utf16().collect(),
+                Input::Float(f64::from_bits(0x7ff8_0000_0000_0042)),
+            ),
+            ("zero".encode_utf16().collect(), Input::Float(-0.0)),
+            ("own".encode_utf16().collect(), Input::Undefined),
+            (vec![0xd800], Input::Text(vec![0xd801])),
+        ])
+    }
+    fn assert_body(input: Input) {
+        let Input::Object(fields) = input else {
+            panic!("retained adapter native object before JSON")
+        };
+        assert_eq!(fields.len(), 4, "retained adapter all own properties");
+        let Input::Float(nan) = fields[0].1 else {
+            panic!("retained adapter native NaN")
+        };
+        assert_eq!(
+            nan.to_bits(),
+            0x7ff8_0000_0000_0042,
+            "retained adapter exact NaN payload"
+        );
+        let Input::Float(zero) = fields[1].1 else {
+            panic!("retained adapter native zero")
+        };
+        assert_eq!(
+            zero.to_bits(),
+            (-0.0_f64).to_bits(),
+            "retained adapter signed zero"
+        );
+        assert_eq!(
+            fields[2].1,
+            Input::Undefined,
+            "retained adapter owns undefined"
+        );
+        assert_eq!(
+            fields[3],
+            (vec![0xd800], Input::Text(vec![0xd801])),
+            "retained adapter exact UTF16 key and value"
+        );
+    }
+    struct NativeHost(Rc<Runtime>);
+    impl JsHttpHost for NativeHost {
+        fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+            self.0.clone()
+        }
+        fn send(&self, config: Js) -> JsFuture<'static> {
+            // The real client delivers native data to its host after interception.
+            let data = to_retained_input(&config.get("data").unwrap()).unwrap();
+            assert_body(data.clone());
+            assert_eq!(
+                String::from_utf8(RestBody::Untransformed(data).wire_bytes().unwrap()).unwrap(),
+                r#"{"nan":null,"zero":0,"\ud800":"\ud801"}"#,
+                "retained adapter physical JSON projection"
+            );
+            Box::pin(async {
+                Ok(Js::object(vec![
+                    ("status", Js::Number(207.0)),
+                    ("data", from_retained_input(body())),
+                ]))
+            })
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let xhr = client::create(Rc::new(NativeHost(runtime.clone())), Js::object(vec![]));
+    let calls = Rc::new(std::cell::Cell::new(0));
+    let observed = calls.clone();
+    xhr.get("interceptors")
+        .unwrap()
+        .get("request")
+        .unwrap()
+        .call_method(
+            "use",
+            vec![Js::function("native signing observer", move |_, args| {
+                let config = arg(&args, 0);
+                assert_body(to_retained_input(&config.get("data")?)?);
+                observed.set(observed.get() + 1);
+                Ok(config)
+            })],
+        )
+        .unwrap();
+    let adapter = Rc::new(client::JsRestAdapter::new(xhr));
+    let worker_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
+    let pending = Js::Promise(Promise::spawn(
+        &worker_runtime,
+        Box::pin(async move {
+            let response = adapter
+                .execute(RestRequest {
+                    method: "post".into(),
+                    url: "/retained".into(),
+                    body: Some(RestBody::Untransformed(body())),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|failure| adapter.thrown(failure))?;
+            assert_eq!(
+                response.status, 207,
+                "retained adapter native response status"
+            );
+            Ok(from_retained_input(response.body.into_data()))
+        }),
+    ));
+    let output = settle(&runtime, pending).unwrap();
+    assert_eq!(calls.get(), 1, "retained adapter real interceptor count");
+    assert_body(to_retained_input(&output).unwrap());
+}
+
+#[path = "support/raw_error_reporting.rs"]
+mod raw_error_reporting;
+#[test]
+fn owned_callback_error_clone_preserves_independent_native_metadata() {
+    use safe_cex_exchange::js_runtime::value::owned::{OwnedCallbackError, OwnedJsValue};
+
+    let original = OwnedCallbackError::new(OwnedJsValue::object([
+        ("name", OwnedJsValue::string("TypeError")),
+        ("message", OwnedJsValue::string("signer refused")),
+        (
+            "code",
+            OwnedJsValue::Array(vec![
+                OwnedJsValue::Number(f64::from_bits(0x7ff8000000000042)),
+                OwnedJsValue::Undefined,
+                OwnedJsValue::Number(-0.0),
+                OwnedJsValue::String(vec![0xd800, 120]),
+            ]),
+        ),
+    ]));
+    let copied = original.clone();
+    let OwnedJsValue::Array(original_code) = &original.value()["code"] else {
+        panic!("native code array")
+    };
+    let OwnedJsValue::Array(copied_code) = &copied.value()["code"] else {
+        panic!("cloned native code array")
+    };
+    assert_ne!(original_code.as_ptr(), copied_code.as_ptr());
+    drop(original);
+    assert_eq!(copied.to_string(), "signer refused");
+    assert_eq!(copied.value()["name"], OwnedJsValue::string("TypeError"));
+    let OwnedJsValue::Array(code) = &copied.value()["code"] else {
+        panic!("retained cloned native code array")
+    };
+    assert_eq!(code.len(), 4);
+    let OwnedJsValue::Number(nan) = code[0] else {
+        panic!("native NaN")
+    };
+    assert_eq!(nan.to_bits(), 0x7ff8000000000042);
+    assert!(matches!(code[1], OwnedJsValue::Undefined));
+    let OwnedJsValue::Number(zero) = code[2] else {
+        panic!("native signed zero")
+    };
+    assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
 }

@@ -1,9 +1,187 @@
 //! Constructed production Orderly family over scripted HTTP and shared sockets.
 #[path = "support/exchange_runtime.rs"]
 mod support;
-use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::{
+    exchange::Exchange,
+    js_runtime::value::{Js, from_json},
+};
 use serde_json::json;
 use support::drive;
+
+#[test]
+fn public_books_and_candles_reach_each_family_binding() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use safe_cex_types::ExchangeName;
+    use std::{cell::RefCell, rc::Rc};
+    for name in [
+        ExchangeName::Kodiakfi,
+        ExchangeName::Mode,
+        ExchangeName::Salsadex,
+        ExchangeName::TealstreetDex,
+        ExchangeName::What,
+        ExchangeName::Woofi,
+    ] {
+        let (venue, rt, _, wire) = support::fixture_for(
+            name.clone(),
+            json!({
+                "key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"
+            }),
+        );
+        script(&wire);
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let capture = errors.clone();
+        venue.base().on(
+            "error",
+            Rc::new(move |_, error| {
+                capture.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        wire.responses.borrow_mut().insert("/v1/orderbook/PERP_BTC_USDC".into(), json!({"success":true,"data":{
+            "timestamp":100,"bids":[{"price":99,"quantity":2}],"asks":[{"price":101,"quantity":4}]
+        }}));
+        drive(&rt, venue.start()).unwrap();
+        // Startup fills the real 10-RPS limiter; advance its deterministic clock.
+        let pump = || {
+            for _ in 0..16 {
+                rt.now.set(rt.now.get() + 100.0);
+                rt.pump();
+            }
+        };
+        pump();
+        let socket = rt
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("private"))
+            .unwrap()
+            .1
+            .clone();
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let seen = books.clone();
+        let close_book = venue
+            .listen_order_book(
+                "BTCUSDC".into(),
+                Rc::new(move |book| seen.borrow_mut().push(book)),
+            )
+            .unwrap();
+        let candles = Rc::new(RefCell::new(Vec::new()));
+        let seen = candles.clone();
+        let close_candle = venue
+            .listen_ohlcv(
+                serde_json::from_value(json!({"symbol":"BTCUSDC","interval":"1m"})).unwrap(),
+                Rc::new(move |candle| seen.borrow_mut().push(candle)),
+            )
+            .unwrap();
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("PERP_BTC_USDC@orderbookupdate"))
+        );
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("PERP_BTC_USDC@kline_1m"))
+        );
+        let frame = |topic: &str, ts: u64, data: serde_json::Value| {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    json!({"topic":topic,"ts":ts,"data":data}).to_string(),
+                )));
+            pump();
+            assert!(
+                rt.errors.borrow().is_empty(),
+                "{name:?}: {:?}",
+                rt.errors.borrow()
+            );
+        };
+        frame(
+            "PERP_BTC_USDC@kline_1m",
+            103,
+            json!({"startTime":1700000000000u64,"open":100,"high":104,"low":99,"close":103,"volume":9}),
+        );
+        assert_eq!(candles.borrow().len(), 1);
+        assert_eq!(
+            (
+                candles.borrow()[0].timestamp,
+                candles.borrow()[0].close,
+                candles.borrow()[0].volume
+            ),
+            (1700000000.0, 103.0, 9.0)
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            99,
+            json!({"bids":[[99,999]],"asks":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "{name:?} snapshot errors: {:?}; runtime errors: {:?}",
+            errors.borrow(),
+            rt.errors.borrow(),
+        );
+        assert_eq!(
+            books.borrow()[0].bids[0].amount,
+            2.0,
+            "buffered older update is discarded against snapshot timestamp100"
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            101,
+            json!({"bids":[[99,3],[98,5]],"asks":[]}),
+        );
+        assert_eq!(books.borrow().len(), 2);
+        assert_eq!(
+            (
+                books.borrow()[1].bids[0].amount,
+                books.borrow()[1].bids[1].total
+            ),
+            (3.0, 8.0)
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            102,
+            json!({"bids":[[99,0]],"asks":[[101,6]]}),
+        );
+        assert_eq!(books.borrow().len(), 3);
+        assert_eq!(
+            (
+                books.borrow()[2].bids.len(),
+                books.borrow()[2].bids[0].price,
+                books.borrow()[2].asks[0].amount
+            ),
+            (1, 98.0, 6.0)
+        );
+        close_book().unwrap();
+        close_candle().unwrap();
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("unsubscribe")
+                    && frame.contains("PERP_BTC_USDC@orderbookupdate"))
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            104,
+            json!({"bids":[[97,1]],"asks":[]}),
+        );
+        frame(
+            "PERP_BTC_USDC@kline_1m",
+            105,
+            json!({"startTime":1700000060000u64,"open":100,"high":104,"low":99,"close":104,"volume":10}),
+        );
+        assert_eq!((books.borrow().len(), candles.borrow().len()), (3, 1));
+        venue.dispose().unwrap();
+    }
+}
+
 fn script(wire: &support::Wire) {
     let mut responses = wire.responses.borrow_mut();
     responses.insert(
@@ -162,7 +340,14 @@ fn all_sixteen_methods_execute_the_source_bodies_on_the_constructed_exchange() {
         .unwrap()
         .clone();
     assert_eq!(
-        request.body.unwrap().untransformed().unwrap()["leverage"]
+        request
+            .body
+            .unwrap()
+            .untransformed()
+            .unwrap()
+            .clone()
+            .into_value()
+            .unwrap()["leverage"]
             .as_f64()
             .unwrap()
             .to_bits(),
@@ -195,7 +380,15 @@ fn all_sixteen_methods_execute_the_source_bodies_on_the_constructed_exchange() {
         .find(|r| r.method == "post" && r.url == "/v1/order")
         .unwrap()
         .clone();
-    let body = request.body.as_ref().unwrap().untransformed().unwrap();
+    let body = request
+        .body
+        .as_ref()
+        .unwrap()
+        .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
+        .unwrap();
     assert_eq!(body["client_order_id"], json!("caller-order-12"));
     assert_eq!(body["margin_mode"], json!("ISOLATED"));
     assert_eq!(body["order_tag"], json!("TEALSTREET"));
@@ -461,7 +654,15 @@ fn each_family_constructor_preserves_its_source_order_tag_and_normalized_key() {
             .unwrap()
             .clone();
         assert_eq!(
-            request.body.as_ref().unwrap().untransformed().unwrap()["order_tag"],
+            request
+                .body
+                .as_ref()
+                .unwrap()
+                .untransformed()
+                .unwrap()
+                .clone()
+                .into_value()
+                .unwrap()["order_tag"],
             json!(tag),
             "{name:?} source subclass"
         );
@@ -511,7 +712,7 @@ fn disposal_updates_the_shared_flag_and_preserves_source_listeners() {
     );
     venue
         .base()
-        .emit("fill", json!({"source":"disposal witness"}))
+        .emit("fill", from_json(&json!({"source":"disposal witness"})))
         .unwrap();
     assert_eq!(calls.get(), 1, "source disposal retains emitter listeners");
 }
@@ -577,7 +778,7 @@ fn trait_cancel_symbol_attempts_algo_after_a_normal_cancel_failure() {
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         errors.borrow()[0]
-            .to_string()
+            .to_display()
             .contains("normal cancellation denied")
     );
 }
@@ -691,10 +892,18 @@ fn private_partial_execution_updates_store_and_emits_fill_for_name(
     assert_eq!(actual.filled, 0.5);
     assert_eq!(actual.remaining, 1.5);
     assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0]["id"].as_f64(), Some(778.0));
-    assert_eq!(fills.borrow()[0]["symbol"], "BTCUSDC");
-    assert_eq!(fills.borrow()[0]["price"].as_f64(), Some(101.5));
-    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(0.5));
+    assert_eq!(fills.borrow()[0].get("id").unwrap().as_f64(), Some(778.0));
+    assert!(
+        fills.borrow()[0]
+            .get("symbol")
+            .unwrap()
+            .strict_equals(&Js::str("BTCUSDC"))
+    );
+    assert_eq!(
+        fills.borrow()[0].get("price").unwrap().as_f64(),
+        Some(101.5)
+    );
+    assert_eq!(fills.borrow()[0].get("amount").unwrap().as_f64(), Some(0.5));
     drop(orders);
     venue.dispose().unwrap();
 }
@@ -800,7 +1009,15 @@ fn trait_set_all_leverage_updates_account_once_and_clamps_without_positions() {
     let requests = wire.requests.borrow();
     assert_eq!(requests.len(), 3);
     for (request, leverage) in requests.iter().zip([20.0, 100.0, 1.0]) {
-        let payload = request.body.as_ref().unwrap().untransformed().unwrap();
+        let payload = request
+            .body
+            .as_ref()
+            .unwrap()
+            .untransformed()
+            .unwrap()
+            .clone()
+            .into_value()
+            .unwrap();
         assert_eq!(payload["leverage"].as_f64(), Some(leverage));
         assert_eq!(payload["margin_mode"], "CROSS");
         assert!(payload.get("symbol").is_none());
@@ -844,7 +1061,7 @@ fn trait_set_all_leverage_emits_and_swallows_failed_account_write() {
     assert_eq!(errors.borrow().len(), 1);
     assert!(
         errors.borrow()[0]
-            .to_string()
+            .to_display()
             .contains("account leverage denied")
     );
     wire.responses

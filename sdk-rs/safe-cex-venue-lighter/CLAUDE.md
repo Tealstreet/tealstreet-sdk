@@ -433,6 +433,10 @@ Nonce retry classification reads the original error's code and message directly.
 Both String conversions precede the final OR, so matching codes still observe
 message coercion failures. Unread surrogate fields and cycles stay untouched.
 
+The TransactionClient approval binding retains raw l1Signature metadata outside
+its typed signing parameters. Falsy values remain visible to callers and are
+omitted by the actual SDK request serializer, matching the maintained source.
+
 Signer class flag inputs use JavaScript truthiness for preimage bits and preserve
 original JS values in returned order metadata. Group validation shares one body
 with typed callers and receives strict raw-side equality from the JS binding.
@@ -440,3 +444,11 @@ with typed callers and receives strict raw-side equality from the JS binding.
 Cancellation and market-precision/minimum helper globals consume native JS fields,
 without whole Order/Market decoding. Keep market lookup and precision fallback
 lazy; unused properties and metadata must not be inspected or serialized.
+
+The constructed native ticker census in `tests/exchange_binding.rs` drives
+1,240 field-independent cases through 2,280 public socket frames. All numeric
+aliases, nested book-side forms, ticker batches and market-stat batches receive
+eight malformed/coercion values between distinct good rows. Native binary64
+fields are checked against the constructed TS exchange and DefaultStore, with
+finite resets before every case. The shared control runner misroutes mark/index
+in the live ingress body and requires compiled failure and restored success.

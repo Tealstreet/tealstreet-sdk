@@ -382,3 +382,13 @@ The actual TypeScript order oracle also passes without changing its fixture.
 The imported response-key helper preserves primitive `in` errors before account
 mapping and searches inherited native keys in original/snake/camel order. The
 signed-response and constructed-host regressions pin refusal timing and shadowing.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` covers 720 frames
+across primary, second and third ticker sockets through Classic, USDC and inverse
+constructors. Every numeric alias receives ten independent values between good
+siblings, with distinct later aliases and a large finite percentage that
+produces infinity after multiplication. All eleven stored numbers are checked
+against the maintained TS exchange and actual Store before JSON. The shared
+fault runner swaps the live bid lookup and requires compiled RED/restored GREEN.
+The native witness identifies shards by their actual subscription frames and
+asserts pairwise socket identity, so three labels cannot exercise one socket.

@@ -2,8 +2,17 @@ import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { contractFor } from './accepted-contracts.mjs';
+import { parseJsonWithSource, stringifyJsonWithSource } from './accepted-json-source.mjs';
 const owner = { name: 'production::Side', methods: [], conversions: [], generics: { params: [] } };
 const strict = { shape: 'string', literals: ['buy', 'sell'], evidence: 'TypeScript Side union', entrypoints: [] };
+test('multi-entry dispatch carries authored raw case tokens into native contracts', () => {
+  const actual = { ...owner, deserialize: false, methods: [{ name: 'first', signature: {} }, { name: 'second', signature: {} }], rawEntrypoints: [true, true] };
+  const contract = parseJsonWithSource(`{"shape":"observed","evidence":"Actual separately observed methods.","entrypoints":[${actual.methods.map(method => `{"api":${JSON.stringify({ kind: 'inherent', ...method })},"input":"observed","reason":"Real native output.","call":"$type::${method.name}($value)","cases":[{"input":-0,"output":0},{"input":{"9":9,"2":2,"x":1},"output":1}]}`).join(',')}]}`);
+  const generated = contractFor(actual, { [actual.name]: contract });
+  const serialized = stringifyJsonWithSource(generated);
+  assert.equal((serialized.match(/"entrypoint":\d,"input":-0/g) ?? []).length, 2, 'raw primitive tokens survive generated dispatch');
+  assert.equal((serialized.match(/"entrypoint":\d,"input":\{"9":9,"2":2,"x":1\}/g) ?? []).length, 2, 'raw object tokens survive generated dispatch');
+});
 test('new public or private Deserialize owner fails closed by name', () => {
   assert.throws(() => contractFor(owner, {}), /production::Side: accepted-set assertion: unclassified deserializable type/);
 });

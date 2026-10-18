@@ -1022,7 +1022,7 @@ fn cancel_symbol_orders_deletes_by_venue_symbol_and_reports_failure() {
     h.venue().base().on(
         "error",
         std::rc::Rc::new(move |_, payload| {
-            sink.borrow_mut().push(payload.to_string());
+            sink.borrow_mut().push(payload.to_display());
             Ok(())
         }),
     );

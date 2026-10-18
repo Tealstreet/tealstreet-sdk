@@ -143,7 +143,10 @@ impl Realm {
             if let Ok(code) = self.get_str(thrown, "code")
                 && !code.is_nullish()
             {
-                error.code = self.to_serde(&code).ok();
+                error.code = match self.capture_typed_value(&code, 0) {
+                    Ok(code) => Some(code),
+                    Err(cause) => return self.exchange_error(&cause),
+                };
             }
             if let Ok(response) = self.get_str(thrown, "response")
                 && !response.is_nullish()

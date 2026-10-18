@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderType, PositionMode, PositionSide } from '../../types';
 
@@ -32,6 +33,9 @@ const openPosition = {
 const buildExchange = () => {
   const exchange = new BitgetExchange('bitget', { key: 'k', secret: 's', passphrase: 'p' }, new DefaultStore());
   exchange.store.update({ markets: [market] as any });
+  // Real batch placement lazily detects the account type. Keep these Classic
+  // fixtures off the network while exercising that detection path.
+  vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: { code: '40084', msg: 'Classic Account mode' } });
   vi.spyOn(exchange as any, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
   return exchange;
 };
@@ -290,6 +294,7 @@ describe('audit regression: Bitget sized stop plan type', () => {
 
     await exchange.placeOrders([sizedStop] as any);
 
+    expect(exchange.xhr.get).toHaveBeenCalledExactlyOnceWith(ENDPOINTS.ACCOUNT_SETTINGS_V3);
     const [payloads] = placeAlgoOrders.mock.calls[0];
     expect(payloads[0]).not.toBeInstanceOf(Promise);
     expect(payloads[0].planType).toBe('loss_plan');

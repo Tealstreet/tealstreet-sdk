@@ -126,7 +126,10 @@ impl BingxPlacement {
             .send(RestRequest {
                 method: "POST".into(),
                 url: url.into(),
-                body: Some(RestBody::Untransformed(payload)),
+                body: Some(RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(payload)
+                        .map_err(|error| ExchangeError::new(error.to_string()))?,
+                )),
                 ..Default::default()
             })
             .await;
