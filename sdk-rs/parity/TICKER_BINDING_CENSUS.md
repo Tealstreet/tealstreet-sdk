@@ -38,13 +38,13 @@ satisfy this corpus.
 | Coinbase | coinbase/coinbase.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Crypto.com | cryptocom/cryptocom.ws-public.ts | parseFloat | Pending; prioritize missing ticker binding corpus |
 | GRVT | grvt/grvt.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Hyperliquid futures | hyperliquid/hyperliquid.ws-public.ts | Numeric coercion | Pending; prioritize missing ticker binding corpus |
-| Hyperliquid Spot | hyperliquid/hyperliquidspot.ws-public.ts | Numeric coercion | Pending; prioritize missing ticker binding corpus |
+| Hyperliquid futures | hyperliquid/hyperliquid.ws-public.ts | parseFloat mids; positive finite Number fast contexts | Native proven: safe-cex-venue-hyperliquid/tests/binding.rs::production_ticker_coercion_matches_constructed_typescript; 24 three-row frames, including raw-DEFLATE fast contexts and midPrice |
+| Hyperliquid Spot | hyperliquid/hyperliquidspot.ws-public.ts | parseFloat mids | Native proven: safe-cex-venue-hyperliquid/tests/spot_binding.rs::production_ticker_coercion_matches_constructed_typescript; 8 three-row frames including midPrice |
 | Kraken futures | kraken/kraken.ws-public.ts | Numeric coercion, including fundingTime helper | Pending complete coercion corpus |
 | Kraken Spot | kraken/krakenspot.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | KuCoin futures | kucoin/kucoin.ws-public.ts | Truthy tickerV2 fallback; nullish snapshot/instrument guards with parseFloat | Native proven: safe-cex-venue-kucoin/tests/exchange_trait.rs::production_ticker_coercion_futures_matches_constructed_typescript; 72 cases / 216 frames across tickerV2, snapshot and instrument |
 | KuCoin Spot | kucoin/kucoinspot.ws-public.ts | Finite parseFloat after nullish-to-empty conversion; nonfinite values leave prior fields | Native proven: safe-cex-venue-kucoin/tests/exchange_trait.rs::production_ticker_coercion_spot_matches_constructed_typescript; 256 cases / 768 symbol and ticker-all frames, including every nullish numeric alias |
-| Lighter | lighter/lighter.ws-public.ts | parseLighterWsNumber and funding normalization | Pending; prioritize missing ticker binding corpus |
+| Lighter | lighter/lighter.ws-public.ts | Finite number/string selection, book-side fallback and funding normalization | Native proven: safe-cex-venue-lighter/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 1,240 cases / 2,280 ticker, ticker-array and market-stat frames, including numeric aliases and nested bid/ask forms |
 | MEXC | mexc/mexc.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | OKX | okx/okx.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Orderly | orderly/orderly.ws-public.ts | Copied ticker/BBO/mark values stay strict; decision-3 row refusal; funding parsed | Pending complete coercion corpus; row policy #803 |

@@ -267,20 +267,24 @@ pub fn native_account_signer_available(account: &NativeAccount, available: bool)
 
 /// The emitter events a host forwards (ts: the events ExchangeWorker listens to).
 const NATIVE_ACCOUNT_EVENTS: &[&str] = &[
-    "error",
-    "log",
-    "warning",
     "fill",
     "updatePositions",
     "ws-reconnected",
     "remoteSignerStatus",
     "markets:changed",
     "activeTickerSymbols:changed",
+    "deactivate",
+];
+const NATIVE_ACCOUNT_ARGS_EVENTS: &[&str] = &[
+    "error",
+    "log",
+    "warning",
     "grafana-error",
     "grafana-http-request",
     "grafana-http-response",
     "grafana-info",
-    "deactivate",
+    "grafana-pws",
+    "grafana-pws-sub",
 ];
 /// Forwards emitter events and worker Store payloads until cleanup runs.
 pub fn native_account_watch(
@@ -318,15 +322,17 @@ pub fn native_account_watch(
         .into();
     let ids: Vec<(&str, String)> = NATIVE_ACCOUNT_EVENTS
         .iter()
+        .chain(NATIVE_ACCOUNT_ARGS_EVENTS.iter())
         .map(|event| {
+            let forwards_args = NATIVE_ACCOUNT_ARGS_EVENTS.contains(event);
             let forward = on_event.clone();
             let active = active.clone();
             let unsubscribe = unsubscribe.clone();
             let delivery = delivery.clone();
             let exchange = Rc::downgrade(&account.exchange);
-            let id = base.on(
+            let id = base.on_args(
                 event,
-                Rc::new(move |name: &str, data: &Js| {
+                Rc::new(move |name: &str, args: &[Js]| {
                     if !active.get() {
                         return Ok(());
                     }
@@ -342,7 +348,19 @@ pub fn native_account_watch(
                         forward("deactivate-status", &NativeValue::Bool(true));
                         return Ok(());
                     }
-                    forward(name, &NativeValue::from_js(data)?);
+                    let data = if forwards_args {
+                        NativeValue::Array(
+                            args.iter()
+                                .map(NativeValue::from_js)
+                                .collect::<Result<_, _>>()?,
+                        )
+                    } else {
+                        args.first()
+                            .map(NativeValue::from_js)
+                            .transpose()?
+                            .unwrap_or(NativeValue::Null)
+                    };
+                    forward(name, &data);
                     Ok(())
                 }),
             );
@@ -747,6 +765,9 @@ mod emitter_error_tests {
         }
     }
 }
+#[cfg(test)]
+#[path = "native_account_events_tests.rs"]
+mod event_protocol_tests;
 
 #[cfg(test)]
 mod model_codec_tests {
