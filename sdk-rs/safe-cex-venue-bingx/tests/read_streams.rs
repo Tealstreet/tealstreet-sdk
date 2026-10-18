@@ -390,7 +390,7 @@ impl ReadTransport for Transport {
         };
         let result = if input["reject"] == which {
             let mut e = ExchangeError::new("network cause");
-            e.response = Some(json!({"data":{"msg":"wire denied"}}));
+            e = e.with_retained_response((json!({"data":{"msg":"wire denied"}})).into());
             Err(e)
         } else {
             let value = match which {

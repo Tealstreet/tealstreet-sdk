@@ -156,7 +156,8 @@ impl ReadTransport for Transport {
             if !self.input["error"].is_null() {
                 let mut error =
                     ExchangeError::new(self.input["error"]["message"].as_str().unwrap());
-                error.response = Some(self.input["error"]["response"].clone());
+                error =
+                    error.with_retained_response(self.input["error"]["response"].clone().into());
                 error.store_subscriber_ids = vec![71, 83];
                 return Err(error);
             }

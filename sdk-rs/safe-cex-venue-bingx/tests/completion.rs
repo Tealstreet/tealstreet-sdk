@@ -186,7 +186,7 @@ impl ReadTransport for Transport {
         Box::pin(async move {
             if host.input["reject"] == true && r.url == "/openApi/swap/v1/trade/amend" {
                 let mut e = ExchangeError::new("transport cause");
-                e.response = Some(json!({"data":{"msg":"wire denied"}}));
+                e = e.with_retained_response((json!({"data":{"msg":"wire denied"}})).into());
                 return Err(e);
             }
             let data = match r.url.as_str() {

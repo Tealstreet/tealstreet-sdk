@@ -373,8 +373,8 @@ impl Exchange for MexcExchange {
     }
 }
 fn failure_message(error: &RestFailure) -> Result<String, ExchangeError> {
-    let response_view = error.response;
-    let message = response_view
+    let message = error
+        .response
         .as_ref()
         .and_then(|r| r.body.json_value().ok())
         .and_then(|v| v.get("message").cloned())

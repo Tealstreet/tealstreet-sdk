@@ -10960,6 +10960,70 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "with_retained_response",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "response",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Construction of one retained API response origin, chaining the original cause. Observes nearest retained response native units/bits and derives a JSON view only at the diagnostic boundary. No stored JSON cache or replacement transport payload.",
+        "call": "{use safe_cex_types::retained_json::RetainedJsonInput as Input;let code=$value.as_u64().expect(\"authored surrogate\") as u16;let mut original=<$type>::new(\"message\");let old=crate::runtime::ExchangeErrorOrigin::new(std::io::Error::other(\"opaque cause\"));original.origin=Some(old.clone());let response=Input::Object(vec![(\"data\".encode_utf16().collect(),Input::Text(vec![code])),(\"zero\".encode_utf16().collect(),Input::Float(-0.0)),(\"ownUndefined\".encode_utf16().collect(),Input::Undefined)]);let decoded=original.with_retained_response(response);let native=decoded.retained_response_input().expect(\"retained response\");let units=match native.get(\"data\").unwrap(){Input::Text(units)=>units.clone(),_=>panic!(\"native text\")};let zero=safe_cex_num::js_retained_number(native.get(\"zero\")).unwrap().to_bits().to_string();let cause=std::error::Error::source(&decoded).and_then(|wrapper|wrapper.source()).and_then(|value|value.downcast_ref::<std::io::Error>()).expect(\"original cause\");serde_json::json!({\"units\":units,\"zero\":zero,\"undefined\":matches!(native.get(\"ownUndefined\"),Some(Input::Undefined)),\"sameCause\":std::ptr::eq(cause,old.error().downcast_ref::<std::io::Error>().unwrap()),\"view\":decoded.response_json_view()})}",
+        "cases": [
+          {
+            "input": 55296,
+            "output": {
+              "units": [
+                55296
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          },
+          {
+            "input": 57343,
+            "output": {
+              "units": [
+                57343
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "new",
           "signature": {
             "inputs": [
@@ -11197,7 +11261,7 @@
         },
         "input": "observed",
         "reason": "Actual REST failure conversion parses encoded JSON response bytes, preserves non-JSON text fallback and keeps authoritative typed origin/request/raw bytes; no owner serialization. The JavaScript transport-kind case additionally observes TypeError name while retaining the complete native request/response origin.",
-        "call": "{ let raw=$value[\"body\"].as_str().expect(\"body\"); let response=safe_cex_transport::RestResponse {status:$value[\"status\"].as_u64().expect(\"status\") as u16,reason:Some(\"reason\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"header-A\".into())]),body:safe_cex_transport::RestResponseBody::Encoded(raw.as_bytes().to_vec())}; let failure=safe_cex_transport::RestFailure {code:Some(\"CODE\".into()),transport_error:if $value[\"js\"].as_bool().unwrap_or(false){Some(Box::new(safe_cex_transport::TransportError::JavaScript(safe_cex_num::JsCoercionError{name:\"TypeError\",message:\"native failure\"})))}else{None},message:\"native failure\".into(),response:Some(Box::new(response)),request:Box::new(safe_cex_transport::RestRequest {url:\"/original\".into(),..Default::default()}),context:Some(Box::new(serde_json::json!({\"retained\":7})))}; let decoded=<$type as From<safe_cex_transport::RestFailure>>::from(failure); let origin=decoded.origin.as_ref().expect(\"origin\").error().downcast_ref::<safe_cex_transport::RestFailure>().expect(\"actual typed failure\"); let origin_body=match &origin.response.as_ref().expect(\"origin response\").body {safe_cex_transport::RestResponseBody::Encoded(bytes)=>String::from_utf8_lossy(bytes).into_owned(),_=>panic!(\"origin body reprojected\")}; serde_json::json!({\"name\":decoded.name,\"message\":decoded.message,\"code\":decoded.code.as_ref().map(|code|crate::js_runtime::value::to_json(code).expect(\"finite code fixture\")),\"context\":decoded.context.clone(),\"response\":decoded.response.clone(),\"originRequestUrl\":origin.request.url,\"originBody\":origin_body}) }",
+        "call": "{ let raw=$value[\"body\"].as_str().expect(\"body\"); let response=safe_cex_transport::RestResponse {status:$value[\"status\"].as_u64().expect(\"status\") as u16,reason:Some(\"reason\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"header-A\".into())]),body:safe_cex_transport::RestResponseBody::Encoded(raw.as_bytes().to_vec())}; let failure=safe_cex_transport::RestFailure {code:Some(\"CODE\".into()),transport_error:if $value[\"js\"].as_bool().unwrap_or(false){Some(Box::new(safe_cex_transport::TransportError::JavaScript(safe_cex_num::JsCoercionError{name:\"TypeError\",message:\"native failure\"})))}else{None},message:\"native failure\".into(),response:Some(Box::new(response)),request:Box::new(safe_cex_transport::RestRequest {url:\"/original\".into(),..Default::default()}),context:Some(Box::new(serde_json::json!({\"retained\":7})))}; let decoded=<$type as From<safe_cex_transport::RestFailure>>::from(failure); let origin=decoded.origin.as_ref().expect(\"origin\").error().downcast_ref::<safe_cex_transport::RestFailure>().expect(\"actual typed failure\"); let origin_body=match &origin.response.as_ref().expect(\"origin response\").body {safe_cex_transport::RestResponseBody::Encoded(bytes)=>String::from_utf8_lossy(bytes).into_owned(),_=>panic!(\"origin body reprojected\")}; serde_json::json!({\"name\":decoded.name,\"message\":decoded.message,\"code\":decoded.code.as_ref().map(|code|crate::js_runtime::value::to_json(code).expect(\"finite code fixture\")),\"context\":decoded.context.clone(),\"response\":decoded.response_json_view(),\"originRequestUrl\":origin.request.url,\"originBody\":origin_body}) }",
         "cases": [
           {
             "input": {

@@ -131,7 +131,7 @@ fn leverage_matches_actual_typescript_and_store() {
                     let response = json!({"status":409,"data":{"msg":"listener-specific"}});
                     if recovered {
                         let mut original = ExchangeError::new("observer failure");
-                        original.response = Some(response);
+                        original = original.with_retained_response(response.into());
                         original.code =
                             Some(safe_cex_exchange::js_runtime::value::Js::str("E_RECOVERED"));
                         // IDs from prior Store boundaries may repeat the new
@@ -185,7 +185,7 @@ fn leverage_matches_actual_typescript_and_store() {
                             "leverage subscriber identity: fallback"
                         );
                     }
-                    let mut observed = json!({"type":"error","name":error.name,"message":error.message,"response":error.response});
+                    let mut observed = json!({"type":"error","name":error.name,"message":error.message,"response":error.response_json_view()});
                     if let Some(code) = error.code.as_ref() {
                         observed["code"] = safe_cex_exchange::js_runtime::value::to_json(code)
                             .expect("finite fixture error code");

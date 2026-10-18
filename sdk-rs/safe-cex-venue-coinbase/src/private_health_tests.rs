@@ -333,7 +333,10 @@ fn subscriber_id_survives_store_to_exchange_error_conversion() {
 
     assert_eq!(exchange_error.message, "subscriber failed");
     assert_eq!(exchange_error.store_subscriber_ids, [0]);
-    assert_eq!(exchange_error.response, Some(json!({"status": 503})));
+    assert_eq!(
+        exchange_error.response_json_view(),
+        Some(json!({"status": 503}))
+    );
     assert_eq!(
         Store::socket_health(&store).unwrap()["privateDegradedReason"],
         "degraded",

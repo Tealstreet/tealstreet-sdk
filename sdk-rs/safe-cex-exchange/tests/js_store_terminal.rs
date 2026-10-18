@@ -137,7 +137,7 @@ fn terminal_subscriber_error_preserves_committed_status_response_and_origin() {
     );
     assert_eq!(error.message, "terminal observer failed");
     assert_eq!(
-        error.response,
+        error.response_json_view(),
         Some(response),
         "JS terminal bridge retains subscriber response"
     );
