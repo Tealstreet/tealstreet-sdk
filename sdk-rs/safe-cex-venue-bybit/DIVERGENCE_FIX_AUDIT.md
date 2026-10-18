@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Thirteen rows are reconciled below; the other
-24 remain pending individual production-binding audits.
+`divergence-cluster-rulings.md`. Twenty rows are reconciled below; the other
+17 remain pending individual production-binding audits.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -70,13 +70,14 @@ arity `position_mode_mapper_arguments`. `position-index-controls.py` also
 compiles early-copy and nonzero-Spot-return faults, requires named runtime
 failures, restores exact bytes and requires GREEN. No WebSocket bodies change.
 
-This batch reconciles five further rows. With the seven rows in PR #1182 and
-row 37 ACCEPT-safety in separate PR #1188, 13 of 37 are reconciled and 24 remain.
+The position batch reconciles five rows. With the seven rows in PR #1182,
+row 37 ACCEPT-safety in PR #1188, the five Hyro rows below and delegated
+history rows 6/16 in PR #1198, 20 of 37 are reconciled and 17 remain.
 
-The remaining 24 rows are split by module: codex-0efu4x owns rows
-1/2/3/6/7/8/12/13/16/23/25/35 (public/private socket lifecycle, history mapping
-and position controls); codex-0w5ohi retains rows
-18/22/24/26/27/28/29/30/31/32/33/36 (Spot/Hyro, placement options, account,
+The remaining 17 rows are split by module: codex-0efu4x owns rows
+1/2/3/7/8/12/13/23/25/35 (public/private socket lifecycle and position
+controls); codex-0w5ohi retains rows
+18/24/26/27/32/33/36 (Spot, placement options, account,
 market and startup/facade work). Existing WS carrier owners retain their separate
 body changes; the socket audit owner coordinates those boundaries first.
 
@@ -106,6 +107,42 @@ bytes and requires GREEN. Its existing instruments-info exclusion control stays.
 
 Evidence: `/tmp/bybit-retry-mutating-evidence.json` records the initial three
 source replays; the reproducible maintained oracle is
-`scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is the
-eighth reconciled audit row, followed by the five-row position-index batch
-above. The seven earlier verdicts and their proof are in PR #1182.
+`scripts/create-api-retry-config-boundaries.cjs` (`safetyCases`). Row 37 is an
+accepted safety residual. The seven earlier verdicts and their proof are in
+PR #1182.
+
+
+## Hyro account and configuration: rows 22, 28, 29, 30, 31
+
+| Assignment rows | Source owner | Verdict | Production observation |
+| --- | --- | --- | --- |
+| 22 | `fetchMarginAccountInfos` | ACCEPT | The real receiver starts the balance dependency before polling, retains its original native value and publishes `{balance}` after settlement only while active. |
+| 28 | `validateAccount` | FIX | Error classification now uses the shared `Js::ordinary_has_instance` prototype operation. An ordinary object inheriting Error.prototype must return and emit its original message, without an invented `Error: ` prefix. |
+| 29 | `fetchIncomeHistoryRange` | ACCEPT | The installed method already ignores range arguments and returns fresh Promises and empty arrays without HTTP; the source fallback brand remains. |
+| 30, 31 | `optionsEnabled`, `inverseEnabled` | ACCEPT | Both modes remain disabled for production and demo Hyro even when account options explicitly opt in. |
+
+`receiver_tests::hyro_divergence_account_configuration_receivers` constructs the
+actual native venue with configured test origins and no wire transport. It
+observes held balance settlement, disposal, native identity, UTF16 and negative
+zero. Validation covers synchronous and awaited failures, detached Error
+prototypes, primitive throws, raw message values and original logger rejection.
+The maintained five TS members execute 21 independent profiles in
+`scripts/hyro-account-fixtures.cjs`; the existing validation corpus stays intact.
+
+The shared operation follows the bound target even for call-only functions,
+checks callability before the left operand, and reads the constructor prototype
+only for object operands. Its Node unit compares thirteen cases, including null
+prototypes and bound constructors; native checks retain throwing-getter identity
+and prove that shadowed `__proto__` accessors are not read.
+`scripts/hyro-account-controls.py` mutates each accepted guard/result and the
+Error classification separately, requires compiled named native failures, then
+restores exact source bytes and replays the receiver.
+
+## Delegated history: rows 6 and 16
+
+Both primary and inverse history mapper rows are FIX in PR #1198. The live
+historical-fills reader visibly refuses malformed strict output fields after
+source paging and recovery, preserving valid neighbors and source error priority.
+The synchronous raw mapper and its original identity/alias guards are unchanged.
+See `DELEGATED_HISTORY_FIX_AUDIT.md` for the real-binding RED/GREEN, six compiled
+production controls and the ten remaining delegated rows.

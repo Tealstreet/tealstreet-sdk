@@ -336,7 +336,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_order_book"
 status = "ported"
-note = "Extracts depth sorting and cumulative quote totals; public HTTP request, limit params and error logging remain host-owned. The live oracle executes the actual method and checks exact request composition, unsorted sides, parseFloat prefixes, empty books, infinities, and negative-zero price bits before serialization. Source and compiled-Rust sort mutations fail the named result assertion. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_order_book."
+note = "Constructed native fetchOrderBook now uses canonical CI V8 TimSort for both price-subtraction comparators. Ten actual-source profiles (22 through 257 levels with NaN) reproduce the old Rust total-order panic independently for bids and asks, then compare every level and cumulative quote-total bit after repair. Extracts depth sorting and cumulative quote totals; public HTTP request, limit params and error logging remain host-owned. The live oracle executes the actual method and checks exact request composition, unsorted sides, parseFloat prefixes, empty books, infinities, and negative-zero price bits before serialization. Source and compiled-Rust sort mutations fail the named result assertion. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_order_book."
 
 [[symbol]]
 ts = "AsterDEXExchange.listenOrderBook"

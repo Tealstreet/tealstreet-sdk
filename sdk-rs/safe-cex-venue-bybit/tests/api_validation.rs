@@ -192,6 +192,7 @@ fn api_validation_native_source_parity() {
         String::from_utf8_lossy(&output.stderr)
     );
     let fixtures: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(fixtures["hyroReceiverAudit"]["profiles"], 21);
     for (group, count) in [
         ("validations", 60),
         ("hyro", 6),

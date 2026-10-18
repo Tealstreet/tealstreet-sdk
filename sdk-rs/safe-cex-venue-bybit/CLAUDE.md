@@ -973,7 +973,7 @@ diagnostics are compared directly rather than normalized to a custom string.
 The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
-DIVERGENCE_FIX_AUDIT.md records the seven audited rows and the remaining 30.
+DIVERGENCE_FIX_AUDIT.md records 20 reconciled rows and the remaining 17-row module split.
 
 Delegated history audit rows 6/16: keep the order-history mapper synchronous and
 raw/source-equal. At the final live historical-fills result, shared strict-output
@@ -983,6 +983,13 @@ recovery decisions and catches; a later source failure must still discard the
 recovery prefix before any new refusal diagnostic. Keep the original 380 mapper
 cases and 16 typed-refusal guards. `DELEGATED_HISTORY_FIX_AUDIT.md` and the compiled
 production controls document this boundary.
+
+Hyro account/configuration FIX-audit rows 22/28/29/30/31 use constructed native
+production/demo receivers and the 21-profile maintained TS account oracle.
+validateAccount uses shared OrdinaryHasInstance, preserving inherited Error
+messages, UTF16 and raw thrown-message identity. Range no-op and disabled
+option/inverse capabilities remain source-equal; disposal suppresses balance
+publication. See DIVERGENCE_FIX_AUDIT.md and hyro-account-controls.py.
 
 Position-index audit rows 9/10/11/20/21 use constructed native receivers in
 `binding/receiver_tests.rs`. Stop-index dispatch is installed once in batch.rs;
