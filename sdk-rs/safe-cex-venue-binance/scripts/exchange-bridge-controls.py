@@ -11,6 +11,9 @@ import re
 import subprocess
 import sys
 
+if not __debug__:
+    raise SystemExit("Binance receipt controls require Python assertions; do not use -O")
+
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = ROOT / "target/accepted-inventory"
 OWNERS = ["exchange_classes::failure", "exchange_classes::json_value", "exchange_classes::typed"]
@@ -22,6 +25,11 @@ FAULTS = [
     (OWNERS[1], "exchange_classes.rs", "serde_json::from_str(&text)", 'serde_json::from_str(if text == "null" { &text } else { "null" })'),
     (OWNERS[2], "exchange_classes.rs", "crate::class_decode::decode(v.clone())", "crate::class_decode::decode({ let _ = v; EventValue::Null })"),
 ]
+
+
+def require(condition, message):
+    if not condition:
+        raise AssertionError(message)
 
 
 def measure(label):
@@ -36,12 +44,12 @@ def measure(label):
     with log.open("w") as output:
         status = subprocess.run(COMMAND, cwd=ROOT, env=env,
                                 stdout=output, stderr=subprocess.STDOUT)
-    assert status.returncode == 0, (label, log.read_text()[-6000:])
+    require(status.returncode == 0, (label, log.read_text()[-6000:]))
     results = json.loads(results_file.read_text())
     selected = [row for row in results if row["name"] in
                 ["safe_cex_venue_binance::" + owner for owner in OWNERS]]
-    assert len(selected) == 3, (label, results)
-    assert all(not row.get("classificationOnly") for row in selected), (label, selected)
+    require(len(selected) == 3, (label, results))
+    require(all(not row.get("classificationOnly") for row in selected), (label, selected))
     log.with_suffix(".json").write_text(json.dumps(selected, indent=2) + "\n")
     return selected
 

@@ -10,6 +10,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+if not __debug__:
+    raise SystemExit("Binance receipt controls require Python assertions; do not use -O")
+
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = ROOT / "target/accepted-inventory"
 OWNERS = ["exchange_classes::" + name for name in ["ExchangeOwner", "Context", "RestContext", "emit_json"]]
