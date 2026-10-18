@@ -122,12 +122,22 @@ impl ExchangeRuntime for Host {
         }
         Box::new(Task)
     }
-    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
-        let rendered = safe_cex_exchange::runtime::console_text(message);
+    fn console_values(&self, severity: &str, values: &[safe_cex_exchange::js_runtime::value::Js]) {
+        let rendered = safe_cex_exchange::runtime::console_text(values);
         let message = rendered.as_str();
         if severity == "error" && message.starts_with("exchange error ") {
             self.reports.borrow_mut().push(message[15..].into())
         } else if matches!(severity, "info" | "warning" | "debug") {
+            let [message, observed_severity] = values else {
+                panic!("BaseExchange.log console observation requires message and severity");
+            };
+            assert!(
+                observed_severity
+                    .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(severity)),
+                "BaseExchange.log console severity argument must match its recorded channel"
+            );
+            let rendered = safe_cex_exchange::runtime::console_text(std::slice::from_ref(message));
+            let message = rendered.as_str();
             self.logs.borrow_mut().push(json!([message, severity]))
         }
     }

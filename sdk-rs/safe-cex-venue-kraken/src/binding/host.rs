@@ -475,7 +475,7 @@ impl ReadHost for Rt {
     fn trace(&self, error: &Thrown) -> ReadResult<Self, ()> {
         self.shared
             .runtime
-            .console("trace", &error.value.to_display());
+            .console_values("trace", &[error.value.clone()]);
         Ok(())
     }
     // ts: `err?.message || fallback`.
@@ -578,20 +578,22 @@ impl ErrorHost for Rt {
         value.is_string()
     }
     fn lower_method(&self, value: &Js, expression: &str) -> ReadResult<Self, Handle<Self>> {
-        if !value.is_string() {
+        let method = value.get("toLowerCase")?;
+        if !method.is_callable() {
             return Err(Thrown::type_error(&format!(
                 "{expression}.toLowerCase is not a function"
             )));
         }
-        Ok(h(value.call_method("toLowerCase", vec![])?))
+        Ok(h(method.call(value.clone(), vec![])?))
     }
     fn upper_method(&self, value: &Js, expression: &str) -> ReadResult<Self, Handle<Self>> {
-        if !value.is_string() {
+        let method = value.get("toUpperCase")?;
+        if !method.is_callable() {
             return Err(Thrown::type_error(&format!(
                 "{expression}.toUpperCase is not a function"
             )));
         }
-        Ok(h(value.call_method("toUpperCase", vec![])?))
+        Ok(h(method.call(value.clone(), vec![])?))
     }
     fn error_value(&self, error: &Thrown) -> ReadResult<Self, Handle<Self>> {
         Ok(h(error.value.clone()))
