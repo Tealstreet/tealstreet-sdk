@@ -21,3 +21,14 @@ then serves all 222 futures rows byte-exact. This bounds the null-decoder proof
 independently of the separately tracked whole-Store processing cost; it does not
 claim full-venue timing or 222-ticker parity. Both maintained TS and native run
 real refreshMarkets/fetchTickers, and the sole returned ticker is deep-equal.
+
+`paradex-markets.json` is the exact public GET
+https://api.prod.paradex.trade/v1/markets HTTP 200 body from the live-diff
+`paradex-post-1044.json` report, captured 2026-10-18. SHA-256:
+`a53b4fb1391e5e028c2801dcf3b5faebaf124b22bdf47f572325e7a48505a33a`.
+The test compares all 66 returned markets, including their own `fees` objects,
+using the real TS constructor and production native account binding. The mapper
+already emits fees; the canonical shared Market runtime model preserves them.
+The live body defaults both fee values to zero; distinct negative maker and
+positive taker values have separate native shared-model and numeric-ingress
+coverage. No live credentials or upstream request is needed for this regression.

@@ -133,11 +133,14 @@ fn actual_typescript_ordinary_limit_predicate() {
         strings[1]["actual"].as_bool().unwrap(),
         "actual source ignores surrogate symbol"
     );
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<PlaceOrderOpts>(
-            strings[1]["raw"].as_str().unwrap()
-        )
-        .is_err(),
-        "shared typed opts refuse lone surrogate"
+    typed_utf16::assert_projection(
+        strings[1]["raw"].as_str().unwrap(),
+        &(safe_cex_num::numeric_ingress::js_from_str::<PlaceOrderOpts>(
+            strings[1]["raw"].as_str().unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -39,7 +39,7 @@ fn prefix_boundary_observes_returned_units_before_wire() {
         "interior",
     ];
     assert_eq!(rows.len(), 12, "APEX-PREFIX independent source floor");
-    let mut refused = 0;
+    let mut typed_boundaries = 0;
     let mut positive = 0;
     for (index, (row, label)) in rows.iter().zip(labels).enumerate() {
         assert_eq!(row["label"], label, "APEX-PREFIX frozen order");
@@ -50,11 +50,13 @@ fn prefix_boundary_observes_returned_units_before_wire() {
         );
         let actual = js_from_str::<String>(row["raw"].as_str().unwrap());
         if index < 4 {
-            assert!(
-                actual.is_err(),
-                "APEX-PREFIX {label} whole-string native ingress must refuse"
+            let actual = actual.unwrap();
+            assert_eq!(
+                actual,
+                String::from_utf16_lossy(&captured_units(&row["inputUnits"]))
             );
-            refused += 1;
+            typed_utf16::assert_projection(row["raw"].as_str().unwrap(), &actual);
+            typed_boundaries += 1;
         } else {
             let input = actual.unwrap_or_else(|error| {
                 panic!("APEX-PREFIX {label} native unexpected refusal: {error}")
@@ -73,7 +75,10 @@ fn prefix_boundary_observes_returned_units_before_wire() {
             positive += 1;
         }
     }
-    assert_eq!(refused, 4, "APEX-PREFIX independent refusal floor");
+    assert_eq!(
+        typed_boundaries, 4,
+        "APEX-PREFIX independent typed-boundary floor"
+    );
     assert_eq!(positive, 8, "APEX-PREFIX independent native-positive floor");
     for (index, expected) in [
         vec![0xd800_u16],
@@ -96,9 +101,12 @@ fn prefix_boundary_observes_returned_units_before_wire() {
             row["label"].as_str().unwrap()
         );
     }
-    // Wire observations follow every native/refusal and source-unit assertion.
+    // Wire observations follow every native/boundary and source-unit assertion.
     assert_eq!(
         rows[0]["outputWire"], r#""\ud800""#,
         "APEX-PREFIX high source wire"
     );
 }
+
+#[path = "../../../test-support/typed_utf16.rs"]
+mod typed_utf16;

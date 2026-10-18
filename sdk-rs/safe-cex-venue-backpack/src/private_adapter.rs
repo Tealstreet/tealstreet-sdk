@@ -198,10 +198,13 @@ impl BackpackPrivateWebSocket {
         events::throttled_fetch_balance(self.state.balance.clone(), self.frame())
     }
     pub fn fetch_orders_throttled(self: &Rc<Self>) -> ExchangeFuture<'static, ()> {
-        Box::pin(events::fetch_throttled_orders(
-            &self.state.orders_timeout,
-            self.frame(),
-        ))
+        let future = events::fetch_throttled_orders(&self.state.orders_timeout, self.frame());
+        let runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = self.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            // The source reconciliation catch is silent; the next event retries.
+            let _ = future.await;
+            Ok(())
+        })
     }
     pub fn throttled_fetch_orders(self: &Rc<Self>) -> Result<(), ExchangeError> {
         let cb = self.clone();
@@ -233,10 +236,13 @@ impl BackpackPrivateWebSocket {
         ))
     }
     pub fn execute_balance_fetch(self: &Rc<Self>) -> ExchangeFuture<'static, ()> {
-        Box::pin(events::execute_balance_fetch(
-            &self.state.balance,
-            self.frame(),
-        ))
+        let future = events::execute_balance_fetch(&self.state.balance, self.frame());
+        let runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = self.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            // The source reconciliation catch is silent; the next event retries.
+            let _ = future.await;
+            Ok(())
+        })
     }
     pub fn unsubscribe(&self, streams: control::Streams) -> Result<(), ExchangeError> {
         crate::private_control::unsubscribe(&self.state.subscriptions, &streams, |m| {

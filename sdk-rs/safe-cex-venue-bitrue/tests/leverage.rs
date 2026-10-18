@@ -47,14 +47,15 @@ fn leverage_matches_actual_typescript_and_store() {
     );
     assert!(capture["header"]["node"].as_str().unwrap().starts_with('v'));
     assert!(!capture["header"]["arch"].as_str().unwrap().is_empty());
-    assert!(
-        js_from_str::<String>(capture["utf8Raw"].as_str().unwrap()).is_err(),
-        "chosen leverage message UTF-8 refusal"
+    typed_utf16::assert_projection(
+        capture["utf8Raw"].as_str().unwrap(),
+        &(js_from_str::<String>(capture["utf8Raw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     for key in ["bracketUtf8Raw", "symbolUtf8Raw"] {
         assert!(
             js_from_str::<OpaqueValue>(capture[key].as_str().unwrap()).is_err(),
-            "chosen leverage UTF-8 refusal: {key}"
+            "opaque Value projection still refuses the unrepresentable payload: {key}"
         );
     }
     for row in capture["errors"].as_array().unwrap() {
@@ -249,3 +250,6 @@ fn leverage_matches_actual_typescript_and_store() {
     }
     native_comparisons(6876, "leverage");
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

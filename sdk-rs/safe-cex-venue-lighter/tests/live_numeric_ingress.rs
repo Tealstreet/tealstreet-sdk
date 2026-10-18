@@ -215,10 +215,11 @@ fn cancel_target_retains_scalar_unicode_and_refuses_lone_surrogates() {
             );
             assert_eq!(value.market_id.to_bits(), (-0.0f64).to_bits());
         } else {
-            assert!(
-                parsed.is_err(),
-                "CancelTarget shared UTF8 representation refusal for valid JSON {encoded}"
-            );
+            let value = parsed.unwrap();
+            typed_utf16::assert_projection(raw, &value);
+            let expected: Vec<u16> = serde_json::from_value(source["units"].clone()).unwrap();
+            assert_eq!(value.order_id, String::from_utf16_lossy(&expected));
+            assert_eq!(value.market_id.to_bits(), (-0.0f64).to_bits());
         }
     }
 }
@@ -267,11 +268,18 @@ fn deployment_profile_keeps_cow_urls_and_the_shared_string_boundary() {
                     "DeploymentProfile.{field} scalar Unicode retention"
                 );
             } else {
-                assert!(
-                    parsed.is_err(),
-                    "DeploymentProfile.{field} shared UTF8 refusal for valid JSON {encoded}"
-                );
+                let value = parsed.unwrap();
+                typed_utf16::assert_projection(&raw, &value);
+                let text = if field == "apiBaseUrl" {
+                    value.api_base_url
+                } else {
+                    value.ws_url
+                };
+                let expected: Vec<u16> = serde_json::from_value(source["units"].clone()).unwrap();
+                assert_eq!(text, String::from_utf16_lossy(&expected));
             }
         }
     }
 }
+
+use unknown_depth::typed_utf16;

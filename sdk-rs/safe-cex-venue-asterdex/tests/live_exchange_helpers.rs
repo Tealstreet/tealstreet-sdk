@@ -1281,7 +1281,14 @@ fn exchange_helpers_match_typescript() {
             serde_json::from_str(wire).map(|input| json!(transform_position(&input, &[]).unwrap()))
         };
         if scalar.is_err() {
-            assert!(output.is_err(), "shared UTF8 refusal for valid mapper JSON");
+            if c["kind"] == "ticker" {
+                let output = output.expect("typed ticker input retains the record");
+                typed_utf16::assert_projection(wire, &output);
+            } else {
+                // transformPosition still receives a standalone serde_json::Value.
+                assert!(output.is_err(), "Value ingress boundary remains observable");
+                typed_utf16::retained(wire);
+            }
             assert!(
                 c["outputJson"]
                     .as_str()
@@ -1479,12 +1486,12 @@ fn exchange_helpers_match_typescript() {
         same(&actual, &c["output"], &format!("transformMarket {c}"));
     }
     for c in data["marketSurrogates"].as_array().unwrap() {
-        assert!(
-            serde_json::from_str::<safe_cex_venue_asterdex::types::AsterDEXMarketResponse>(
-                c["inputJson"].as_str().unwrap()
-            )
-            .is_err(),
-            "shared UTF8 refusal for valid market JSON"
+        typed_utf16::assert_projection(
+            c["inputJson"].as_str().unwrap(),
+            &(serde_json::from_str::<safe_cex_venue_asterdex::types::AsterDEXMarketResponse>(
+                c["inputJson"].as_str().unwrap(),
+            ))
+            .expect("typed surrogate record is retained"),
         );
         assert!(
             c["outputJson"]
@@ -2444,9 +2451,12 @@ fn order_mapper_matches_typescript() {
             case["inputJson"].as_str().unwrap(),
         );
         if serde_json::from_str::<String>(case["symbolJson"].as_str().unwrap()).is_err() {
+            let input = input.expect("typed order input retains the record");
+            typed_utf16::assert_projection(case["inputJson"].as_str().unwrap(), &input);
+            let order = transform_order(&input).unwrap();
             assert!(
-                input.is_err(),
-                "valid JSON lone surrogate representation refusal"
+                order.symbol.contains('\u{fffd}'),
+                "native order symbol replacement"
             );
             assert!(
                 case["outputJson"]
@@ -2751,3 +2761,6 @@ fn mapper_metadata_retains_native_numbers() {
         "independent native cell floor ends at case 87"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
