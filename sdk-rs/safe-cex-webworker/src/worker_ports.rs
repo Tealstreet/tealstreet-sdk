@@ -2,6 +2,7 @@
 //! Host methods follow the synchronous postMessage / asynchronous setTimeout
 //! contract; Result represents a thrown postMessage value without inspecting it.
 use indexmap::IndexMap;
+use safe_cex_exchange::delivery_timers::WorkerPortTimers;
 use std::{cell::RefCell, rc::Rc};
 
 pub const THROTTLE_HIDDEN_MS: f64 = 2500.0;
@@ -15,19 +16,6 @@ pub trait WorkerMessage {
 pub trait WorkerPort<M> {
     type Error;
     fn post_message(&self, message: &Rc<M>) -> Result<(), Self::Error>;
-}
-
-/// set_timeout must retain the callback and enqueue it, never run it inline.
-/// The host supplies wall time, original binary64 delay, and opaque timer IDs.
-/// Timer clones retain identity. Truthiness is pure, and clear_timeout does not
-/// invoke callbacks. At worker teardown the host must release retained callbacks;
-/// Rc alone cannot collect a registry -> host -> callback -> registry cycle.
-pub trait WorkerPortTimers {
-    type Timer: Clone;
-    fn now_ms(&self) -> f64;
-    fn set_timeout(&self, callback: Rc<dyn Fn()>, delay_ms: f64) -> Self::Timer;
-    fn clear_timeout(&self, timer: &Self::Timer);
-    fn timer_is_truthy(&self, timer: &Self::Timer) -> bool;
 }
 
 pub type WorkerConfigHandler<C> = Rc<dyn Fn(&C)>;

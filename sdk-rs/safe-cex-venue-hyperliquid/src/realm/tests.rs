@@ -223,6 +223,10 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
         base.on_args(
             event,
             Rc::new(move |event, args| {
+                let args: Vec<serde_json::Value> = args
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 seen.borrow_mut().push((event.to_owned(), args.to_vec()));
                 Ok(())
             }),
@@ -774,4 +778,277 @@ fn market_host_iterator_rejects_primitive_iterator_before_first_step() {
         MarketBootstrapHost::iterator(&mut r, &array).is_err(),
         "actual market host must reject a primitive iterator before reading next"
     );
+}
+
+#[test]
+fn production_builder_import_preserves_configured_value_and_lazy_default() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/native-builder-config.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 5);
+    let (mut r, _) = production_realm();
+    let imported = r.global_binding("resolveHyperliquidBuilder").unwrap();
+    let address = "0x1111111111111111111111111111111111111111";
+    let builders = [
+        r.object_from(vec![
+            ("address", Value::str(address)),
+            ("feeTenthsBps", Value::str("10")),
+        ]),
+        r.object_from(vec![("feeTenthsBps", Value::Number(7.))]),
+        Value::Bool(false),
+        Value::Number(17.),
+        Value::str("raw"),
+    ];
+    for (index, builder) in builders.into_iter().enumerate() {
+        let options = r.object_from(vec![
+            ("hyperliquidBuilder", builder.clone()),
+            ("testnet", Value::Bool(true)),
+        ]);
+        let reads = Rc::new(std::cell::Cell::new(0));
+        let count = reads.clone();
+        let getter = r.native("get testnet", 0, move |_, _, _| {
+            count.set(count.get() + 1);
+            Ok(Value::Bool(true))
+        });
+        r.define_getter(&options, PropKey::str("testnet"), getter);
+        let result = r.call(&imported, &Value::Undefined, &[options]).unwrap();
+        assert_eq!(
+            reads.get(),
+            0,
+            "configured builder must skip the native default getter"
+        );
+        assert!(
+            result.strict_equal(&builder),
+            "configured builder identity/type case {index}"
+        );
+        assert_eq!(
+            r.to_serde(&result).unwrap(),
+            source[index]["result"],
+            "source case {index}"
+        );
+        assert_eq!(source[index]["same"], true);
+        assert_eq!(source[index]["testnetReads"], 0);
+    }
+}
+
+#[test]
+fn production_builder_import_uses_fresh_nullish_defaults() {
+    let output = std::process::Command::new("node")
+        .args([
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/native-builder-config.cjs"
+            ),
+            "--defaults",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 5);
+    let (mut r, _) = production_realm();
+    let imported = r.global_binding("resolveHyperliquidBuilder").unwrap();
+    let inputs = [
+        Value::Undefined,
+        Value::Null,
+        r.new_object(),
+        r.object_from(vec![("testnet", Value::Bool(true))]),
+        r.object_from(vec![
+            ("testnet", Value::Bool(true)),
+            ("hyperliquidBuilder", Value::Null),
+        ]),
+    ];
+    for (index, options) in inputs.into_iter().enumerate() {
+        let result = r
+            .call(&imported, &Value::Undefined, std::slice::from_ref(&options))
+            .unwrap();
+        let second = r.call(&imported, &Value::Undefined, &[options]).unwrap();
+        assert!(!result.strict_equal(&second), "fresh default case {index}");
+        let fee = r.get_str(&result, "feeTenthsBps").unwrap();
+        assert_eq!(fee.as_number().unwrap().to_bits(), 10f64.to_bits());
+        assert_eq!(r.to_serde(&result).unwrap(), source[index]["result"]);
+        assert_eq!(source[index]["fresh"], true);
+    }
+}
+
+#[test]
+fn production_builder_consumer_keeps_the_fee_type_in_the_action() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let (mut r, _) = production_realm();
+    let builder = r.object_from(vec![
+        (
+            "address",
+            Value::str("0xABCDEF1111111111111111111111111111111111"),
+        ),
+        ("feeTenthsBps", Value::str("10")),
+    ]);
+    let options = r.object_from(vec![
+        ("applicationId", Value::str("account")),
+        ("hyperliquidBuilder", builder),
+    ]);
+    let instance = r.object_from(vec![
+        ("options", options),
+        ("_builderFeeApproved", Value::Bool(true)),
+    ]);
+    let mut future = Box::pin(crate::order_request_leaves::get_builder_info(
+        &mut r, &instance,
+    ));
+    let Poll::Ready(Ok(info)) = future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    else {
+        panic!("approved builder consumer should complete immediately");
+    };
+    drop(future);
+    let fee = r.get_str(&info, "f").unwrap();
+    assert!(
+        fee.strict_equal(&Value::str("10")),
+        "actual builder action must retain the source string fee"
+    );
+    let address = r.get_str(&info, "b").unwrap();
+    assert_eq!(
+        text(&mut r, &address),
+        "0xabcdef1111111111111111111111111111111111"
+    );
+    let action_factory = r.global_binding("orderWiresToOrderAction").unwrap();
+    let wires = r.new_array(vec![]);
+    let action = r
+        .call(&action_factory, &Value::Undefined, &[wires, info.clone()])
+        .unwrap();
+    let actual = r.get_str(&action, "builder").unwrap();
+    assert!(actual.strict_equal(&info));
+    let encoded = r.to_js_json(&action).unwrap();
+    let safe_cex_num::JsJsonValue::Object(fields) = encoded else {
+        panic!("action object");
+    };
+    let builder = fields.iter().find(|(k, _)| k == "builder").unwrap();
+    let safe_cex_num::JsJsonValue::Object(fields) = &builder.1 else {
+        panic!("builder object");
+    };
+    assert!(
+        matches!(&fields.iter().find(|(k,_)|k=="f").unwrap().1,safe_cex_num::JsJsonValue::String(fee) if fee=="10")
+    );
+}
+
+#[test]
+fn production_order_wire_import_keeps_native_nonfinite_fields() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/native-order-wire.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 6);
+    let (mut r, _) = production_realm();
+    let imported = r.global_binding("orderRequestToOrderWire").unwrap();
+    for (index, number) in [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -0.0,
+        60000.125,
+        1e30,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let trigger = r.object_from(vec![
+            ("isMarket", Value::Bool(true)),
+            ("triggerPx", Value::Number(number)),
+            ("tpsl", Value::str("sl")),
+        ]);
+        let order_type = r.object_from(vec![("trigger", trigger)]);
+        let order = r.object_from(vec![
+            ("is_buy", Value::Bool(true)),
+            ("limit_px", Value::Number(number)),
+            ("sz", Value::Number(number)),
+            ("reduce_only", Value::Bool(false)),
+            ("order_type", order_type),
+        ]);
+        let wire = r
+            .call(&imported, &Value::Undefined, &[order, Value::Number(7.)])
+            .unwrap_or_else(|error| {
+                panic!("native wire case {index}: {}", message(&mut r, &error))
+            });
+        assert_eq!(r.get_str(&wire, "a").unwrap().as_number(), Some(7.));
+        assert!(
+            r.get_str(&wire, "b")
+                .unwrap()
+                .strict_equal(&Value::Bool(true))
+        );
+        assert!(
+            r.get_str(&wire, "r")
+                .unwrap()
+                .strict_equal(&Value::Bool(false))
+        );
+        let expected = ["NaN", "Infinity", "-Infinity", "0", "60000.125", "1e+3"][index];
+        for field in ["p", "s"] {
+            let value = r.get_str(&wire, field).unwrap();
+            assert_eq!(
+                text(&mut r, &value),
+                expected,
+                "native {field} case {index}"
+            );
+        }
+        assert_eq!(
+            r.to_serde(&wire).unwrap(),
+            source[index],
+            "maintained source case {index}"
+        );
+    }
+}
+
+#[test]
+fn production_order_wire_import_retains_undefined_and_limit_alias() {
+    let (mut r, _) = production_realm();
+    let imported = r.global_binding("orderRequestToOrderWire").unwrap();
+    let limit = r.object_from(vec![("tif", Value::str("Gtc"))]);
+    let order_type = r.object_from(vec![("limit", limit.clone())]);
+    let order = r.object_from(vec![
+        ("limit_px", Value::Number(11.25)),
+        ("sz", Value::Number(3.5)),
+        ("order_type", order_type),
+        ("cloid", Value::Null),
+    ]);
+    let wire = r
+        .call(&imported, &Value::Undefined, &[order, Value::Undefined])
+        .unwrap();
+    assert_eq!(r.own_entries(&wire).unwrap().len(), 7);
+    for key in ["a", "b", "r"] {
+        assert!(
+            matches!(r.get_str(&wire, key).unwrap(), Value::Undefined),
+            "native own-undefined {key}"
+        );
+    }
+    assert!(matches!(r.get_str(&wire, "c").unwrap(), Value::Null));
+    let order_type = r.get_str(&wire, "t").unwrap();
+    let retained = r.get_str(&order_type, "limit").unwrap();
+    assert!(retained.strict_equal(&limit));
+    r.set_str(&limit, "tif", Value::str("Alo")).unwrap();
+    let observed = r.get_str(&retained, "tif").unwrap();
+    assert_eq!(text(&mut r, &observed), "Alo");
 }

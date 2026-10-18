@@ -73,3 +73,23 @@ No new base-delegation exception is needed.
 
 Latest master refresh 71107baba8: native registry 4/4 and all-feature/ignored
 override 6/6 pass; parity remains zero (7,459 rows; 17,183 public items).
+
+
+## Strict mark-price ticker rows
+
+`wrapped_mark_price_frame_retains_valid_siblings` and
+`bare_mark_price_frame_retains_valid_siblings` compile against master fbee9d96aa
+and fail at the first valid ETH sibling update. The fixed actual Exchange/API/
+socket/Store path refuses complete BTC/string and LTC/boolean fundingTime rows,
+keeps ETH/ADA updates and emits only their two mark-price events. Both refused
+rows report their original symbol, field and value through the existing Error log.
+
+`mark_price_falsey_time_and_unknown_targets_keep_source_behavior` preserves null,
+false, zero and empty-string omission plus missing/inherited target no-ops. The
+four existing production private-frame topic controls pass. The ignored actual
+TypeScript public-dispatch comparison passes without changing its source corpus.
+Official V3 API examples identify T as numeric next funding time; maintained TS
+still controls the raw-copy/falsey behavior. Documentation checked at
+https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md#mark-price-stream-for-all-market.
+Scoped strict Clippy, all-features cancellation inventory (6), override inventory,
+parity and extractor gates pass. Independent review is clean; no shared API changes.

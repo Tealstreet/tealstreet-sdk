@@ -151,7 +151,9 @@ impl OrderExecution {
         let response = adapter.execute(request).await.map_err(|failure| {
             let mut e = ExchangeError::new(failure.message);
             e.is_axios_error = true;
-            e.code = failure.code.map(Value::String);
+            e.code = failure
+                .code
+                .map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
             e.context = failure.context.map(|c| *c);
             e.method = Some(failure.request.method);
             e.url = Some(failure.request.url);
@@ -281,7 +283,7 @@ impl OrderExecution {
                     if !truthy(trigger) {
                         continue;
                     }
-                    let new = PreparedOrderOpts {
+                    let new: PreparedOrderOpts = PreparedOrderOpts {
                         symbol: opts.symbol.clone(),
                         r#type: kind.into(),
                         side: if opts.side == OrderSide::Buy {
@@ -294,7 +296,7 @@ impl OrderExecution {
                         trigger_price: trigger,
                         stop_loss: None,
                         take_profit: None,
-                        reduce_only: Some(true),
+                        reduce_only: true.into(),
                         time_in_force: None,
                         trigger_type: None,
                         tp_trigger_type: if kind == OrderType::TakeProfit {
@@ -578,7 +580,7 @@ impl OrderExecution {
                     r#type: old.r#type.into_property(),
                     side: old.side.into_property(),
                     amount,
-                    reduce_only: Some(old.reduce_only),
+                    reduce_only: old.reduce_only.into_property(),
                     price: (!algo).then_some(price).flatten(),
                     trigger_price: algo.then_some(price).flatten(),
                     take_profit: None,

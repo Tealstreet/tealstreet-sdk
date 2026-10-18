@@ -284,7 +284,12 @@ impl SessionHost for Rt {
                 message.extend(" not found".encode_utf16());
                 Ok(Js::utf16(&message))
             }
-            "missingMarket" => Js::Undefined.get("limits"),
+            "missingMarket" => {
+                let mut message: Vec<u16> = "Market ".encode_utf16().collect();
+                message.extend_from_slice(&arg(&args, 0).to_js_string()?);
+                message.extend(" not found".encode_utf16());
+                Ok(Js::utf16(&message))
+            }
             "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" | "LogSeverity" => {
                 self.shared.globals.get(name)
             }
@@ -469,7 +474,10 @@ impl crate::variant_account_refresh::AccountRefreshHost for Rt {
         promise.call_method("then", vec![fulfilled])
     }
     fn all(&self, promises: Vec<Js>) -> Result<Js, Thrown> {
-        Ok(self.spawn(Box::pin(super::promise::all(promises))))
+        Ok(Js::Promise(super::promise::all(
+            &self.exchange_runtime(),
+            promises,
+        )))
     }
 }
 

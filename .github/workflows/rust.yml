@@ -134,6 +134,11 @@ concurrency:
 
 env:
   RUSTFLAGS: -Dwarnings
+  # The test tier ran out of runner disk (os error 28) even after the SDK purge;
+  # incremental state and debug info are most of target/ and CI never uses them.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
 
 defaults:
   run:
@@ -199,9 +204,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             sdk-rs/target
-          key: ${{ runner.os }}-cargo-sdk-rs-${{ matrix.check }}-${{ hashFiles('sdk-rs/**/Cargo.toml', 'sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          key: ${{ runner.os }}-cargo-sdk-rs-nodebug-${{ matrix.check }}-${{ hashFiles('sdk-rs/**/Cargo.toml', 'sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-sdk-rs-${{ matrix.check }}-
+            ${{ runner.os }}-cargo-sdk-rs-nodebug-${{ matrix.check }}-
       - name: Bootstrap Rust
         run: rustup toolchain install stable --profile minimal --no-self-update
       # Bootstrap provides rustup; this loads the workspace pin and components.
@@ -254,8 +259,6 @@ jobs:
         run: |
           node --test safe-cex-exchange/scripts/cancellable-futures.test.cjs
           cargo test --locked -p safe-cex-exchange --all-features --test cancellable_future_inventory --jobs 2
-      # The venue binding ratchet tests in the plain test run compare against the
-      # PR base, which a depth-1 checkout lacks, so fetch it before they run.
       - name: Fetch binding ratchet base
         if: matrix.check == 'test' && github.event_name == 'pull_request'
         env:

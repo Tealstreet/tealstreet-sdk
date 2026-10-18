@@ -640,7 +640,13 @@ impl SessionHost for Harness {
                 Rc::ptr_eq(lexical, &self.root),
                 "native_lexical_callback_receiver"
             );
-            return api::dispatch(self, lexical, code, captures, args);
+            return api::dispatch(
+                self,
+                lexical,
+                api::Callback::from_name(code).expect("source callback selector"),
+                captures,
+                args,
+            );
         }
         let Node::Function {
             owner: lexical,

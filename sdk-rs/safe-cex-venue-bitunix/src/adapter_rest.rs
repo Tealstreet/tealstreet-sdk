@@ -46,6 +46,7 @@ impl BitunixVenue {
                 || me.base.store.markets().to_vec(),
                 read,
                 |e: &Fault| me.runtime.console("error", &e.0.js_error_string()),
+                |message| me.runtime.console("warning", message),
             )
             .await)
         })

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.runtime-selector.ts"
-rust_files = [ "safe-cex-venue-woo/src/runtime_selector.rs", "safe-cex-venue-woo/src/shadow_compare.rs" ]
+rust_files = [ "safe-cex-venue-woo/src/runtime_selector.rs" ]
 
 [[symbol]]
 ts = "WooV3MigrationRouteId"
@@ -109,31 +109,31 @@ note = "MIXED: FORCED the actual source selector returns requestedMode as observ
 [[symbol]]
 ts = "WooV3ObservedCanonical"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ObservedCanonical", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ObservedCanonical::new", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ObservedCanonical::canonical", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ObservedCanonical::observed" ]
-status = "ported"
-note = "Required readonly canonical code units and generic observed reference, no JSON codec claim. Native assertions precede maintained-source observations. Four focused groups cover retained code units/identities, structural Error typing, normalization, and twelve comparison cases stopping at surrogate canonical text; fourteen source cases including the two normalizer cases. No exhaustive host-runtime or exotic getter/realm claim. See SHADOW_READ_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict . Adapted split: safe-cex-venue-woo/src/shadow_compare.rs::WooV3ObservedCanonical ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ObservedCanonical::new ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ObservedCanonical::canonical ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ObservedCanonical::observed ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Not applicable: test-only WOO V3 comparison/canonical helper, absent from the SDK package exports and production TS/Rust callers. Rust executable bodies and oracle-only tests are retired; tealstreet-next owns the test-only TS side. Live legacy operation carriers and the separate route declaration remain."
 
 [[symbol]]
 ts = "WooV3ShadowReadComparison"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ShadowReadComparison", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::new", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::status", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::route_id", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::authoritative", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::observed_canonical", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::observed", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::store_action", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::new", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::status", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::route_id", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::authoritative", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::error", "safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::store_action" ]
-status = "ported"
-note = "Two readonly native variants with closed status/store-action values, existing typed route ID, retained authoritative/observed references, and constrained structural Error handle. ShadowErrorReference requires live typed name/message/optional stack and arbitrary optional cause access; no instanceof-only declaration restriction. Native assertions precede maintained-source observations. Four focused groups cover retained code units/identities, structural Error typing, normalization, and twelve comparison cases stopping at surrogate canonical text; fourteen source cases including the two normalizer cases. No exhaustive host-runtime or exotic getter/realm claim. See SHADOW_READ_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict . Adapted split: safe-cex-venue-woo/src/shadow_compare.rs::WooV3ShadowReadComparison ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::new ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::status ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::route_id ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::authoritative ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::observed_canonical ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::observed ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3ComparedRead::store_action ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::new ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::status ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::route_id ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::authoritative ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::error ; safe-cex-venue-woo/src/shadow_compare.rs::WooV3FailedRead::store_action ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Not applicable: test-only WOO V3 comparison/canonical helper, absent from the SDK package exports and production TS/Rust callers. Rust executable bodies and oracle-only tests are retired; tealstreet-next owns the test-only TS side. Live legacy operation carriers and the separate route declaration remain."
 
 [[symbol]]
 ts = "normalizeError"
 kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/shadow_compare.rs::normalize_error", "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::Value", "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::Failure", "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::native", "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::name", "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::message", "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::stack", "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::cause" ]
-status = "ported"
-note = "Original Error identity after actual instanceof Error; otherwise capture new Error constructor before String conversion/template coercion. Native assertions precede maintained-source observations. Four focused groups cover retained code units/identities, structural Error typing, normalization, and twelve comparison cases stopping at surrogate canonical text; fourteen source cases including the two normalizer cases. No exhaustive host-runtime or exotic getter/realm claim. See SHADOW_READ_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict . Adapted split: safe-cex-venue-woo/src/shadow_compare.rs::normalize_error . Error-shape split: safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::Value safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::Failure and safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::native are the referent value, failure and native-handle members, and safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::name safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::message safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::stack safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::cause the ECMAScript Error name/message/stack/cause readers, of the structural Error constraint this body normalizes; they are bodyless and add no behavior."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Not applicable: test-only WOO V3 comparison/canonical helper, absent from the SDK package exports and production TS/Rust callers. Rust executable bodies and oracle-only tests are retired; tealstreet-next owns the test-only TS side. Live legacy operation carriers and the separate route declaration remain."
 
 [[symbol]]
 ts = "compareWooV3ShadowRead"
 kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-venue-woo/src/shadow_compare.rs::compare_shadow_read", "safe-cex-venue-woo/src/shadow_compare.rs::normalize_error", "safe-cex-venue-woo/src/shadow_compare.rs::has_own", "safe-cex-venue-woo/src/shadow_compare.rs::method", "safe-cex-venue-woo/src/shadow_compare.rs::freeze", "safe-cex-venue-woo/src/shadow_compare.rs::invalid_decoder" ]
-status = "ported"
-note = "Decoder member call retains input receiver and original response; object/non-null/own canonical+observed/string guards stay within the catch; observed value is read before canonical type check. Catch/result Object.freeze callee is captured before result property reads; canonical comparison and later route/snapshot reads preserve source order. Native assertions precede maintained-source observations. Four focused groups cover retained code units/identities, structural Error typing, normalization, and twelve comparison cases stopping at surrogate canonical text; fourteen source cases including the two normalizer cases. No exhaustive host-runtime or exotic getter/realm claim. See SHADOW_READ_EVIDENCE.md. Canonical declarations: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary ; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias ; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect ; sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ; sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict . Adapted split: safe-cex-venue-woo/src/shadow_compare.rs::compare_shadow_read ; safe-cex-venue-woo/src/shadow_compare.rs::normalize_error ; safe-cex-venue-woo/src/shadow_compare.rs::has_own ; safe-cex-venue-woo/src/shadow_compare.rs::method ; safe-cex-venue-woo/src/shadow_compare.rs::freeze ; safe-cex-venue-woo/src/shadow_compare.rs::invalid_decoder ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Not applicable: test-only WOO V3 comparison/canonical helper, absent from the SDK package exports and production TS/Rust callers. Rust executable bodies and oracle-only tests are retired; tealstreet-next owns the test-only TS side. Live legacy operation carriers and the separate route declaration remain."

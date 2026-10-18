@@ -498,6 +498,9 @@ fn merge_order(target: &mut Order, incoming: Order) {
     if target.price.is_absent() {
         target.price = old.price;
     }
+    if target.reduce_only.is_absent() {
+        target.reduce_only = old.reduce_only;
+    }
     if target.close.is_absent() {
         target.close = old.close;
     }
@@ -658,20 +661,50 @@ impl StoreState {
     }
     fn patch_ticker_in_place(target: &mut Ticker, source: &Ticker) -> bool {
         let mut changed = false;
-        macro_rules! patch { ($($field:ident),*) => { $(if target.$field != source.$field {target.$field=source.$field;changed=true;})* }; }
-        patch!(
-            bid,
-            ask,
-            last,
-            mark,
-            index,
-            percentage,
-            open_interest,
-            funding_rate,
-            funding_time,
-            volume,
-            quote_volume
-        );
+        if target.bid != source.bid {
+            target.bid = source.bid;
+            changed = true;
+        }
+        if target.ask != source.ask {
+            target.ask = source.ask;
+            changed = true;
+        }
+        if target.last != source.last {
+            target.last = source.last;
+            changed = true;
+        }
+        if target.mark != source.mark {
+            target.mark = source.mark;
+            changed = true;
+        }
+        if target.index != source.index {
+            target.index = source.index;
+            changed = true;
+        }
+        if target.percentage != source.percentage {
+            target.percentage = source.percentage;
+            changed = true;
+        }
+        if target.open_interest != source.open_interest {
+            target.open_interest = source.open_interest;
+            changed = true;
+        }
+        if target.funding_rate != source.funding_rate {
+            target.funding_rate = source.funding_rate;
+            changed = true;
+        }
+        if target.funding_time != source.funding_time {
+            target.funding_time = source.funding_time;
+            changed = true;
+        }
+        if target.volume != source.volume {
+            target.volume = source.volume;
+            changed = true;
+        }
+        if target.quote_volume != source.quote_volume {
+            target.quote_volume = source.quote_volume;
+            changed = true;
+        }
         changed
     }
     fn patch_worker_tickers_in_place(&mut self, tickers: &[Ticker]) -> Option<bool> {
@@ -1240,25 +1273,45 @@ impl StoreState {
             self.retained_balance = Arc::new(balance.clone());
             self.data.balance = balance;
         }
-        macro_rules! apply { ($($field:ident),*) => {$(if let Some(value)=changes.$field {self.data.$field=value;})*}; }
-        apply!(
-            latency,
-            displayed_positions,
-            orders_risk,
-            active_chasers,
-            active_twaps,
-            loaded,
-            options,
-            fetched_leverage
-        );
-        macro_rules! optional { ($($field:ident),*) => {$(if let Some(value)=changes.$field {self.data.$field=Some(value);})*}; }
-        optional!(
-            displayed_margin,
-            message_handler_stats,
-            stark_config,
-            zk_link_config,
-            user_data
-        );
+        if let Some(value) = changes.latency {
+            self.data.latency = value;
+        }
+        if let Some(value) = changes.displayed_positions {
+            self.data.displayed_positions = value;
+        }
+        if let Some(value) = changes.orders_risk {
+            self.data.orders_risk = value;
+        }
+        if let Some(value) = changes.active_chasers {
+            self.data.active_chasers = value;
+        }
+        if let Some(value) = changes.active_twaps {
+            self.data.active_twaps = value;
+        }
+        if let Some(value) = changes.loaded {
+            self.data.loaded = value;
+        }
+        if let Some(value) = changes.options {
+            self.data.options = value;
+        }
+        if let Some(value) = changes.fetched_leverage {
+            self.data.fetched_leverage = value;
+        }
+        if let Some(value) = changes.displayed_margin {
+            self.data.displayed_margin = Some(value);
+        }
+        if let Some(value) = changes.message_handler_stats {
+            self.data.message_handler_stats = Some(value);
+        }
+        if let Some(value) = changes.stark_config {
+            self.data.stark_config = Some(value);
+        }
+        if let Some(value) = changes.zk_link_config {
+            self.data.zk_link_config = Some(value);
+        }
+        if let Some(value) = changes.user_data {
+            self.data.user_data = Some(value);
+        }
         if let Some(stats) = changes.request_stats {
             self.request_stats = Some(stats);
         }

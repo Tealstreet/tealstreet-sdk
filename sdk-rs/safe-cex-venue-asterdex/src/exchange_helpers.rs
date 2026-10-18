@@ -1,11 +1,11 @@
 //! Pure exchange decisions, kept independent from lifecycle and transport state.
-use safe_cex_exchange::js_runtime::value::{Js, from_json};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_json};
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_num::{JsCoercionError, js_number, js_string, js_truthy, parse_float};
 use safe_cex_transport::{RestAdapter, RestRequest};
 use safe_cex_types::{
-    Balance, BothPositionSide, Candle, ExchangeAccount, Execution, ExecutionPositionSide,
-    OrderBook, OrderBookOrders, OrderSide, OrderType, PositionSide,
+    Balance, BothPositionSide, ExchangeAccount, Execution, ExecutionPositionSide, OrderBook,
+    OrderBookOrders, OrderSide, OrderType, PositionSide,
 };
 use serde_json::{Map, Value};
 
@@ -754,18 +754,21 @@ pub fn balance_from_account_response(account: &Value) -> Result<Balance, JsCoerc
 }
 
 // ts: AsterDEXExchange.fetchOHLCV
-pub fn transform_klines(rows: &[crate::types::AsterDEXKlineResponse]) -> Vec<Candle> {
-    rows.iter()
-        .map(|candle| Candle {
-            timestamp: candle.0,
-            open: parse_float(&candle.1),
-            high: parse_float(&candle.2),
-            low: parse_float(&candle.3),
-            close: parse_float(&candle.4),
-            volume: parse_float(&candle.5),
-            last_side: None,
-        })
-        .collect()
+pub fn transform_klines(rows: &Js) -> Result<Js, Thrown> {
+    rows.call_method(
+        "map",
+        vec![Js::function("", |_, args| {
+            let row = arg(&args, 0);
+            Ok(Js::object(vec![
+                ("timestamp", row.get("0")?),
+                ("open", Js::Number(row.get("1")?.parse_float()?)),
+                ("high", Js::Number(row.get("2")?.parse_float()?)),
+                ("low", Js::Number(row.get("3")?.parse_float()?)),
+                ("close", Js::Number(row.get("4")?.parse_float()?)),
+                ("volume", Js::Number(row.get("5")?.parse_float()?)),
+            ]))
+        })],
+    )
 }
 
 // ts: AsterDEXExchange.fetchHistoricalFills
@@ -908,7 +911,7 @@ pub fn extract_filter_value(
 // ts: AsterDEXExchange.transformMarket
 pub fn transform_market(
     market: &crate::types::AsterDEXMarketResponse,
-    leverage_brackets: &std::collections::BTreeMap<String, f64>,
+    leverage_brackets: &std::collections::BTreeMap<String, Js>,
 ) -> Result<safe_cex_types::Market, (&'static str, String)> {
     use safe_cex_num::{ccxt_precision::precision_to_string, parse_float};
     use safe_cex_types::{
@@ -916,11 +919,15 @@ pub fn transform_market(
     };
     let price = parse_float(&precision_to_string(market.price_precision));
     let amount = parse_float(&precision_to_string(market.quantity_precision));
-    let max_leverage = leverage_brackets
+    let max_leverage = match leverage_brackets
         .get(&market.symbol)
-        .copied()
-        .filter(|v| *v != 0.0 && !v.is_nan())
-        .unwrap_or(10.0);
+        .filter(|value| value.truthy())
+    {
+        Some(value) => value
+            .to_number()
+            .map_err(|error| ("TypeError", error.message()))?,
+        None => 10.0,
+    };
     let filters = market
         .filters
         .iter()
@@ -1048,7 +1055,7 @@ pub fn transform_order(
         filled,
         remaining: amount - filled,
         status: status.into(),
-        reduce_only: order.close_position == Some(true) || order.reduce_only == Some(true),
+        reduce_only: (order.close_position == Some(true) || order.reduce_only == Some(true)).into(),
         last_update: order.time,
         info: (Some(
             retained_info(

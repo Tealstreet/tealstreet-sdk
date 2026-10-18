@@ -114,7 +114,9 @@ fn listen(h: &Harness, event: &str) -> Rc<RefCell<Vec<Value>>> {
     h.venue().base().on(
         event,
         Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.clone());
+            sink.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(data).expect("finite fixture event"),
+            );
             Ok(())
         }),
     );
@@ -993,6 +995,234 @@ fn real_journal_default_window_uses_the_runtime_clock() {
     assert_eq!(
         calls[0].params["start_t"],
         safe_cex_num::js_number_string(now - 30.0 * 24.0 * 60.0 * 60.0 * 1000.0)
+    );
+    h.venue().dispose().unwrap();
+}
+
+fn assert_unsupported_private_topics_preserve_store(topics: &[&str], data: Value) {
+    let (h, private) = authed("HEDGE_MODE", |_| {});
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{
+        "symbol":"PERP_BTC_USDT","orderId":777,"side":"BUY","type":"LIMIT",
+        "quantity":2,"price":100,"reduceOnly":false,"status":"NEW",
+        "executedQuantity":0,"executedPrice":0}}),
+    );
+    assert!(
+        order(&h, "777").is_some(),
+        "known private order makes preservation non-vacuous"
+    );
+    let orders = h.store.orders().to_vec();
+    let positions = h.store.positions().to_vec();
+    let balance = h.store.balance().clone();
+    assert!(balance.total > 0.0);
+    let fills = Rc::new(std::cell::Cell::new(0usize));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
+    for topic in topics {
+        push(&h, &private, json!({"topic":topic,"data":data}));
+        assert_eq!(
+            h.store.orders().to_vec(),
+            orders,
+            "{topic} cannot change source orders"
+        );
+        assert_eq!(
+            h.store.positions().to_vec(),
+            positions,
+            "{topic} has no source position handler"
+        );
+        assert_eq!(
+            *h.store.balance(),
+            balance,
+            "{topic} has no source balance handler"
+        );
+        assert_eq!(fills.get(), 0, "unsupported {topic} cannot invent a fill");
+    }
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn private_position_topics_preserve_the_rest_owned_store() {
+    assert_unsupported_private_topics_preserve_store(
+        &["position", "positions"],
+        json!({
+        "symbol":"PERP_BTC_USDT","holding":99,"averageOpenPrice":999,
+        "positions":[{"symbol":"PERP_BTC_USDT","holding":99,"averageOpenPrice":999}]}),
+    );
+}
+#[test]
+fn private_balance_topics_preserve_the_rest_owned_store() {
+    assert_unsupported_private_topics_preserve_store(
+        &["balance", "account"],
+        json!({
+        "totalAccountValue":999999,"freeCollateral":888888,"totalCollateral":777777}),
+    );
+}
+
+fn ticker_row_refusals(topic: &str, source: &str, target: &str, surrogate: bool) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let template = h.store.tickers()[0].clone();
+    let mut tickers = vec![];
+    for symbol in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "LTCUSDT"] {
+        let mut row = template.clone();
+        row.id = symbol.into();
+        row.symbol = symbol.into();
+        tickers.push(row);
+    }
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let public = socket(&h, PUBLIC_URL);
+    let frame_row = |asset: &str, value: Value| {
+        let mut row = json!({"symbol":format!("PERP_{asset}_USDT"),"close":10,"amount":20,
+            "volume":30,"bid":40,"ask":50,"price":60});
+        row[source] = value;
+        row
+    };
+    let frame = json!({"topic":topic,"data":[
+        frame_row("BTC",Value::Null),frame_row("ETH",json!(123)),
+        frame_row("SOL",json!("unparsed")),frame_row("LTC",json!(456))
+    ]});
+    if surrogate {
+        let text = frame.to_string().replace("\"unparsed\"", r#""\ud800""#);
+        public
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(text)));
+        h.runtime.pump();
+    } else {
+        push(&h, &public, frame);
+    }
+    let rows = json_of(&*h.store.tickers());
+    let field = |symbol: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["symbol"] == symbol)
+            .unwrap()[target]
+            .clone()
+    };
+    assert_eq!(field("ETHUSDT"), 123.);
+    assert_eq!(field("LTCUSDT"), 456.);
+    let original = serde_json::to_value(&template).unwrap()[target].clone();
+    assert_eq!(field("BTCUSDT"), original);
+    assert_eq!(field("SOLUSDT"), original);
+    let reports = h.runtime.reports.borrow().join("\n");
+    for (symbol, value) in [
+        ("BTCUSDT", "null"),
+        ("SOLUSDT", if surrogate { r"\ud800" } else { "unparsed" }),
+    ] {
+        assert!(
+            reports.contains(symbol),
+            "missing refused row identity: {reports}"
+        );
+        assert!(reports.contains(target), "missing refused field: {reports}");
+        assert!(
+            reports.contains(value),
+            "missing original refused value: {reports}"
+        );
+    }
+    assert_eq!(
+        reports.matches("Refused WOO ticker row").count(),
+        2,
+        "{reports}"
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn ticker_row_refusals_keep_valid_ticker_siblings_and_report_each_value() {
+    ticker_row_refusals("tickers", "close", "last", false);
+}
+#[test]
+fn ticker_row_refusals_keep_valid_bbo_siblings_and_report_each_value() {
+    ticker_row_refusals("bbos", "bid", "bid", false);
+}
+#[test]
+fn ticker_row_refusals_keep_valid_mark_siblings_and_report_each_value() {
+    ticker_row_refusals("markprices", "price", "mark", false);
+}
+
+#[test]
+fn retained_ticker_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("tickers", "close", "last", true);
+}
+#[test]
+fn retained_bbo_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("bbos", "bid", "bid", true);
+}
+#[test]
+fn retained_mark_frame_refuses_surrogate_row_only() {
+    ticker_row_refusals("markprices", "price", "mark", true);
+}
+
+#[test]
+fn retained_ticker_frame_ignores_unread_surrogate_metadata() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":123,"amount":20,"volume":30,"ignored":"\ud800"}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, 123.);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn retained_ticker_frame_preserves_overflow_and_signed_zero_numbers() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":1e400,"amount":20,"volume":-0.0}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, f64::INFINITY);
+    assert_eq!(h.store.tickers()[0].volume.to_bits(), (-0.0f64).to_bits());
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn retained_ticker_frame_normalizes_before_identifier_admission() {
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let public = socket(&h, PUBLIC_URL);
+    let frame = r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT_\ud800","close":999,"amount":999,"volume":999},{"symbol":"PERP_\ud800_USDT","close":123,"amount":20,"volume":30}]}"#;
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.into())));
+    h.runtime.pump();
+    assert_eq!(h.store.tickers()[0].last, 999.);
+    assert_eq!(h.runtime.reports.borrow().len(), 1);
+    let reports = h.runtime.reports.borrow().join("\n");
+    assert!(
+        reports.contains(r"\ud800") && reports.contains("identifier boundary"),
+        "{reports}"
     );
     h.venue().dispose().unwrap();
 }

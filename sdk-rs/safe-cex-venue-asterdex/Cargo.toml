@@ -23,5 +23,4 @@ safe-cex-store.workspace = true
 safe-cex-exchange = { workspace = true, features = ["native"] }
 safe-cex-transport = { workspace = true, features = ["native"] }
 tokio = { workspace = true, features = ["rt", "time"] }
-safe-cex-webworker = { path = "../safe-cex-webworker" }
 

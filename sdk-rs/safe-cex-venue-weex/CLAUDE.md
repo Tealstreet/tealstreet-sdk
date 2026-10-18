@@ -15,7 +15,10 @@ Typed placement enters the shared ValidatedOrder/ValidatedBatch path before the
 native body; batch capability registration invokes the source batch algorithm.
 The trading runtime's `updateStoredOrder` capability binds the real Store's
 `updateOrder` with its Store receiver. Accepted single/batch PostOnly placements
-and TP/SL amendments then apply the source patch and return IDs. Constructed
+and TP/SL amendments then apply the source patch and return IDs.
+Successful batch replies require a positive ASCII decimal order ID, exactly like
+the source regex. Every result is validated before any PostOnly Store patch;
+leading zeroes, signs, whitespace and nondecimal strings visibly refuse the batch. Constructed
 regressions check existing and absent rows, batch-result reordering and both
 protective order types; an absent row remains absent.
 
@@ -38,6 +41,26 @@ Positions and historical fills use the source's default extractArray admission:
 raw arrays and the `data` array only. Extra `items`, `list` and `rows` wrappers
 are ignored. Constructed HTTP regressions cover all six direct/nested extra
 wrappers plus the two accepted forms, retaining fake zero positions when needed.
+
+Historical-fill pages apply the final strict-field policy per row. The concrete
+normalizer warns with the offending field/value and refuses only an Execution
+whose maker or commission asset cannot inhabit the shared model, retaining all
+valid rows. Missing maker stays absent, false stays false, and assets are never
+coerced. Source coercion/capture errors retain their order and propagation;
+warning subscriber failures also propagate. Both the public utility and the
+binding use one normalization pipeline; standalone utility error names/messages
+remain unchanged. This intentionally differs from TS retaining malformed rows.
+Mixed-page and all-refused-page regressions use the constructed exchange.
+
+Market snapshots apply the same strict-field policy per row. Source coercions
+finish before required-string admission; a malformed symbol or base is reported
+with its field and received value, then only that row is omitted. An all-refused
+page returns an empty snapshot. Source coercion/capture failures still use the
+existing error/cached-market catch. The utility and binding share one normalizer;
+the utility's prior error messages stay unchanged. Constructed tests cover twelve
+mixed-page refusals, an all-refused page and source-error precedence. An actual
+maintained-method probe separately pins TS retaining all raw fields; this is an
+intentional typed-output difference, not arbitrary malformed-input parity.
 
 `tests/exchange_binding.rs` drives production methods through scripted native HTTP
 and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
@@ -534,3 +557,14 @@ WEEX members: close all venue positions, replace the refreshed snapshot, then
 `exchange_binding` proves endpoint reachability from an empty Store and close/refresh/
 cancel order; private order, position and account frames assert actual Store changes
 alongside the retained fill-event witness.
+
+
+`exchange_binding::production_ticker_coercion_matches_constructed_typescript` adds
+96 field-independent cases through the constructed production socket/Store:
+consecutive ticker frames, object/array payloads and finite fallback. Each case resets both native and
+maintained TS Stores to finite baselines, then checks all eleven native numeric
+fields after malformed and good rows. Null, numeric/prefix/NaN strings, objects,
+overflow, signed zero and false follow the actual TS exchange and DefaultStore.
+The shared ticker census records the witness. The compiling
+`parity/scripts/ticker-native-controls.py weex` fault must fail that test and
+pass after exact source restoration.

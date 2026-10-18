@@ -93,7 +93,10 @@ fn exact_units_and_whole_input_prices() {
     let raw = inputs[6].replace("\\ud800", replacement);
     let data: OpaqueValue = js_from_str(&raw).unwrap();
     let stored = store.balance_handle();
-    let balance = parse_balance(Some(&data.value), &stored).unwrap();
+    let balance = parse_balance(Some(&data.value), &stored, |warning| {
+        panic!("unexpected refusal: {warning}")
+    })
+    .unwrap();
     assert_eq!(balance.total.to_bits(), 31.0f64.to_bits());
     assert_eq!(balance.info.as_ref().unwrap()["extra"], replacement);
     let bracket = r#"{"data":[{"contractName":"�","brackets":[{"initialLeverage":3}]},{"contractName":"\ud800","brackets":[{"initialLeverage":7}]}]}"#;
