@@ -51,6 +51,26 @@ vm.runInContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarg
   }
   process.stdout.write(JSON.stringify(rows));return;
  }
+ if(process.argv.includes('--signer-lifetime')) {
+  const rows=[];
+  for(const finish of ['available','disposed']) {
+   const callbacks=new Set(), events=[];
+   let removals=0;
+   const signer={isAvailable:()=>false,onAvailabilityChange(cb){callbacks.add(cb);return()=>{assert.ok(callbacks.delete(cb));removals++;};}};
+   const emitter=new TinyEmitter();
+   emitter.on('remoteSignerStatus',value=>events.push(value));
+   const base=new context.Base();Object.assign(base,{emitter,options:{remoteSigner:signer},isDisposed:false,remoteSignerAvailabilityCleanups:new Set()});
+   void base.waitForRemoteSigner();
+   assert.deepEqual(events,['disconnected']);
+   assert.equal(callbacks.size,1,'discarding the Promise keeps availability subscription');
+   if(finish==='available')for(const callback of [...callbacks])callback(true);
+   else {base.isDisposed=true;for(const cleanup of [...base.remoteSignerAvailabilityCleanups])cleanup();}
+   await new Promise(setImmediate);
+   assert.equal(callbacks.size,0);assert.equal(removals,1);assert.equal(base.remoteSignerAvailabilityCleanups.size,0);
+   rows.push({finish,events,removals});
+  }
+  process.stdout.write(JSON.stringify(rows));return;
+ }
  if(process.argv.includes('--signer')) {
   const rows=[];
   for(const fail of ['disconnected','connected']) {

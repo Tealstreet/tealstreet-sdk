@@ -120,6 +120,9 @@ The shared JS Date.now facade rounds down an injected wall clock, while
 performance.now keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
+The pending signer wait delegates to `eager::start_eager`: discarding its waiter
+keeps the availability callback registered until availability or exchange disposal.
+Either terminal path unregisters exactly once and releases the listener captures.
 
 See the [socket host contract](WS_CONTRACT.md) for host scheduling and relay options.
 Opt-in replay hosts register the canonical per-dial parser counters when a

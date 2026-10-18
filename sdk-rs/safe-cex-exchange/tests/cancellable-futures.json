@@ -848,12 +848,13 @@
         "await",
         "poll-fn"
       ],
-      "producer_sha256": "06152e3ea0e4cc18b95a54e63c45c1bbdfa24c51ee485af4255efbc3baf567db",
+      "producer_sha256": "93781e57f29372a6ed74e7579d15f006b34b36c478ca9fe05b733e4a6957d3ad",
       "classification": "guarded",
-      "reason": "Invocation registers eagerly; the pre-pin SignerWaitGuard owns subscription and waker cleanup even for unpolled Drop. Callback throw retains the source settled-but-unresolved state. Caller cancellation remains an explicit owned-continuation choice. Reviewed Js status payloads only; availability registration, guard construction, completion and Drop cleanup retain their prior sequencing and boundaries. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged.",
+      "reason": "Availability checks, status emission and subscription registration stay eager and source-ordered. The pending body now delegates to canonical eager::start_eager, whose runtime owns SignerWaitGuard independently of the returned waiter. Availability/disposal unsubscribe once; runtime shutdown still drops the guard. The lifecycle guard/finish/Drop bodies are byte-unchanged. Actual source, NativeRuntime and deterministic multi-waiter tests prove retained subscription, completion, capture release and the original connected-listener throw profile.",
       "witnesses": [
-        "tests/core_lifecycle.rs::cancelled_signer_waits_release_subscription_and_ignore_late_callbacks",
-        "tests/core_lifecycle.rs::signer_wait_starts_before_first_poll_and_unpolled_drop_cleans_up"
+        "tests/core_lifecycle.rs::discarded_signer_waiter_keeps_source_subscription_until_completion",
+        "tests/core_lifecycle.rs::discarded_signer_waits_remain_independent_and_release_on_disposal",
+        "tests/core_lifecycle.rs::signer_wait_starts_before_first_poll_and_unpolled_drop_keeps_subscription"
       ],
       "source_dependencies": [
         {
@@ -884,7 +885,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "1ce944d94dfd4be3b125de77f937320427a1ab56b6e9f9feb598d84c108aad3e"
+          "sha256": "2d023b58745678f27d962c578748c681721bab6cb9c4c3045feb40c4d6dbe6a8"
         }
       ],
       "guards": [
@@ -2390,7 +2391,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "1ce944d94dfd4be3b125de77f937320427a1ab56b6e9f9feb598d84c108aad3e"
+          "sha256": "2d023b58745678f27d962c578748c681721bab6cb9c4c3045feb40c4d6dbe6a8"
         }
       ],
       "guards": [

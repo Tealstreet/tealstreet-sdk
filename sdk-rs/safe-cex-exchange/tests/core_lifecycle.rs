@@ -27,6 +27,8 @@ use std::{
     task::{Context, Poll, Wake, Waker},
 };
 
+#[path = "support/runtime.rs"]
+mod test_runtime;
 #[path = "support/store.rs"]
 mod test_store;
 use test_store::TestStore;
@@ -46,6 +48,7 @@ struct Runtime {
     next: Cell<usize>,
     exceptions: RefCell<Vec<ExchangeError>>,
     timeout: Rc<Cell<bool>>,
+    driver: test_runtime::Runtime,
 }
 impl ExchangeRuntime for Runtime {
     fn monotonic_now_ms(&self) -> f64 {
@@ -64,8 +67,8 @@ impl ExchangeRuntime for Runtime {
             }
         }))
     }
-    fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
-        panic!("no task expected")
+    fn spawn_local(&self, task: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
+        self.driver.spawn_local(task)
     }
     fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
@@ -96,7 +99,7 @@ impl ExchangeRuntime for Runtime {
         Box::pin(async { unreachable!() })
     }
 }
-fn base(runtime: Rc<Runtime>) -> BaseExchange {
+fn base(runtime: Rc<dyn ExchangeRuntime>) -> BaseExchange {
     BaseExchange::new(
         ExchangeName::Bybit,
         serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
@@ -174,9 +177,10 @@ fn signer_wait_absent_or_ready_returns_without_registering_listener() {
 }
 
 #[test]
-fn signer_wait_starts_before_first_poll_and_unpolled_drop_cleans_up() {
+fn signer_wait_starts_before_first_poll_and_unpolled_drop_keeps_subscription() {
     let signer = Signer::new(false);
-    let mut base = base(Rc::new(Runtime::default()));
+    let runtime = Rc::new(Runtime::default());
+    let mut base = base(runtime.clone());
     base.signers.remote_signer = Some(signer.clone());
     let statuses = Rc::new(RefCell::new(vec![]));
     let recorded = statuses.clone();
@@ -201,19 +205,28 @@ fn signer_wait_starts_before_first_poll_and_unpolled_drop_cleans_up() {
         "SIGNER native invocation registers before first poll"
     );
     drop(waiter);
-    assert!(
-        signer.callbacks.borrow().is_empty(),
-        "SIGNER native unpolled drop releases subscription"
+    assert_eq!(
+        signer.callbacks.borrow().len(),
+        1,
+        "discarded Promise stays subscribed"
     );
-    assert_eq!(signer.unsubscribed.get(), 1);
+    assert_eq!(signer.unsubscribed.get(), 0);
     signer.notify(true);
-    assert_eq!(*statuses.borrow(), [json!("disconnected")]);
+    assert!(signer.callbacks.borrow().is_empty());
+    assert_eq!(signer.unsubscribed.get(), 1);
+    assert_eq!(
+        *statuses.borrow(),
+        [json!("disconnected"), json!("connected")]
+    );
+    runtime.driver.advance(0);
+    assert!(runtime.driver.tasks.borrow().is_empty());
 }
 
 #[test]
 fn signer_wait_disconnect_callback_settles_once_and_unsubscribes() {
     let signer = Signer::new(false);
-    let mut base = base(Rc::new(Runtime::default()));
+    let runtime = Rc::new(Runtime::default());
+    let mut base = base(runtime.clone());
     base.signers.remote_signer = Some(signer.clone());
     let statuses = Rc::new(RefCell::new(vec![]));
     let recorded = statuses.clone();
@@ -238,6 +251,7 @@ fn signer_wait_disconnect_callback_settles_once_and_unsubscribes() {
         vec![json!("disconnected"), json!("connected")]
     );
     base.dispose().unwrap();
+    runtime.driver.advance(0);
     assert!(matches!(poll(waiter.as_mut()), Poll::Ready(Ok(true))));
     assert_eq!(signer.unsubscribed.get(), 1);
     assert!(signer.callbacks.borrow().is_empty());
@@ -252,11 +266,13 @@ fn signer_wait_disconnect_callback_settles_once_and_unsubscribes() {
 #[test]
 fn disposal_settles_signer_wait_false_and_unsubscribes_without_connected_event() {
     let signer = Signer::new(false);
-    let mut base = base(Rc::new(Runtime::default()));
+    let runtime = Rc::new(Runtime::default());
+    let mut base = base(runtime.clone());
     base.signers.remote_signer = Some(signer.clone());
     let mut waiter = Box::pin(base.wait_for_remote_signer());
     assert!(poll(waiter.as_mut()).is_pending());
     base.dispose().unwrap();
+    runtime.driver.advance(0);
     assert!(matches!(poll(waiter.as_mut()), Poll::Ready(Ok(false))));
     assert_eq!(signer.unsubscribed.get(), 1);
     assert!(signer.callbacks.borrow().is_empty());
@@ -669,9 +685,10 @@ fn dropping_worker_waiter_releases_its_listener_and_waker() {
 }
 
 #[test]
-fn cancelled_signer_waits_release_subscription_and_ignore_late_callbacks() {
+fn discarded_signer_waits_remain_independent_and_release_on_disposal() {
+    let runtime = Rc::new(Runtime::default());
     let signer = Signer::new(false);
-    let mut base = base(Rc::new(Runtime::default()));
+    let mut base = base(runtime.clone());
     base.signers.remote_signer = Some(signer.clone());
     let statuses = Rc::new(RefCell::new(vec![]));
     let recorded = statuses.clone();
@@ -684,28 +701,36 @@ fn cancelled_signer_waits_release_subscription_and_ignore_late_callbacks() {
             Ok(())
         }),
     );
-    let mut stale_callbacks = vec![];
-    for _ in 0..5 {
+    let mut callbacks = vec![];
+    for count in 1..=5 {
         let mut task = Box::pin(base.wait_for_remote_signer());
         assert!(poll(task.as_mut()).is_pending());
-        stale_callbacks.extend(signer.callbacks.borrow().iter().cloned());
-        drop(task); // Here the caller future owns the subscription; no detached task exists.
-        assert!(
-            signer.callbacks.borrow().is_empty(),
-            "cancelled signer subscription leaked"
-        );
+        drop(task);
+        assert_eq!(signer.callbacks.borrow().len(), count);
     }
+    callbacks.extend(signer.callbacks.borrow().iter().cloned());
+    assert_eq!(signer.unsubscribed.get(), 0);
+    callbacks[0](true);
+    assert_eq!(signer.unsubscribed.get(), 1);
+    assert_eq!(signer.callbacks.borrow().len(), 4);
+    base.dispose().unwrap();
+    assert!(signer.callbacks.borrow().is_empty());
     assert_eq!(signer.unsubscribed.get(), 5);
-    for callback in stale_callbacks {
+    for callback in callbacks {
         callback(true);
     }
+    runtime.driver.advance(0);
+    let mut expected = vec![json!("disconnected"); 5];
+    expected.push(json!("connected"));
     assert_eq!(
         *statuses.borrow(),
-        vec![json!("disconnected"); 5],
-        "cancelled waits emitted connected"
+        expected,
+        "late callbacks cannot repeat completion"
     );
-    base.dispose().unwrap();
-    assert_eq!(signer.unsubscribed.get(), 5, "cleanup must be idempotent");
+    assert!(
+        runtime.driver.tasks.borrow().is_empty(),
+        "settled drivers release captures"
+    );
 }
 
 #[test]
@@ -775,6 +800,8 @@ fn signer_listener_throw_keeps_source_settled_but_unresolved_state() {
         poll(waiter.as_mut()).is_pending(),
         "source already-settled callback cannot be resolved by disposal"
     );
+    drop(waiter);
+    runtime.driver.tasks.borrow_mut().clear();
 }
 
 #[test]
@@ -885,4 +912,151 @@ fn live_divergence_prefix_source() {
         "EXCHANGE_PREFIX_SOURCE signer=1 pager=6 resync=1\n",
         "PREFIX independent source completion marker"
     );
+}
+
+#[test]
+fn discarded_signer_waiter_keeps_source_subscription_until_completion() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/listener-oracle.cjs"
+        ))
+        .arg("--signer-lifetime")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        expected,
+        json!([
+            {"finish":"available","events":["disconnected","connected"],"removals":1},
+            {"finish":"disposed","events":["disconnected"],"removals":1}
+        ])
+    );
+    let mut actual = vec![];
+    for finish in ["available", "disposed"] {
+        let signer = Signer::new(false);
+        let runtime = Rc::new(Runtime::default());
+        let mut base = base(runtime.clone());
+        base.signers.remote_signer = Some(signer.clone());
+        let events = Rc::new(RefCell::new(vec![]));
+        let recorded = events.clone();
+        base.on(
+            "remoteSignerStatus",
+            Rc::new(move |_, value| {
+                recorded
+                    .borrow_mut()
+                    .push(safe_cex_exchange::js_runtime::value::to_json(value).unwrap());
+                Ok(())
+            }),
+        );
+        drop(base.wait_for_remote_signer());
+        assert_eq!(
+            signer.callbacks.borrow().len(),
+            1,
+            "SIGNER_DISCARDED keeps source subscription"
+        );
+        if finish == "available" {
+            signer.notify(true);
+        } else {
+            base.dispose().unwrap();
+        }
+        runtime.driver.advance(0);
+        assert!(runtime.driver.tasks.borrow().is_empty());
+        assert!(signer.callbacks.borrow().is_empty());
+        assert_eq!(signer.unsubscribed.get(), 1);
+        actual.push(
+            json!({"finish":finish,"events":*events.borrow(),"removals":signer.unsubscribed.get()}),
+        );
+        base.dispose().unwrap();
+        assert_eq!(
+            signer.unsubscribed.get(),
+            1,
+            "completion cleanup is idempotent"
+        );
+    }
+    assert_eq!(Value::Array(actual), expected);
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn native_signer_waiter_drop_preserves_callback_and_releases_captures() {
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        for available in [true, false] {
+            let runtime = safe_cex_exchange::native::native_runtime();
+            let signer = Signer::new(false);
+            let mut base = BaseExchange::new(
+                ExchangeName::Bybit,
+                serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+                runtime,
+                ExchangeSettings::default(),
+            );
+            base.signers.remote_signer = Some(signer.clone());
+            let statuses = Rc::new(RefCell::new(vec![]));
+            let recorded = statuses.clone();
+            base.on(
+                "remoteSignerStatus",
+                Rc::new(move |_, value| {
+                    recorded
+                        .borrow_mut()
+                        .push(safe_cex_exchange::js_runtime::value::to_json(value).unwrap());
+                    Ok(())
+                }),
+            );
+            let waiter = base.wait_for_remote_signer();
+            assert_eq!(*statuses.borrow(), [json!("disconnected")]);
+            drop(waiter);
+            tokio::task::yield_now().await;
+            assert_eq!(signer.callbacks.borrow().len(), 1);
+            if available {
+                signer.notify(true);
+            } else {
+                base.dispose().unwrap();
+            }
+            tokio::task::yield_now().await;
+            assert!(signer.callbacks.borrow().is_empty());
+            assert_eq!(signer.unsubscribed.get(), 1);
+            assert_eq!(
+                *statuses.borrow(),
+                if available {
+                    vec![json!("disconnected"), json!("connected")]
+                } else {
+                    vec![json!("disconnected")]
+                }
+            );
+            base.dispose().unwrap();
+            drop(base);
+            tokio::task::yield_now().await;
+            assert_eq!(
+                Rc::strong_count(&statuses),
+                1,
+                "completion releases listener captures"
+            );
+        }
+    });
+}
+
+#[test]
+fn signer_runtime_shutdown_releases_pending_subscription() {
+    let runtime = Rc::new(Runtime::default());
+    let signer = Signer::new(false);
+    let mut base = base(runtime.clone());
+    base.signers.remote_signer = Some(signer.clone());
+    drop(base.wait_for_remote_signer());
+    assert_eq!(signer.callbacks.borrow().len(), 1);
+    assert_eq!(signer.unsubscribed.get(), 0);
+    runtime.driver.tasks.borrow_mut().clear();
+    assert!(signer.callbacks.borrow().is_empty());
+    assert_eq!(signer.unsubscribed.get(), 1);
+    base.dispose().unwrap();
+    assert_eq!(signer.unsubscribed.get(), 1);
 }

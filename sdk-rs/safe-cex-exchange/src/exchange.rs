@@ -1358,7 +1358,7 @@ impl BaseExchange {
         } else {
             *waiter.unsubscribe.borrow_mut() = Some(cleanup);
         }
-        Box::pin(async move {
+        crate::eager::start_eager(&self.runtime, async move {
             let _guard = guard;
             std::future::poll_fn(|cx| {
                 if let Some(value) = *waiter.result.borrow() {
