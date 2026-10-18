@@ -359,6 +359,15 @@ clock. Rate limiting, heartbeat timing and private refresh throttles retain thei
 source monotonic or Date.now clocks. The native routing and private reopen
 regressions distinguish synced time from an unrelated host clock.
 
+The constructed ticker corpus in `tests/exchange_trait.rs` observes 72 cases / 216 ticker, trade, bookTicker and depth frames
+through the production socket protocol and DefaultStore. Independent null,
+string, NaN-producing, object, overflow, signed-zero and false fields accompany
+distinct good rows. The maintained TS constructor and actual DefaultStore provide
+native numeric-bit expectations. Fresh TS receivers and advancing native clocks
+isolate numeric mapping from throttle timing. `ticker-native-controls.py backpack`
+compiles a live publication fault, requires a native assertion failure, then
+restores exact source bytes and requires the named test to pass.
+
 The concrete leverage catch emits the helper-created native Error value rather
 than its message string. The constructed Exchange regression drives a successful
 account PATCH followed by a malformed position refresh, checks the committed
