@@ -1480,6 +1480,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             let s = scope_of(&rt)?;
             let array = arg(&a, 0);
             let callback = arg(&a, 1);
+            let runtime = s.exchange_runtime();
             let supplied = arg(&a, 2);
             let receiver = if supplied.truthy() {
                 supplied
@@ -1497,7 +1498,9 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                     let key = index.to_string();
                     if in_operator(&array, &key)? {
                         let call = callback.get("call")?;
-                        let value = await_js(array.get(&key)?).await?;
+                        let value =
+                            await_js(Js::Promise(Promise::resolve(&runtime, array.get(&key)?)))
+                                .await?;
                         let pending = call.call(
                             callback.clone(),
                             vec![
@@ -1507,7 +1510,8 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                                 array.clone(),
                             ],
                         )?;
-                        let value = await_js(pending).await?;
+                        let value =
+                            await_js(Js::Promise(Promise::resolve(&runtime, pending))).await?;
                         if collect {
                             out.set(&key, value)?;
                         }

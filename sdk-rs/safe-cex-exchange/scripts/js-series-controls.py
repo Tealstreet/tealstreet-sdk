@@ -1,19 +1,26 @@
 from pathlib import Path
 import os
 import subprocess
+import sys
 
 workspace = Path(__file__).resolve().parents[2]
 source = workspace / 'safe-cex-exchange/src/js_runtime/library.rs'
+if len(sys.argv) > 1 and sys.argv[1] == 'thenable-resolution':
+    source = workspace / 'safe-cex-exchange/src/js_runtime/promise.rs'
 output = Path('/tmp/js-series-controls')
 output.mkdir(exist_ok=True)
 saved = source.read_bytes()
 cases = [
-    ('input-await', b'await_js(array.get(&key)?).await?', b'array.get(&key)?',
+    ('input-await', b'await_js(Js::Promise(Promise::resolve(&runtime, array.get(&key)?)))', b'std::future::ready(Ok::<_, Thrown>(array.get(&key)?))',
      'installed_series_helpers_match_package_live_slots_awaits_and_receivers', 'SERIES_SOURCE'),
     ('module-root', b'NATIVE_MODULE_ROOTS: [&str; 1] = ["p-iteration"]',
      b'NATIVE_MODULE_ROOTS: [&str; 1] = ["not-loaded"]',
      'series_module_roots_survive_export_removal_and_release_with_scope', 'SERIES_MODULE'),
 ]
+if len(sys.argv) > 1 and sys.argv[1] == 'thenable-resolution':
+    cases = [('thenable-resolution', b'resolve_promise(promise.clone(), value);',
+              b'promise.settle(Ok(value));',
+              'installed_series_helpers_match_package_live_slots_awaits_and_receivers', 'SERIES_SOURCE')]
 for label, original, mutated, test, assertion in cases:
     assert saved.count(original) == 1, label
     command = ['cargo', '+1.99.0', 'test', '--locked', '-p', 'safe-cex-exchange',
