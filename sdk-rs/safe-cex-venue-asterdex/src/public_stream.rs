@@ -13,6 +13,7 @@ use safe_cex_exchange::{
 use safe_cex_num::{js_string, js_truthy};
 use safe_cex_store::model_patch::ModelPatch;
 use safe_cex_transport::socket::SocketFrame;
+use safe_cex_types::retained_json::RetainedJsonInput;
 use safe_cex_types::{AnyTimeframe, Ticker};
 use serde_json::Value;
 use std::{
@@ -107,6 +108,32 @@ fn coerce(e: safe_cex_num::JsCoercionError) -> ExchangeError {
 fn string(v: Option<&Value>) -> Result<String, ExchangeError> {
     js_string(v).map_err(coerce)
 }
+// Public callback arguments have a typed Value ABI. Only that String view is
+// normalized; canonical capture owns parsing, and its scalar projection keeps
+// numeric lexemes (including overflowing JSON numbers) instead of JSON writing.
+fn callback_data(input: RetainedJsonInput) -> Result<Value, serde_json::Error> {
+    Ok(match input {
+        RetainedJsonInput::Text(_) => Value::String(input.decode_native(false)?),
+        RetainedJsonInput::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(callback_data)
+                .collect::<Result<_, _>>()?,
+        ),
+        RetainedJsonInput::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| {
+                    Ok((
+                        RetainedJsonInput::Text(key).decode_native(false)?,
+                        callback_data(value)?,
+                    ))
+                })
+                .collect::<Result<_, serde_json::Error>>()?,
+        ),
+        scalar => scalar.into_value()?,
+    })
+}
 impl PublicStream {
     // ts: AsterDEXPublicWebsocket.constructor
     pub fn new(
@@ -188,9 +215,9 @@ impl PublicStream {
                 SocketFrame::Binary(b) => String::from_utf8_lossy(b).into_owned(),
                 SocketFrame::Close { .. } => return Ok(()),
             };
-            let json = safe_cex_transport::signing::try_parse_params_json(
-                serde_json::from_str(&text).map_err(|e| ExchangeError::new(e.to_string()))?,
-            );
+            let captured: RetainedJsonInput =
+                serde_json::from_str(&text).map_err(|e| ExchangeError::new(e.to_string()))?;
+            let json = callback_data(captured).map_err(|e| ExchangeError::new(e.to_string()))?;
             if !js_truthy(Some(&json)) {
                 return Ok(());
             }
