@@ -705,11 +705,7 @@ fn native_rest_array_host_retains_owner_and_inherited_getter_completion() {
     prototype
         .define_accessor(
             "0",
-            Some(Rc::new(move |_| {
-                Err(Thrown {
-                    value: thrown.clone(),
-                })
-            })),
+            Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
             None,
         )
         .unwrap();
