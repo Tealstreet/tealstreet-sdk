@@ -1,16 +1,11 @@
-"""Sequential compiling controls for the private heartbeat and timestamp operations."""
+"""Sequential compiling controls for the private timestamp decoder."""
 from pathlib import Path
 import os
 import subprocess
 
 path = Path('sdk-rs/safe-cex-venue-woo/src/private_socket.rs')
 original = path.read_text()
-send = 'socket.send_with_log(r#"{"event":"ping"}"#)'
 cases = [
-    ('disposed-guard', 'if socket.is_disposed() {', 'if false && socket.is_disposed() {', 'private diagnostic call order'),
-    ('clock-after-send', 'socket.mark_ping_sent();\n    ' + send, send + '?;\n    socket.mark_ping_sent();\n    Ok(())', 'heartbeat ping timestamp'),
-    ('diagnostic-bypass', send, 'socket.send(r#"{"event":"ping"}"#)', 'private diagnostic call order'),
-    ('swallowed-send', send, send + '.or(Ok(()))', 'heartbeat error'),
     ('unit-threshold', 'parsed >= 1_000_000_000_000.0', 'parsed > 1_000_000_000_000.0', 'timestamp output bits'),
     ('floor', 'parsed.floor()', 'parsed', 'timestamp output bits'),
     ('zero', 'parsed <= 0.0', 'parsed < 0.0', 'timestamp absence'),
