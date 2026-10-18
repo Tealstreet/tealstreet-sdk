@@ -1486,7 +1486,7 @@ impl Js {
         props.borrow_mut().insert(key.into(), next);
         Ok(())
     }
-    fn has_property(&self, key: &[u16]) -> bool {
+    pub(super) fn has_property(&self, key: &[u16]) -> bool {
         if self
             .own_props()
             .is_some_and(|p| p.borrow().contains_key(key))
@@ -1494,6 +1494,11 @@ impl Js {
             return true;
         }
         match self {
+            Js::Array(items) => {
+                key == utf16("length").as_ref()
+                    || array_index(key)
+                        .is_some_and(|i| matches!(items.borrow().get(i), Some(Some(_))))
+            }
             Js::Function(_) if key == utf16("name").as_ref() => true,
             Js::Builtin(reference) => String::from_utf16(key).is_ok_and(|key| {
                 reference.own_fields().contains_key(&key)

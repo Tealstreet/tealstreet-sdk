@@ -1743,6 +1743,13 @@ Independent dropped-retention and leaked-retention faults must compile, fail nam
 assertions, restore exact source and pass. This adds no native resource wire codec
 and does not switch a Hyperliquid consumer or change default prototype policy.
 
+The shared `in` operator validates the right-hand receiver, then reuses canonical
+property-presence traversal for ordinary objects, functions and intrinsics.
+Presence includes own undefined values, nonenumerable accessors and function
+names without invoking getters; array length and present indices remain covered.
+`tests/js_in_function_prototypes.rs` compares mixed prototype chains and null
+termination with Node. The original helper compiles but fails this witness;
+the independent function-bypass fault must fail and restore green as well.
 Ordinary objects can retain one native WriteObserver, installed or cleared by
 set_write_observer. Successful assignments notify after the property operation,
 including inherited setters, using the original receiver, UTF-16 key and value.
@@ -1761,3 +1768,14 @@ NaN and signed zero reach the reporting sink intact. Native terminal formatting
 is a sink choice. Typed `ExchangeError` diagnostic strings keep their existing
 shape; original UTF-16 name/message fields use the existing retained callback
 cause and are restored only while their diagnostic views remain unchanged.
+
+## ccxt compatibility imports
+
+The shared library installs ccxt-compat numberToString, parsePrecision,
+five-argument decimalToPrecision, safeString and precision mode constants.
+The decimal formatter follows functions/number.ts, including strict mode
+comparisons and source coercion order; it is distinct from safe-cex-num's
+one-argument precision-count helper. The installed native/source tests cover
+123 scalar cases, UTF16 results, original value/throw identity, repeated property
+reads and precision operand coercion. The separate Realm implementation is
+removed only with the atomic Hyperliquid family consolidation.

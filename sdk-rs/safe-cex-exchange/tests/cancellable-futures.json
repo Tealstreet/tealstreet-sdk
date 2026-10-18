@@ -1927,9 +1927,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "f6c765e86e987fb42eae7ead78e03f4af4e9eb83ba1f7fbfaa5a875d14289d13",
+      "producer_sha256": "1a53b6f17d5c0e6c7dac748dd4e60b75d1061301283abb9e4f6603ff5e35e38d",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to the existing Promise/Jobs owner; no exchange in-flight slot or shared borrow spans an await. The serial repair adds one awaited input before the existing callback-result await, for eight syntactic async boundaries. Each serial invocation retains its original input/callback/receiver and local output; the scope privately roots the module while exported functions capture it weakly. Canonical Promise.resolve owns thenable jobs through the existing FIFO driver. Existing throttle timer ownership remains delegated to Scope.set_timeout/clear_timeout. Native installed-package and module-release witnesses verify settlement, escaped exports and absence of scope/module cycles."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to the existing Promise/Jobs owner; no exchange in-flight slot or shared borrow spans an await. The serial repair adds one awaited input before the existing callback-result await, for eight syntactic async boundaries. Each serial invocation retains its original input/callback/receiver and local output; the scope privately roots the module while exported functions capture it weakly. Canonical Promise.resolve owns thenable jobs through the existing FIFO driver. Existing throttle timer ownership remains delegated to Scope.set_timeout/clear_timeout. Native installed-package and module-release witnesses verify settlement, escaped exports and absence of scope/module cycles. Reviewed ccxt import registration adds only synchronous native functions/constants; existing future creators, async boundaries, owner latches and cancellation delegation remain unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",

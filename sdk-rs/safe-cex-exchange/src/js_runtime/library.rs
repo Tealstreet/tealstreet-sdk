@@ -99,17 +99,7 @@ pub fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
             "Cannot use 'in' operator to search for '{key}' in {rhs}"
         )));
     }
-    if obj.has_own(key) {
-        return Ok(true);
-    }
-    match obj {
-        Js::Object(o) => match o.proto.borrow().as_ref() {
-            Some(proto) if !matches!(proto, Js::Null) => in_operator(proto, key),
-            _ => Ok(false),
-        },
-        Js::Array(_) => Ok(key == "length"),
-        _ => Ok(false),
-    }
+    Ok(obj.has_property(&super::value::utf16(key)))
 }
 
 /// lodash compareAscending: undefined, then null, then NaN sort last.
@@ -1356,6 +1346,7 @@ fn define_on(owner: &Js, key: &str, value: Js) {
 
 /// Install the shared utility modules next to `install_builtins`' globals.
 pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
+    super::ccxt::install(g).expect("fresh native import descriptors admit ccxt utilities");
     let def = |k: &str, v: Js| define_on(g, k, v);
     def("times", func("times", |args| lodash_times(&args)));
     let scoped = |name: &'static str, f: fn(&Scope<X>, Vec<Js>) -> Result<Js, Thrown>| -> Js {
