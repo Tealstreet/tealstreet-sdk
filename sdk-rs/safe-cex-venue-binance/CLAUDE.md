@@ -648,3 +648,12 @@ Keep production imports explicit. The canonical accepted-set scanner must prove
 macro provenance across each source scope; wildcard imports can hide that proof
 even when the current business logic compiles. Import changes also require review
 of any affected source pins; nested helper bodies keep their existing contracts.
+
+The private-construction Clone reviews in the Binance construction policy cover
+three reusable capabilities: the inverse listener retry context, shared class
+settlement observations and captured private arrows with their receiver/base
+leases. The disconnected candle-listener witness executes the actual retry
+clone before a real socket frame and cleanup; the native private-clone witness
+holds a listen-key request, drops the original settlement and observes both
+clones before invoking a cloned reconnect arrow. These reviews do not classify
+raw-input decoders or widen accepted representations.
