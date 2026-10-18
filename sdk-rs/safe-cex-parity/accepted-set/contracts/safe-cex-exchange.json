@@ -21809,7 +21809,29 @@
           ]
         ],
         "output": {
-          "primitive": "bool"
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
         },
         "is_c_variadic": false
       },
@@ -21818,7 +21840,7 @@
         "where_predicates": []
       }
     },
-    "evidence": "safe-cex-exchange/src/js_runtime/library.rs::in_operator; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
+    "evidence": "safe-cex-exchange/src/js_runtime/library.rs::in_operator; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later. Fresh compiler Result<bool,Thrown> API reviewed; tests/js_in_function_prototypes.rs compares actual native function/intrinsic chains with Node without reading getters, and js_get_key_in.rs preserves primitive refusal/source cases.",
     "reason": "Tests key presence on an existing native receiver, preserving source TypeError behavior for invalid receivers. It creates no decoded record."
   },
   "safe_cex_exchange::js_runtime::library::qs_encode": {

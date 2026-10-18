@@ -1741,3 +1741,11 @@ resolution operation. Serial helpers use it before awaiting input and callback
 results, preserving synchronous then lookup, deferred invocation, first-call
 settlement and original rejection identity. General direct await/async-return
 and combinator adoption remains a separately recorded follow-up after #901.
+
+The shared `in` operator validates the right-hand receiver, then reuses canonical
+property-presence traversal for ordinary objects, functions and intrinsics.
+Presence includes own undefined values, nonenumerable accessors and function
+names without invoking getters; array length and present indices remain covered.
+`tests/js_in_function_prototypes.rs` compares mixed prototype chains and null
+termination with Node. The original helper compiles but fails this witness;
+the independent function-bypass fault must fail and restore green as well.
