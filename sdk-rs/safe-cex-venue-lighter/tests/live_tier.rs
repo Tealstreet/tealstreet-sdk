@@ -353,6 +353,8 @@ const rows=Object.entries(cases).map(([label,input])=>{
             }
         };
         assert_eq!(actual, row["expected"], "{row}");
-        payload.delete(&"extra".encode_utf16().collect::<Vec<_>>());
+        payload
+            .delete(&"extra".encode_utf16().collect::<Vec<_>>())
+            .unwrap();
     }
 }

@@ -190,7 +190,8 @@ async fn sign(
             "url",
             Js::str(&format!("{}?{query}", string(&get(&next, "url")?)?)),
         )?;
-        next.delete(&"params".encode_utf16().collect::<Vec<_>>());
+        next.delete(&"params".encode_utf16().collect::<Vec<_>>())
+            .map_err(|error| error.message())?;
     }
     let preimage = if v3 {
         let url = get(&next, "url")?;
@@ -239,7 +240,7 @@ async fn sign(
                 .iter()
                 .any(|expected| name.eq_ignore_ascii_case(expected))
         {
-            headers.delete(&key);
+            headers.delete(&key).map_err(|error| error.message())?;
         }
     }
     set(
@@ -250,7 +251,8 @@ async fn sign(
     set(&headers, "x-api-signature", Js::str(&signature))?;
     if !v3 && mutation {
         set(&next, "data", Js::str(query.as_deref().unwrap_or("")))?;
-        next.delete(&"params".encode_utf16().collect::<Vec<_>>());
+        next.delete(&"params".encode_utf16().collect::<Vec<_>>())
+            .map_err(|error| error.message())?;
         let key = headers.own_keys().into_iter().find(|key| {
             String::from_utf16(key).is_ok_and(|key| key.eq_ignore_ascii_case("content-type"))
         });

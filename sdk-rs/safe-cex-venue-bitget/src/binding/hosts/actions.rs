@@ -495,7 +495,7 @@ impl RestActionsHost for Rt {
                 "Cannot convert undefined or null to object",
             ));
         }
-        value.delete(&property_key(key)?);
+        value.delete(&property_key(key)?)?;
         Ok(())
     }
     fn truthy(&self, value: &Js) -> bool {
@@ -963,7 +963,7 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
             for path in a.iter().skip(1) {
                 let paths = path.array_values().unwrap_or_else(|| vec![path.clone()]);
                 for p in paths {
-                    out.delete(&property_key(&p)?);
+                    out.delete(&property_key(&p)?)?;
                 }
             }
             Ok(out)

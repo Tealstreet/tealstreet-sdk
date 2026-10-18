@@ -87,7 +87,9 @@ fn source_accessor_flags_identity_and_frozen_setter_match_node() {
         Js::object(vec![("get", Js::function("other", |_, _| Ok(Js::Null)))]),
     )
     .is_err();
-    target.delete(&"x".encode_utf16().collect::<Vec<_>>());
+    target
+        .reflect_delete(&"x".encode_utf16().collect::<Vec<_>>())
+        .unwrap();
     let after = descriptor(&object, &target, "x");
     let child = Js::object(vec![("tag", Js::Number(22.0))]);
     let Js::Object(data) = &child else {
