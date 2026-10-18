@@ -192,6 +192,14 @@ emitter. It emits exactly once, then returns the unsupported-margin Error; an
 emitter failure takes precedence and retains its metadata. Unused isolated and
 symbol inputs are omitted; concrete class/emitter composition remains pending.
 
+The three `leverage` function contracts pin typed command APIs, including the
+shared setter reached by both live exchange classes. Their classification receipts
+do not execute the commands or admit raw records. The separate `leverage` test
+target compares 138 maintained source cases and four inherited-market guards,
+observes native finite/signed-zero bits and nonfinite classes before projection,
+and checks both families cannot write Store state while POST remains pending.
+Use canonical accepted-set `--measure --module=leverage` for the scoped receipts.
+
 Generated wire records capture shared JsNumberInput at their public Deserialize
 entry, then call the private remote companion through strict_decode::object. Keep
 all field/default/presence attributes on that schema and keep the explicit
@@ -676,6 +684,13 @@ production file after each control. Historical `ORDERS_THROTTLE*_EXITS.json`
 receipts describe the retired oracle-only helper; they are not current class
 execution evidence. No package script directly names the deleted target/oracle;
 the existing all-targets Binance oracle command continues to discover live tests.
+
+The private/order alias review covers thirteen live capabilities with individual
+compiler contracts and actual native binding/fault witnesses. See
+`PRIVATE_ORDER_ALIAS_REVIEW.md` and `scripts/private-order-alias-contracts.mjs`.
+`RefreshCallback` and `KeyFuture` were retired with test-only scheduling and key
+wrappers. Keep the live receiver's native key future, retry/refresh methods and
+single shared detach helper; do not restore parallel helpers for the census.
 
 
 The private REST `SnapshotCall` capture preserves each source console argument
