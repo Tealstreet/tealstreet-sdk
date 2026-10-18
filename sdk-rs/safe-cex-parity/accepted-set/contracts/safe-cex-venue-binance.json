@@ -12111,6 +12111,1344 @@
       }
     ]
   },
+"safe_cex_venue_binance::request_weight::get_response_header": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_response_header",
+      "signature": {
+        "inputs": [
+          [
+            "has_headers",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "get_member",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::HeaderGetMember",
+                                          "args": null
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "property",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "core::option::Option",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "serde_json::value::Value",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut() -> Result<HeaderGetMember, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::HeaderGetMember",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Result<Option<Value>, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "serde_json::value::Value",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Finite production output/effect observations of the actual request-weight function; preserve presence, binary64 duration bits, callback order, and original Rc error identity before observation encoding. The separate native signed HTTP witness constructs actual Futures/PM/Spot owners and reads their pause state. No arbitrary callback or raw HTTP object admission claim.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/request-weight-observers.rs\")); } witness::header($value, |has,name,get,property| $type(has,name,get,property)) }",
+    "cases": [
+      {
+        "input": {
+          "has": false,
+          "mode": "member-error"
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "call",
+          "answer": "literal"
+        },
+        "output": {
+          "result": {
+            "some": "literal"
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "get",
+              2
+            ],
+            [
+              "call",
+              "X-Test"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "call",
+          "answer": null
+        },
+        "output": {
+          "result": {
+            "some": null
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "get",
+              2
+            ],
+            [
+              "call",
+              "X-Test"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "flip"
+        },
+        "output": {
+          "result": {
+            "name": "TypeError",
+            "message": "headers.get is not a function",
+            "original": false
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "get",
+              2
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {
+            "X-Test": 0
+          }
+        },
+        "output": {
+          "result": {
+            "some": {
+              "bits": "0000000000000000"
+            }
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {
+            "X-Test": null,
+            "x-test": false
+          }
+        },
+        "output": {
+          "result": {
+            "some": false
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ],
+            [
+              "property",
+              "x-test"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {
+            "X-TEST": "upper"
+          }
+        },
+        "output": {
+          "result": {
+            "some": "upper"
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ],
+            [
+              "property",
+              "x-test"
+            ],
+            [
+              "property",
+              "X-TEST"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {
+            "X-TEST": null
+          }
+        },
+        "output": {
+          "result": {
+            "some": null
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ],
+            [
+              "property",
+              "x-test"
+            ],
+            [
+              "property",
+              "X-TEST"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "properties": {}
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ],
+            [
+              "property",
+              "x-test"
+            ],
+            [
+              "property",
+              "X-TEST"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "member-error"
+        },
+        "output": {
+          "result": {
+            "name": "Error",
+            "message": "header failure",
+            "original": true
+          },
+          "events": [
+            [
+              "get",
+              1
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "has": true,
+          "mode": "property-error"
+        },
+        "output": {
+          "result": {
+            "name": "Error",
+            "message": "header failure",
+            "original": true
+          },
+          "events": [
+            [
+              "get",
+              1
+            ],
+            [
+              "property",
+              "X-Test"
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::request_weight::observe_request_weight": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "observe_request_weight",
+      "signature": {
+        "inputs": [
+          [
+            "status",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "header",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "core::option::Option",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "serde_json::value::Value",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "pause",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "f64"
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(&str) -> Result<Option<Value>, Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "serde_json::value::Value",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(f64) -> Result<(), Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "f64"
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Finite production output/effect observations of the actual request-weight function; preserve presence, binary64 duration bits, callback order, and original Rc error identity before observation encoding. The separate native signed HTTP witness constructs actual Futures/PM/Spot owners and reads their pause state. No arbitrary callback or raw HTTP object admission claim.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/request-weight-observers.rs\")); } witness::weight($value, |status,header,pause| $type(status,header,pause)) }",
+    "cases": [
+      {
+        "input": {
+          "value": "2",
+          "status": 429
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "409f400000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "status": 418
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity",
+          "status": 429
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "status": 429
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": [],
+          "status": 429
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 1919,
+          "status": 200
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 1920,
+          "status": 200
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "1921",
+          "status": 200
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ],
+            [
+              "pause",
+              "40ed4c0000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 2,
+          "status": "429"
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "nonsense"
+        },
+        "output": {
+          "result": {
+            "none": true
+          },
+          "events": [
+            [
+              "header",
+              "x-mbx-used-weight-1m"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "status": 429,
+          "value": 3,
+          "fail": "header"
+        },
+        "output": {
+          "result": {
+            "name": "Error",
+            "message": "weight failure",
+            "original": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "status": 429,
+          "value": 3,
+          "fail": "pause"
+        },
+        "output": {
+          "result": {
+            "name": "Error",
+            "message": "weight failure",
+            "original": true
+          },
+          "events": [
+            [
+              "header",
+              "retry-after"
+            ],
+            [
+              "pause",
+              "40a7700000000000"
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::request_weight::type_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "type_error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_binance::request_weight::Failure",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Finite production output/effect observations of the actual request-weight function; preserve presence, binary64 duration bits, callback order, and original Rc error identity before observation encoding. The separate native signed HTTP witness constructs actual Futures/PM/Spot owners and reads their pause state. No arbitrary callback or raw HTTP object admission claim.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/request-weight-observers.rs\")); } witness::diagnostic($value, |message| $type(message)) }",
+    "cases": [
+      {
+        "input": "",
+        "output": {
+          "name": "TypeError",
+          "units": []
+        }
+      },
+      {
+        "input": "header failure",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            104,
+            101,
+            97,
+            100,
+            101,
+            114,
+            32,
+            102,
+            97,
+            105,
+            108,
+            117,
+            114,
+            101
+          ]
+        }
+      },
+      {
+        "input": "é漢😀",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            233,
+            28450,
+            55357,
+            56832
+          ]
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            110,
+            117,
+            108,
+            108
+          ]
+        }
+      },
+      {
+        "input": "\u0000literal",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            0,
+            108,
+            105,
+            116,
+            101,
+            114,
+            97,
+            108
+          ]
+        }
+      }
+    ]
+  },
   "safe_cex_venue_binance::request_weight::ObserveGetter": {
     "category": "non-decoder",
     "evidence": "The production ExchangeState::install_guards constructs this zero-argument getter and resolves its weak owner at each interceptor invocation. The actual NativeImports request pipeline success/rejection cases exercise that resolution and the returned Observer before observing pause state.",

@@ -1702,6 +1702,10 @@ elisions; IteratorStepValue terminates on abrupt next/done/value access. Normal
 IteratorClose propagates cleanup errors and rejects primitive return results.
 Throwing completion preserves the original error after cleanup effects. Existing
 Array.from, Map/Set construction and iterable collection reuse these operations.
+Public `IteratorRecord::from_iterator` captures an already acquired iterator;
+callers that retain expression-specific GetMethod diagnostics use it without
+repeating Symbol.iterator lookup. Its accepted contract executes this constructor
+and `get` independently, with native sequence/exhaustion and primitive refusals.
 The installed-global witness compares Node next/done/value/body failures, while
 normal-close cases cover skipped getters, replaced next members, original bound
 references and return methods/getters/classes. These are core prerequisites;

@@ -472,6 +472,11 @@ an own balance property (None is undefined); Invalid has error only. Concrete
 class/client/fetch composition and arbitrary executable callback behaviors remain
 outside these extractions; preserve this boundary when wiring the classes.
 
+The three request-weight function contracts execute actual header presence/order,
+rate-limit coercion/effect and native error outputs. Keep all seven alias reviews
+separate. `REQUEST_WEIGHT_REVIEW.md` records the finite profiles, real signed HTTP
+Futures pause witness, PM/Spot no-guard controls and independent compiled faults
+with exact restoration. No receiver/local-function/cancellation pin is widened.
 
 ## Concrete class closure
 
