@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/binance/binanceinverse.exchange.ts"
-rust_files = [ "safe-cex-venue-binance/src/inverse/mod.rs", "safe-cex-venue-binance/src/inverse/ops.rs", "safe-cex-venue-binance/src/inverse/lifecycle.rs", "safe-cex-venue-binance/src/inverse/reads.rs", "safe-cex-venue-binance/src/inverse/orders.rs" ]
+rust_files = [ "safe-cex-venue-binance/src/inverse/mod.rs", "safe-cex-venue-binance/src/inverse/ops.rs", "safe-cex-venue-binance/src/inverse/lifecycle.rs", "safe-cex-venue-binance/src/inverse/reads.rs", "safe-cex-venue-binance/src/inverse/orders.rs", "safe-cex-exchange/src/js_runtime/library.rs" ]
 
 [[symbol]]
 ts = "describeBinanceInverseResponseShape"
@@ -334,9 +334,9 @@ note = "Native receiver body composed through shared Scope, BaseExchange, Store,
 ts = "BinanceInverseExchange.cancelOrders"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-binance/src/inverse/orders.rs::cancel_orders"
+rs = [ "safe-cex-venue-binance/src/inverse/orders.rs::cancel_orders", "safe-cex-exchange/src/js_runtime/library.rs::group_by" ]
 status = "ported"
-note = "Native receiver body composed through shared Scope, BaseExchange, Store, configured HTTP and socket services; imported operations keep their shared owners. Constructor/REST and actual socket witnesses inspect native values before terminal wire projection; registry witness constructs the real venue and verifies physical HTTP HMAC. This port is inside the existing Binance family module. Shared UTF-8 and closed typed facade boundaries remain those documented at sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #closed-typed-output-boundary. Finite witnesses do not claim exhaustive arbitrary getter/prototype behavior. Rust mapping: safe-cex-venue-binance/src/inverse/orders.rs::cancel_orders."
+note = "Native receiver body composed through shared Scope, BaseExchange, Store, configured HTTP and socket services; imported operations keep their shared owners. Constructor/REST and actual socket witnesses inspect native values before terminal wire projection; registry witness constructs the real venue and verifies physical HTTP HMAC. This port is inside the existing Binance family module. Shared UTF-8 and closed typed facade boundaries remain those documented at sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #closed-typed-output-boundary. Finite witnesses do not claim exhaustive arbitrary getter/prototype behavior. Rust mapping: safe-cex-venue-binance/src/inverse/orders.rs::cancel_orders. Split imported lodash property grouping into safe-cex-exchange/src/js_runtime/library.rs::group_by : source cancelOrders passes the fixed symbol property iteratee and declared Order array; native rows retain their aliases and group keys use JavaScript own-key order. Existing source helper body and cancellation witness establish batch10/partial-refusal ordering. This maps the imported algorithm at its consuming source body, without a second installed global path."
 
 [[symbol]]
 ts = "BinanceInverseExchange.cancelSymbolOrders"
