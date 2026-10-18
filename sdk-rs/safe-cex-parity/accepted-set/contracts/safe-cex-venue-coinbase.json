@@ -33587,6 +33587,45 @@
     "reason": "Shared mutable native update fields and independent own-property presence flags. Numeric values retain native NaN and negative zero; this is an already projected input root, not a raw response parser.",
     "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias; native trait detection must fail this role if Deserialize becomes available. tests/support/config_alias_native.rs directly observes constructed Advanced/Spot class adapters with NativeRuntime, actual account projection and request/private option adapters, the production OHLCV option and private-event adapters, and native update fields. It imports the maintained RFC test-vector key through CryptoHost and get_signing_key, checks the cache handle identity, invokes actual class websocket signing and verifies both signatures with the maintained Node/WebCrypto oracle. Finite role coverage only: update-root fields are observed directly, not a claim about every amendment or remote-signer flow. config-alias-controls.py mutates actual key-cache identity policy and private event array projection, requires named compiled assertion failures, restores exact source bytes and reruns the witnesses."
   },
+  "safe_cex_venue_coinbase::exchange_lifecycle::LifecycleTimer": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Mutable root for the original shared-runtime Js Timeout object. Cancellation must preserve that native handle identity; serialized JSON is not a timer token or decoder.",
+    "evidence": "The fresh canonical compiler/artifact/declaration probe authenticates the exact Js-backed alias and native trait detection refuses unreviewed decoder capabilities. tests/support/lifecycle_timer_native.rs constructs both real Coinbase variants with NativeRuntime and the production HTTP dependency, creates/cancels actual host timers, verifies no cancelled callback, and observes one uncancelled callback. The same expectation compiled RED on the old production JSON boundary. lifecycle-timer-controls.py independently reintroduces the real JSON roundtrip, requires both named compiled variant failures, restores exact source bytes and requires both GREEN. Scope is the actual Coinbase host timer capability, not arbitrary JSON timer records or other venue implementations."
+  },
   "safe_cex_venue_coinbase::market_position_reads::ReadItem": {
     "category": "decoder",
     "shape": "json",

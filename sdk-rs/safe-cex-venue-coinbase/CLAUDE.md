@@ -347,6 +347,14 @@ are observed directly; full amendment and remote-signer flows are not claimed.
 and event-array projection, requires named compiled failures, restores exact
 source bytes and reruns the same witnesses.
 
+Lifecycle timer roots retain the original shared-runtime Js Timeout handle.
+The native host passes that exact value from setTimeout to clearTimeout; JSON
+views cannot preserve its cancellation identity. Both Advanced and Spot native
+class witnesses cancel a real timer and retain an independent uncancelled timer.
+`lifecycle-timer-controls.py` restores the JSON-roundtrip defect, requires both
+named native failures, restores exact source bytes and reruns both witnesses.
+The fixed timer alias has a specific non-decoder capability receipt.
+
 The last ten structural data aliases have seven native decoder records and three
 non-decoder collection roles. `data-alias-contracts.mjs` authenticates fresh
 compiler targets and reads decoded contents before reporting; its controls lose
