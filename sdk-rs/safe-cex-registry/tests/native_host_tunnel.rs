@@ -680,6 +680,8 @@ fn native_factory_correlation_reads_only_primitive_metadata() {
                 js_runtime::{client, promise::await_js, value::Js},
             };
             let runtime = safe_cex_exchange::native::native_runtime();
+            let await_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
+                runtime.clone();
             let owner = Rc::new(BaseExchange::new(
                 safe_cex_types::ExchangeName::Woo,
                 serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
@@ -746,6 +748,7 @@ fn native_factory_correlation_reads_only_primitive_metadata() {
                     ("__tealstreetSigningCapture", Js::Bool(capture)),
                 ]);
                 let response = await_js(
+                    &await_runtime,
                     xhr.call_method("get", vec![Js::str("/metadata?private=discard"), config])
                         .unwrap(),
                 )

@@ -153,8 +153,16 @@ fn single_and_batch_cancels_bypass_the_read_rate_limiter() {
             1,
             "cancel must reach HTTP while the read window is full"
         );
-        h.drive(async { await_js(future).await.map_err(|e| e.to_exchange_error()) })
-            .unwrap();
+        h.drive(async {
+            await_js(
+                &(h.runtime.clone()
+                    as std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>),
+                future,
+            )
+            .await
+            .map_err(|e| e.to_exchange_error())
+        })
+        .unwrap();
     }
 }
 
@@ -196,7 +204,15 @@ fn binding_place_orders_rejects_duplicate_ids_before_any_http() {
         .call_method("placeOrders", vec![from_json(&json!([order, order]))])
         .unwrap();
     let error = h
-        .drive(async { await_js(future).await.map_err(|e| e.to_exchange_error()) })
+        .drive(async {
+            await_js(
+                &(h.runtime.clone()
+                    as std::rc::Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>),
+                future,
+            )
+            .await
+            .map_err(|e| e.to_exchange_error())
+        })
         .unwrap_err();
     assert_eq!(
         error.message,

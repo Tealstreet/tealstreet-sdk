@@ -299,6 +299,7 @@ struct ClientFactory {
     provider: std::sync::Arc<dyn safe_cex_transport::TransportProvider>,
 }
 struct Wire {
+    runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
     xhr: Js,
 }
 impl ApiHost for ClientFactory {
@@ -330,7 +331,10 @@ impl ApiHost for ClientFactory {
             &exchange.base,
         )?;
         *self.xhr.borrow_mut() = Some(xhr.clone());
-        Ok(Rc::new(Wire { xhr }))
+        Ok(Rc::new(Wire {
+            runtime: self.http.runtime(),
+            xhr,
+        }))
     }
     fn install_network_retry(
         &self,
@@ -462,6 +466,7 @@ impl ApiWire for Wire {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<JsNumberInput, ApiFailure>>>>
     {
         let xhr = self.xhr.clone();
+        let runtime = self.runtime.clone();
         let request = config.borrow().request.clone();
         Box::pin(async move {
             let result = async {
@@ -498,8 +503,11 @@ impl ApiWire for Wire {
                 if let Some(timeout) = request.timeout_ms {
                     fields.push(("timeout", Js::Number(timeout as f64)));
                 }
-                let response =
-                    await_js(xhr.call_method("request", vec![Js::object(fields)])?).await?;
+                let response = await_js(
+                    &runtime,
+                    xhr.call_method("request", vec![Js::object(fields)])?,
+                )
+                .await?;
                 to_typed::<JsNumberInput>(&response.get("data")?)
             }
             .await;

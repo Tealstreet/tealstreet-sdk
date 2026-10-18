@@ -173,10 +173,10 @@ impl ReadHost for SdkHost {
             .owner
             .get(if axios { "axiosInstance" } else { "client" })?;
         let pending = target.call_method("get", vec![Js::utf16(&url), config])?;
-        Ok(Box::pin(await_js(pending)))
+        Ok(Box::pin(await_js(&self.realm.exchange_runtime(), pending)))
     }
     fn promise_resolve(&self, value: Js) -> KeyFuture<Js, Thrown> {
-        Box::pin(await_js(value))
+        Box::pin(await_js(&self.realm.exchange_runtime(), value))
     }
 }
 

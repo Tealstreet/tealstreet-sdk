@@ -238,6 +238,7 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
     let raised: Raised = Rc::default();
     let response = xhr.get("interceptors")?.get("response")?;
     let register = response.get("use")?;
+    let use_runtime = rt.exchange_runtime();
     let (use_pairs, use_raised, use_owner) = (pairs.clone(), raised.clone(), response.clone());
     response.define(
         "use",
@@ -246,6 +247,7 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
             let index = use_pairs.borrow().len();
             use_pairs.borrow_mut().push((fulfilled.clone(), rejected));
             let tags = use_raised.clone();
+            let tag_runtime = use_runtime.clone();
             let tagged = Js::function("fulfilled", move |this, v| {
                 let result = fulfilled.call(this, v).inspect_err(|e| {
                     tags.borrow_mut().push((e.value.clone(), index));
@@ -254,13 +256,16 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
                     return Ok(result);
                 };
                 let (promise, tags) = (promise.clone(), tags.clone());
+                let runtime = tag_runtime.clone();
                 Ok(Js::Promise(
                     safe_cex_exchange::js_runtime::promise::Promise::spawn(
                         &promise.runtime(),
                         Box::pin(async move {
-                            await_js(Js::Promise(promise)).await.inspect_err(|e| {
-                                tags.borrow_mut().push((e.value.clone(), index));
-                            })
+                            await_js(&runtime, Js::Promise(promise))
+                                .await
+                                .inspect_err(|e| {
+                                    tags.borrow_mut().push((e.value.clone(), index));
+                                })
                         }),
                     ),
                 ))
@@ -277,8 +282,9 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
             Js::function(verb, move |_, a| {
                 let pending = send.call(owner.clone(), a)?;
                 let (pairs, raised) = (pairs.clone(), raised.clone());
+                let runtime = verb_rt.exchange_runtime();
                 Ok(verb_rt.spawn(Box::pin(async move {
-                    let error = match await_js(pending).await {
+                    let error = match await_js(&runtime, pending).await {
                         Ok(value) => return Ok(value),
                         Err(error) => error,
                     };
@@ -295,10 +301,12 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
                     for (fulfilled, rejected) in handlers {
                         outcome = match outcome {
                             Ok(value) => {
-                                await_js(fulfilled.call(Js::Undefined, vec![value])?).await
+                                await_js(&runtime, fulfilled.call(Js::Undefined, vec![value])?)
+                                    .await
                             }
                             Err(error) if rejected.is_callable() => {
-                                await_js(rejected.call(Js::Undefined, vec![error.value])?).await
+                                await_js(&runtime, rejected.call(Js::Undefined, vec![error.value])?)
+                                    .await
                             }
                             Err(error) => Err(error),
                         };
