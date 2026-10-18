@@ -1772,3 +1772,14 @@ readonly descriptors; redefining/deleting them uses the common property code.
 Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
 this does not widen the public intrinsic descriptor-reflection surface.
 Array descriptor/prototype migration remains the separate single-storage step.
+
+## ccxt compatibility imports
+
+The shared library installs ccxt-compat numberToString, parsePrecision,
+five-argument decimalToPrecision, safeString and precision mode constants.
+The decimal formatter follows functions/number.ts, including strict mode
+comparisons and source coercion order; it is distinct from safe-cex-num's
+one-argument precision-count helper. The installed native/source tests cover
+123 scalar cases, UTF16 results, original value/throw identity, repeated property
+reads and precision operand coercion. The separate Realm implementation is
+removed only with the atomic Hyperliquid family consolidation.
