@@ -1,9 +1,6 @@
 //! Audit the cloid claims through the constructed production class/imports.
-#[allow(dead_code)]
-#[path = "binding_runtime.rs"]
-mod host;
-
 use super::{HyperliquidDependencies, HyperliquidExchange, RuntimeClock};
+use crate::binding_test_runtime as host;
 use crate::{rate_limit::RateLimiter, realm::Value};
 use safe_cex_exchange::{exchange::Exchange, native_store::DefaultStore};
 use serde_json::json;
