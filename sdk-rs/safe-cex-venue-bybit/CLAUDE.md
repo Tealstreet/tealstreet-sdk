@@ -981,3 +981,12 @@ validateAccount uses shared OrdinaryHasInstance, preserving inherited Error
 messages, UTF16 and raw thrown-message identity. Range no-op and disabled
 option/inverse capabilities remain source-equal; disposal suppresses balance
 publication. See DIVERGENCE_FIX_AUDIT.md and hyro-account-controls.py.
+
+Position-index audit rows 9/10/11/20/21 use constructed native receivers in
+`binding/receiver_tests.rs`. Stop-index dispatch is installed once in batch.rs;
+placement/amendment call the same replaceable members. The existing native omit
+facade uses canonical ForInRecord to preserve inherited enumerable aliases, and
+getter failures reject the original Promise. Position-mode mapping binds the
+mapper once and uses native Array.map with row/index/original-array arguments.
+Run the receiver tests, execution_guards source target and
+`scripts/position-index-controls.py`; the latter restores every compiled fault.
