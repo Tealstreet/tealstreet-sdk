@@ -623,6 +623,14 @@ paths independently; both must compile and fail the named native test, then pass
 after exact source restoration. Other owners and generic instantiations remain
 outside this finite evidence.
 
+Native HTTP weight guards receive canonical shared AxiosHeaders on both successful
+responses and reconstructed rejection responses. NativeImports reads and invokes
+the actual get method with the original header receiver. The native
+`production_native_request_weight_callbacks_observe_success_and_rejection` test
+compares five signed request outcomes, including mixed-case weight/retry headers,
+against actual maintained TS guards with installed Axios. Its only request stub
+is the terminal RestAdapter; the factories, signer and response guards are live.
+
 The twenty history/API/lifecycle capabilities have individual source-role records
 and authenticated native compiler probes in `scripts/lifecycle-alias-contracts.mjs`.
 Their real native owner/HTTP/socket/signing/Store witnesses and compiled controls
@@ -674,6 +682,13 @@ macro provenance across each source scope; wildcard imports can hide that proof
 even when the current business logic compiles. Import changes also require review
 of any affected source pins; nested helper bodies keep their existing contracts.
 
+The public frame RAII guard lives at module scope so compiler discovery covers
+its lifetime and Drop implementation. The native `public_frame_guard` test in
+`private_classes` checks packet release after success, rejection and unwind,
+original failure identity and the next real Store ticker update for all families.
+`scripts/public-frame-guard-controls.py` removes the actual pop, requires a compiled
+packet-retention failure and restores the exact source before requiring GREEN.
+
 The private-construction Clone reviews in the Binance construction policy cover
 three reusable capabilities: the inverse listener retry context, shared class
 settlement observations and captured private arrows with their receiver/base
@@ -682,3 +697,16 @@ clone before a real socket frame and cleanup; the native private-clone witness
 holds a listen-key request, drops the original settlement and observes both
 clones before invoking a cloned reconnect arrow. These reviews do not classify
 raw-input decoders or widen accepted representations.
+
+The seven `public_listeners` aliases have a finite compiler-authenticated review
+in `scripts/public-listener-alias-contracts.mjs`. `Book` is an actual map decoder,
+with native per-level binary64 observations and Rc identity; the six callable,
+future and sequence-state capabilities retain their individual role reviews.
+`tests/support/public_listener_aliases.rs` constructs the real native dependencies
+for Futures/PM/Spot. It advances the virtual timer before subscription, holds
+terminal snapshot HTTP while two frames buffer, checks the exact endpoint and
+flat query, then checks one retained book through live updates and cleanup.
+`NativeListenerOperations::get_snapshot` passes raw query fields to `run_request`:
+the latter installs GET args into config.params, so callers must not wrap again.
+Separate compiled semantic controls require named native failures and exact
+source restoration for every reviewed alias.
