@@ -36,6 +36,12 @@ mod accepted_read_receivers;
 #[path = "../../tests/support/accepted_runtime_receivers.rs"]
 mod accepted_runtime_receivers;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_stream_tail.rs"]
+mod accepted_stream_tail;
+#[cfg(test)]
+#[path = "../../tests/support/accepted_topic_alias.rs"]
+mod accepted_topic_alias;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_trading_error_receivers.rs"]
 mod accepted_trading_error_receivers;
 use super::{

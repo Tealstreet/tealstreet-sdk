@@ -119,7 +119,7 @@ fn ticker(native: &Ticker, source: &Value) {
         ("ask", native.ask),
         ("last", native.last),
         ("mark", native.mark),
-        ("index", native.index),
+        ("index", native.index.unwrap()),
         ("percentage", native.percentage),
         ("fundingRate", native.funding_rate),
         ("fundingTime", native.funding_time),

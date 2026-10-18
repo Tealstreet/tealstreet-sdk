@@ -90,7 +90,7 @@ fn market(v: &Market) -> Value {
     json!({"id":v.id,"symbol":v.symbol,"base":v.base,"quote":v.quote,"active":v.active,"precision":{"amount":number(v.precision.amount),"price":number(v.precision.price)},"limits":{"amount":{"min":number(v.limits.amount.min),"max":number(safe_cex_num::numeric_value_to_number(&v.limits.amount.max))},"leverage":{"min":number(v.limits.leverage.min),"max":number(v.limits.leverage.max)}}})
 }
 fn ticker(v: &Ticker) -> Value {
-    json!({"id":v.id,"symbol":v.symbol,"bid":number(v.bid),"ask":number(v.ask),"last":number(v.last),"mark":number(v.mark),"index":number(v.index),"percentage":number(v.percentage),"fundingRate":number(v.funding_rate),"fundingTime":number(v.funding_time),"volume":number(v.volume),"quoteVolume":number(v.quote_volume),"openInterest":number(v.open_interest)})
+    json!({"id":v.id,"symbol":v.symbol,"bid":number(v.bid),"ask":number(v.ask),"last":number(v.last),"mark":number(v.mark),"index":v.index.map(number).unwrap_or(Value::Null),"percentage":number(v.percentage),"fundingRate":number(v.funding_rate),"fundingTime":number(v.funding_time),"volume":number(v.volume),"quoteVolume":number(v.quote_volume),"openInterest":number(v.open_interest)})
 }
 #[derive(Default)]
 struct Host {

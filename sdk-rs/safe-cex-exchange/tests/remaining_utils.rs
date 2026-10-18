@@ -8,20 +8,9 @@ use safe_cex_exchange::{
 use safe_cex_types::{ClosedPnlEntry, DataProvenance, HistoricalTradeOptions};
 use std::{
     cell::{Cell, RefCell},
-    future::Future,
     rc::Rc,
     task::{Context, Poll, Waker},
 };
-fn ready<F: Future>(future: F) -> F::Output {
-    let mut future = std::pin::pin!(future);
-    match future
-        .as_mut()
-        .poll(&mut Context::from_waker(Waker::noop()))
-    {
-        Poll::Ready(value) => value,
-        Poll::Pending => panic!("ready fixture"),
-    }
-}
 fn loop_ready(
     runtime: &fixture_runtime::Runtime,
     future: ExchangeFuture<'static, ()>,
@@ -134,27 +123,42 @@ fn entry(provenance: &str) -> ClosedPnlEntry {
 fn opts() -> HistoricalTradeOptions {
     serde_json::from_value(serde_json::json!({"from":11,"to":22,"symbol":"BTC","limit":3})).unwrap()
 }
+fn closed_ready<T>(
+    runtime: &fixture_runtime::Runtime,
+    mut future: ExchangeFuture<'static, T>,
+) -> Result<T, ExchangeError> {
+    let mut cx = Context::from_waker(Waker::noop());
+    for _ in 0..8 {
+        if let Poll::Ready(result) = future.as_mut().poll(&mut cx) {
+            return result;
+        }
+        runtime.advance(0);
+    }
+    panic!("closed position promise did not settle");
+}
 #[test]
 fn native_closed_positions_provenance_independence_and_one_fetch() {
     let calls = Rc::new(RefCell::new(vec![]));
+    let runtime = Rc::new(fixture_runtime::Runtime::default());
     let mut source = ClosedPositionSource {
+        runtime: runtime.clone(),
         fetch_closed_pnl: {
             let calls = calls.clone();
-            Box::new(move |options| {
+            Rc::new(move |options| {
                 calls.borrow_mut().push(("venue", options));
                 Box::pin(async { Ok(vec![entry("derived")]) })
             })
         },
         derive_closed_positions: Some({
             let calls = calls.clone();
-            Box::new(move |options| {
+            Rc::new(move |options| {
                 calls.borrow_mut().push(("derived", options));
                 Box::pin(async { Ok(vec![entry("venue")]) })
             })
         }),
         closed_positions_share_ledger_source: None,
     };
-    let venue = ready(resolve_closed_positions(&source, opts(), false)).unwrap();
+    let venue = closed_ready(&runtime, resolve_closed_positions(&source, opts(), false)).unwrap();
     assert_eq!(venue.provenance, DataProvenance::Venue);
     assert!(venue.independently_verifiable);
     assert_eq!(
@@ -165,7 +169,7 @@ fn native_closed_positions_provenance_independence_and_one_fetch() {
     assert_eq!(calls.borrow().len(), 1);
     assert_eq!(calls.borrow()[0].0, "venue");
     assert_eq!(calls.borrow()[0].1, opts());
-    let derived = ready(resolve_closed_positions(&source, opts(), true)).unwrap();
+    let derived = closed_ready(&runtime, resolve_closed_positions(&source, opts(), true)).unwrap();
     assert_eq!(derived.provenance, DataProvenance::Derived);
     assert!(!derived.independently_verifiable);
     assert_eq!(derived.entries[0].provenance, DataProvenance::Derived);
@@ -173,12 +177,12 @@ fn native_closed_positions_provenance_independence_and_one_fetch() {
     assert_eq!(calls.borrow()[1].0, "derived");
     source.closed_positions_share_ledger_source = Some(false);
     assert!(
-        ready(resolve_closed_positions(&source, opts(), true))
+        closed_ready(&runtime, resolve_closed_positions(&source, opts(), true))
             .unwrap()
             .independently_verifiable
     );
     source.derive_closed_positions = None;
-    let missing = ready(resolve_closed_positions(&source, opts(), true)).unwrap();
+    let missing = closed_ready(&runtime, resolve_closed_positions(&source, opts(), true)).unwrap();
     assert!(missing.entries.is_empty());
     assert!(!missing.independently_verifiable);
     assert_eq!(
@@ -186,11 +190,11 @@ fn native_closed_positions_provenance_independence_and_one_fetch() {
         Some("venue reports no closed positions and no derivation is implemented")
     );
     assert_eq!(calls.borrow().len(), 3);
-    source.fetch_closed_pnl = Box::new(|_| -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
+    source.fetch_closed_pnl = Rc::new(|_| -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
         Box::pin(async { Err(ExchangeError::new("venue rejected")) })
     });
     assert_eq!(
-        ready(resolve_closed_positions(&source, opts(), false))
+        closed_ready(&runtime, resolve_closed_positions(&source, opts(), false))
             .unwrap_err()
             .message,
         "venue rejected"

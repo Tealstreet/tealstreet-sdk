@@ -26,7 +26,7 @@ pub fn apply_market_ioc_slippage(price: f64, side: OrderSide, slippage_pct: f64)
 }
 fn fair_price(ticker: Option<&Ticker>) -> Option<f64> {
     ticker.and_then(|t| {
-        [Some(t.mark), Some(t.index), t.mid_price, Some(t.last)]
+        [Some(t.mark), t.index, t.mid_price, Some(t.last)]
             .into_iter()
             .flatten()
             .find(|v| is_positive_finite_price(Some(*v)))

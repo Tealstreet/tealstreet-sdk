@@ -222,7 +222,7 @@ pub fn place(symbol: &str) -> PlaceOrderOpts {
     serde_json::from_value(json!({"symbol":symbol,"type":"limit","side":"buy","amount":2})).unwrap()
 }
 pub fn view_ticker(value: &Ticker) -> Value {
-    json!({"id":value.id,"symbol":value.symbol,"numbers":[bits(value.bid),bits(value.ask),bits(value.last),bits(value.mark),bits(value.index),
+    json!({"id":value.id,"symbol":value.symbol,"numbers":[bits(value.bid),bits(value.ask),bits(value.last),bits(value.mark),bits(value.index.unwrap()),
         bits(value.percentage),bits(value.open_interest),bits(value.funding_rate),bits(value.funding_time),bits(value.volume),bits(value.quote_volume)],
         "mid":value.mid_price.map(bits),"timestamp":value.timestamp.map(bits),"info":value.info.as_ref().map(retained)})
 }

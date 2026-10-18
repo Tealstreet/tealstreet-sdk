@@ -565,3 +565,16 @@ callback capabilities. `loop-socket-alias-contracts.mjs` runs authenticated nati
 alias probes; `accepted_loop_socket_aliases` drives the actual socket/Store and
 signed timer/HTTP paths. Three named compiled consumer faults and exact restored
 passes are required by `loop-socket-alias-controls.py`.
+
+`TOPIC_ALIAS_REVIEW.md` records the UTF-16 collection decoder and physical public
+subscription boundary. Keep `Topic` units in canonical retained JSON until wire
+escaping; do not reintroduce a lossy String conversion. The `accepted_topic_alias`
+native witnesses, live-source script and compiled lossy-consumer control cover
+both Futures and Spot. `topic-alias-contracts.mjs` probes only this concrete alias.
+
+`STREAM_ADAPTER_RETIREMENT.md` records why the duplicate typed stream adapters and
+three callback aliases were removed. Their old class target strings are native
+dispatch identifiers, not Rust calls. Stream manifest rows map to the live member
+dispatcher. Preserve constructed book/candle tests and the actual Futures socket
+no-op witness; `scripts/stream-binding-controls.py` requires four compiled named
+failures and exact-source restored passes.

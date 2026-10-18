@@ -783,7 +783,16 @@ impl FactoryBindings for Factorizer<'_> {
             adapter: self.imports.adapter.clone(),
             host: self.imports.host.clone(),
             runtime: runtime.clone(),
-            store: None,
+            store: Some(
+                self.imports
+                    .owner
+                    .borrow()
+                    .upgrade()
+                    .ok_or_else(|| failure("HTTP factory exchange owner released"))?
+                    .base
+                    .store
+                    .clone(),
+            ),
             stats: None,
             logs: None,
             every: vec![],
@@ -1405,14 +1414,16 @@ impl ListenerHost for NativeListenerOperations {
         )))
     }
     fn spawn(&self, job: Job) {
+        let driver: Rc<dyn ExchangeRuntime> = self.runtime.clone();
         let runtime = self.runtime.clone();
-        self.runtime.spawn_local(Box::pin(async move {
+        drop(safe_cex_exchange::eager::start_eager(&driver, async move {
             if let Err(error) = job.await {
                 runtime.report_exception(
                     &error,
                     &serde_json::json!({"operation":"binance listener job"}).into(),
                 );
             }
+            Ok(())
         }));
     }
     fn reset_sync(&self, sync: SyncState) -> Result<(), Failure> {

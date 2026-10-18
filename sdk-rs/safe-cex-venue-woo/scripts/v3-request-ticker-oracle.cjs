@@ -24,7 +24,6 @@ function nativeRaw(value){
  return JSON.stringify(value);
 }
 function capture(fn,...args){try{return {ok:observe(fn(...args))};}catch(e){return {error:{name:e.name,message:e.message}};}}
-const inputRaw='{"method":"POST","path":"/v3/trade/order","query":{"queryField":-0},"body":{"bodyField":1e400}}';
 const futures={symbol:'PERP_BTC_USDT',indexPrice:'111',markPrice:'113',estFundingRate:'-0.0125',lastFundingRate:'0.025',openInterest:'617','24hOpen':'100','24hClose':'108.27','24hHigh':'139','24hLow':'97','24hVolume':'701','24hAmount':'809',nextFundingTime:11003};
 const bbo={symbol:'PERP_BTC_USDT',askPrice:'131',askQuantity:'17',bidPrice:'103',bidQuantity:'19',timestamp:-0};
 const trade={symbol:'PERP_BTC_USDT',price:'117',quantity:'23',side:'BUY',source:1,matchedRpi:true,timestamp:12007};
@@ -33,8 +32,8 @@ const composed=tickers.composeWooV3AuthoritativeTicker(futures,bbo,trade,market)
 assert.equal(composed.bid,103,'V3 source bid');assert.equal(composed.ask,131,'V3 source ask');assert.equal(composed.last,117,'V3 source last');
 assert.equal(composed.info.bbo,bbo,'V3 source BBO alias');assert.equal(composed.info.trade,trade,'V3 source Trade alias');
 assert.equal(Object.isFrozen(composed),true,'V3 source ticker frozen');assert.equal(Object.isFrozen(composed.info),true,'V3 source info frozen');
-const records={input:{raw:inputRaw,native:observe(JSON.parse(inputRaw))},bbo:{raw:'{"symbol":"PERP_BTC_USDT","askPrice":"131","askQuantity":"17","bidPrice":"103","bidQuantity":"19","timestamp":-0}',native:observe(bbo)},trade:{raw:JSON.stringify(trade),native:observe(trade)},info:{raw:nativeRaw(composed.info),native:observe(composed.info)},ticker:{raw:nativeRaw(composed),native:observe(composed)}};
-assert.equal(Object.keys(records).length,5,'V3 independent record count');
+const records={bbo:{raw:'{"symbol":"PERP_BTC_USDT","askPrice":"131","askQuantity":"17","bidPrice":"103","bidQuantity":"19","timestamp":-0}',native:observe(bbo)},trade:{raw:JSON.stringify(trade),native:observe(trade)},info:{raw:nativeRaw(composed.info),native:observe(composed.info)},ticker:{raw:nativeRaw(composed),native:observe(composed)}};
+assert.equal(Object.keys(records).length,4,'V3 independent record count');
 const normalizations=['PERP_BTC_USDT','PERP_1000SHIB_USDT','PERP_BTC2_USDC','BTCUSDT','PERP_btc_USDT','PERP__USDT','PERP_BTC_','PERP_BTC_USDT_EXTRA','PERP_BTC_USDT\n','PERP_É_USDT'];
 const normalized=normalizations.map(input=>({input,...capture(tickers.normalizePerpetualSymbol,input,'symbol-path')}));
 const prices=['103','0x64','0b10','\ufeff 3.5 ','1e308','5e-324','0','-0','-1','1e400','-1e-4000','Infinity','NaN','','\u008510'];
