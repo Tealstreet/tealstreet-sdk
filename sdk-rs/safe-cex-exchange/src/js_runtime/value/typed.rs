@@ -72,8 +72,9 @@ pub(super) fn capture(
         }
         Js::Builtin(reference) if reference.is_callable() => Input::Null,
         Js::Object(_) | Js::Builtin(_) => {
-            let mut fields = vec![];
-            for (key, value) in value.own_entries()? {
+            let entries = value.own_entries()?;
+            let mut fields = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
                 if !present_fields && (matches!(value, Js::Function(_)) || value.is_callable()) {
                     continue;
                 }

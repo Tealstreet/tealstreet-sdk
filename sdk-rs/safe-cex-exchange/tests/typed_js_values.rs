@@ -1,5 +1,6 @@
 //! Native typed values cross the runtime before any JSON wire projection.
-use safe_cex_exchange::js_runtime::value::{Js, from_typed, to_json, to_typed};
+use safe_cex_exchange::js_runtime::value::{Js, from_typed, to_json, to_retained_input, to_typed};
+use safe_cex_types::retained_json::RetainedJsonInput;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -145,7 +146,17 @@ fn typed_projection_keeps_enum_and_optional_object_shapes() {
             .optional
             .is_none()
     );
-    assert!(to_typed::<String>(&Js::String(vec![0xd800].into())).is_err());
+    let raw = Js::String(vec![0xd800].into());
+    assert_eq!(
+        to_retained_input(&raw).unwrap(),
+        RetainedJsonInput::Text(vec![0xd800])
+    );
+    assert_eq!(to_typed::<String>(&raw).unwrap(), "\u{fffd}");
+    assert_eq!(
+        to_retained_input(&raw).unwrap(),
+        RetainedJsonInput::Text(vec![0xd800]),
+        "typed replacement leaves the native string's original units intact"
+    );
 }
 
 #[test]

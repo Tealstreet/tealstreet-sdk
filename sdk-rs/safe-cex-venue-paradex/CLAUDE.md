@@ -270,3 +270,12 @@ The labelled RED commit declares only the new host ABI/union; assembly is unchan
 truncates the forwarded hash, requires named compiled failures and restores exact
 source bytes before rerunning the witness. Apex has no maintained payloadSigner
 caller in this source tree; no Apex signing API is introduced by this repair.
+
+The listenOHLCV audit keeps polling failures diagnostic-only: Host::start reports
+the detached rejection without emitting an app error or writing Store state.
+`candle_audit_failure_reports_only_and_preserves_polling_and_shared_cleanup`
+compares the real REST/socket binding with the complete maintained public class
+and original fetchOHLCV method. Both failing endpoints still lead to a poll at
+3000ms, unchanged candles stay suppressed, and one listener cleanup preserves
+the other until its own cleanup cancels polling. This extra report is the
+authorized no-silent-failure residual; it is not a source parity claim.

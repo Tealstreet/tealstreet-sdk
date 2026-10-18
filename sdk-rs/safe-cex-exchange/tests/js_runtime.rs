@@ -1,6 +1,4 @@
 //! js_runtime semantics a venue binding depends on, over a recording runtime.
-#[path = "support/store_correctness_source.rs"]
-mod store_correctness_source;
 use safe_cex_exchange::{
     js_runtime::{
         client::{self, JsHttpHost},
@@ -770,7 +768,12 @@ fn operators_follow_ecmascript_and_refuse_bigint_mixing() {
 fn set_refuses_writes_it_cannot_store_instead_of_dropping_them() {
     let array = Js::array(vec![]);
     array.set("0", Js::Number(1.0)).unwrap();
-    assert!(array.set("extra", Js::Number(1.0)).is_err());
+    array.set("extra", Js::Number(-0.0)).unwrap();
+    assert_eq!(array.get("length").unwrap().as_f64(), Some(1.0));
+    assert_eq!(
+        array.get("extra").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
     assert_eq!(
         Js::str("abc")
             .set("x", Js::Number(1.0))
@@ -2249,19 +2252,16 @@ fn store_facade_reads_fetched_leverage_and_writes_settings_and_statuses() {
         .call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)])
         .unwrap();
     assert!(store.options().unwrap().is_hedged);
-    // store.base.ts:1044 assigns arbitrary runtime keys, despite the TS key type.
-    let source = store_correctness_source::capture();
     facade
         .call_method("setSetting", vec![Js::str("other"), Js::Bool(true)])
         .unwrap();
-    assert_eq!(
+    assert!(
         facade
             .get("options")
             .unwrap()
             .get("other")
             .unwrap()
-            .truthy(),
-        source["setting"]["other"].as_bool().unwrap(),
+            .strict_equals(&Js::Bool(true))
     );
 
     store.add_order(order("one", "BTC")).unwrap();

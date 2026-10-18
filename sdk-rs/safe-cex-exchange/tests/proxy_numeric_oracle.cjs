@@ -29,7 +29,7 @@ if (process.argv.includes('--utf16')) {
   });
   const scalar='😀';channel.onmessage({data:{type:'proxyTokenUpdate',token:scalar,expiresAt:1}});
   assert.equal(exportsObject.getCurrentToken(),scalar);assert.equal(seen.at(-1),scalar);
-  assert.equal(seen.length,3,'two refused Rust token shapes plus scalar source positive');stop();
+  assert.equal(seen.length,3,'two native UTF16 token shapes plus scalar source positive');stop();
   process.stdout.write(JSON.stringify({rows,scalar}));process.exit(0);
 }
 const results = process.argv.slice(2).map(lexeme => {
