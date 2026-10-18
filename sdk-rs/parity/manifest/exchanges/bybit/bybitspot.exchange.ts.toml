@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/lifecycle.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" , "safe-cex-venue-bybit/src/binding/members/markets.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/lifecycle.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs", "safe-cex-venue-bybit/src/binding/members/markets.rs" ]
 
 [[symbol]]
 ts = "isBybitOrderAlreadyGoneCancelMessage"
@@ -246,7 +246,7 @@ note = "BybitSpotExchange: exact eager ticker GET with literal spot category, st
 ts = "BybitSpotExchange.parseTickers"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/exchange_state.rs::parse_spot_tickers", "safe-cex-venue-bybit/src/binding/members/markets.rs::parse_tickers"]
+rs = [ "safe-cex-venue-bybit/src/exchange_state.rs::parse_spot_tickers", "safe-cex-venue-bybit/src/binding/members/markets.rs::parse_tickers" ]
 status = "divergent"
 note = "Production primary/Spot receiver parser reads the native indexed list and live marketsBySymbol dictionary directly. Falsy raw input returns the original cached array; unread properties are not serialized. UTF-16 numeric prefixes, NaN, infinity, signed zero, source key lookup and Spot zero-funding semantics survive until the existing typed Ticker boundary. The public extracted JSON mapper remains supplemental finite adapter coverage, including its documented owned-map membership profile. Native receiver and maintained-source witnesses cover both families. Renamed Rust targets: safe-cex-venue-bybit/src/exchange_state.rs::parse_spot_tickers; safe-cex-venue-bybit/src/binding/members/markets.rs::parse_tickers."
 
@@ -262,7 +262,7 @@ note = "Preserves one-level native flatten, strict-null failure detection and st
 ts = "BybitSpotExchange.fetchMarketsHelper"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper", "safe-cex-venue-bybit/src/binding/members/spot.rs::install"]
+rs = [ "safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper", "safe-cex-venue-bybit/src/binding/members/spot.rs::install" ]
 status = "divergent"
 note = "FIX-audit row27: the actual Spot receiver awaits its original xhr operation, retains native HTTP data directly and uses the canonical retained-input market mapper. No whole-response JSON projection precedes info capture; opaque UTF-16, own undefined and nonfinite fields survive. APPROVED decision3 typed string refusal omits only the affected row after source projection, reports field/value and keeps good neighbors through fetch and refresh. The existing real HTTP malformed-asset/symbol corpus and native metadata receiver witness cover that admission. The exported rest_markets helper remains supplemental JSON request-sequence coverage; its cancellation profile does not describe the source Promise on the installed receiver. Renamed Rust targets: safe-cex-venue-bybit/src/rest_markets.rs::fetch_markets_helper; safe-cex-venue-bybit/src/binding/members/spot.rs::install."
 

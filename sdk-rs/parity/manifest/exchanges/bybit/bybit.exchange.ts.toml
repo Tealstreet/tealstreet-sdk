@@ -734,7 +734,7 @@ note = "BybitExchange: exact eager ticker GET with supplied category, strict get
 ts = "BybitExchange.parseTickers"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/exchange_state.rs::parse_tickers", "safe-cex-venue-bybit/src/binding/members/markets.rs::parse_tickers"]
+rs = [ "safe-cex-venue-bybit/src/exchange_state.rs::parse_tickers", "safe-cex-venue-bybit/src/binding/members/markets.rs::parse_tickers" ]
 status = "divergent"
 note = "Primary class: an inverse market (isInverse) reads volume from turnover24h (coin) and quoteVolume from volume24h (USD contracts); other markets keep volume24h and volume24h * lastPrice. Shares parse_tickers_family with the inverse and spot classes, which keep the old volume semantics. Witness: scripts/check-exchange-state.mjs, 5 inverse-market cases per class (3228 cases) with a source-side volume assertion. Renamed Rust target: safe-cex-venue-bybit/src/exchange_state.rs::parse_tickers. FIX-audit row33 FIX: production binding now reads the original indexed native list and live marketsBySymbol, returns the original falsy-input cache and preserves UTF-16 parseFloat prefixes and unread properties. Inverse-market volume/quoteVolume and expiring funding remain source-selected. The extracted JSON helper remains supplemental coverage. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/markets.rs::parse_tickers."
 
