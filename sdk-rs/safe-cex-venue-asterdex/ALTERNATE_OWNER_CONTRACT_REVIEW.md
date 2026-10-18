@@ -16,7 +16,15 @@ DTOs; the kline tuple requires its twelve declared slots. Raw account/stream
 responses continue through their existing production methods, independently of
 these declared DTO contracts.
 
-`ExecutionOrder` also observes its flattened options and nullable `postOnly`.
+`ExecutionOrder` observes its flattened options and nullable `postOnly` through
+owned and borrowed Value decoders and Clone. Direct and qualified text decoders
+explicitly refuse these inputs: Serde flatten buffers the arbitrary-precision
+number shim before the nested numeric capture. Each receipt records both text
+refusals separately. A repository-wide `rg -n ExecutionOrder sdk-rs --glob '*.rs'`
+caller audit finds only production native `to_typed` reads at
+`binding/members.rs` (single/batch placement), construction and From conversions;
+no production caller decodes this carrier from serde_json text. This cohort
+preserves that visible refusal rather than claiming four-route equivalence.
 `CheckParams` and `ApproveParams` are ordinary parameter Serde carriers: their
 union cases explicitly expose optional null and full positional-sequence
 acceptance, rather than misclassifying them as strict map-only JS input guards.

@@ -26088,13 +26088,13 @@
       "impliedVolatility": 17.25,
       "stpMode": "EXPIRE_TAKER"
     },
-    "evidence": "order_execution::ExecutionOrder is the strict flattened AsterDEXPlaceOrderOpts carrier plus optional postOnly. These native observations cover all shared/venue fields and postOnly true/false/null/absence; no runtime raw account or order response is gated by this decoder.",
+    "evidence": "order_execution::ExecutionOrder is the strict flattened AsterDEXPlaceOrderOpts carrier plus optional postOnly. These native observations cover all shared/venue fields and postOnly true/false/null/absence; no runtime raw account or order response is gated by this decoder. Production caller audit: binding/members.rs uses native value::to_typed for placeOrder and placeOrders; all other production references construct or convert the carrier. No production serde_json text decoder exists. Owned/borrowed native values and Clone are observed; direct/qualified text routes explicitly refuse the flattened arbitrary-precision numeric shim and are recorded separately, not claimed equivalent.",
     "nativeObservation": {
       "nativeFields": [
         "opts",
         "post_only"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed source JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let project=|v:&$type| serde_json::json!({\"ok\":true,\"opts\":serde_json::json!({\"order\":serde_json::json!({\"symbol\":&v.opts.order.symbol,\"type\":format!(\"{:?}\",v.opts.order.r#type),\"side\":format!(\"{:?}\",v.opts.order.side),\"amount\":format!(\"{:016x}\",(v.opts.order.amount).to_bits()),\"price\":(v.opts.order.price).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"trigger_price\":(v.opts.order.trigger_price).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"stop_loss\":(v.opts.order.stop_loss).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"take_profit\":(v.opts.order.take_profit).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"reduce_only\":(v.opts.order.reduce_only).as_ref().map(|item|serde_json::json!(&item)),\"time_in_force\":(v.opts.order.time_in_force).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"trigger_type\":(v.opts.order.trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"tp_trigger_type\":(v.opts.order.tp_trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"sl_trigger_type\":(v.opts.order.sl_trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"client_order_id\":(v.opts.order.client_order_id).as_ref().map(|item|serde_json::json!(&item)),\"max_slippage_pct\":(v.opts.order.max_slippage_pct).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"close\":(v.opts.order.close).as_ref().map(|item|serde_json::json!(&item)),\"implied_volatility\":(v.opts.order.implied_volatility).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits())))}),\"stp_mode\":v.opts.stp_mode.as_ref().map(|x|format!(\"{:?}\",x))}),\"post_only\":v.post_only}); let observe=|v:$type| { let actual=project(&v); assert_eq!(actual,project(&v.clone()),\"ASTER alternate DTO native Clone\"); actual }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) { (Ok(a),Ok(b),Ok(c),Ok(d))=>{decoder.end().unwrap(); let actual=observe(a); assert_eq!(actual,observe(b)); assert_eq!(actual,observe(c)); assert_eq!(actual,observe(d)); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),other=>panic!(\"ASTER alternate DTO route disagreement: {raw}; {other:?}\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed source JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let project=|v:&$type| serde_json::json!({\"ok\":true,\"opts\":serde_json::json!({\"order\":serde_json::json!({\"symbol\":&v.opts.order.symbol,\"type\":format!(\"{:?}\",v.opts.order.r#type),\"side\":format!(\"{:?}\",v.opts.order.side),\"amount\":format!(\"{:016x}\",(v.opts.order.amount).to_bits()),\"price\":(v.opts.order.price).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"trigger_price\":(v.opts.order.trigger_price).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"stop_loss\":(v.opts.order.stop_loss).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"take_profit\":(v.opts.order.take_profit).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"reduce_only\":(v.opts.order.reduce_only).as_ref().map(|item|serde_json::json!(&item)),\"time_in_force\":(v.opts.order.time_in_force).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"trigger_type\":(v.opts.order.trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"tp_trigger_type\":(v.opts.order.tp_trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"sl_trigger_type\":(v.opts.order.sl_trigger_type).as_ref().map(|item|serde_json::json!(format!(\"{:?}\",item))),\"client_order_id\":(v.opts.order.client_order_id).as_ref().map(|item|serde_json::json!(&item)),\"max_slippage_pct\":(v.opts.order.max_slippage_pct).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits()))),\"close\":(v.opts.order.close).as_ref().map(|item|serde_json::json!(&item)),\"implied_volatility\":(v.opts.order.implied_volatility).as_ref().map(|item|serde_json::json!(format!(\"{:016x}\",(item).to_bits())))}),\"stp_mode\":v.opts.stp_mode.as_ref().map(|x|format!(\"{:?}\",x))}),\"post_only\":v.post_only}); let observe=|v:$type| { let actual=project(&v); assert_eq!(actual,project(&v.clone()),\"ASTER alternate DTO native Clone\"); actual }; let mut decoder=serde_json::Deserializer::from_str(raw); let text=serde_json::from_str::<$type>(raw); let qualified=<$type as serde::Deserialize>::deserialize(&mut decoder); assert!(text.is_err(),\"ExecutionOrder text route is an explicit unsupported flattened numeric route: {raw}\"); assert!(qualified.is_err(),\"ExecutionOrder qualified text route is explicitly refused: {raw}\"); let actual=match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input)) { (Ok(a),Ok(b))=>{ let actual=observe(a); assert_eq!(actual,observe(b)); actual },(Err(_),Err(_))=>serde_json::json!({\"ok\":false}),other=>panic!(\"ExecutionOrder owned/borrowed disagreement: {raw}; {other:?}\") }; let mut result=actual; result[\"textAccepted\"]=serde_json::json!(false); result[\"qualifiedTextAccepted\"]=serde_json::json!(false); result }",
       "cases": [
         {
           "label": "full-left",
@@ -26123,7 +26123,9 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26153,147 +26155,189 @@
               },
               "stp_mode": "V2"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "outer-null",
           "input": "null",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "outer-true",
           "input": "true",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "outer-42",
           "input": "42",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "outer-\"text\"",
           "input": "\"text\"",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "outer-[]",
           "input": "[]",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "complete-positional-array",
           "input": "[\"AsterDEXPlaceOrderOpts.symbol\",\"market\",\"buy\",4.25,5.25,6.25,7.25,8.25,true,\"GoodTillCancel\",\"mark_price\",\"mark_price\",\"mark_price\",\"AsterDEXPlaceOrderOpts.clientOrderId\",15.25,false,17.25,\"EXPIRE_TAKER\"]",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-symbol",
           "input": "{\"symbol\":null,\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-symbol",
           "input": "{\"symbol\":[],\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "omitted-symbol",
           "input": "{\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-type",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":null,\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-type",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":[],\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "omitted-type",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-side",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":null,\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-side",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":[],\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "omitted-side",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-amount",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":null,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-amount",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":[],\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "omitted-amount",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-price",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":null,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-price",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":[],\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26323,21 +26367,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-triggerPrice",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":null,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-triggerPrice",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":[],\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26367,21 +26417,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-stopLoss",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":null,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-stopLoss",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":[],\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26411,21 +26467,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-takeProfit",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":null,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-takeProfit",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":[],\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26455,21 +26517,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-reduceOnly",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":null,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-reduceOnly",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":[],\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26499,21 +26567,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-timeInForce",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":null,\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-timeInForce",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":[],\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26543,21 +26617,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-triggerType",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":null,\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-triggerType",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":[],\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26587,21 +26667,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-tpTriggerType",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":null,\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-tpTriggerType",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":[],\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26631,21 +26717,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-slTriggerType",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":null,\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-slTriggerType",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":[],\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26675,21 +26767,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-clientOrderId",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":null,\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-clientOrderId",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":[],\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26719,21 +26817,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-maxSlippagePct",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":null,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-maxSlippagePct",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":[],\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26763,21 +26867,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-close",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":null,\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-close",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":[],\"impliedVolatility\":17.25,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26807,21 +26917,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-impliedVolatility",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":null,\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-impliedVolatility",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":[],\"stpMode\":\"EXPIRE_TAKER\"}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26851,21 +26967,27 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "null-stpMode",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":null}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
           "label": "wrong-kind-stpMode",
           "input": "{\"symbol\":\"AsterDEXPlaceOrderOpts.symbol\",\"type\":\"market\",\"side\":\"buy\",\"amount\":4.25,\"price\":5.25,\"triggerPrice\":6.25,\"stopLoss\":7.25,\"takeProfit\":8.25,\"reduceOnly\":true,\"timeInForce\":\"GoodTillCancel\",\"triggerType\":\"mark_price\",\"tpTriggerType\":\"mark_price\",\"slTriggerType\":\"mark_price\",\"clientOrderId\":\"AsterDEXPlaceOrderOpts.clientOrderId\",\"maxSlippagePct\":15.25,\"close\":false,\"impliedVolatility\":17.25,\"stpMode\":[]}",
           "output": {
-            "ok": false
+            "ok": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26895,7 +27017,9 @@
               },
               "stp_mode": null
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26925,7 +27049,9 @@
               },
               "stp_mode": null
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26955,7 +27081,9 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": true
+            "post_only": true,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -26985,7 +27113,9 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": false
+            "post_only": false,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         },
         {
@@ -27015,7 +27145,9 @@
               },
               "stp_mode": "V0"
             },
-            "post_only": null
+            "post_only": null,
+            "textAccepted": false,
+            "qualifiedTextAccepted": false
           }
         }
       ]
