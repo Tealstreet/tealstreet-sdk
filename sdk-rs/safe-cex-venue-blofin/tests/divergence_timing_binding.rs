@@ -81,7 +81,7 @@ fn mode_change_logs_run_in_the_call_prefix_before_the_caller_can_poll() {
     drive(&runtime, pending).unwrap();
     assert_eq!(json!(&*logs.borrow()), source["settled"]);
     assert_eq!(
-        store.fetched_leverage()["BTCUSDT"].position_mode,
+        store.fetched_leverage().unwrap()["BTCUSDT"].position_mode,
         Some(PositionMode::Hedged)
     );
     assert_eq!(wire.requests.borrow().len(), 1);
