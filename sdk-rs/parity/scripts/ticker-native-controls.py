@@ -5,6 +5,12 @@ import sys
 
 root = Path(__file__).resolve().parents[3]
 cases = {
+    "bingx": ("public_stream.rs", "binding", '("mark", "fairPrice"),', '("mark", "indexPrice"),'),
+    "bitget": ("ticker.rs", "exchange_binding", '("bid", &["bidPr", "bidPrice", "bid"][..]),', '("bid", &["askPr", "askPrice", "ask"][..]),'),
+    "grvt-store": ("binding/public.rs", "exchange_binding", 'vec![Js::object(vec![("id", id.clone())]), patch],', 'vec![id.clone(), patch],'),
+    "grvt-candle": ("public_feeds.rs", "exchange_binding", 'last: Some(close),', 'last: Some(close + 1.0),'),
+    "grvt-mark": ("public_feeds.rs", "exchange_binding", 'changes.last = Some(mark);', 'changes.last = Some(mark + 1.0);'),
+    "grvt": ("public_feeds.rs", "exchange_binding", '("mp", "mark_price", &mut changes.mark),', '("ip", "index_price", &mut changes.mark),'),
     "kraken": ("stream_updates.rs", "exchange_binding", 'let bid = keyed(host, message, &["bid", "best_bid"])?;', 'let bid = keyed(host, message, &["ask", "best_ask"])?;'),
     "krakenspot": ("stream_updates.rs", "exchange_binding", 'let last = optional(host, &item, "last", Lookup::Direct)?;', 'let last = optional(host, &item, "ask", Lookup::Direct)?;'),
     "mexc": ("ws_public.rs", "exchange_trait", 'patch.set_number("last", next.last);', 'patch.set_number("last", next.bid);'),
@@ -33,7 +39,7 @@ selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
 for venue in selected:
     filename, target, before, after = cases[venue]
-    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket", "paradex-book": "paradex", "krakenspot": "kraken"}.get(venue, venue)
+    crate = {"kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket", "grvt-store": "grvt", "grvt-candle": "grvt", "grvt-mark": "grvt", "paradex-book": "paradex", "krakenspot": "kraken"}.get(venue, venue)
     test = {
         "kraken": "production_ticker_coercion_futures_matches_constructed_typescript",
         "krakenspot": "production_ticker_coercion_spot_matches_constructed_typescript",
