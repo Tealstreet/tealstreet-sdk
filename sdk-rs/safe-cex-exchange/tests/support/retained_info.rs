@@ -78,7 +78,10 @@ fn observe(actual: &Js, expected: &Value) {
             matches!(actual,Js::String(value) if value.as_ref()==units(&expected["units"]).as_slice())
         ),
         "array" => {
-            let values = actual.array_values().expect("native info array");
+            let values = actual
+                .array_values()
+                .expect("fixture array property reads")
+                .expect("native info array");
             let expected = expected["values"].as_array().unwrap();
             assert_eq!(values.len(), expected.len());
             for (value, expected) in values.iter().zip(expected) {
@@ -227,7 +230,12 @@ fn retained_info_coercions_read_the_native_store_value() {
                 vec![Js::object(vec![("markets", Js::array(vec![market]))])],
             )
             .unwrap();
-        let value = facade.get("markets").unwrap().array_values().unwrap()[0]
+        let value = facade
+            .get("markets")
+            .unwrap()
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()[0]
             .get("info")
             .unwrap();
         let retained = to_retained_input(&value).unwrap();

@@ -91,52 +91,14 @@ pub(crate) fn length(v: &Js) -> Result<usize, Thrown> {
 }
 
 /// A for...of iterator: arrays iterate live, re-reading length each step.
-pub(crate) enum Iter {
-    Live(Js, usize),
-    Snapshot(Vec<Js>, usize),
-}
-
+pub(crate) struct Iter(safe_cex_exchange::js_runtime::iterator::IteratorRecord);
 pub(crate) fn iterate(v: Js) -> Result<Iter, Thrown> {
-    Ok(match &v {
-        Js::Array(_) => Iter::Live(v, 0),
-        Js::Set(set) => Iter::Snapshot(set.borrow().clone(), 0),
-        Js::Map(map) => Iter::Snapshot(
-            map.borrow()
-                .iter()
-                .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-                .collect(),
-            0,
-        ),
-        Js::String(s) => Iter::Snapshot(
-            String::from_utf16_lossy(s)
-                .chars()
-                .map(|c| Js::str(&c.to_string()))
-                .collect(),
-            0,
-        ),
-        other => {
-            return Err(Thrown::type_error(&format!(
-                "{} is not iterable",
-                other.to_display()
-            )));
-        }
-    })
+    Ok(Iter(
+        safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(&v)?,
+    ))
 }
-
-pub(crate) fn next(it: &mut Iter) -> Option<Js> {
-    match it {
-        Iter::Live(Js::Array(list), i) => {
-            let item = list.borrow().get(*i).cloned()?;
-            *i += 1;
-            Some(item.unwrap_or(Js::Undefined))
-        }
-        Iter::Live(_, _) => None,
-        Iter::Snapshot(items, i) => {
-            let item = items.get(*i).cloned()?;
-            *i += 1;
-            Some(item)
-        }
-    }
+pub(crate) fn next(it: &mut Iter) -> Result<Option<Js>, Thrown> {
+    it.0.step_value()
 }
 
 /// setTimeout / setInterval whose handle `clear_timer` cancels; a rejected
@@ -348,16 +310,16 @@ impl body::Host for Frame {
         length(v)
     }
     fn has_index(&mut self, v: &Js, i: usize) -> Result<bool, Thrown> {
-        Ok(v.has_own(&i.to_string()))
+        Ok(v.has_index(i))
     }
     fn iterator(&mut self, v: Js) -> Result<Iter, Thrown> {
         iterate(v)
     }
     fn next(&mut self, i: &mut Iter) -> Result<Option<Js>, Thrown> {
-        Ok(next(i))
+        next(i)
     }
-    fn close_iterator(&mut self, _: &mut Iter) -> Result<(), Thrown> {
-        Ok(())
+    fn close_iterator(&mut self, iterator: &mut Iter) -> Result<(), Thrown> {
+        iterator.0.close()
     }
     fn await_element(&mut self, v: Js) -> Task<Js, Thrown> {
         Box::pin(await_js(&self.rt.exchange_runtime(), v))
