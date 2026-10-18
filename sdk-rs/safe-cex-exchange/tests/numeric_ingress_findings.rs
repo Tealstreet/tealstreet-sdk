@@ -1,5 +1,6 @@
 use safe_cex_exchange::proxy_token::BroadcastMessage;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
+use safe_cex_types::retained_json::RetainedJsonInput;
 use serde_json::Value;
 
 #[test]
@@ -143,7 +144,7 @@ fn proxy_broadcast_prices_shared_depth_budget() {
 }
 
 #[test]
-fn proxy_token_native_string_refusal_is_program_observable() {
+fn proxy_token_typed_strings_replace_surrogates_and_raw_units_remain_observable() {
     let source = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -161,24 +162,38 @@ fn proxy_token_native_string_refusal_is_program_observable() {
     assert_eq!(
         reference["rows"].as_array().unwrap().len(),
         2,
-        "independent token refusal floor"
+        "independent token UTF-16 floor"
     );
     for (i, expected) in [vec![0xd800u64], vec![0x78, 0xdc00]]
         .into_iter()
         .enumerate()
     {
         let raw = reference["rows"][i]["escaped"].as_str().unwrap();
-        assert!(
-            serde_json::from_str::<BroadcastMessage>(raw).is_err(),
-            "TOKEN-NATIVE-STRING-REFUSAL bare whole message"
+        let retained: RetainedJsonInput = serde_json::from_str(raw).unwrap();
+        let units: Vec<u16> = expected.iter().map(|unit| *unit as u16).collect();
+        assert_eq!(
+            retained.get("token"),
+            Some(&RetainedJsonInput::Text(units.clone())),
+            "raw token retains the actual source units before typed projection"
         );
-        assert!(
-            serde_json::from_slice::<BroadcastMessage>(raw.as_bytes()).is_err(),
-            "whole message slice refuses"
-        );
-        assert!(
-            js_from_str::<BroadcastMessage>(raw).is_err(),
-            "whole shared message refuses"
+        for (route, decoded) in [
+            ("bare-str", serde_json::from_str::<BroadcastMessage>(raw)),
+            ("bare-slice", serde_json::from_slice(raw.as_bytes())),
+            ("shared-str", js_from_str(raw)),
+        ] {
+            let BroadcastMessage::ProxyTokenUpdate { token, expires_at } =
+                decoded.unwrap_or_else(|error| panic!("{route}: {error}"))
+            else {
+                panic!("typed token update")
+            };
+            assert_eq!(token, String::from_utf16_lossy(&units), "{route}");
+            assert!(token.contains('\u{fffd}'), "{route}: typed replacement");
+            assert_eq!(expires_at.to_bits(), 1.0f64.to_bits(), "{route}");
+        }
+        assert_eq!(
+            retained.get("token"),
+            Some(&RetainedJsonInput::Text(units)),
+            "typed projection does not replace retained raw units"
         );
         assert_eq!(reference["rows"][i]["units"], serde_json::json!(expected));
     }
