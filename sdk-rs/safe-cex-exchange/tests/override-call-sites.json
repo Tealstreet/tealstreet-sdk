@@ -3190,6 +3190,18 @@
   },
   {
     "file": "safe-cex-venue-bingx/src/binding/exchange.rs",
+    "function": "drop",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs",
     "function": "fetch_historical_fills",
     "edges": [
       {

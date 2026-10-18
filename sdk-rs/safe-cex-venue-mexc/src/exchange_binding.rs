@@ -214,7 +214,7 @@ impl Host {
         host
     }
 
-    fn venue(&self) -> Result<Rc<MexcExchange>, Thrown> {
+    pub(super) fn venue(&self) -> Result<Rc<MexcExchange>, Thrown> {
         self.venue
             .upgrade()
             .ok_or_else(|| Thrown::error("Error", "MEXC exchange was dropped"))
@@ -516,7 +516,8 @@ impl Host {
             }),
             ("updateFetchedLeverage", |h, a| {
                 let config = config_of(&arg(&a, 1))?;
-                h.venue()?.update_fetched_leverage(
+                MexcExchange::update_fetched_leverage(
+                    &h.venue()?.base,
                     &text(&arg(&a, 0))?,
                     FetchedLeverage {
                         buy_leverage: config.buy_leverage,
@@ -1260,9 +1261,12 @@ pub(crate) fn typed<T: serde::de::DeserializeOwned + 'static>(
     host: Option<Rc<Host>>,
     body: impl FnOnce(Rc<Host>) -> Result<MethodObserver<Js, Thrown>, Thrown> + 'static,
 ) -> ExchangeFuture<'static, T> {
+    let observer = host
+        .ok_or_else(unbuilt)
+        .map_err(Thrown::from)
+        .and_then(body);
     Box::pin(async move {
-        let host = host.ok_or_else(unbuilt)?;
-        let value = body(host)
+        let value = observer
             .map_err(ExchangeError::from)?
             .await
             .map_err(ExchangeError::from)?;
@@ -1274,9 +1278,12 @@ pub(crate) fn unit(
     host: Option<Rc<Host>>,
     body: impl FnOnce(Rc<Host>) -> Result<MethodObserver<Js, Thrown>, Thrown> + 'static,
 ) -> ExchangeFuture<'static, ()> {
+    let observer = host
+        .ok_or_else(unbuilt)
+        .map_err(Thrown::from)
+        .and_then(body);
     Box::pin(async move {
-        let host = host.ok_or_else(unbuilt)?;
-        body(host)
+        observer
             .map_err(ExchangeError::from)?
             .await
             .map_err(ExchangeError::from)?;

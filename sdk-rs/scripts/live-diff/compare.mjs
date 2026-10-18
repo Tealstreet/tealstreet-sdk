@@ -4,7 +4,14 @@ import { isDeepStrictEqual } from 'node:util';
 export function differences(ts, rust, path = '$', result = []) {
   if (isDeepStrictEqual(ts, rust)) return result;
   if (result.length >= 100) return result;
-  if (ts && rust && typeof ts === 'object' && typeof rust === 'object' && Array.isArray(ts) === Array.isArray(rust)) {
+  // Recurse only through plain records and arrays. Map/Set/Date/buffers have
+  // non-enumerable state: Object.keys would silently turn a real diff into PASS.
+  const plain = (value) =>
+    value &&
+    (Array.isArray(value) ||
+      Object.getPrototypeOf(value) === Object.prototype ||
+      Object.getPrototypeOf(value) === null);
+  if (plain(ts) && plain(rust) && Array.isArray(ts) === Array.isArray(rust)) {
     for (const key of new Set([...Object.keys(ts), ...Object.keys(rust)])) {
       if (Object.hasOwn(ts, key) !== Object.hasOwn(rust, key)) {
         result.push({
