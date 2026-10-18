@@ -311,3 +311,11 @@ Serde/conversion detectors remain required; these capability identities do not
 execute callbacks or classify other host instantiations. The compiled control
 renames only the copied concrete value owner while retaining its Value alias;
 all six native owner-identity receipts must fail before restoration passes.
+
+The local source-scope helper policy pins both accepted_source.rs and the
+accepted-source binary's actual complete file bytes. The bounded local macro
+substituter and authenticated-glob UseTree resolver are syntax transformations;
+the binary's name/use collectors and Bindings visitor inspect parsed syntax.
+Their specific non-decoder rows do not waive macro-effect, provenance, import
+shadowing or missing-classification checks. Refresh these reviewed file pins
+alongside changes to either source file.
