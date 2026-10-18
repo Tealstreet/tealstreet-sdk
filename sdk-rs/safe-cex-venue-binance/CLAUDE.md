@@ -13,6 +13,16 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 Core contract: [validated placement and lifecycle](../safe-cex-exchange/CLAUDE.md).
 Futures, Portfolio Margin and Spot remain modules inside this crate.
 
+Public socket owner receipts use `requiredFeatures: ["native"]`: the default
+inventory explicitly records unexecuted native-gated owners, then the canonical
+driver executes production NativeRuntime/ExchangeOwner observations. Callbacks,
+core handler state and binary64 bits are read before reporting; snapshot cases
+use actual reqwest HTTP against loopback. This is finite payload coverage, not
+arbitrary object/prototype or complete feature-matrix equivalence. Five unused
+family wrappers were retired; ExchangeOwner already constructed PublicSocket
+with PublicKind directly. Native observation fixtures use the existing Tokio
+runtime dependency only under the native feature.
+
 `scripts/public-dispatch-contracts.mjs` uses the maintained compiler driver with
 four exact owner filters for `public_dispatch::{Handlers,dispatch_binance_message}`
 and `ticker_capture::{Capture,lookup}`. The three raw-key/frame operations have
