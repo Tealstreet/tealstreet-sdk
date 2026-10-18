@@ -1,6 +1,7 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{js_number_string, number_from_string};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Market, Position};
 use safe_cex_venue_binance::leverage::{
     BinanceLeverageRequest, set_binance_leverage, set_binance_pm_leverage,
@@ -220,7 +221,7 @@ fn leverage_matches_live_source_and_native_store() {
             usize::from(did_update),
             "LEVERAGE native notification count case {index}"
         );
-        let native = store.positions();
+        let native = store.positions().unwrap();
         assert_eq!(
             native.len(),
             if positions { 3 } else { 0 },
@@ -334,14 +335,14 @@ fn pending_leverage_post_cannot_commit() {
             );
             assert_eq!(calls.get(), 1, "LEVERAGE one pending POST");
             assert_eq!(
-                store.positions()[0].leverage,
+                store.positions().unwrap()[0].leverage,
                 5.0,
                 "LEVERAGE no mutation before POST success"
             );
-            assert_eq!(store.positions()[1].leverage, 11.0);
+            assert_eq!(store.positions().unwrap()[1].leverage, 11.0);
         }
         drop(future);
-        assert_eq!(store.positions()[0].leverage, 5.0);
+        assert_eq!(store.positions().unwrap()[0].leverage, 5.0);
     }
 }
 

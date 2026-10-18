@@ -3,12 +3,13 @@ mod oracle_clock;
 #[path = "support/retained_observe.rs"]
 mod retained_observe;
 
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_value_as_f64};
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_venue_bingx::{
     data_reads::{BingxDataReads, ReadTransport},
@@ -487,9 +488,9 @@ fn fixture(
     )
 }
 fn state(store: &DefaultStore) -> Value {
-    let l = store.loaded();
-    let b = store.balance();
-    json!({"orders":store.orders().iter().map(order_value).collect::<Vec<_>>(),"loaded":{"orders":l.orders,"balance":l.balance,"positions":l.positions,"markets":l.markets,"tickers":l.tickers},"balance":{"total":number(b.total),"free":number(b.free),"used":number(b.used),"upnl":number(b.upnl)}})
+    let l = store.loaded().unwrap();
+    let b = store.balance().unwrap();
+    json!({"orders":store.orders().unwrap().iter().map(order_value).collect::<Vec<_>>(),"loaded":{"orders":l.orders,"balance":l.balance,"positions":l.positions,"markets":l.markets,"tickers":l.tickers},"balance":{"total":number(b.total),"free":number(b.free),"used":number(b.used),"upnl":number(b.upnl)}})
 }
 fn subscribe(
     subs: &Rc<BingxSubscriptions>,

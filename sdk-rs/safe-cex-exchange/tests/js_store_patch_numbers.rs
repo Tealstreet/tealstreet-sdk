@@ -3,7 +3,8 @@ use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_json, from_typed},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use serde_json::json;
 use std::rc::Rc;
 
@@ -20,7 +21,7 @@ fn seeded() -> (Rc<DefaultStore>, Js) {
             "precision":{"amount":1,"price":0.5},"limits":{"amount":{"min":1,"max":1000},"leverage":{"min":1,"max":100}}}]
     })).unwrap();
     Store::update(native.as_ref(), update, false).unwrap();
-    let facade = store::facade(native.clone());
+    let facade = store::facade(native.clone()).unwrap();
     (native, facade)
 }
 
@@ -46,7 +47,7 @@ fn update_positions_keeps_native_leverage_bits() {
             )
             .unwrap();
         assert_eq!(
-            native.positions()[0].leverage.to_bits(),
+            native.positions().unwrap()[0].leverage.to_bits(),
             value.to_bits(),
             "updatePositions retains native leverage bits for {value:?}"
         );
@@ -132,10 +133,10 @@ fn all_model_patch_methods_keep_every_numeric_field() {
                         panic!("{method}.{field} refused {value:?}: {}", e.message())
                     });
                 let row = match method {
-                    "updatePosition" => from_typed(&native.positions()[0]),
-                    "updateOrder" => from_typed(&native.orders()[0]),
-                    "updateTicker" => from_typed(&native.tickers()[0]),
-                    "updateMarket" => from_typed(&native.markets()[0]),
+                    "updatePosition" => from_typed(&native.positions().unwrap()[0]),
+                    "updateOrder" => from_typed(&native.orders().unwrap()[0]),
+                    "updateTicker" => from_typed(&native.tickers().unwrap()[0]),
+                    "updateMarket" => from_typed(&native.markets().unwrap()[0]),
                     _ => unreachable!(),
                 }
                 .unwrap();
@@ -167,14 +168,14 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
             ],
         )
         .unwrap();
-    assert_eq!(native.positions()[0].leverage, 10.0);
-    assert_eq!(native.positions()[0].entry_price, 20000.0);
+    assert_eq!(native.positions().unwrap()[0].leverage, 10.0);
+    assert_eq!(native.positions().unwrap()[0].entry_price, 20000.0);
     assert_eq!(
-        native.positions()[0].margin_type,
+        native.positions().unwrap()[0].margin_type,
         Some(safe_cex_types::MarginType::Isolated)
     );
     assert_eq!(
-        native.positions()[0].info,
+        native.positions().unwrap()[0].info,
         Some(safe_cex_types::retained_json::RetainedJsonInput::Null)
     );
     assert!(
@@ -189,7 +190,7 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
             .is_err(),
         "explicit null is still refused as a numeric patch"
     );
-    assert_eq!(native.positions()[0].leverage, 10.0);
+    assert_eq!(native.positions().unwrap()[0].leverage, 10.0);
     for value in [42.0, f64::NAN] {
         facade
             .call_method(
@@ -201,7 +202,7 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
             )
             .unwrap();
         assert_eq!(
-            native.positions()[0]
+            native.positions().unwrap()[0]
                 .info
                 .as_ref()
                 .unwrap()
@@ -222,5 +223,5 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
             ])])],
         )
         .unwrap();
-    assert_eq!(native.positions().len(), 1);
+    assert_eq!(native.positions().unwrap().len(), 1);
 }

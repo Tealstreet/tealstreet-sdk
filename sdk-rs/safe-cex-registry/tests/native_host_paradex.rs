@@ -40,7 +40,7 @@ fn paradex_registry_constructs_native_inputs_and_reads_market_precision() {
             (0.003, 0.25)
         );
         assert!(
-            h.store.markets().is_empty(),
+            h.store.markets().unwrap().is_empty(),
             "source fetchMarkets does not write Store"
         );
         let seen = h.seen.borrow();

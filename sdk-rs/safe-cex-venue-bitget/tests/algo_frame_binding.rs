@@ -102,7 +102,7 @@ fn real_algo_frame_skips_unmapped_status_and_keeps_later_rows() {
             algo("algo-live", "live", "profit_plan")
         ]),
     );
-    let orders = s.h.store.orders();
+    let orders = s.h.store.orders().unwrap();
     assert_eq!(
         orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
         ["algo-live"],
@@ -130,7 +130,7 @@ fn real_algo_frame_keeps_open_order_with_unmapped_plan_type() {
             algo("algo-known-plan", "live", "profit_plan")
         ]),
     );
-    let orders = s.h.store.orders();
+    let orders = s.h.store.orders().unwrap();
     assert_eq!(
         orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
         ["algo-unknown-plan", "algo-known-plan"],
@@ -218,7 +218,7 @@ fn real_algo_unmapped_status_still_evaluates_mapper() {
         json!([malformed, algo("algo-later", "live", "profit_plan")]),
     );
     assert!(
-        s.h.store.orders().is_empty(),
+        s.h.store.orders().unwrap().is_empty(),
         "source mapper error must still stop the frame before later rows"
     );
     s.h.venue().dispose().unwrap();
@@ -233,7 +233,7 @@ fn real_algo_missing_side_retains_native_undefined_before_store_projection() {
         "orders-algo",
         json!([absent, algo("algo-known-side", "live", "profit_plan")]),
     );
-    let orders = s.h.store.orders();
+    let orders = s.h.store.orders().unwrap();
     assert_eq!(
         orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
         ["algo-missing-side", "algo-known-side"]

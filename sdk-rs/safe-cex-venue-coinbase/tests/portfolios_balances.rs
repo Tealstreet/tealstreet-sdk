@@ -50,11 +50,21 @@ impl PortfolioHost for Host {
         self.emits.borrow_mut().push(args.to_vec());
         Ok(())
     }
-    fn cached_balance(&self) -> Balance {
-        self.cached.clone()
+    fn cached_balance(
+        &self,
+    ) -> std::result::Result<
+        Rc<RefCell<safe_cex_venue_coinbase::portfolios_balances::PortfolioBalance>>,
+        Rc<safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown>,
+    > {
+        Ok(self.cached.clone())
     }
-    fn position_upnls(&self) -> Vec<f64> {
-        self.upnls.clone()
+    fn position_upnls(
+        &self,
+    ) -> std::result::Result<
+        Vec<f64>,
+        Rc<safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown>,
+    > {
+        Ok(self.upnls.clone())
     }
     fn supported_types_override(
         &self,

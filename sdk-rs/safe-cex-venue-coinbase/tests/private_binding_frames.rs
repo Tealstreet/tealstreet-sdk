@@ -85,9 +85,9 @@ fn snapshot(h: &Harness, socket: &Socket) {
 fn real_private_order_snapshot_populates_store() {
     for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
         let (h, socket, fills) = connected(name);
-        assert!(h.store.orders().is_empty());
+        assert!(h.store.orders().unwrap().is_empty());
         snapshot(&h, &socket);
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         assert_eq!(orders.len(), 1, "real private snapshot must reach Store");
         assert_eq!(orders[0].id, "ws-native-order");
         assert_eq!(orders[0].parent_id.as_deref(), Some("ws-native-client"));
@@ -95,7 +95,7 @@ fn real_private_order_snapshot_populates_store() {
         assert_eq!(orders[0].amount, 2.5);
         assert_eq!(orders[0].filled, 0.0);
         assert_eq!(orders[0].remaining, 2.5);
-        assert!(h.store.loaded().orders);
+        assert!(h.store.loaded().unwrap().orders);
         assert!(fills.borrow().is_empty(), "snapshot does not emit fill");
         drop(orders);
         h.venue().dispose().unwrap();
@@ -107,7 +107,7 @@ fn real_private_filled_update_closes_order_and_emits_fill() {
         let (h, socket, fills) = connected(name);
         snapshot(&h, &socket);
         assert_eq!(
-            h.store.orders().len(),
+            h.store.orders().unwrap().len(),
             1,
             "fill witness must begin with an open order"
         );
@@ -116,7 +116,7 @@ fn real_private_filled_update_closes_order_and_emits_fill() {
             &socket,
             json!({"channel":"user","events":[{"type":"update","orders":[order("FILLED")]}]}),
         );
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         assert_eq!(
             orders.len(),
             1,
@@ -144,26 +144,26 @@ fn ignored_topic(topic: &str) {
     for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
         let (h, socket, fills) = connected(name);
         snapshot(&h, &socket);
-        let before_orders = h.store.orders().to_vec();
-        let before_positions = h.store.positions().to_vec();
-        let before_balance = h.store.balance().clone();
+        let before_orders = h.store.orders().unwrap().to_vec();
+        let before_positions = h.store.positions().unwrap().to_vec();
+        let before_balance = h.store.balance().unwrap().clone();
         send(
             &h,
             &socket,
             json!({"channel":topic,"events":[{"type":"update","positions":[{"product_id":"BTC-USDC","number_of_contracts":"999"}],"balances":[{"asset":"USDC","available":"999"}]}]}),
         );
         assert_eq!(
-            h.store.orders().to_vec(),
+            h.store.orders().unwrap().to_vec(),
             before_orders,
             "unsupported private topic must preserve orders"
         );
         assert_eq!(
-            h.store.positions().to_vec(),
+            h.store.positions().unwrap().to_vec(),
             before_positions,
             "source has no private position dispatcher"
         );
         assert_eq!(
-            *h.store.balance(),
+            h.store.balance().unwrap(),
             before_balance,
             "source has no private balance dispatcher"
         );
@@ -210,7 +210,7 @@ fn real_private_write_timeout_emits_forced_toast_once_until_recovery() {
             h.runtime.advance(8000.0);
         };
         place();
-        let reason = h.store.socket_health()["privateDegradedReason"]
+        let reason = h.store.socket_health().unwrap().unwrap()["privateDegradedReason"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -330,7 +330,7 @@ fn health_callbacks_preserve_source_throws_and_effect_order(fault: &'static str)
         );
         health_check_write(&h);
         assert!(
-            h.store.socket_health()["privateDegradedReason"]
+            h.store.socket_health().unwrap().unwrap()["privateDegradedReason"]
                 .as_str()
                 .unwrap()
                 .contains("Coinbase private WS"),
@@ -389,7 +389,7 @@ fn real_auth_failure_log_callback_reaches_socket_host() {
             json!({"type":"error","message":"authentication failed"}),
         );
         assert!(
-            h.store.socket_health()["privateDegradedReason"]
+            h.store.socket_health().unwrap().unwrap()["privateDegradedReason"]
                 .as_str()
                 .unwrap()
                 .contains("Coinbase private WS authentication failed")

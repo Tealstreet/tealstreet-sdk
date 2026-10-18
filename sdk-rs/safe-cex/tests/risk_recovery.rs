@@ -1,8 +1,8 @@
 //! Production engine and Store wiring. Worker processor remains owned by its slice.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_store::{
     Store, StoreUpdate,
     risk::{calculate_orders_risk, format_pnl},
-    store::DefaultStore,
 };
 use safe_cex_types::{Market, Order, Position, Ticker};
 use serde_json::Value;
@@ -187,7 +187,7 @@ fn prototype_risk_error_is_catchable_and_store_clearing_is_observable() {
         )
         .expect("fixture Store mutation must succeed");
         assert!(
-            host.orders_risk().is_empty(),
+            host.orders_risk().unwrap().is_empty(),
             "risk must be visibly cleared"
         );
         assert_eq!(

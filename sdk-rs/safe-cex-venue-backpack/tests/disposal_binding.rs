@@ -213,7 +213,7 @@ fn exercise(surface: &str) {
         p.base.has_websocket() && q.base.has_websocket(),
         "DISPOSE source retains socket handles"
     );
-    let mut tickers = store.tickers().to_vec();
+    let mut tickers = store.tickers().unwrap().to_vec();
     tickers[0].bid = 42.0;
     Store::update(
         store.as_ref(),

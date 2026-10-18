@@ -43,7 +43,10 @@ fn phemex_registry_constructs_native_inputs_and_signs_account_http() {
             (markets[0].precision.amount, markets[0].precision.price),
             (0.003, 0.25)
         );
-        assert!(h.store.markets().is_empty(), "fetchMarkets read purity");
+        assert!(
+            h.store.markets().unwrap().is_empty(),
+            "fetchMarkets read purity"
+        );
         let account = h
             .exchange
             .get_account()

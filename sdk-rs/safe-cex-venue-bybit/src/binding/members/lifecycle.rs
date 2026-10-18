@@ -53,7 +53,7 @@ pub(crate) fn preserve_recently_placed_orders(rt: &Rt, fetched: &Js) -> Result<J
         fetched,
         || now(rt),
         |id| mark_order_seen(rt, id),
-        || Ok(order_list(store.orders().to_vec())),
+        || Ok(order_list(store.orders()?.to_vec())),
     )?;
     let kept: Vec<Order> = kept.borrow().iter().map(|o| o.borrow().clone()).collect();
     from_typed(&kept)

@@ -48,11 +48,11 @@ async fn verify(name: ExchangeName, exchange: &'static str) {
         .start()
         .await
         .expect("Bitget starts with native external provider");
-    assert_eq!(h.store.markets()[0].symbol, "GWUSDT");
-    assert_eq!(h.store.markets()[0].precision.amount, 0.1);
-    assert_eq!(h.store.tickers()[0].last, 10.0);
+    assert_eq!(h.store.markets().unwrap()[0].symbol, "GWUSDT");
+    assert_eq!(h.store.markets().unwrap()[0].precision.amount, 0.1);
+    assert_eq!(h.store.tickers().unwrap()[0].last, 10.0);
     {
-        let loaded = h.store.loaded();
+        let loaded = h.store.loaded().unwrap();
         assert!(
             loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders
         );
@@ -112,7 +112,7 @@ async fn verify(name: ExchangeName, exchange: &'static str) {
     )
     .unwrap();
     eventually("gateway stream processing barrier", || {
-        h.store.tickers()[0].last == 10.5
+        h.store.tickers().unwrap()[0].last == 10.5
     })
     .await;
     let observation = json!({
@@ -139,7 +139,7 @@ async fn verify(name: ExchangeName, exchange: &'static str) {
     )
     .unwrap();
     eventually("gateway processing barrier", || {
-        h.store.tickers()[0].last == 11.0
+        h.store.tickers().unwrap()[0].last == 11.0
     })
     .await;
     assert!(

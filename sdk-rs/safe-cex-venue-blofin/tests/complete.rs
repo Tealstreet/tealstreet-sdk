@@ -68,7 +68,7 @@ fn effects(n: &Value, e: &Value) {
     }
 }
 fn native(r: &Runtime, e: &Value) {
-    let orders = r.store.orders();
+    let orders = r.store.orders().unwrap();
     let expected = e["orders"].as_array().unwrap();
     assert_eq!(orders.len(), expected.len(), "native orders count");
     for (o, e) in orders.iter().zip(expected) {
@@ -109,7 +109,7 @@ fn native(r: &Runtime, e: &Value) {
             &e["extra"]["filledInPlacementUnits"],
         );
     }
-    let positions = r.store.positions();
+    let positions = r.store.positions().unwrap();
     let expected = e["positions"].as_array().unwrap();
     assert_eq!(positions.len(), expected.len(), "native positions count");
     for (p, e) in positions.iter().zip(expected) {
@@ -134,7 +134,7 @@ fn native(r: &Runtime, e: &Value) {
             &e["extra"]["contractsNative"],
         );
     }
-    let balance = r.store.balance();
+    let balance = r.store.balance().unwrap();
     for (n, k) in [
         (balance.free, "free"),
         (balance.total, "total"),
@@ -290,6 +290,7 @@ fn account_native() {
         String::from_utf16(
             r.store
                 .balance()
+                .unwrap()
                 .info
                 .as_ref()
                 .unwrap()
@@ -320,7 +321,7 @@ fn private_facade_native() {
         .unwrap();
     let (r, s, _) = run(e);
     assert_eq!(
-        r.store.balance().total,
+        r.store.balance().unwrap().total,
         97.25,
         "native concrete dispatcher body"
     );
@@ -434,7 +435,7 @@ fn exchange_class_native() {
         .handle_order_topic(&json!({"data":[corpus()["order"]]}))
         .unwrap();
     assert_eq!(
-        r.store.orders()[0].amount,
+        r.store.orders().unwrap()[0].amount,
         1.0,
         "private uses same parent Store"
     );
@@ -442,8 +443,8 @@ fn exchange_class_native() {
     // Timer fetch invokes the parent's actual REST reader, not the panic host placeholder.
     let cb = r.timers.borrow_mut().remove(&1).unwrap();
     ready(cb());
-    assert!(r.store.loaded().orders);
-    assert!(r.store.orders().is_empty());
+    assert!(r.store.loaded().unwrap().orders);
+    assert!(r.store.orders().unwrap().is_empty());
     assert_eq!(
         r.trace
             .borrow()
@@ -462,7 +463,7 @@ fn exchange_class_native() {
         "read body shares confirmed cache"
     );
     assert_eq!(
-        exchange.symbol_to_market_id("BTCUSDT").as_deref(),
+        exchange.symbol_to_market_id("BTCUSDT").unwrap().as_deref(),
         Some("BTC-USDT")
     );
     let candle: CandleCallback<String> = Rc::new(|_| Ok(()));
@@ -576,7 +577,7 @@ fn exchange_class_native() {
         .on_message("{\"arg\":{\"channel\":\"account\"},\"data\":{\"totalEquity\":\"100\"}}")
         .unwrap();
     assert_eq!(
-        r2.store.balance().total,
+        r2.store.balance().unwrap().total,
         20.0,
         "private disposal prevents subsequent data dispatch"
     );

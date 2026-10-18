@@ -13,13 +13,14 @@ pub mod api_factory_proxy_region;
 pub mod api_factory_runtime;
 #[path = "support/api_factory_timeout.rs"]
 pub mod api_factory_timeout;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     http::{HttpClientOptions, HttpFailure, HttpFuture, HttpHost},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     NetworkFailure, RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse,
     RestResponseBody, TransportError, TransportFuture, TransportRegistry,

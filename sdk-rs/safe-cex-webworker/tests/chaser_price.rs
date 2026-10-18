@@ -1,11 +1,12 @@
 #[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use runtime::Runtime;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, Market, Ticker};
 use safe_cex_webworker::{
     chaser::ChaserOrderInstance, chaser_manager::find_best_price, task_types::ChaserOrderOptions,
@@ -126,7 +127,7 @@ fn run(row: &Value) -> Value {
             }),
         );
     }
-    let instance = ChaserOrderInstance::new(venue, options);
+    let instance = ChaserOrderInstance::new(venue, options).unwrap();
     instance.set_min_tick_distance(number(&row["distance"]));
     let result = match find_best_price(&instance) {
         Ok(v) => json!({"price":bits(v)}),

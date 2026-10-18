@@ -247,8 +247,8 @@ impl StartupHost for Host {
     fn fetch_tickers(&self) -> Result<ExchangeFuture<'static, Rc<Batch>>, ExchangeError> {
         self.begin("tickers", 2, self.tickers.clone())
     }
-    fn loaded(&self) -> StoreDataLoaded {
-        self.loaded.borrow().clone()
+    fn loaded(&self) -> Result<StoreDataLoaded, ExchangeError> {
+        Ok(self.loaded.borrow().clone())
     }
     fn update(&self, value: StartupUpdate<Batch, Batch>) -> Result<(), ExchangeError> {
         let (stage, loaded, identity, marker) = match value {
@@ -553,7 +553,7 @@ fn fetch_and_set_orders_live_source() {
         let mut future = Box::pin(startup::fetch_and_set_orders(
             fetch,
             add,
-            || loaded.borrow().clone(),
+            || Ok(loaded.borrow().clone()),
             update,
         ));
         let mut context = Context::from_waker(Waker::noop());

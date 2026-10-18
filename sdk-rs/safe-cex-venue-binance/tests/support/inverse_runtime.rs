@@ -278,7 +278,7 @@ impl JsHttpHost for Http {
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub http: Rc<Http>,
-    pub store: Rc<safe_cex_store::store::DefaultStore>,
+    pub store: Rc<safe_cex_exchange::native_store::DefaultStore>,
     pub exchange: Rc<safe_cex_venue_binance::inverse::BinanceInverseExchange>,
 }
 pub fn fixture(public_only: bool, testnet: bool) -> Harness {
@@ -291,7 +291,7 @@ pub fn fixture(public_only: bool, testnet: bool) -> Harness {
         requests: Default::default(),
         replies: Default::default(),
     });
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let options=serde_json::from_value(serde_json::json!({"key":"fixture-key","secret":"fixture-secret","testnet":testnet,"publicDataOnly":public_only,"tuning":{"consoleLogging":false}})).unwrap();
     let exchange = safe_cex_venue_binance::inverse::BinanceInverseExchange::new(
         safe_cex_types::ExchangeName::Binanceinverse,

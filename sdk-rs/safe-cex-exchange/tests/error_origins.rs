@@ -1,5 +1,6 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_types::StoreSubscriberError;
 use std::{cell::Cell, error::Error, fmt, rc::Rc};
 
@@ -47,7 +48,10 @@ fn shared_store_conversion_retains_opaque_listener_origin() {
         }),
     );
     let error = ExchangeError::from(store.set_setting("isHedged", true).unwrap_err());
-    assert!(store.options().is_hedged, "origin setting stays committed");
+    assert!(
+        store.options().unwrap().is_hedged,
+        "origin setting stays committed"
+    );
     assert_eq!(first_calls.get(), 1, "origin first subscriber calls");
     assert_eq!(later_calls.get(), 0, "origin aborts later subscriber");
     assert_eq!(

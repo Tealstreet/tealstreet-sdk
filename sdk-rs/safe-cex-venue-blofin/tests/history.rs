@@ -86,13 +86,18 @@ fn live_history_corpus() {
             });
             let mut trace = Vec::new();
             let result = match case["op"].as_str().unwrap() {
-                "number" => to_number(input.as_ref()).map(bits),
-                "optional" => to_optional_number(input.as_ref()).map(optional),
+                "number" => to_number(input.as_ref())
+                    .map(bits)
+                    .map_err(safe_cex_exchange::runtime::ExchangeError::from),
+                "optional" => to_optional_number(input.as_ref())
+                    .map(optional)
+                    .map_err(safe_cex_exchange::runtime::ExchangeError::from),
                 "order" => map_blofin_historical_order(input.as_ref().unwrap(), |id| {
                     trace.push(id.to_owned());
-                    case["resolved"].as_str().map(str::to_owned)
+                    Ok(case["resolved"].as_str().map(str::to_owned))
                 })
-                .map(|v| v.map_or(Value::Null, native)),
+                .map(|v| v.map_or(Value::Null, native))
+                .map_err(safe_cex_exchange::runtime::ExchangeError::from),
                 _ => unreachable!(),
             };
             if case["inherited"].is_object() {

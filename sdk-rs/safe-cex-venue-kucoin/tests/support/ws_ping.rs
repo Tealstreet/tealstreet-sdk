@@ -1,3 +1,4 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
@@ -7,7 +8,6 @@ use safe_cex_exchange::{
     },
     ws_parent::WsExchangeParent,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_kucoin::ws_ping::*;
@@ -338,7 +338,7 @@ fn four_live_pings_preserve_native_clock_identity_disposal_and_failure() {
                 fixture.runtime.monotonic.set(monotonic + 38.0);
                 fixture.socket.handle_pong_event(5000).unwrap();
                 assert_eq!(
-                    fixture.store.latency().to_bits(),
+                    fixture.store.latency().unwrap().to_bits(),
                     19.0_f64.to_bits(),
                     "KUCOIN-PING native monotonic timestamp {method}/{outcome}"
                 );

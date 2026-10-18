@@ -10,6 +10,7 @@ pub mod globals;
 pub mod iterator;
 pub(crate) mod jobs;
 pub mod library;
+pub mod native_store;
 mod number_radix;
 pub mod ops;
 pub mod promise;

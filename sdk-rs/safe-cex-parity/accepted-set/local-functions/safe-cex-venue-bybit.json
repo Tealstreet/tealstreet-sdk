@@ -1,7 +1,7 @@
 {
   "safe-cex-venue-bybit/src/ws_public.rs::LOCAL_FUNCTION:round_numbers": {
     "category": "non-decoder",
-    "reason": "Inside parse_frame: canonicalizes numeric tokens in an already JSON-parsed generic Value tree, retaining negative zero spelling and refusing nonfinite projections. Its output is the same untyped tree, not a typed domain record or a field/enum admission decision; the surrounding JSON parser remains a separate production boundary. Reviewed ticker error propagation since 1b81d57fe2: Store errors retain their native conversion and source failures retain TypeError identity; parse_frame and its numeric normalization helper are unchanged.",
-    "sourceSha256": "6f47902a4410ffee2d4884cc8ed2f4e8a667c4a445795d560bf713b2472a5ee7"
+    "reason": "Inside parse_frame: canonicalizes numeric tokens in an already JSON-parsed generic Value tree, retaining negative zero spelling and refusing nonfinite projections. Its output is the same untyped tree, not a typed domain record or a field/enum admission decision; the surrounding JSON parser remains a separate production boundary. Reviewed ticker error propagation since 1b81d57fe2: Store errors retain their native conversion and source failures retain TypeError identity; parse_frame and its numeric normalization helper are unchanged. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order.",
+    "sourceSha256": "8660425da9d84d4ecbd6af5608955eca5a650d1236fe27704a58de1dffde2810"
   }
 }

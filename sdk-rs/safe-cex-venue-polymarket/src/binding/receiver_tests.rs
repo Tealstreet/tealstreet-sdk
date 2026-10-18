@@ -10,6 +10,7 @@ use crate::{
     ws_dispatch::{ConnectHost, MessageHost, Runtime},
     ws_lifecycle::SocketHost,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     js_runtime::{
         client::JsHttpHost,
@@ -19,7 +20,6 @@ use safe_cex_exchange::{
     native::native_runtime,
     runtime::ExchangeRuntime,
 };
-use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
 use std::{
     cell::{Cell, RefCell},

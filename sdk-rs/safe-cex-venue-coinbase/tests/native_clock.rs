@@ -83,7 +83,7 @@ fn native_jwt_and_private_order_timestamp_use_the_synced_clock() {
         socket.events.borrow_mut().push_back(WsEvent::Message(SocketFrame::Text(json!({"channel":"user","events":[{"type":"snapshot","orders":[{"order_id":"clock-order","client_order_id":"clock-client","product_id":"BTC-USDC","order_type":"LIMIT","order_side":"BUY","status":"OPEN","cumulative_quantity":"0","leaves_quantity":"2.5","limit_price":"123.45"}]}]}).to_string())));
         h.runtime.pump();
         let after = VIRTUAL_CLOCK.get_current_time_ms();
-        let orders = h.store.orders();
+        let orders = h.store.orders().unwrap();
         assert_eq!(orders.len(), 1);
         assert_eq!(orders[0].id, "clock-order");
         let last_update = orders[0].last_update;

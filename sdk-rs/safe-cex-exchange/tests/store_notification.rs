@@ -1,4 +1,6 @@
-use safe_cex_store::{Store, StoreMutationError, store::DefaultStore};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::Store;
+use safe_cex_store::StoreMutationError;
 use safe_cex_types::StoreSubscriberError;
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
@@ -8,7 +10,7 @@ fn first_subscriber_failure_surfaces_after_committed_setting_and_skips_fanout() 
     let out = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/notification_oracle.mjs"
+            "/../safe-cex-store/tests/notification_oracle.mjs"
         ))
         .output()
         .unwrap();
@@ -58,7 +60,7 @@ fn first_subscriber_failure_surfaces_after_committed_setting_and_skips_fanout() 
                     "first failing subscriber retains its identity"
                 );
                 assert!(
-                    store.options().is_hedged,
+                    store.options().unwrap().is_hedged,
                     "mutation commits before callback error surfaces"
                 );
                 let emit = |message: &str| -> Result<(), &str> {
@@ -83,7 +85,7 @@ fn first_subscriber_failure_surfaces_after_committed_setting_and_skips_fanout() 
             row["rejected"].as_bool().unwrap(),
             "only caller emitter failure escapes"
         );
-        assert!(store.options().is_hedged);
+        assert!(store.options().unwrap().is_hedged);
         first();
         second();
     }
