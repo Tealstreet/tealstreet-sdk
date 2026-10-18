@@ -559,7 +559,7 @@ fn query(value: &Js) -> Result<QueryValue, Thrown> {
         ),
         value if value.is_array() => QueryValue::Array(
             value
-                .array_values()
+                .array_values()?
                 .unwrap_or_default()
                 .iter()
                 .map(query)

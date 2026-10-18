@@ -32,5 +32,10 @@ for(let unit=0;unit<65536;unit++) {
   assert.deepEqual(units(JSON.parse('"\\u'+unit.toString(16).padStart(4,'0')+'"')),[unit]);
 }
 const rest='{"label":"tp \\ud83d","\\udfff":"kept","list":[1,2],"zero":-0}';
+const ordering=String.raw`{"z":1,"4294967295":2,"2":3,"01":4,"0":5,"a":6,"4294967294":7,"10":8,"-0":9,"\ud800":10,"next":11}`;
+const changing={z:3,tail:4,"0":0};
+Object.defineProperty(changing,'hidden',{value:55,configurable:true});
+Object.defineProperty(changing,'1',{enumerable:true,get(){delete changing.tail;changing.tail=99;changing.z=33;return 1;}});
+const changed=observe(JSON.parse(JSON.stringify(changing)));
 const instance=axios.create({adapter:async config=>({data:rest,status:200,statusText:'OK',headers:{},config})});
-instance.get('/source').then(response=>console.log(JSON.stringify({cases,escapeCodeUnits:65536,rest,restValue:observe(response.data)})));
+instance.get('/source').then(response=>console.log(JSON.stringify({cases,escapeCodeUnits:65536,rest,restValue:observe(response.data),changed,ordering:{text:units(ordering),value:observe(JSON.parse(ordering))}})));

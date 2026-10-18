@@ -18,7 +18,6 @@ const names = [
   "safe_cex_venue_backpack::public_control::SubscriptionState",
   "safe_cex_venue_backpack::public_listeners::Book",
   "safe_cex_venue_backpack::public_listeners::State",
-  "safe_cex_venue_backpack::rest_reads::Array",
   "safe_cex_venue_backpack::signing::SigningRecord",
   "safe_cex_venue_backpack::startup_recovery::NativeMap"
 ];
@@ -37,8 +36,8 @@ assert.deepEqual(results.map(row => row.name).sort(), names);
 if (args.includes('--expect-unclassified')) {
   for (const result of results) assert.ok(result.failures.some(failure =>
     failure.includes('public alias needs an accepted-set contract')), result.name);
-  console.log('All 16 Backpack containers fail missing classification by name.');
+  console.log('All 15 retained Backpack containers fail missing classification by name.');
 } else {
   for (const result of results) assert.deepEqual(result.failures, [], result.name);
-  console.log('Backpack16 actual compiler/container alias receipts PASS');
+  console.log('Backpack15 retained actual compiler/container alias receipts PASS');
 }

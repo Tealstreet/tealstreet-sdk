@@ -1,4 +1,4 @@
-use crate::runtime::{ExchangeError, ExchangeRuntime, ExchangeTask};
+use crate::runtime::{ExchangeError, ExchangeRuntime, ExchangeTask, RuntimeTaskKind};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -92,7 +92,20 @@ impl OwnedTasks {
         build: impl FnOnce(OwnedOperation) -> Work,
         cleanup: impl FnOnce(bool) + 'static,
     ) -> OwnedOperation {
-        self.start_inner(|work| Some(runtime.spawn_local(work)), build, cleanup)
+        self.start_classified(runtime, RuntimeTaskKind::Finite, build, cleanup)
+    }
+    pub(crate) fn start_classified<R: ExchangeRuntime + ?Sized>(
+        self: &Rc<Self>,
+        runtime: &R,
+        kind: RuntimeTaskKind,
+        build: impl FnOnce(OwnedOperation) -> Work,
+        cleanup: impl FnOnce(bool) + 'static,
+    ) -> OwnedOperation {
+        self.start_inner(
+            |work| Some(runtime.spawn_classified(kind, work)),
+            build,
+            cleanup,
+        )
     }
     /// Register cancellation before the canonical Promise driver runs the prefix.
     /// The registry owns the actual body, so cancelling drops pending I/O even
@@ -122,6 +135,14 @@ impl OwnedTasks {
         future: Work,
     ) -> OwnedOperation {
         Self::detached().start(runtime, |_| future, |_| {})
+    }
+    pub(crate) fn start_promise_driver<R: ExchangeRuntime + ?Sized>(runtime: &R, future: Work) {
+        Self::detached().start_classified(
+            runtime,
+            RuntimeTaskKind::PromiseDriver,
+            |_| future,
+            |_| {},
+        );
     }
     fn start_inner(
         self: &Rc<Self>,
@@ -193,8 +214,9 @@ impl OwnedTasks {
         }
         let mut deadline = now + period_ms as f64;
         let task_runtime = runtime.clone();
-        Ok(self.start(
+        Ok(self.start_classified(
             runtime.as_ref(),
+            RuntimeTaskKind::Timer,
             move |operation| {
                 Box::pin(async move {
                     let result = async {

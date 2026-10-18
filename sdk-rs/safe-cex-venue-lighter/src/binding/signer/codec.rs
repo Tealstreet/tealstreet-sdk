@@ -4,7 +4,7 @@ use crate::{
     http_transactions::*,
     transaction_client::{SendTxBatchResponse, TransactionRef, VolumeQuotaRemaining},
     transaction_client_types::*,
-    transaction_promise::{Shared, shared},
+    transaction_promise::shared,
 };
 use num_bigint::BigInt;
 use safe_cex_exchange::js_runtime::value::{Js, Thrown};
@@ -146,7 +146,7 @@ pub(super) fn create_grouped_orders(
 ) -> Result<(CreateGroupedOrdersParams, Vec<OrderFlagValues>), Thrown> {
     let orders = params.get("orders")?;
     let values = orders
-        .array_values()
+        .array_values()?
         .ok_or_else(|| mismatch("orders", "an array", &orders))?;
     if values.is_empty() || values.len() > 3 {
         return Err(Thrown::error(
@@ -208,7 +208,7 @@ pub(super) fn create_grouped_orders(
         }
     };
     let decoded = orders
-        .array_values()
+        .array_values()?
         .ok_or_else(|| mismatch("orders", "an array", &orders))?
         .iter()
         .map(create_order)
@@ -231,6 +231,15 @@ pub(super) fn cancel_order(params: &Js) -> Result<CancelOrderParams, Thrown> {
     Ok(CancelOrderParams {
         order_id: big(params, "orderId")?,
         market_id: number(params, "marketId")?,
+    })
+}
+
+// ts: TransferParams
+pub(super) fn transfer(params: &Js) -> Result<TransferParams, Thrown> {
+    Ok(TransferParams {
+        to_account_index: big(params, "toAccountIndex")?,
+        amount: big(params, "amount")?,
+        token_id: optional(params, "tokenId", as_number)?,
     })
 }
 
@@ -307,7 +316,7 @@ pub(super) fn deadline(value: &Js) -> Result<BigInt, Thrown> {
 pub(super) fn send_tx_batch_response(value: &Js) -> Result<SendTxBatchResponse, Thrown> {
     let hashes = value.get("txHashes")?;
     let tx_hashes = hashes
-        .array_values()
+        .array_values()?
         .ok_or_else(|| mismatch("txHashes", "an array", &hashes))?
         .into_iter()
         .map(|hash| as_text("txHashes[]", hash))
@@ -549,17 +558,4 @@ pub(super) fn transaction_ref(tx: &TransactionRef) -> Js {
             )
         }
     }
-}
-
-pub(super) fn create_order_txs(
-    txs: &[Shared<L2CreateOrderTxInfo>],
-    flags: &[OrderFlagValues],
-) -> Js {
-    assert_eq!(txs.len(), flags.len());
-    Js::array(
-        txs.iter()
-            .zip(flags)
-            .map(|(tx, flags)| create_order_tx(&tx.borrow(), flags))
-            .collect(),
-    )
 }

@@ -120,7 +120,7 @@ pub(super) fn install(g: &Js, weak: Weak<Shared>) -> Result<(), Thrown> {
                 let bytes = await_js(&h.exchange_runtime(), buffer?)
                     .await?
                     .get("bytes")?
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("ArrayBuffer bytes are unavailable"))?
                     .iter()
                     .map(|v| v.to_number().map(|n| n as u8))

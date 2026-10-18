@@ -20,6 +20,13 @@ const quote = value => JSON.stringify(value);
 const mappings = {};
 const snapshots = {};
 const schemas = {};
+// These erased source annotations have no Rust caller in this mirror or the
+// tealstreet-next embedder. Live position/history methods read the native graph.
+// Keep the maintained TS declarations; do not generate parallel unused codecs.
+const retiredRecords = {
+  binance: new Set(['GET_POSITION_RISK_RESPONSE', 'BinanceIncomeRecord', 'BinanceIncomeHistoryOptions']),
+  binancepm: new Set(['GET_POSITION_RISK_RESPONSE']),
+};
 
 function primitive(node) {
   if (node.kind === ts.SyntaxKind.StringKeyword) return 'String';
@@ -85,6 +92,7 @@ for (const variant of variants) {
   snapshots[variant] = exports;
   let output = '// Generated from the live TypeScript types source by scripts/types.mjs. Do not edit.\n';
   const rows = {};
+  const retired = new Set();
   for (const statement of ast.statements) {
     if (ts.isImportDeclaration(statement)) continue;
     if (ts.isVariableStatement(statement)) {
@@ -106,6 +114,11 @@ for (const variant of variants) {
       }
     } else if (ts.isTypeAliasDeclaration(statement)) {
       const sourceName = statement.name.text;
+      if (retiredRecords[variant]?.has(sourceName)) {
+        retired.add(sourceName);
+        rows[sourceName] = [];
+        continue;
+      }
       const name = pascal(sourceName);
       const node = statement.type;
       rows[sourceName] = [name];
@@ -143,6 +156,8 @@ for (const variant of variants) {
       } else output += record(name, node);
     } else throw Error('Unclassified source statement: ' + statement.getText(ast));
   }
+  assert.deepEqual([...retired].sort(), [...(retiredRecords[variant] ?? [])].sort(),
+    `${variant}: reviewed retired source declarations must still exist`);
   // Root yarn invocations must use the workspace pin and its rustfmt component.
   const formatted = spawnSync(process.env.RUSTFMT || 'rustfmt', ['--edition', '2024'], {
     cwd: process.env.RUSTFMT ? undefined : root + 'sdk-rs',

@@ -213,7 +213,7 @@ pub fn parse_asset_balance_updates(
     let Js::Array(items) = balances else {
         return Ok(None);
     };
-    let mut updates = Vec::with_capacity(items.borrow().len());
+    let mut updates = Vec::with_capacity(items.len());
     let iterator = balances.iterator()?;
     loop {
         let step = iterator.call_method("next", vec![])?;

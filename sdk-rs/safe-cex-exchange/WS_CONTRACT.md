@@ -142,3 +142,29 @@ numbers do not pass through a JSON projection. There is one handler ABI and one
 registry. Typed projection occurs only at a reached output field. Binance retains
 its callback identity bridges, with original callback failures carried through
 the existing opaque error origin only on the error path.
+
+The native plain socket returns its stable host handle in CONNECTING before the
+HTTP upgrade settles. Constructor admission (URL, protocol/header parsing and TLS
+configuration) precedes that handle; the one transport handshake is then driven
+by the canonical eager boundary in the socket's owned task registry. The event
+consumer waits for that same handle to open or fail, preserving the existing
+network Error then Close(1006) path and constructor-error origin.
+
+Direct send while CONNECTING throws `InvalidStateError: Sent before connected.`;
+BaseWebSocket.send instead observes state 0 and uses its existing warning and
+reconnect path. Closing during CONNECTING cancels pending physical I/O and emits
+one Error then Close(1006), with no Open. The maintained Node WebSocket stays
+CLOSING (2) after that pair; the native plain handle preserves that observed
+quirk. Its normalized Error message is the source listener's `event.type` fallback.
+Dispose/final drop cancels the handshake and suppresses later delivery. Event
+waiter drop only removes its own shared registration; it does not cancel a live
+socket. `safe-cex-registry/tests/native_connecting_socket.rs` runs actual native
+handshakes and the constructed Bitget secondary market callback against
+`connecting_socket_source.cjs`, which executes the maintained Bitget/BaseWebSocket
+and real WebSocket over a held local upgrade. Core's native connecting tests pin
+immediate cancellation and waiter registration release independently.
+Event delivery uses the existing queued native consumer under the
+[callback choice](../parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice).
+The Bitget witness checks handle presence at callback entry and the resulting
+lifecycle effects after event delivery; it does not claim Node EventTarget's
+synchronous close-callback stack.

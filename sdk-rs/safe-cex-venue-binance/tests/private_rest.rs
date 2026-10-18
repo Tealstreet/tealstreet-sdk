@@ -55,7 +55,13 @@ fn wire(v: &EventValue) -> Value {
                 json!({"$prototype":true})
             }
         }
-        EventValue::Array(a) => Value::Array(array_values(a).iter().map(wire).collect()),
+        EventValue::Array(a) => Value::Array(
+            array_values(a)
+                .expect("fixture array reads")
+                .iter()
+                .map(wire)
+                .collect(),
+        ),
         EventValue::Object(o) => {
             let mut out = v
                 .spread()
@@ -116,7 +122,7 @@ fn items(v: &EventValue) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("native Array")
     };
-    array_values(a)
+    array_values(a).expect("fixture array reads")
 }
 fn own(v: &EventValue, k: &str) -> bool {
     if matches!(v, EventValue::Object(_)) {
@@ -155,7 +161,10 @@ fn setup(f: Value, venue: &'static str, family: &'static str) -> Bind {
     };
     if venue == "spot" && family == "orders" {
         if let EventValue::Array(a) = &mut payload {
-            if let Some(o) = a.borrow().first().and_then(Option::as_ref) {
+            if let Some(o) = native_array_fixture::slots(&a)
+                .first()
+                .and_then(Option::as_ref)
+            {
                 if f["name"] == "stop" {
                     o.write("type", string("STOP_LOSS_LIMIT"))
                 }
@@ -325,7 +334,10 @@ impl SnapshotBindings for Bind {
             return Err(s.error.clone());
         }
         if let EventValue::Array(a) = &s.payload {
-            let first = a.borrow().first().and_then(Option::as_ref).cloned();
+            let first = native_array_fixture::slots(&a)
+                .first()
+                .and_then(Option::as_ref)
+                .cloned();
             if let Some(o) = first {
                 if s.name() == "clock-mutates" {
                     o.write("origQty", string("7.10"));
@@ -351,7 +363,7 @@ impl SnapshotBindings for Bind {
             return Err(s.error.clone());
         }
         Ok(if s.family == "lookup" && s.name() != "store-hit" {
-            EventValue::Array(Default::default())
+            EventValue::array(vec![])
         } else {
             s.orders.clone()
         })
@@ -377,7 +389,7 @@ impl SnapshotBindings for Bind {
         }
         if s.name() == "price-appends" {
             if let EventValue::Array(a) = prop(&s.payload, "balances") {
-                if a.borrow().len() == 2 {
+                if a.len() == 2 {
                     EventValue::Array(a.clone())
                         .push(value(json!({"asset":"ETH","free":"1","locked":"1"})))
                         .unwrap();
@@ -439,17 +451,17 @@ fn project(s: &State, result: &Result<EventValue, Failure>) -> Value {
         .cloned()
         .unwrap_or(EventValue::Undefined);
     let list = if let EventValue::Array(a) = &v {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
     let rows = if let EventValue::Array(a) = &s.payload {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
     let algos = if let EventValue::Array(a) = &s.algo {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
@@ -1155,7 +1167,7 @@ fn bound_method(
             } else if s.name() == "string-iterables" {
                 string(if which == "first" { "ab" } else { "c" })
             } else if s.name() == "empty" {
-                EventValue::Array(Default::default())
+                EventValue::array(vec![])
             } else {
                 value(s.f[which].clone())
             })
@@ -1661,3 +1673,7 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[path = "support/native_array_fixture.rs"]
+#[allow(dead_code)] // Different integration binaries consume distinct fixture operations.
+mod native_array_fixture;

@@ -98,15 +98,6 @@ fn derived_deserialization_inventory_equals_typescript_and_rejects_nonmembers() 
             .unwrap(),
     );
     let combined = incoming.union(&outgoing).cloned().collect();
-    let modes = ts_literals(
-        source
-            .split("mode:")
-            .nth(1)
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap(),
-    );
     let mut inventory = EnumInventory::default();
     // Inspect serde's generated helper, then test the public string-only Deserialize boundary.
     let _ = StoreWorkerIncomingOpWire::deserialize(&mut inventory);
@@ -139,20 +130,9 @@ fn derived_deserialization_inventory_equals_typescript_and_rejects_nonmembers() 
             .collect::<std::collections::BTreeSet<_>>(),
         combined
     );
-    let _ = PerfFixtureModeWire::deserialize(&mut inventory);
-    assert_eq!(
-        inventory
-            .0
-            .unwrap()
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<std::collections::BTreeSet<_>>(),
-        modes
-    );
     assert_rejected::<StoreWorkerIncomingOp>(&incoming);
     assert_rejected::<StoreWorkerOutgoingOp>(&outgoing);
     assert_rejected::<StoreWorkerOp>(&combined);
-    assert_rejected::<PerfFixtureMode>(&modes);
     for input in &outgoing {
         if !incoming.contains(input) {
             assert!(serde_json::from_value::<StoreWorkerIncomingOp>(json!(input)).is_err());
@@ -162,18 +142,5 @@ fn derived_deserialization_inventory_equals_typescript_and_rejects_nonmembers() 
         if !outgoing.contains(input) {
             assert!(serde_json::from_value::<StoreWorkerOutgoingOp>(json!(input)).is_err());
         }
-    }
-    for mode in [
-        json!("unknown"),
-        json!("RECORD"),
-        json!(""),
-        json!(null),
-        json!({"off":null}),
-    ] {
-        assert!(serde_json::from_value::<PerfFixtureConfig>(json!({"mode":mode})).is_err());
-    }
-    for mode in modes {
-        let value: PerfFixtureConfig = serde_json::from_value(json!({"mode":mode})).unwrap();
-        assert_eq!(serde_json::to_value(value).unwrap()["mode"], mode);
     }
 }

@@ -734,17 +734,17 @@ impl PrivateStream {
             self.parent.log(
                 &format!(
                     "ACCOUNT_UPDATE received with {} position(s): {}",
-                    positions.borrow().len(),
+                    positions.len(),
                     stringify(&p)?
                 ),
                 LogSeverity::Info,
             )?;
-            let length = positions.borrow().len();
+            let length = positions.len();
             for index in 0..length {
-                let pos = positions.borrow().get(index).cloned().flatten();
-                let Some(pos) = pos else {
+                if !p.has_index(index) {
                     continue;
-                };
+                }
+                let pos = p.get(&index.to_string())?;
                 let amount = parsed(&pos.get("pa")?)?;
                 let side = account::get_position_side(&pos, amount)?;
                 let symbol = utf8(pos.get("s")?).unwrap_or_default();

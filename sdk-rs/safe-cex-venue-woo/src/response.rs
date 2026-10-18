@@ -1,6 +1,7 @@
 //! Stateless response projections used by the WOO exchange.
 use crate::utils::{normalize_symbol, reverse_symbol};
 use safe_cex_num::{JsCoercionError, js_number, js_trim};
+use safe_cex_types::retained_json::RetainedJsonInput;
 use serde_json::{Map, Value};
 
 // ts: WOOXExchange#parseFiniteFundingNumber
@@ -108,13 +109,13 @@ pub fn get_transaction_history_symbol_candidates(symbol: &str) -> Vec<String> {
 }
 
 // ts: WOOXExchange#parseTransactionRowsFromResponse
-pub fn parse_transaction_rows_from_response(data: &Value) -> &[Value] {
+pub fn parse_transaction_rows_from_response(data: &RetainedJsonInput) -> &[RetainedJsonInput] {
     let nested = data.get("data");
     nested
         .and_then(|v| v.get("rows"))
-        .and_then(Value::as_array)
-        .or_else(|| data.get("rows").and_then(Value::as_array))
-        .or_else(|| nested.and_then(Value::as_array))
+        .and_then(RetainedJsonInput::as_array)
+        .or_else(|| data.get("rows").and_then(RetainedJsonInput::as_array))
+        .or_else(|| nested.and_then(RetainedJsonInput::as_array))
         .or_else(|| data.as_array())
-        .map_or(&[], Vec::as_slice)
+        .unwrap_or(&[])
 }

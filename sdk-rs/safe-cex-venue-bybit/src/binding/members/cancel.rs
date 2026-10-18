@@ -24,7 +24,7 @@ pub(crate) fn cancel_symbol_orders(rt: &Rt, symbol: Js, cancel_tp_sl: Js) -> Res
             .this
             .get("store")?
             .get("orders")?
-            .array_values()
+            .array_values()?
             .unwrap_or_default();
         let mut tp_sl = vec![];
         let mut cancelled = vec![];
@@ -146,7 +146,7 @@ pub(crate) async fn cancel_orders_helper(
         } else {
             ext.get("list")?
         };
-        let Some(rows) = list.array_values() else {
+        let Some(rows) = list.array_values()? else {
             return Err(Thrown::type_error(&format!(
                 "Cannot read properties of {} (reading 'find')",
                 list.to_display()
@@ -170,7 +170,7 @@ pub(crate) fn cancel_orders(rt: &Rt, orders: Js) -> Result<Js, Thrown> {
     let body_rt = rt.clone();
     Ok(rt.spawn(Box::pin(async move {
         let rt = body_rt;
-        let orders = orders.array_values().unwrap_or_default();
+        let orders = orders.array_values()?.unwrap_or_default();
         let mut kept = vec![];
         for order in &orders {
             let id = text(&order.get("id")?)?;

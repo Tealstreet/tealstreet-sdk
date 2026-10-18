@@ -3,6 +3,7 @@
 import { createRequire } from 'node:module';
 import { setTimeout as realTimeout } from 'node:timers';
 import { replayClock, socketReceipts, httpReceipts } from './replay-clock.mjs';
+import { verifyRawTaskDrain } from './stream-relay.mjs';
 import { exchangeRegistry } from '../../../packages/safe-cex/src/exchanges/registry.ts';
 import { DefaultStore } from '../../../packages/safe-cex/src/store/store.base.ts';
 import { ExchangeWorker } from '../../../packages/safe-cex/src/webworker/ExchangeWorker.ts';
@@ -115,16 +116,21 @@ process.on('message', async (message) => {
       // activating the replay clock. Post-play barriers require the same fence.
       if (implementation === 'rust' || clock) {
         while (true) {
-          const pending =
+          const receipt =
             implementation === 'rust'
-              ? (await native.nativeAccountReplay(id, { op: 'receipt' })).pendingJobs
-              : pendingHttp() + receipts.pendingJobs();
-          if (!pending) break;
+              ? await native.nativeAccountReplay(id, { op: 'receipt' })
+              : { pendingJobs: pendingHttp() + receipts.pendingJobs() };
+          if (!Number.isSafeInteger(receipt.pendingJobs)) throw new Error('Missing pending-job receipt');
+          if (implementation === 'rust' && (!receipt.rawTasks || receipt.rawTasks.version !== 1))
+            throw new Error('Addon lacks raw-task receipts');
+          if (receipt.pendingJobs === 0 && (implementation !== 'rust' || verifyRawTaskDrain(receipt.rawTasks))) break;
           await new Promise((resolve) => realTimeout(resolve, 1));
         }
       }
       // Include the trailing production Store throttle after the last frame.
       await new Promise((resolve) => realTimeout(resolve, 350));
+    } else if (message.method === 'cpuUsage') {
+      value = process.cpuUsage();
     } else if (message.method === 'drain') {
       observing = false;
       value = { outputs, state };

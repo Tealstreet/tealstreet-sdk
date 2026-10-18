@@ -54,7 +54,7 @@ fn fetch_markets(rt: Rt, _: Vec<Js>) -> JsFuture<'static> {
                 {
                     continue;
                 }
-                let filters = market.get("filters")?.array_values().unwrap_or_default();
+                let filters = market.get("filters")?.array_values()?.unwrap_or_default();
                 let find = |kind: &str| -> Result<Js, Thrown> {
                     for f in &filters {
                         if v(&rt, f, "filterType")?.strict_equals(&Js::str(kind)) {
@@ -482,7 +482,7 @@ fn fetch_positions_and_balance(rt: Rt, _: Vec<Js>) -> JsFuture<'static> {
     Box::pin(async move {
         let result = async {
         let data = request(&rt, "xhr", "get", "ACCOUNT", vec![]).await?;
-        let assets = optional(&data, "assets")?.array_values().unwrap_or_default();
+        let assets = optional(&data, "assets")?.array_values()?.unwrap_or_default();
         let (mut total, mut free, mut upnl, mut used) = (0.0, 0.0, 0.0, 0.0);
         let coins = Js::object(vec![]);
         for asset in assets {
@@ -526,7 +526,7 @@ fn fetch_orders(rt: Rt, _: Vec<Js>) -> JsFuture<'static> {
         let result = async {
             let data = request(&rt, "xhr", "get", "OPEN_ORDERS", vec![]).await?;
             let mut orders = vec![];
-            for o in data.array_values().unwrap_or_default() {
+            for o in data.array_values()?.unwrap_or_default() {
                 let kind = rt
                     .global("ORDER_TYPE")?
                     .get_property(&v(&rt, &o, "type")?)?;
@@ -722,7 +722,7 @@ fn fetch_public_trades(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
         )
         .await?;
         let mut output = vec![];
-        for trade in data.array_values().unwrap_or_default() {
+        for trade in data.array_values()?.unwrap_or_default() {
             output.push(Js::object(vec![
                 ("id", trade.get("id")?.call_method("toString", vec![])?),
                 ("symbol", symbol.clone()),
@@ -806,7 +806,7 @@ fn fetch_ohlcv(rt: Rt, a: Vec<Js>) -> JsFuture<'static> {
         )
         .await?;
         let mut candles = vec![];
-        for row in data.array_values().unwrap_or_default() {
+        for row in data.array_values()?.unwrap_or_default() {
             let cells = row.iterable_values()?;
             let candle = Js::object(vec![(
                 "timestamp",

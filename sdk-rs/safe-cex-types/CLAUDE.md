@@ -1,5 +1,9 @@
 # Shared types
 
+The two gateway non-UTF-8 audit verdicts are in `per-row-rulings.md`. Production
+gateway ingress reads raw frames by channel; the stricter standalone
+GatewayMessage decoder must not become a precondition for that ingress.
+
 The bottom layer: every crate above — venues, store, transport, crypto,
 exchange core — reads its wire vocabulary from here, so a type added anywhere
 else is a second copy by definition. Naming, literal-union identifiers and
@@ -93,8 +97,16 @@ retained_json contains the canonical UTF-16 native data carrier. All five shared
 model info fields use it, preserving their Option or ModelField outer presence.
 NaN payloads, infinities, signed zero, own undefined, text and keys survive native
 Serde and Store capture. The named native codec is distinct from raw JSON tokens;
-its internal payload never appears in serialized JSON. The single retained JSON
+its internal payload never appears in serialized JSON. The private native payload adapter supplies UTF-16 storage as native-endian bytes.
+One borrowed read-only byte view lasts only through visit_bytes; the codec copies
+pairs back into u16 storage. The wire payload keeps numeric unit sequences and
+their existing range, type and cardinality checks. The single retained JSON
 writer lives here below Num and applies JSON.stringify projection only on output.
+Payload tags decode directly into the closed eight-variant tag enum. Short ASCII
+field identifiers use stack storage; long and Unicode names retain the existing
+String projection. Explicit key context preserves StringDeserializer's rejection
+of optional and newtype map keys. retained_utf16 checks these admissions against
+stock Serde and covers borrowed/owned UTF-8 byte tags independently.
 `safe-cex-exchange/tests/js_runtime.rs` runs the maintained TS model/Store corpus
 against actual typed bridges and the production Store facade before wire checks.
 StoreData and StoreUpdate use the same native Store record profile: undefined
@@ -267,3 +279,5 @@ adapter. UTF-16 units decode into validated u16 storage without an intermediate
 Float-node tree or f64 vector. The tagged payload schema and malformed-unit
 refusals are unchanged. JSON string parsing copies unescaped spans together;
 escape/control validation and duplicate-property order keep their existing rules.
+
+StoreData.socketHealth uses RetainedJsonInput so own undefined diagnostic fields survive typed notifications and native Store payloads. Ordinary JSON output omits those keys. StoreUpdate and the Store health getter/merge use the same carrier; a JSON map is an explicit ingress conversion.

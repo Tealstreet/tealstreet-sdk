@@ -172,3 +172,98 @@ pub fn post_worker_error_getter_data(post: js_sys::Function) -> Result<u32, JsVa
     .map_err(|error| js_sys::Error::new(&error.message))?;
     Ok(reads.get())
 }
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn post_worker_array_data(post: js_sys::Function) -> Result<u32, JsValue> {
+    use safe_cex_exchange::{js_runtime::value::Js, runtime::ExchangeError};
+    use safe_cex_webworker::{
+        data_post::{WorkerDataPayload, WorkerDataPost},
+        payload::StoreWorkerOp,
+    };
+    use std::{cell::Cell, rc::Rc};
+    let host = WorkerDataPost::for_browser(Rc::new(move |value| {
+        post.call1(&JsValue::UNDEFINED, value)
+            .map(|_| ())
+            .map_err(|error| ExchangeError::new(format!("array post failed: {error:?}")))
+    }));
+    let token = Js::object(vec![("bits", Js::Number(f64::INFINITY))]);
+    let array = Js::holey_array(vec![
+        None,
+        Some(Js::Undefined),
+        Some(Js::Number(-0.0)),
+        Some(token.clone()),
+    ]);
+    array.define("tag", token).unwrap();
+    array.define("self", array.clone()).unwrap();
+    let reads = Rc::new(Cell::new(0));
+    let observed = reads.clone();
+    array
+        .define_accessor(
+            "read",
+            Some(Rc::new(move |this| {
+                observed.set(observed.get() + 1);
+                this.get("tag")
+            })),
+            None,
+        )
+        .unwrap();
+    host.send(WorkerDataPayload {
+        op: StoreWorkerOp::CallMethodDone,
+        data: Js::object(vec![("array", array.clone()), ("alias", array)]),
+    })
+    .map_err(|error| js_sys::Error::new(&error.message))?;
+    Ok(reads.get())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn post_worker_array_edge(post: js_sys::Function, mode: u32) -> Result<(), JsValue> {
+    use safe_cex_exchange::{js_runtime::value::Js, runtime::ExchangeError};
+    use safe_cex_webworker::{
+        data_post::{WorkerDataPayload, WorkerDataPost},
+        payload::StoreWorkerOp,
+    };
+    use std::rc::Rc;
+    let host = WorkerDataPost::for_browser(Rc::new(move |value| {
+        post.call1(&JsValue::UNDEFINED, value)
+            .map(|_| ())
+            .map_err(|error| ExchangeError::new(format!("array edge post failed: {error:?}")))
+    }));
+    let array = Js::array(vec![]);
+    array.set("length", Js::Number(u32::MAX as f64)).unwrap();
+    let result = match mode {
+        0 => array
+            .call_method("push", vec![Js::Number(-0.0)])
+            .map(|_| ()),
+        1 => array.splice_array(
+            u32::MAX as usize,
+            u32::MAX as usize,
+            0,
+            vec![Js::Number(-0.0)],
+        ),
+        2 => array.splice_array(
+            u32::MAX as usize,
+            (u32::MAX - 1) as usize,
+            0,
+            vec![Js::Number(11.0), Js::Number(-0.0)],
+        ),
+        _ => return Err(js_sys::Error::new("unknown array edge mode").into()),
+    };
+    let error = result.expect_err("ARRAY-EDGE oversized array length refuses");
+    let summary = Js::object(vec![
+        ("name", error.value.get("name").unwrap()),
+        ("length", array.get("length").unwrap()),
+        ("named", array.get("4294967295").unwrap()),
+        ("namedOwn", Js::Bool(array.has_own("4294967295"))),
+        ("lastOwn", Js::Bool(array.has_own("4294967294"))),
+        ("last", array.get("4294967294").unwrap()),
+        ("higherOwn", Js::Bool(array.has_own("4294967296"))),
+    ]);
+    host.send(WorkerDataPayload {
+        op: StoreWorkerOp::CallMethodDone,
+        data: summary,
+    })
+    .map_err(|error| js_sys::Error::new(&error.message))?;
+    Ok(())
+}

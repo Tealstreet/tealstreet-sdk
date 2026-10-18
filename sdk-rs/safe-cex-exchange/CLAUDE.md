@@ -6,6 +6,9 @@ Error snapshot excludes the self-reference under decision 2; existing owned
 metadata preserves diagnostics, extra/config data and nearest-response authority.
 Executable config capabilities retain the owned-data boundary. Constructed Aster
 and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
+The typed REST host recovers owned callback errors through the canonical
+ExchangeError-to-Thrown conversion and attaches the effective request config.
+The Bitget owned-transport regression pins retry eligibility after that boundary.
 
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
@@ -26,6 +29,13 @@ Graph-backed typed reads return `StoreReadError` with property/projection phase
 and the opaque original cause; conversion recovers that cause before diagnostics.
 The lower `safe-cex-store` crate retains the object-safe protocol and pure helpers.
 
+The native owner retains one lazily constructed facade. Repeated facade requests
+reuse the same object and methods, including custom descriptors across reset;
+state dictionaries still publish their normal replacement generations. The cache
+belongs to the owner capability, while the facade captures only the graph. A
+retained facade or method therefore survives Store drop without retaining its
+cache owner, and the last handle releases the graph without a reference cycle.
+
 Native snapshots retain their own undefined properties; JSON serialization is a
 separate boundary. Retained config reads keep absence distinct from an own
 undefined or null value. Source `for` loops recheck live input lengths, while
@@ -39,6 +49,20 @@ operation; sealing preserves existing writable bits and both retain accessors.
 Strict writes to string primitives distinguish existing read-only length/index
 slots from missing properties. The actual Bitget dictionary facade witness pins
 both errors against the maintained Store and preserves the typed projection refusal.
+
+## Raw Store replay and callable splice
+
+The source-backed Store-correctness batch distinguishes raw mutation from typed
+read/patch admission. Unknown settings, raw undefined/callable/null numeric fields
+and UTF16 terminal IDs follow maintained DefaultStore; invalid raw rows can make
+a typed read fail. Source snapshots in tests/js_store_correctness_source.mjs
+observe these values before JSON. See STORE_CORRECTNESS_REVIEW.md.
+Private ID dictionaries apply string-hint ToPropertyKey while retaining a returned
+Symbol in its own slot; the actual Symbol/string Store witness checks both slots.
+Installed Array.splice captures length before coercion and deleted-slot reads,
+then uses the canonical checked splice_array mutation with that captured length.
+Its Node corpus preserves holes/deleted values and reentrant length effects;
+readonly failures and raw row/reference identity remain observable.
 
 ## Abstract venue hooks
 
@@ -914,11 +938,14 @@ actual-source scheduling and returned-array witnesses.
 
 ## Shared income range paging
 
-`income_paging::paginate_income_range` owns no executor or transport. Its awaited
-fetch callback returns the shared typed ledger; its awaited delay operation
-receives the original f64, leaving host timer conversion explicit. Only fetch
-failures are caught: the branch becomes incomplete, while delay failures escape.
-Caller drop cancels its owned pending callback future.
+`income_paging::paginate_income_range` requires its owning runtime and owned
+fetch/delay callbacks. Canonical start_eager starts the first fetch at invocation
+and retains the walk after waiter drop; each fetch and delay uses the same
+Promise await boundary. The delay receives the original f64, leaving host timer
+conversion explicit. Fetch failures mark the branch incomplete; delay failures
+escape with their original metadata. tests/income_paging compares the maintained
+source with NativeRuntime after dropping an unpolled waiter, and retains the
+existing request, deduplication, output-bit and delay-error corpus.
 
 The pending-window stack is LIFO. Direction reads use the original global range,
 not the current subwindow; page length includes unusable rows. Identity retains
@@ -926,8 +953,10 @@ both PnL and commission from the same bill, keeps the first duplicate, and stabl
 newest-first sorting preserves insertion order on timestamp ties. No termination
 guard repairs source floating-point nonprogress for non-advancing chunks.
 
-Typed `IncomeRecord` excludes nullish/coercible/open source records and UTF-16
-lone surrogates. Returned records and options are owned rather than live aliases.
+Typed `IncomeRecord` excludes nullish/coercible/open source records. The canonical
+native String decoder replaces isolated UTF-16 units at the approved typed
+boundary; direct Serde JSON input remains a separate decoder. Returned records
+and options are owned rather than live aliases.
 These are declared choices, not source-equivalence claims for arbitrary objects.
 The six existing income-paging manifest rows own the shared implementation;
 binance, bitget, kraken and weex each have one separate wrapper call to adopt.
@@ -1112,8 +1141,9 @@ in ECMA-262. New fields default to undefined/false; omitted fields on an existin
 property retain their value. Read-only writes reject, non-enumerable fields stay
 out of keys/spread/JSON, and non-configurable fields survive deletion and reject
 incompatible redefinition (SameValue preserves NaN and the sign of zero).
-Arrays and accessor descriptors explicitly refuse until a source caller requires
-that representation. Existing host define_accessor remains the host accessor seam.
+Array and accessor descriptors share this checked property machinery; arrays now
+retain sparse indexed/named slots and a virtual length in one ArrayData owner.
+Existing host define_accessor remains the fallible host accessor seam.
 The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
 redefinition matrix; the native error test covers Polymarket's enhanced message.
 
@@ -1254,15 +1284,15 @@ incorrect rounding and base-two refusal; each must compile, fail the named sourc
 comparison and pass again after exact restoration. No venue-local radix shim is
 required.
 
-The JS Store facade constructs scalar model patches with the existing native
-number carrier and typed-value bridge. All declared numeric fields of Position,
-Order, Ticker and Market retain NaN, infinities and signed zero through partial
-updates. Opaque `info` crosses the same production facade as retained native data,
-including nested undefined and UTF-16 units; nested option terms retain their
-separate typed decoder. Other field admission, omission and atomic patch
-validation retain [the Store patch choice](../parity/MANIFEST-SPEC.md#store-typed-patch-choice).
-`tests/js_store_patch_numbers.rs` exercises all five model patch methods, with
-compiled projection and signed-zero controls in the adjacent Python runner.
+The raw JS Store facade assigns native properties directly, retaining numeric
+bits, opaque info, own undefined, null, callable values and unknown fields as the
+maintained source does. A later typed read can refuse that raw state; it does not
+retroactively reject or roll back the raw assignment. Typed PatchSource admission
+separately retains [its atomic model policy](../parity/MANIFEST-SPEC.md#store-typed-patch-choice).
+`tests/js_store_patch_numbers.rs` covers all five raw patch methods and typed
+numeric-bit projections. The maintained Store oracle additionally checks raw
+invalid-field retention and recovery after a valid patch; current graph controls
+live in scripts/store-correctness-controls.py.
 
 `BaseWebSocket::last_received` and `set_last_received` expose the raw source
 `lastReceived` scalar without normalization or side effects. Subclasses that
@@ -1310,13 +1340,12 @@ native `Deref` view and the added `Js` protocol APIs have executed output
 observations. Independently authored Node fixtures and per-owner compiled
 controls supplement these bounded native/default receipts.
 
-The JS Store facade exposes `markOrdersTerminal` by delegating to the existing
-native terminal-memory operation. It remembers IDs even when the Store has no
-orders, and preserves committed-state subscriber errors through the existing
-mutation bridge. IDs cross the declared typed string boundary without lossy
-surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
-snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
-real private-frame witnesses cover the production caller and final fill ordering.
+The raw JS Store facade exposes `markOrdersTerminal` on its canonical graph.
+It remembers native UTF16 IDs even before orders exist and preserves committed
+subscriber errors. The typed Store API supplies Rust string IDs separately.
+`tests/js_store_terminal.rs` compares raw surrogate terminal memory with the
+maintained source: D800 and U+FFFD remain distinct, and the surviving row retains
+identity. OKX's real private frames cover its production caller/fill ordering.
 
 Shared builtins for source callers: `Array#pop`/`reverse` (holes mirror),
 `Object.getOwnPropertyNames` (own keys incl. non-enumerable; functions and
@@ -1355,7 +1384,7 @@ full-string, whitespace and arbitrary-length binary64 rounding rules. The native
 host `js_string_number` target compares 93 Node results through installed Number,
 including signed radix refusals, large values, overflow and signed zero.
 
-Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
+Array `sort` and Lodash `orderBy` use the shared safe-cex-num fallible V8 TimSort.
 JavaScript callbacks need not define a Rust total order: NaN comparison results
 mean equality, and inconsistent callbacks must not panic. The first source throw
 stops comparisons immediately. Default Array sorting compares original UTF-16
@@ -1363,6 +1392,13 @@ units, puts undefined before holes and rejects a present non-callable comparator
 The native-host `js_sort` target checks the compiled master panic and error count,
 plus Node ordering across merge boundaries. Ordering under an inconsistent
 comparator remains implementation-dependent under ECMAScript.
+
+Journal interval reconstruction reuses that sorter for both fills and reconstructed
+intervals. Equal timestamps with missing IDs and NaN close times need not define
+a total order. The journal target compares all position fields with maintained
+TS across 128 finite mixed-ID and 128 nonfinite-close profiles, alongside its
+192 existing interval/funding profiles. The old fill sort panics on the finite
+profiles; a separate reversed-result-order control checks the final sort.
 
 Ordinary numeric conversion of live objects/functions calls `valueOf` before
 `toString`, reading each member only when reached and retaining the original
@@ -1514,8 +1550,8 @@ keeps its own snapshot. `tests/js_emitter_off.rs` compares 20 cases through the
 production native runtime and BaseExchange facade against installed tiny-emitter.
 
 Singular JS Store order/position/market mutators read the selector's `id` and
-compare it strictly with native string IDs. Non-string IDs and bare primitives
-do not identify those rows; nullish selectors and throwing getters propagate
+compare it strictly with stored native ID values. For ordinary string-ID rows,
+non-string IDs and bare primitives do not identify those rows; nullish selectors and throwing getters propagate
 when the source actually reads them. Empty order/position arrays retain their
 findIndex short circuit. Ticker mutation follows its distinct object-key lookup
 with property-key coercion. `tests/js_store_id_matching.rs` compares132 actual
@@ -1854,7 +1890,8 @@ Native functions store name/length as ordinary nonenumerable configurable,
 readonly descriptors; redefining/deleting them uses the common property code.
 Stock intrinsic own-enumerability metadata reuses PrototypeRealm referents;
 this does not widen the public intrinsic descriptor-reflection surface.
-Array descriptor/prototype migration remains the separate single-storage step.
+Array descriptors, virtual length and prototype links now use the same canonical
+ArrayData owner; hidden own indices suppress inherited names without reading values.
 
 ## ccxt compatibility imports
 
@@ -1918,9 +1955,16 @@ eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
 
 `js_json_parse` bounds cumulative allocation for real NativeRuntime JSON parsing
-and the Vec<Market> info boundary. Its optional recorded-payload probe measures
-parse and typed decode separately; `tests/large_payload_source.mjs` captures
+and the Vec<Market> info boundary. `tests/large_payload_source.mjs` captures
 maintained source market outputs from recorded Bybit/OKX/Paradex responses.
+Use `cargo run --release -p safe-cex-exchange --features native --example
+large_payload_decode` with LARGE_PAYLOAD_MANIFEST and LARGE_PAYLOAD_OUTPUT to
+measure the same recorded probe with the production allocator. The test binary
+has a counting allocator and must not supply production CPU ratios. Report CPU
+medians and spread from at least three interleaved control/candidate runs;
+input restoration and complete output observations stay outside timed phases.
+The bootstrap parse/decode budget is 250 ms process CPU per recorded venue;
+TS ratios remain diagnostic. Per-frame WebSocket timing is a separate budget.
 Native observation files encode UTF-16, own undefined and f64 bits explicitly so
 before/after byte comparisons do not hide lossy JSON projections.
 
@@ -1962,6 +2006,15 @@ Store payload ticker baselines retain nullable index prices. The maintained work
 advances its baseline for number-to-null transitions but omits non-number deltas;
 null-to-number emits the new number. Preserve this source behavior. The live
 store_payload oracle pins both transitions and unchanged-null packed arrays.
+
+## Canonical array storage
+
+`Js::Array` now holds sparse `ArrayData`, with no mutable Vec/Deref or parallel
+property map. Array snapshots return Result so getter failures propagate. Native
+consumer loops retain the original Js owner and use checked Get/Has/Set/Delete.
+See ARRAY_STORAGE_REVIEW.md for the length/descriptor/iterator algorithms, atomic
+consumer boundaries and independent native/Node/compiled controls. The browser
+DATA bridge caches identity before walking enumerable indexed and named fields.
 
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.
@@ -2011,3 +2064,39 @@ Restore retained ingress once per frame, preserve it across all callbacks, and
 project only reached typed output fields; see exchange/WS_CONTRACT.md and the
 actual-source/native retained-handler witnesses. Do not reintroduce Value frame
 projections or a second callback registry.
+
+
+BaseExchange socket-health publication constructs own undefined timestamp/close-code properties and passes them to the canonical Store partial merge. It never removes keys through a JSON read/replacement. Typed Store notifications and prepared payloads retain the same health field.
+
+Native replay receipts include raw ExchangeRuntime tasks as well as canonical
+Promise jobs. Unclassified spawn_local calls, finite work, unpolled tasks and
+awakened tasks block drain. Reviewed timer/socket reader tasks qualify as waiting
+only at their actual pending sleep/receive leaves; pending handler HTTP/auth work
+still blocks. Waking invalidates the waiting observation before repoll. The sole
+Promise driver delegates to the separately counted canonical queue (including
+checkpoint callbacks). Completion and cancellation release records without
+retaining account/task bodies. This instrumentation runs only on explicit replay
+hosts; it does not cover arbitrary external Tokio tasks or transport internals.
+The public probe requires the versioned raw receipt and refuses older addons.
+Tests in raw_task_receipts.rs use the real native timer and socket runtime, and
+the private wake-race witness checks the pre-repoll fence.
+
+Js::ordinary_has_instance implements the shared OrdinaryHasInstance operation
+using the bound target, constructor prototype and internal prototype links.
+Bound call-only functions retain that target independently of constructibility.
+The js_construction Node comparison covers bound constructors, primitive left
+operands, null prototypes and invalid prototypes; native getter checks preserve
+original thrown identity. Hyro validation consumes this operation directly.
+
+`safe_cex_num::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
+natural-run detection, minrun, binary insertion, stack collapse, directional merges
+and adaptive galloping. Comparators may be inconsistent or equate NaN; callers
+retain source comparisons and the first failure. The 4096-case real Node
+differential checks native result identities, comparison counts, pair-trace hashes
+and random-comparator state, alongside the constructed Paradex ticker corpus.
+Do not replace this with Rust slice sorting or a differently scheduled merge.
+
+The differential rejects other Node versions: inconsistent comparator ordering is
+engine-dependent. Array sort compacts defined values before TimSort, then writes
+undefined values and deletes remaining holes; four native/Node profiles pin the
+comparator schedule as well as sparse output.

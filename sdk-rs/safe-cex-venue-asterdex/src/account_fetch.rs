@@ -80,7 +80,6 @@ impl AccountFetch {
                 let method = failure.request.method.clone();
                 let url = failure.request.url.clone();
                 let mut error: ExchangeError = failure.into();
-                error.is_axios_error = true;
                 error.method = Some(method);
                 error.url = Some(url);
                 error

@@ -85,7 +85,7 @@ where
                 events.get("map")?;
             }
             let events = events
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("data.events.map is not a function"))?;
             let mut fields = Vec::with_capacity(events.len());
             for raw in events {

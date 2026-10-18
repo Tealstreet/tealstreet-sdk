@@ -33,8 +33,14 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
             .iter()
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect::<Map<String, Value>>();
-        Store::update_socket_health(&store, &initial_health).unwrap();
-        let current = Store::socket_health(&store).unwrap();
+        Store::update_socket_health(
+            &store,
+            &serde_json::Value::Object(initial_health.clone()).into(),
+        )
+        .unwrap();
+        let current = Store::socket_health(&store)
+            .unwrap()
+            .map(|value| value.into_value().unwrap());
         for (key, value) in values {
             assert_eq!(
                 current.as_ref().and_then(|current| current.get(key)),
@@ -53,7 +59,11 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
     initial_health.insert("publicHealthy".into(), json!(true));
     initial_health.insert("publicInitialized".into(), json!(true));
     initial_health.insert("privateDegradedReason".into(), json!("stale"));
-    Store::update_socket_health(&store, &initial_health).unwrap();
+    Store::update_socket_health(
+        &store,
+        &serde_json::Value::Object(initial_health.clone()).into(),
+    )
+    .unwrap();
     let notifications = Rc::new(RefCell::new(Vec::<Value>::new()));
     let observed = notifications.clone();
     let _unsubscribe = Store::subscribe(
@@ -61,7 +71,7 @@ fn private_user_stream_health_matches_live_source_and_keeps_notification_finding
         Box::new(move |data, _| {
             observed
                 .borrow_mut()
-                .push(data.socket_health.clone().unwrap());
+                .push(data.socket_health.clone().unwrap().into_value().unwrap());
             Ok(())
         }),
     );
@@ -208,7 +218,8 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
     let store = DefaultStore::new();
     let mut initial = Map::new();
     initial.insert("publicHealthy".into(), json!(true));
-    Store::update_socket_health(&store, &initial).unwrap();
+    Store::update_socket_health(&store, &serde_json::Value::Object(initial.clone()).into())
+        .unwrap();
 
     let notifications = Rc::new(RefCell::new(Vec::new()));
     let first_calls = notifications.clone();
@@ -217,7 +228,7 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
         Box::new(move |data, _| {
             first_calls
                 .borrow_mut()
-                .push(data.socket_health.clone().unwrap());
+                .push(data.socket_health.clone().unwrap().into_value().unwrap());
             Err(StoreSubscriberError::new("subscriber failed"))
         }),
     );
@@ -267,7 +278,11 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
         }
         other => panic!("expected original Store notification failure, got {other:?}"),
     }
-    let committed = Store::socket_health(&store).unwrap().unwrap();
+    let committed = Store::socket_health(&store)
+        .unwrap()
+        .unwrap()
+        .into_value()
+        .unwrap();
     assert_eq!(committed["privateDegradedReason"], "private stream stalled");
     assert_eq!(
         notifications.borrow().len(),
@@ -283,7 +298,11 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
     let message_store = DefaultStore::new();
     let mut stale = Map::new();
     stale.insert("privateDegradedReason".into(), json!("stale"));
-    Store::update_socket_health(&message_store, &stale).unwrap();
+    Store::update_socket_health(
+        &message_store,
+        &serde_json::Value::Object(stale.clone()).into(),
+    )
+    .unwrap();
     let _failing_subscriber = Store::subscribe(
         &message_store,
         Box::new(|_, _| Err(StoreSubscriberError::new("message subscriber failed"))),
@@ -296,12 +315,12 @@ fn subscriber_failure_propagates_after_health_commit_and_before_callbacks() {
             if error.subscriber_id() == 0 && error.cause().message() == "message subscriber failed"
     ));
     assert_eq!(message_health.last_message_at(), 25.0);
-    assert!(
+    assert_eq!(
         Store::socket_health(&message_store)
             .unwrap()
             .unwrap()
-            .get("privateDegradedReason")
-            .is_none()
+            .get("privateDegradedReason"),
+        Some(&safe_cex_types::retained_json::RetainedJsonInput::Undefined)
     );
 }
 
@@ -340,7 +359,11 @@ fn subscriber_id_survives_store_to_exchange_error_conversion() {
         Some(json!({"status": 503}))
     );
     assert_eq!(
-        Store::socket_health(&store).unwrap().unwrap()["privateDegradedReason"],
+        Store::socket_health(&store)
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .unwrap()["privateDegradedReason"],
         "degraded",
         "Store state commits before subscriber failure is returned"
     );

@@ -97,8 +97,8 @@ const expectedKeys = [['BTC:USDT', '1m'], ['A:B:C', '1h'], ['', '1M'], ['雪:�
   return { key, parts: Array.from(context.parseCandleSubscriptionKey(key)) };
 });
 assert.deepEqual(actual.keys, expectedKeys, 'subscription key mapping differs');
-assert.deepEqual(actual.malformedAstral, ['', '😀'], 'declared Rust scalar truncation');
 const malformedTs = Array.from(context.parseCandleSubscriptionKey('😀'));
 assert.equal(malformedTs[0].charCodeAt(0), 0xd83d, 'source UTF-16 high surrogate');
-assert.notDeepEqual(actual.malformedAstral, malformedTs, 'malformed astral divergence must stay explicit');
+assert.deepEqual(actual.malformedAstral, malformedTs.map(value => value.toWellFormed()), 'source UTF-16 slicing with typed String replacement');
+assert.notDeepEqual(actual.malformedAstral, malformedTs, 'typed String replacement of the isolated unit stays explicit');
 console.log(`Registry equivalence: ${web.length} ordered names in both registries; thresholds and colon-bearing subscription keys match live TS.`);

@@ -968,6 +968,13 @@ Generic payloads consume `Envelope<JsNumberInput>` and then `data.decode` /
 `decode_with`; `Value` has **no `JsNumberOutput` implementation at all**, so the
 lossy path does not compile rather than failing at runtime.
 
+Current Binance scope: FINAL_FIX_AUDIT.md retires the four unused Futures/PM
+wire codecs after checking this mirror and tealstreet-next for production
+consumers. Their signed-zero/overflow measurements below are historical evidence
+at the stated landing revision; live position/history bindings and shared
+numeric-ingress guards remain independently tested. Retirement does not approve
+the shared numeric-capture depth limit.
+
 **Existing production decoders are untouched.** The operation is OPT-IN per
 owner. There are **TWO** regression guards over shipped code, not three: binance's 9
 fields across 4 records and hyperliquid's `OrderType.trigger.triggerPx`. Both

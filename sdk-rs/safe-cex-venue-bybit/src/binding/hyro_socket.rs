@@ -177,7 +177,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             if let Some(protocol) = weak_protocol.upgrade() {
                 if let Some(parent) = protocol.parent.upgrade() {
                     let rows = arg(&args, 0)
-                        .array_values()
+                        .array_values()?
                         .ok_or_else(|| Thrown::type_error("data.forEach is not a function"))?;
                     protocol.handle_order_topic(&parent, rows)?;
                 }

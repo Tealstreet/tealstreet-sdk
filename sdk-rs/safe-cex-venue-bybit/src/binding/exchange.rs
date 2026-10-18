@@ -606,26 +606,22 @@ impl BybitExchange {
         member: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
-        let this = self.rt().this.clone();
+        let runtime = self.rt().exchange_runtime();
+        let result = self.rt().this.call_method(member, args);
         Box::pin(async move {
-            let value = await_js(
-                &self.rt().exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            let value = await_js(&runtime, result.map_err(err)?)
+                .await
+                .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
-        let this = self.rt().this.clone();
+        let runtime = self.rt().exchange_runtime();
+        let result = self.rt().this.call_method(member, args);
         Box::pin(async move {
-            await_js(
-                &self.rt().exchange_runtime(),
-                this.call_method(member, args).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            await_js(&runtime, result.map_err(err)?)
+                .await
+                .map_err(err)?;
             Ok(())
         })
     }
@@ -743,14 +739,12 @@ impl Exchange for BybitExchange {
     // Bybit sends userID/inviterID as numbers, which ExchangeAccount's open-String
     // fields carry as their interpolated text (MANIFEST-SPEC closed typed output boundary).
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        let this = self.rt().this.clone();
+        let runtime = self.rt().exchange_runtime();
+        let result = self.rt().this.call_method("getAccount", vec![]);
         Box::pin(async move {
-            let account = await_js(
-                &self.rt().exchange_runtime(),
-                this.call_method("getAccount", vec![]).map_err(err)?,
-            )
-            .await
-            .map_err(err)?;
+            let account = await_js(&runtime, result.map_err(err)?)
+                .await
+                .map_err(err)?;
             for key in ["userId", "affiliateId"] {
                 let value = account.get(key).map_err(err)?;
                 if !value.is_nullish() && !value.is_string() {

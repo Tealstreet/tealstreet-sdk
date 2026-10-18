@@ -184,6 +184,8 @@ async function run(input) {
   }
   releaseProbe();
   const results = await Promise.all([first, second]);
+  assert.equal(settledFirst, true, 'first response observer notified after probe release');
+  assert.equal(settledSecond, true, 'second response observer notified after probe release');
   const third = await client.request({ method: 'get', url: '/private' });
   results.push(third);
   assert.equal(probes, 1, 'completed outcome cached across later auth failure');

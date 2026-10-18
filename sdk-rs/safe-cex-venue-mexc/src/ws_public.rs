@@ -697,7 +697,7 @@ fn native_book(raw: &Js, market: &safe_cex_types::Market) -> Result<OrderBook, E
         let Js::Array(items) = &rows else {
             return Ok(vec![]);
         };
-        let length = items.borrow().len();
+        let length = items.len();
         let mut levels = vec![];
         for index in 0..length {
             let row = rows.get(&index.to_string())?;

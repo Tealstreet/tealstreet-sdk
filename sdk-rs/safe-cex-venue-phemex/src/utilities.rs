@@ -81,7 +81,7 @@ pub fn format_symbol_out_value(
 {
     use safe_cex_exchange::js_runtime::value::{Js, Thrown};
     for market in markets
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("markets.find is not a function"))?
     {
         if market.get("symbol")?.strict_equals(&symbol) {

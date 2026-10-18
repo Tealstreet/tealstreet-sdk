@@ -129,6 +129,7 @@ fn execution_guards_native_source_parity() {
         String::from_utf8_lossy(&output.stderr)
     );
     let f: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(f["receiverProfiles"], 28, "native receiver source floor");
     assert_eq!(
         f["windows"].as_array().unwrap().len(),
         20,

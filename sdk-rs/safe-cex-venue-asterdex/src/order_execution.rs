@@ -198,7 +198,6 @@ impl OrderExecution {
             let method = failure.request.method.clone();
             let url = failure.request.url.clone();
             let mut e: ExchangeError = failure.into();
-            e.is_axios_error = true;
             e.method = Some(method);
             e.url = Some(url);
             e

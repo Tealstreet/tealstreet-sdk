@@ -34,7 +34,7 @@ test('registry oracle rejects corrupted claims and native divergence', () => {
       ['auth extension', v => v.channels = v.channels.filter(x => x !== 'auth'), /AssertionError/],
       ['auth reply', v => v.authReply.channel = 'ticker', /AssertionError/],
       ['null rejection', v => v.rejectsNullSymbol = false, /Rust rejects the same null field/],
-      ['astral truncation', v => v.malformedAstral = ['wrong', 'wrong'], /declared Rust scalar truncation/],
+      ['astral truncation', v => v.malformedAstral = ['wrong', 'wrong'], /source UTF-16 slicing with typed String replacement/],
     ];
     for (const [label, mutate, diagnostic] of controls) {
       const bad = structuredClone(good);

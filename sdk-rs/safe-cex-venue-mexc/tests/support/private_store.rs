@@ -7,7 +7,7 @@ use safe_cex_store::{
 };
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::*;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::cell::{Cell, RefCell};
 type Subscriber = StoreSubscriber;
 #[derive(Debug, Clone, PartialEq)]
@@ -234,10 +234,15 @@ impl Store for ObservedStore {
     fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError> {
         Store::fetched_leverage(&self.inner)
     }
-    fn socket_health(&self) -> Result<Option<Value>, StoreReadError> {
+    fn socket_health(
+        &self,
+    ) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError> {
         Store::socket_health(&self.inner)
     }
-    fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError> {
+    fn update_socket_health(
+        &self,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), StoreMutationError> {
         Store::update_socket_health(&self.inner, data)
     }
     fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError> {

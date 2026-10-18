@@ -12,6 +12,7 @@ use safe_cex_exchange::{
     runtime::ExchangeError,
 };
 use safe_cex_transport::{RestAdapter, RestFailure};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Execution, ExecutionsOptions, HistoricalTrade, HistoricalTradeOptions};
 use serde_json::Value;
 
@@ -43,20 +44,16 @@ fn report(venue: &dyn Exchange, error: ExchangeError) -> Result<(), ExchangeErro
         .base()
         .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)
 }
-fn parse_rows(rows: Vec<Value>) -> Result<Vec<ParsedWooTransaction>, ExchangeError> {
+fn parse_rows(rows: Vec<Input>) -> Result<Vec<ParsedWooTransaction>, ExchangeError> {
     let mut parsed = Vec::new();
     for row in rows {
-        let Some(row) = row.as_object() else {
-            safe_cex_num::get_key::v_unknown(Some(&row), "symbol")
-                .map_err(|error| ExchangeError::new(error.message))?;
-            continue;
-        };
-        if let Some(row) = parse_transaction_history_row(row).map_err(ExchangeError::new)? {
+        if let Some(row) = parse_transaction_history_row(&row).map_err(ExchangeError::new)? {
             parsed.push(row);
         }
     }
     Ok(parsed)
 }
+
 fn select(
     rows: &mut Vec<ParsedWooTransaction>,
     symbol: Option<&str>,
@@ -92,20 +89,47 @@ fn select(
     };
     rows.truncate(count);
 }
-fn asset(row: &ParsedWooTransaction) -> Result<Option<String>, ExchangeError> {
-    match &row.commission_asset {
-        None => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        Some(_) => Err(ExchangeError::new(
-            "history commissionAsset cannot cross the typed String output",
-        )),
+fn admitted(
+    venue: &dyn Exchange,
+    rows: Vec<ParsedWooTransaction>,
+) -> Result<Vec<(ParsedWooTransaction, Option<String>)>, ExchangeError> {
+    let mut output = Vec::new();
+    for row in rows {
+        let commission_asset = match &row.commission_asset {
+            None => None,
+            Some(Input::Text(value)) => Some(String::from_utf16_lossy(value)),
+            Some(value) => {
+                let rendered = value
+                    .json_stringify()
+                    .map_err(|error| ExchangeError::new(error.message))?
+                    .unwrap_or_else(|| "undefined".into());
+                let message = format!(
+                    "Refusing WOO history row {}: commissionAsset must be a string; received {rendered}",
+                    row.fill_id.as_deref().unwrap_or("<missing>")
+                );
+                venue.base().emit_and_log_error(
+                    ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::Js::str(
+                        &message,
+                    )),
+                    None,
+                    None,
+                )?;
+                continue;
+            }
+        };
+        output.push((row, commission_asset));
     }
+    Ok(output)
 }
-fn executions(rows: Vec<ParsedWooTransaction>) -> Result<Vec<Execution>, ExchangeError> {
-    rows.into_iter()
-        .map(|row| {
+fn executions(
+    venue: &dyn Exchange,
+    rows: Vec<ParsedWooTransaction>,
+) -> Result<Vec<Execution>, ExchangeError> {
+    admitted(venue, rows)?
+        .into_iter()
+        .map(|(row, commission_asset)| {
             Ok(Execution {
-                commission_asset: asset(&row)?,
+                commission_asset,
                 id: row.fill_id,
                 timestamp: row.timestamp_seconds,
                 symbol: row.symbol,
@@ -123,11 +147,15 @@ fn executions(rows: Vec<ParsedWooTransaction>) -> Result<Vec<Execution>, Exchang
         })
         .collect()
 }
-fn trades(rows: Vec<ParsedWooTransaction>) -> Result<Vec<HistoricalTrade>, ExchangeError> {
-    rows.into_iter()
-        .map(|row| {
+fn trades(
+    venue: &dyn Exchange,
+    rows: Vec<ParsedWooTransaction>,
+) -> Result<Vec<HistoricalTrade>, ExchangeError> {
+    admitted(venue, rows)?
+        .into_iter()
+        .map(|(row, commission_asset)| {
             Ok(HistoricalTrade {
-                commission_asset: asset(&row)?,
+                commission_asset,
                 id: row.fill_id,
                 order_id: row.order_id.filter(|id| !id.is_empty()).unwrap_or_else(|| {
                     format!(
@@ -208,7 +236,7 @@ pub async fn fetch_historical_trades_internal(
     adapter: &dyn RestAdapter,
     opts: &HistoricalTradeOptions,
 ) -> Result<Vec<HistoricalTrade>, ExchangeError> {
-    trades(internal_rows(venue, adapter, opts).await?)
+    trades(venue, internal_rows(venue, adapter, opts).await?)
 }
 
 // ts: WOOXExchange#fetchHistoricalFills
@@ -267,7 +295,7 @@ pub async fn fetch_historical_fills(
                 return Ok(Vec::new());
             }
         };
-        let history = trades(history)?;
+        let history = trades(venue, history)?;
         let mut result: Vec<_> = history
             .into_iter()
             .map(|trade| Execution {
@@ -299,5 +327,5 @@ pub async fn fetch_historical_fills(
         });
         return Ok(result);
     }
-    executions(rows)
+    executions(venue, rows)
 }

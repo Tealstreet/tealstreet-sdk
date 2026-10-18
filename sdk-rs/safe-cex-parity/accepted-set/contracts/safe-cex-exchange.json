@@ -23593,7 +23593,7 @@
       }
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs::from_json; observes actual native enum tags, boolean payloads, binary64 bits, UTF-16 units, array occupancy and object-key storage before serialization. No encoder roundtrip is used and no arbitrary native-JS input claim is made; sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect.",
-    "call": "{ use super::Js; let decoded = super::from_json($value); match decoded {\n Js::Null => serde_json::json!({\"tag\":\"null\"}),\n Js::Bool(flag) => serde_json::json!({\"tag\":\"bool\",\"flag\":flag}),\n Js::Number(n) => serde_json::json!({\"tag\":\"number\",\"bits\":format!(\"{:016x}\", n.to_bits())}),\n Js::String(units) => serde_json::json!({\"tag\":\"string\",\"units\":units.as_ref()}),\n Js::Array(items) => serde_json::json!({\"tag\":\"array\",\"length\":items.borrow().len(),\"holes\":items.borrow().iter().filter(|item| item.is_none()).count()}),\n Js::Object(object) => { let keys: Vec<Vec<u16>> = object.props.borrow().keys().map(|key|key.to_vec()).collect(); serde_json::json!({\"tag\":\"object\",\"keys\":keys}) },\n _ => panic!(\"JSON input cannot decode into a non-JSON native tag\") } }",
+    "call": "{ use super::Js; let decoded = super::from_json($value); match decoded {\n Js::Null => serde_json::json!({\"tag\":\"null\"}),\n Js::Bool(flag) => serde_json::json!({\"tag\":\"bool\",\"flag\":flag}),\n Js::Number(n) => serde_json::json!({\"tag\":\"number\",\"bits\":format!(\"{:016x}\", n.to_bits())}),\n Js::String(units) => serde_json::json!({\"tag\":\"string\",\"units\":units.as_ref()}),\n Js::Array(items) => serde_json::json!({\"tag\":\"array\",\"length\":items.len(),\"holes\":Js::Array(items.clone()).array_items().expect(\"JSON array reads\").unwrap().iter().filter(|item| item.is_none()).count()}),\n Js::Object(object) => { let keys: Vec<Vec<u16>> = object.props.borrow().keys().map(|key|key.to_vec()).collect(); serde_json::json!({\"tag\":\"object\",\"keys\":keys}) },\n _ => panic!(\"JSON input cannot decode into a non-JSON native tag\") } }",
     "cases": [
       {
         "input": null,
@@ -26402,29 +26402,43 @@
             ],
             "output": {
               "resolved_path": {
-                "path": "core::option::Option",
+                "path": "core::result::Result",
                 "args": {
                   "angle_bracketed": {
                     "args": [
                       {
                         "type": {
                           "resolved_path": {
-                            "path": "alloc::vec::Vec",
+                            "path": "core::option::Option",
                             "args": {
                               "angle_bracketed": {
                                 "args": [
                                   {
                                     "type": {
                                       "resolved_path": {
-                                        "path": "core::option::Option",
+                                        "path": "alloc::vec::Vec",
                                         "args": {
                                           "angle_bracketed": {
                                             "args": [
                                               {
                                                 "type": {
                                                   "resolved_path": {
-                                                    "path": "safe_cex_exchange::js_runtime::value::Js",
-                                                    "args": null
+                                                    "path": "core::option::Option",
+                                                    "args": {
+                                                      "angle_bracketed": {
+                                                        "args": [
+                                                          {
+                                                            "type": {
+                                                              "resolved_path": {
+                                                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                                "args": null
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "constraints": []
+                                                      }
+                                                    }
                                                   }
                                                 }
                                               }
@@ -26439,6 +26453,14 @@
                                 "constraints": []
                               }
                             }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
                           }
                         }
                       }
@@ -26475,22 +26497,36 @@
             ],
             "output": {
               "resolved_path": {
-                "path": "core::option::Option",
+                "path": "core::result::Result",
                 "args": {
                   "angle_bracketed": {
                     "args": [
                       {
                         "type": {
                           "resolved_path": {
-                            "path": "alloc::vec::Vec",
+                            "path": "core::option::Option",
                             "args": {
                               "angle_bracketed": {
                                 "args": [
                                   {
                                     "type": {
                                       "resolved_path": {
-                                        "path": "safe_cex_exchange::js_runtime::value::Js",
-                                        "args": null
+                                        "path": "alloc::vec::Vec",
+                                        "args": {
+                                          "angle_bracketed": {
+                                            "args": [
+                                              {
+                                                "type": {
+                                                  "resolved_path": {
+                                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                    "args": null
+                                                  }
+                                                }
+                                              }
+                                            ],
+                                            "constraints": []
+                                          }
+                                        }
                                       }
                                     }
                                   }
@@ -26498,6 +26534,14 @@
                                 "constraints": []
                               }
                             }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
                           }
                         }
                       }
@@ -29115,8 +29159,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "sockets.rs::binary_data; actual native Buffer/browser Blob construction is observed through its backing ArrayBuffer bytes and byteLength, before text decoding or JSON projection. Both independently authored byte sequences include non-ASCII bytes. The target-specific outer class is checked against the compile target; Blob.arrayBuffer is observed via its settled native promise. No UTF-8, venue payload or transport delivery claim.",
-    "call": "{#[allow(dead_code,unused_imports)] mod fx{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/exchange-runtime-fixture.rs\"));}use crate::js_runtime::value::Js;let bytes:Vec<u8>=$value.as_array().unwrap().iter().map(|v|u8::try_from(v.as_u64().unwrap()).expect(\"authored byte\")).collect();let runtime:std::rc::Rc<dyn crate::runtime::ExchangeRuntime>=std::rc::Rc::new(fx::Runtime::default());let frame=super::binary_data(&bytes,runtime);match &frame{Js::Object(data)=>assert_eq!(data.class,if cfg!(target_arch=\"wasm32\"){\"Blob\"}else{\"Buffer\"}),_=>panic!(\"binary frame lost native host object\")};let buffer=if cfg!(target_arch=\"wasm32\"){match frame.call_method(\"arrayBuffer\",vec![]).unwrap(){Js::Promise(p)=>p.result().expect(\"settled arrayBuffer promise\").unwrap(),_=>panic!(\"Blob.arrayBuffer lost promise\")}}else{frame.get(\"buffer\").unwrap()};let class=match &buffer{Js::Object(data)=>data.class,_=>panic!(\"backing buffer lost native object\")};let native=buffer.get(\"bytes\").unwrap().array_values().unwrap();let byte_bits:Vec<String>=native.iter().map(|v|v.to_number().unwrap().to_bits().to_string()).collect();let length=buffer.get(\"byteLength\").unwrap().to_number().unwrap().to_bits().to_string();serde_json::json!({\"classUnits\":class.encode_utf16().collect::<Vec<_>>(),\"byteBits\":byte_bits,\"lengthBits\":length})}",
+    "evidence": "sockets.rs::binary_data; actual default Blob construction on native and browser hosts is observed through its backing ArrayBuffer bytes and byteLength before text decoding or JSON projection. Both independently authored byte sequences include non-ASCII bytes. The Blob outer class and its settled arrayBuffer Promise are checked directly; byte bits, order and length expectations remain unchanged. The stale native-Buffer observer compiled and failed its class assertion before this fixture repair. No UTF-8, venue payload or transport delivery claim.",
+    "call": "{#[allow(dead_code,unused_imports)] mod fx{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/exchange-runtime-fixture.rs\"));}use crate::js_runtime::value::Js;let bytes:Vec<u8>=$value.as_array().unwrap().iter().map(|v|u8::try_from(v.as_u64().unwrap()).expect(\"authored byte\")).collect();let runtime:std::rc::Rc<dyn crate::runtime::ExchangeRuntime>=std::rc::Rc::new(fx::Runtime::default());let frame=super::binary_data(&bytes,runtime);match &frame{Js::Object(data)=>assert_eq!(data.class,\"Blob\"),_=>panic!(\"binary frame lost native host object\")};let buffer=match frame.call_method(\"arrayBuffer\",vec![]).unwrap(){Js::Promise(p)=>p.result().expect(\"settled arrayBuffer promise\").unwrap(),_=>panic!(\"Blob.arrayBuffer lost promise\")};let class=match &buffer{Js::Object(data)=>data.class,_=>panic!(\"backing buffer lost native object\")};let native=buffer.get(\"bytes\").unwrap().array_values().expect(\"array property reads\").unwrap();let byte_bits:Vec<String>=native.iter().map(|v|v.to_number().unwrap().to_bits().to_string()).collect();let length=buffer.get(\"byteLength\").unwrap().to_number().unwrap().to_bits().to_string();serde_json::json!({\"classUnits\":class.encode_utf16().collect::<Vec<_>>(),\"byteBits\":byte_bits,\"lengthBits\":length})}",
     "cases": [
       {
         "input": [
@@ -31269,7 +31313,7 @@
           {
             "input": [
               7,
-              "😀",
+              "\ud83d\ude00",
               null
             ],
             "output": {
@@ -31292,7 +31336,7 @@
             }
           },
           {
-            "input": "A😀",
+            "input": "A\ud83d\ude00",
             "output": {
               "values": [
                 {
@@ -31384,7 +31428,7 @@
           {
             "input": [
               7,
-              "😀",
+              "\ud83d\ude00",
               null
             ],
             "output": {
@@ -31407,7 +31451,7 @@
             }
           },
           {
-            "input": "A😀",
+            "input": "A\ud83d\ude00",
             "output": {
               "values": [
                 {

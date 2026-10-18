@@ -99,19 +99,71 @@ fn subscription_keys_split_at_the_last_delimiter_and_keep_source_edge_cases() {
 }
 
 #[test]
-fn malformed_no_separator_astral_key_has_a_declared_utf16_divergence() {
+fn malformed_no_separator_astral_key_replaces_only_the_remaining_surrogate() {
     assert_eq!(
         parse_candle_subscription_key("😀"),
-        ("".into(), "😀".into())
+        ("�".into(), "😀".into())
     );
     assert_eq!(
         parse_candle_subscription_key("BTC😀"),
-        ("BTC".into(), "BTC😀".into())
+        ("BTC�".into(), "BTC😀".into())
+    );
+    assert_eq!(
+        parse_candle_subscription_key("😀🦀"),
+        ("😀�".into(), "😀🦀".into())
     );
     assert_eq!(
         parse_candle_subscription_key("😀:1m"),
         ("😀".into(), "1m".into())
     );
+}
+
+#[test]
+fn subscription_key_slices_match_maintained_source_units() {
+    let output = std::process::Command::new("node")
+        .arg("-e")
+        .arg(r#"
+const fs=require('fs'),vm=require('vm');
+const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
+const path=process.argv[1];
+const ast=ts.createSourceFile(path,fs.readFileSync(path,'utf8'),ts.ScriptTarget.Latest,true);
+const names=['getCandleSubscriptionKey','parseCandleSubscriptionKey'];
+const selected=ast.statements.filter(ts.isVariableStatement)
+  .flatMap(s=>[...s.declarationList.declarations])
+  .filter(d=>names.includes(d.name.getText(ast)));
+if(selected.length!==2)throw Error('candle key source inventory changed');
+const context=vm.createContext({});
+const code=selected.map(d=>'globalThis.'+d.name.getText(ast)+'='+d.initializer.getText(ast)+';').join('\n');
+vm.runInContext(ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i));
+const cases=['','BTC','😀','BTC😀','😀🦀','雪😀','雪','a\0','a\u2028','á',':','😀:','a:😀',':😀','A:B:C:1m','👩‍👩‍👧'];
+for(const symbol of ['','BTC:USDT','😀','雪:😀','A:B:C','\0','é','👩‍👩‍👧'])
+  for(const interval of ['1m','1h','1M'])cases.push(context.getCandleSubscriptionKey(symbol,interval));
+process.stdout.write(JSON.stringify(cases.map(key=>({key,units:Array.from(context.parseCandleSubscriptionKey(key),units)}))));
+"#)
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/safe-cex/src/exchanges/external-public-data.ts"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rows.len(), 40);
+    assert_eq!(rows[2]["units"][0], json!([0xd83d]));
+    for row in rows {
+        let units: Vec<Vec<u16>> = serde_json::from_value(row["units"].clone()).unwrap();
+        assert_eq!(
+            parse_candle_subscription_key(row["key"].as_str().unwrap()),
+            (
+                String::from_utf16_lossy(&units[0]),
+                String::from_utf16_lossy(&units[1])
+            ),
+            "CANDLE_KEY_UTF16 source-unit slice {}",
+            row["key"]
+        );
+    }
 }
 
 #[test]

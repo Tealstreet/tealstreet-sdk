@@ -45,7 +45,7 @@ fn coercion(e: safe_cex_types::js_coercion::JsCoercionError) -> Thrown {
 }
 
 fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
-    v.array_values()
+    v.array_values()?
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", v.to_display())))
 }
 
@@ -662,7 +662,7 @@ fn load_state(this: &Js) -> Result<BookState, Thrown> {
     if !js_topics.is_nullish() {
         for (k, list) in js_topics.own_entries()? {
             let mut pairs = vec![];
-            for t in list.array_values().unwrap_or_default() {
+            for t in list.array_values()?.unwrap_or_default() {
                 pairs.push((text(&t.get("channel")?)?, text(&t.get("instId")?)?));
             }
             topics.insert(String::from_utf16_lossy(&k), pairs);
@@ -741,7 +741,7 @@ fn sync_handlers(this: &Js, socket: &BaseWebSocket) -> Result<(), Thrown> {
     let mut registry = socket.message_handlers.borrow_mut();
     registry.clear();
     for (key, list) in handlers.own_entries()? {
-        let Some(callbacks) = list.array_values() else {
+        let Some(callbacks) = list.array_values()? else {
             continue;
         };
         let callbacks: Vec<MessageHandler> = callbacks

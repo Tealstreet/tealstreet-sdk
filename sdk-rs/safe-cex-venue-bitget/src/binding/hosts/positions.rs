@@ -506,7 +506,7 @@ async fn page_rows(
     .await?;
     let rows = page.get("rows")?;
     let rows = rows
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error(&format!("{member} rows is not an array")))?
         .iter()
         .map(to_json)
@@ -675,11 +675,11 @@ pub(crate) fn bind(
         "stream_positions.rs::merge_rest_positions_with_fresh_ws_state" => {
             sync_member(rt, name, |rt, a| {
                 let rest_js = arg(&a, 0)
-                    .array_values()
+                    .array_values()?
                     .ok_or_else(|| Thrown::type_error("restPositions is not iterable"))?;
                 let current_js = rt
                     .path("store.positions")?
-                    .array_values()
+                    .array_values()?
                     .unwrap_or_default();
                 let rest: Vec<Position> = rest_js.iter().map(to_typed).collect::<Result<_, _>>()?;
                 let current: Vec<Position> =

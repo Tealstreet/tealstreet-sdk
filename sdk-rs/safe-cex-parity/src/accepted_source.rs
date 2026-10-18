@@ -852,6 +852,7 @@ impl<'ast> Visit<'ast> for LocalTypes {
         if attr.path().is_ident("derive")
             || attr.path().is_ident("cfg_attr")
             || attr.path().is_ident("wasm_bindgen")
+            || attr.path().is_ident("track_caller")
             || attr.path().segments.len() == 2
                 && attr.path().segments[0].ident == "clippy"
                 && attr.path().segments[1].ident == "msrv"
@@ -1211,17 +1212,28 @@ impl<'ast> Visit<'ast> for LocalTypes {
                 end.column,
             ));
         }
-        fn attribute_binding(tree: &syn::UseTree) -> bool {
-            match tree {
-                syn::UseTree::Name(name) => attribute_macro_name(&name.ident.to_string()),
-                syn::UseTree::Rename(name) => attribute_macro_name(&name.rename.to_string()),
-                syn::UseTree::Group(group) => group.items.iter().any(attribute_binding),
-                syn::UseTree::Path(path) => attribute_binding(&path.tree),
-                syn::UseTree::Glob(_) => true,
-            }
+        fn attribute_binding(tree: &syn::UseTree, builtin_only: bool) -> bool {
+            let name = match tree {
+                syn::UseTree::Name(name) => name.ident.to_string(),
+                syn::UseTree::Rename(name) => name.rename.to_string(),
+                syn::UseTree::Group(group) => {
+                    return group
+                        .items
+                        .iter()
+                        .any(|tree| attribute_binding(tree, builtin_only));
+                }
+                syn::UseTree::Path(path) => return attribute_binding(&path.tree, builtin_only),
+                syn::UseTree::Glob(_) => return !builtin_only,
+            };
+            attribute_macro_name(&name)
+                && (!builtin_only || name.trim_start_matches("r#") == "track_caller")
         }
         let attribute_origin = matches!(&item.tree, syn::UseTree::Path(path) if matches!(path.ident.to_string().as_str(), "std" | "core" | "serde" | "ts_rs" | "wasm_bindgen" | "napi_derive"));
-        if !attribute_origin && attribute_binding(&item.tree) {
+        // A renamed binding is never the compiler builtin, even from a known
+        // procedural-macro crate. Preserve the ordinary import rules separately.
+        if attribute_binding(&item.tree, true)
+            || !attribute_origin && attribute_binding(&item.tree, false)
+        {
             self.untrusted_attribute_import = true;
         }
         fn ambiguous(tree: &syn::UseTree) -> bool {
@@ -1417,6 +1429,11 @@ fn known_attribute(meta: &syn::Meta) -> bool {
     if name == "rustfmt::skip" {
         return matches!(meta, syn::Meta::Path(_));
     }
+    // The compiler builtin only propagates caller locations; it cannot expand
+    // declarations. Accept its bare spelling, never arguments or a qualified path.
+    if name == "track_caller" {
+        return matches!(meta, syn::Meta::Path(path) if path.is_ident("track_caller"));
+    }
     // Known SDK binding macros are compiler-inventoried; arbitrary expansion fails closed.
     matches!(
         name.as_str(),
@@ -1499,6 +1516,8 @@ fn attribute_macro_name(name: &str) -> bool {
             | "TS"
             | "wasm_bindgen"
             | "napi"
+            | "track_caller"
+            | "r#track_caller"
     )
 }
 
@@ -2164,6 +2183,57 @@ mod tests {
         assert!(
             !guards.0,
             "cfg_attr selecting a lint expectation is not doc-dependent"
+        );
+    }
+
+    #[test]
+    fn track_caller_builtin_is_exact_and_keeps_expansion_guards() {
+        for source in [
+            "#[track_caller] fn f() {}",
+            "trait Runtime { #[track_caller] fn spawn(&self); }",
+            "impl Runtime for Host { #[track_caller] fn spawn(&self) {} }",
+            "#[cfg_attr(feature = \"diagnostics\", track_caller)] fn f() {}",
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(visitor.names.is_empty(), "{source}: {:?}", visitor.names);
+        }
+        for source in [
+            "#[track_caller()] fn f() {}",
+            "#[track_caller = true] fn f() {}",
+            "#[::track_caller] fn f() {}",
+            "#[forged::track_caller] fn f() {}",
+            "#[cfg_attr(feature = \"diagnostics\", track_caller(hidden))] fn f() {}",
+            "#[track_caller] #[custom_decoder] fn f() {}",
+            "use forged::track_caller; #[track_caller] fn f() {}",
+            "use forged::r#track_caller; #[track_caller] fn f() {}",
+            "use forged::attribute as track_caller; #[track_caller] fn f() {}",
+            "use wasm_bindgen::prelude::wasm_bindgen as track_caller; #[track_caller] fn f() {}",
+            "use wasm_bindgen::prelude::wasm_bindgen as r#track_caller; #[track_caller] fn f() {}",
+            "#[track_caller] fn f() {} use forged::*;",
+        ] {
+            let mut visitor = verified_test_visitor();
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            assert!(
+                visitor
+                    .names
+                    .iter()
+                    .any(|row| row.0 == "UNSUPPORTED_ATTRIBUTE_IMPORT_SCOPE"
+                        || row.0.starts_with("UNSUPPORTED_ATTRIBUTE_EXPANSION:")),
+                "{source}: {:?}",
+                visitor.names
+            );
+        }
+        let mut visitor = verified_test_visitor();
+        visitor
+            .visit_file(&syn::parse_file("#[track_caller] fn outer() { fn hidden() {} }").unwrap());
+        assert!(
+            visitor
+                .names
+                .iter()
+                .any(|row| row.0 == "LOCAL_FUNCTION:hidden"),
+            "the builtin must not hide nested declarations: {:?}",
+            visitor.names
         );
     }
 

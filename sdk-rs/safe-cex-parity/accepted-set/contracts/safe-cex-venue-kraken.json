@@ -8407,5 +8407,1505 @@
     },
     "reason": "Outgoing live-listener frame preparation: consumes the typed Frame<Js> prepared by the actual registered listener, performs its existing symbol ToString and builds retained subscription data for the physical WebSocket. It does not parse a message or construct an inbound model. Actual assembled Futures/Spot listenOrderBook and unsubscribe paths observe the resulting original symbol units on the physical wire.",
     "evidence": "TOPIC_ALIAS_REVIEW.md reviews this specific outgoing helper and its compiler-confirmed API. scripts/topic-alias-contracts.mjs measures its exact role classification separately from the actual decoder alias. This role receipt is not an execution claim: tests/support/accepted_topic_alias.rs separately drives the actual constructed Scope, listener/reconnect/send members and physical wire against unchanged live TypeScript. scripts/topic-alias-controls.py requires both named compiled lossy-consumer failures and exact restored passes. No inbound decoder or other function is exempted."
+  },
+  "safe_cex_venue_kraken::orderbooks::Level": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      {
+        "price": -0.0,
+        "amount": 17.25,
+        "total": 31.5
+      },
+      {
+        "price": 23.75,
+        "amount": -0.0,
+        "total": -41.125,
+        "ignored": true
+      }
+    ],
+    "negative": [
+      null,
+      false,
+      7,
+      "x",
+      {},
+      [],
+      [
+        1,
+        2,
+        3
+      ],
+      {
+        "price": 1,
+        "amount": 2
+      },
+      {
+        "price": "1",
+        "amount": 2,
+        "total": 3
+      }
+    ],
+    "entrypoints": [],
+    "evidence": "This exact native Rc<RefCell<OrderBookOrders>> cell inherits concrete Serde decoding. The decoder admits complete map records and rejects malformed shapes/fields; it is not a non-decoder capability. Direct native observations read price/amount/total binary64 bits before serialization, including distinct fields and signed zero. scripts/book-level-alias-contracts.mjs authenticates the actual production compiler/artifact/target/identity and executes owned/qualified Serde plus alternate-trait detection. tests/support/accepted_book_value_aliases.rs verifies exact native type and Rc/RefCell alias identity separately, then drives the actual constructed Futures/Spot subscription and raw socket snapshot to native callbacks, comparing every field to the unchanged live TypeScript emitOrderBook body. Two independently compiled production consumer faults must fail named native assertions and pass after exact restoration. No claim for JS shared-array identity or other aliases; see BOOK_LEVEL_ALIAS_REVIEW.md.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::OrderBookOrders",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::OrderBookOrders",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok(decoded) => { let row = decoded.borrow(); serde_json::json!([format!(\"{:016x}\", row.price.to_bits()),format!(\"{:016x}\", row.amount.to_bits()),format!(\"{:016x}\", row.total.to_bits())]) }, Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": {
+            "price": -0.0,
+            "amount": 17.25,
+            "total": 31.5
+          },
+          "output": [
+            "8000000000000000",
+            "4031400000000000",
+            "403f800000000000"
+          ]
+        },
+        {
+          "input": {
+            "price": 23.75,
+            "amount": -0.0,
+            "total": -41.125,
+            "ignored": true
+          },
+          "output": [
+            "4037c00000000000",
+            "8000000000000000",
+            "c044900000000000"
+          ]
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 7,
+          "output": null
+        },
+        {
+          "input": "x",
+          "output": null
+        },
+        {
+          "input": {},
+          "output": null
+        },
+        {
+          "input": [],
+          "output": null
+        },
+        {
+          "input": [
+            1,
+            2,
+            3
+          ],
+          "output": null
+        },
+        {
+          "input": {
+            "price": 1,
+            "amount": 2
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "price": "1",
+            "amount": 2,
+            "total": 3
+          },
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kraken::orderbooks::Levels": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        {
+          "price": -0.0,
+          "amount": 17.25,
+          "total": 31.5
+        }
+      ],
+      [
+        {
+          "price": -0.0,
+          "amount": 17.25,
+          "total": 31.5
+        },
+        {
+          "price": 23.75,
+          "amount": -0.0,
+          "total": -41.125,
+          "ignored": true
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      7,
+      "x",
+      {},
+      [
+        null
+      ],
+      [
+        [
+          1,
+          2,
+          3
+        ]
+      ],
+      [
+        {
+          "price": 1,
+          "amount": 2
+        }
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "This exact native Rc<RefCell<Vec<Level>>> collection inherits concrete Serde decoding. The decoder admits arrays of complete records including the empty array and rejects malformed shapes/fields; it is not a non-decoder capability. Direct native observations read price/amount/total binary64 bits before serialization, including distinct fields and signed zero. scripts/book-level-alias-contracts.mjs authenticates the actual production compiler/artifact/target/identity and executes owned/qualified Serde plus alternate-trait detection. tests/support/accepted_book_value_aliases.rs verifies exact native type and Rc/RefCell alias identity separately, then drives the actual constructed Futures/Spot subscription and raw socket snapshot to native callbacks, comparing every field to the unchanged live TypeScript emitOrderBook body. Two independently compiled production consumer faults must fail named native assertions and pass after exact restoration. No claim for JS shared-array identity or other aliases; see BOOK_LEVEL_ALIAS_REVIEW.md.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_kraken::orderbooks::Level",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_types::OrderBookOrders",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok(decoded) => { serde_json::Value::Array(decoded.borrow().iter().map(|cell| { let row = cell.borrow(); serde_json::json!([format!(\"{:016x}\", row.price.to_bits()),format!(\"{:016x}\", row.amount.to_bits()),format!(\"{:016x}\", row.total.to_bits())]) }).collect()) }, Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "price": -0.0,
+              "amount": 17.25,
+              "total": 31.5
+            }
+          ],
+          "output": [
+            [
+              "8000000000000000",
+              "4031400000000000",
+              "403f800000000000"
+            ]
+          ]
+        },
+        {
+          "input": [
+            {
+              "price": -0.0,
+              "amount": 17.25,
+              "total": 31.5
+            },
+            {
+              "price": 23.75,
+              "amount": -0.0,
+              "total": -41.125,
+              "ignored": true
+            }
+          ],
+          "output": [
+            [
+              "8000000000000000",
+              "4031400000000000",
+              "403f800000000000"
+            ],
+            [
+              "4037c00000000000",
+              "8000000000000000",
+              "c044900000000000"
+            ]
+          ]
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 7,
+          "output": null
+        },
+        {
+          "input": "x",
+          "output": null
+        },
+        {
+          "input": {},
+          "output": null
+        },
+        {
+          "input": [
+            null
+          ],
+          "output": null
+        },
+        {
+          "input": [
+            [
+              1,
+              2,
+              3
+            ]
+          ],
+          "output": null
+        },
+        {
+          "input": [
+            {
+              "price": 1,
+              "amount": 2
+            }
+          ],
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kraken::stream_updates::NumericChanges": {
+    "category": "decoder",
+    "shape": "borrowed-sequence",
+    "evidence": "Actual Vec<(&'static str,f64)> Deserialize borrows static keys. Four separately executed routes inspect tuple order, duplicate keys, signed-zero/subnormal bits, borrowed pointers and owned-input refusal. Constructed Futures/Spot sockets publish every live patch field into the actual Store. No DeserializeOwned or generic borrowed permission is claimed.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    },
+                    {
+                      "primitive": "f64"
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    },
+                    {
+                      "primitive": "f64"
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "borrowedRoutes": [
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 0,
+          "raw": "[[\"bid\",-0.0],[\"ask\",19.25]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "bid",
+              "8000000000000000"
+            ],
+            [
+              "ask",
+              "4033400000000000"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            16
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 1,
+          "raw": "[[\"last\",17.5],[\"last\",-3.125],[\"fundingRate\",0.003125]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "last",
+              "4031800000000000"
+            ],
+            [
+              "last",
+              "c009000000000000"
+            ],
+            [
+              "fundingRate",
+              "3f6999999999999a"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            17,
+            33
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 2,
+          "raw": "[]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [],
+          "key_offsets": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 3,
+          "raw": "[[\"b\\u0069d\",12.5]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 4,
+          "raw": "null"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 5,
+          "raw": "{}"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 6,
+          "raw": "true"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 7,
+          "raw": "0"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 8,
+          "raw": "\"x\""
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 9,
+          "raw": "[\"bid\",1]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 10,
+          "raw": "[[\"bid\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 11,
+          "raw": "[[\"bid\",1,2]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 12,
+          "raw": "[[7,1]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 13,
+          "raw": "[[\"bid\",\"1\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 14,
+          "raw": "[[\"bid\",null]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 15,
+          "raw": "[[\"bid\",1],null]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-text",
+          "fixture": 16,
+          "raw": "[[\"\",5e-324],[\"💱\",-2.75]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "",
+              "0000000000000001"
+            ],
+            [
+              "💱",
+              "c006000000000000"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            15
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 0,
+          "raw": "[[\"bid\",-0.0],[\"ask\",19.25]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "bid",
+              "8000000000000000"
+            ],
+            [
+              "ask",
+              "4033400000000000"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            16
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 1,
+          "raw": "[[\"last\",17.5],[\"last\",-3.125],[\"fundingRate\",0.003125]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "last",
+              "4031800000000000"
+            ],
+            [
+              "last",
+              "c009000000000000"
+            ],
+            [
+              "fundingRate",
+              "3f6999999999999a"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            17,
+            33
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 2,
+          "raw": "[]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [],
+          "key_offsets": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 3,
+          "raw": "[[\"b\\u0069d\",12.5]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 4,
+          "raw": "null"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 5,
+          "raw": "{}"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 6,
+          "raw": "true"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 7,
+          "raw": "0"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 8,
+          "raw": "\"x\""
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 9,
+          "raw": "[\"bid\",1]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 10,
+          "raw": "[[\"bid\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 11,
+          "raw": "[[\"bid\",1,2]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 12,
+          "raw": "[[7,1]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 13,
+          "raw": "[[\"bid\",\"1\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 14,
+          "raw": "[[\"bid\",null]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 15,
+          "raw": "[[\"bid\",1],null]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "qualified-static-text",
+          "fixture": 16,
+          "raw": "[[\"\",5e-324],[\"💱\",-2.75]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "",
+              "0000000000000001"
+            ],
+            [
+              "💱",
+              "c006000000000000"
+            ]
+          ],
+          "key_offsets": [
+            3,
+            15
+          ]
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 0,
+          "raw": "[[\"bid\",-0.0],[\"ask\",19.25]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "bid",
+              "8000000000000000"
+            ],
+            [
+              "ask",
+              "4033400000000000"
+            ]
+          ],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 1,
+          "raw": "[[\"last\",17.5],[\"last\",-3.125],[\"fundingRate\",0.003125]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "last",
+              "4031800000000000"
+            ],
+            [
+              "last",
+              "c009000000000000"
+            ],
+            [
+              "fundingRate",
+              "3f6999999999999a"
+            ]
+          ],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 2,
+          "raw": "[]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 3,
+          "raw": "[[\"b\\u0069d\",12.5]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "bid",
+              "4029000000000000"
+            ]
+          ],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 4,
+          "raw": "null"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 5,
+          "raw": "{}"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 6,
+          "raw": "true"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 7,
+          "raw": "0"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 8,
+          "raw": "\"x\""
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 9,
+          "raw": "[\"bid\",1]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 10,
+          "raw": "[[\"bid\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 11,
+          "raw": "[[\"bid\",1,2]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 12,
+          "raw": "[[7,1]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 13,
+          "raw": "[[\"bid\",\"1\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 14,
+          "raw": "[[\"bid\",null]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 15,
+          "raw": "[[\"bid\",1],null]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "static-borrowed-value",
+          "fixture": 16,
+          "raw": "[[\"\",5e-324],[\"💱\",-2.75]]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": [
+            [
+              "",
+              "0000000000000001"
+            ],
+            [
+              "💱",
+              "c006000000000000"
+            ]
+          ],
+          "borrowed_keys": true
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 0,
+          "raw": "[[\"bid\",-0.0],[\"ask\",19.25]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 1,
+          "raw": "[[\"last\",17.5],[\"last\",-3.125],[\"fundingRate\",0.003125]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 2,
+          "raw": "[]"
+        },
+        "output": {
+          "accepted": true,
+          "identity": true,
+          "alternate_traits": [],
+          "members": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 3,
+          "raw": "[[\"b\\u0069d\",12.5]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 4,
+          "raw": "null"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 5,
+          "raw": "{}"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 6,
+          "raw": "true"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 7,
+          "raw": "0"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 8,
+          "raw": "\"x\""
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 9,
+          "raw": "[\"bid\",1]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 10,
+          "raw": "[[\"bid\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 11,
+          "raw": "[[\"bid\",1,2]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 12,
+          "raw": "[[7,1]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 13,
+          "raw": "[[\"bid\",\"1\"]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 14,
+          "raw": "[[\"bid\",null]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 15,
+          "raw": "[[\"bid\",1],null]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      },
+      {
+        "input": {
+          "route": "owned-value",
+          "fixture": 16,
+          "raw": "[[\"\",5e-324],[\"💱\",-2.75]]"
+        },
+        "output": {
+          "accepted": false,
+          "identity": true,
+          "alternate_traits": []
+        }
+      }
+    ]
   }
 }

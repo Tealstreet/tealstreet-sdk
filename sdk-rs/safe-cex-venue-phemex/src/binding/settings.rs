@@ -54,7 +54,7 @@ impl ContextHost for Host {
         Ok(rows(r)?.len())
     }
     fn row(&mut self, r: &Js, i: usize) -> Result<Option<Js>, Thrown> {
-        Ok(r.array_items()
+        Ok(r.array_items()?
             .ok_or_else(|| Thrown::type_error("positions.filter is not a function"))?
             .get(i)
             .cloned()
