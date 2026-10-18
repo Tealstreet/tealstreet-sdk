@@ -208,6 +208,9 @@
       "real Node probe execution is restricted to the production FFI addon profile",
       "Node probe execution refuses failed builds and foreign or ambiguous Cargo artifacts"
     ],
+    "accepted-number-output-exports-native.test.mjs": [
+      "numeric dependency exports authenticate the real compiler origin and reject compiling grammar changes"
+    ],
     "accepted-number-output-native.test.mjs": [
       "numeric production compiler binding catches a compiling recipe mutation"
     ],
@@ -278,6 +281,8 @@
     ]
   },
   "mutations": [
+    "numeric dependency export missing origin",
+    "numeric dependency export opaque operand",
     "workspace dependency glob macro shadow",
     "workspace dependency glob hidden provider expansion",
     "doc-hidden production enum",
