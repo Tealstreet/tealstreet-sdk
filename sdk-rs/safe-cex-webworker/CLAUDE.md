@@ -719,3 +719,9 @@ CallMethod dispatch starts through the canonical eager driver at either entry.
 Ready venue futures yield at the source await before replying; synchronous cases
 reply during entry. Dropping a caller waiter leaves the operation and reply owned
 by the runtime. Runtime teardown keeps the existing guarded cancellation report.
+
+Worker startup and session listeners own their continuations through canonical
+start_eager. Clock, import, venue-start and startup-race typed results yield at
+their source await boundaries. Discarding a caller waiter cannot cancel startup
+or failed-worker table cleanup; token/disposal suppression and retained startup
+losers remain unchanged. Raw session/config admission is a separate audit row.
