@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { deserialize, serialize } from 'node:v8';
-import { publicRestPlan, resultStatus, tickerCoverage, qualifyTiming, qualifyUpstream } from './rest-plan.mjs';
+import {
+  publicReadMethods,
+  publicRestPlan,
+  resultStatus,
+  tickerCoverage,
+  qualifyTiming,
+  qualifyUpstream,
+} from './rest-plan.mjs';
 import { readKey, isRead } from './recorder.mjs';
 import { restVenueHosts } from './rest-venues.mjs';
 
@@ -211,4 +218,123 @@ test('matching coarse clock traces do not prove HTTP completion timing for times
     qualifyTiming({ ...check, diffs: [...check.diffs, { path: '$.value.0.price', ts: 1, rust: 2 }] }).status,
     'DIFF',
   );
+});
+
+test('REST comparison excludes concrete exchange helpers from both implementations', () => {
+  const internal = ['fetchOptionMarkets', 'fetchTickersRaw', 'fetchTickersWithoutParse'];
+  for (const method of internal) assert.ok(!publicReadMethods.includes(method), method);
+  for (const venue of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader']) {
+    const { plan } = publicRestPlan(venue, { methods: internal, overrides: internal }, 1710000000000);
+    assert.ok(
+      plan.every(({ method }) => !internal.includes(method)),
+      venue,
+    );
+    assert.ok(plan.some(({ method }) => method === 'fetchMarkets'));
+    assert.ok(plan.some(({ method }) => method === 'fetchTickers'));
+  }
+});
+
+test('actual REST workers reject internal helpers equally before either runtime is invoked', async () => {
+  const { fork } = await import('node:child_process');
+  const internal = ['fetchOptionMarkets', 'fetchTickersRaw', 'fetchTickersWithoutParse'];
+  const replies = [];
+  for (const implementation of ['ts', 'rust']) {
+    const child = fork(new URL('./rest-worker.mjs', import.meta.url), [implementation], {
+      execArgv: ['--import', 'tsx'],
+      serialization: 'advanced',
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      env: {
+        ...process.env,
+        TSX_TSCONFIG_PATH: new URL('../../../packages/safe-cex/tsconfig.json', import.meta.url).pathname,
+      },
+    });
+    try {
+      for (const [requestId, method] of internal.entries()) {
+        const reply = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(`${implementation} worker did not reply`)), 30000);
+          const onExit = (code) => {
+            clearTimeout(timer);
+            reject(new Error(`worker exited ${code}`));
+          };
+          child.once('exit', onExit);
+          child.once('message', (message) => {
+            clearTimeout(timer);
+            child.off('exit', onExit);
+            resolve(message);
+          });
+          child.send({ requestId, method, args: [] });
+        });
+        assert.deepEqual(reply, {
+          requestId,
+          failure: { name: 'Error', message: 'Not an audited public read' },
+          errors: 0,
+        });
+        replies.push(reply);
+      }
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        child.kill();
+        await exited;
+      }
+    }
+  }
+  assert.deepEqual(replies.slice(0, 3), replies.slice(3));
+});
+
+test('maintained worker dispatch refuses helpers even when present on the receiver', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const handler = new URL('../../../packages/safe-cex/src/webworker/handlers/CallMethodHandler.ts', import.meta.url)
+    .href;
+  const source = `
+    import assert from 'node:assert/strict';
+    import { CallMethodHandler } from ${JSON.stringify(handler)};
+    const messages = [], calls = [];
+    const exchange = { fetchOrders: async () => { calls.push('fetchOrders'); return ['public']; } };
+    for (const method of ['fetchOptionMarkets', 'fetchTickersRaw', 'fetchTickersWithoutParse'])
+      exchange[method] = () => { throw new Error('internal helper invoked'); };
+    const handler = new CallMethodHandler('account', 'bybit', exchange, {postMessage: m => messages.push(m)}, {}, {});
+    for (const method of ['fetchOptionMarkets', 'fetchTickersRaw', 'fetchTickersWithoutParse']) {
+      await handler.handleCallMethod(method, method, []);
+      assert.deepEqual(messages.pop(), {op: 'callMethod:done', data: {requestId: method, success: false}});
+    }
+    await handler.handleCallMethod('public', 'fetchOrders', []);
+    assert.deepEqual(messages.pop(), {op: 'callMethod:done', data: {requestId: 'public', result: ['public'], success: true}});
+    assert.deepEqual(calls, ['fetchOrders']);
+    handler.dispose();
+  `;
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', source], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: {
+      ...process.env,
+      TSX_TSCONFIG_PATH: new URL('../../../packages/safe-cex/tsconfig.json', import.meta.url).pathname,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('helper classification follows the maintained public interface and concrete Bybit declaration', async () => {
+  const { createRequire } = await import('node:module');
+  const ts = createRequire(import.meta.url)('typescript');
+  const parse = (path) =>
+    ts.createSourceFile(path, readFileSync(new URL(path, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+  const base = parse('../../../packages/safe-cex/src/exchanges/base.ts');
+  const bybit = parse('../../../packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts');
+  const api = base.statements.find((node) => ts.isInterfaceDeclaration(node) && node.name.text === 'Exchange');
+  const callable = base.statements.find(
+    (node) => ts.isTypeAliasDeclaration(node) && node.name.text === 'CallableMethodsInWorker',
+  );
+  const receiver = bybit.statements.find((node) => ts.isClassDeclaration(node) && node.name.text === 'BybitExchange');
+  assert.ok(api && callable && receiver);
+  const publicNames = new Set(api.members.map((node) => node.name?.getText(base)));
+  const workerNames = new Set(callable.type.types.map((node) => node.literal.text));
+  const concreteNames = new Set(receiver.members.map((node) => node.name?.getText(bybit)));
+  for (const method of ['fetchOptionMarkets', 'fetchTickersRaw', 'fetchTickersWithoutParse']) {
+    assert.ok(concreteNames.has(method), method);
+    assert.ok(!publicNames.has(method), method);
+    assert.ok(!workerNames.has(method), method);
+  }
+  for (const method of ['fetchMarkets', 'fetchTickers', 'fetchOptionChain', 'fetchOptionExpiries'])
+    assert.ok(publicNames.has(method), method);
 });
