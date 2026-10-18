@@ -1,0 +1,198 @@
+{
+  "source_commit": "4630307b3e198ace2fdb77dba29ba0b2f82c3840",
+  "base": "1b55cfc9c32405515d21a632cf771db14c1a2a3b",
+  "CARGO_INCREMENTAL": "0",
+  "cargo_cwd": "sdk-rs",
+  "cargo_jobs": 2,
+  "assignment_rows": [
+    6,
+    16
+  ],
+  "verdict": "FIX",
+  "remaining_delegated_rows": [
+    1,
+    2,
+    3,
+    7,
+    8,
+    12,
+    13,
+    23,
+    25,
+    35
+  ],
+  "gates": [
+    {
+      "gate": "full-venue",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-venue-bybit",
+        "--all-features",
+        "--all-targets",
+        "--no-fail-fast",
+        "--",
+        "--include-ignored"
+      ],
+      "exit": 0,
+      "seconds": 593.78,
+      "log": "/tmp/bybit-history-gate-full-venue.log",
+      "sha256": "3406a784ea18f2d085d6c57f1ed90e5f27f05320ffd42739e4890b42d55770c5"
+    },
+    {
+      "gate": "core-gates",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-exchange",
+        "--all-features",
+        "--test",
+        "cancellable_future_inventory",
+        "--test",
+        "override_contract",
+        "--test",
+        "venue_binding_gate",
+        "--",
+        "--include-ignored"
+      ],
+      "exit": 0,
+      "seconds": 149.01,
+      "log": "/tmp/bybit-history-gate-core-gates.log",
+      "sha256": "2485dc71990212e92f56960ca77efd9344b057d4cd64d1a93aaf1eac183b95fe"
+    },
+    {
+      "gate": "full-index",
+      "command": [
+        "cargo",
+        "run",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-parity",
+        "--bin",
+        "parity-check",
+        "--"
+      ],
+      "exit": 0,
+      "seconds": 25.55,
+      "log": "/tmp/bybit-history-gate-full-index.log",
+      "sha256": "6874cf88ed79e7d95a778e406bbe727b526de663a600b3cc29f0d45772e1889d"
+    },
+    {
+      "gate": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 34.74,
+      "log": "/tmp/bybit-history-gate-fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "gate": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-venue-bybit",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 49.96,
+      "log": "/tmp/bybit-history-gate-clippy.log",
+      "sha256": "25ea1e61c6b16e0e8a08b9823876d882de2667f41ad0b9cc469de787309d0de8"
+    },
+    {
+      "gate": "wasm-clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-venue-bybit",
+        "--all-features",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--lib",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 34.46,
+      "log": "/tmp/bybit-history-gate-wasm-clippy.log",
+      "sha256": "4492530ed76aae417d037b9784da74b44e82871be9ea1f6986ef44ca3544f1db"
+    }
+  ],
+  "additional_gates": [
+    {
+      "gate": "latest focused matrix",
+      "log": "/tmp/bybit-history-final-strong-green.log",
+      "proof": "10 passed; 0 failed; 0 ignored",
+      "sha256": "42f2aca497a62329f5efe09964eda02f69d429e7ed5afef2906c5dfb39a48e8b"
+    },
+    {
+      "gate": "CI wiring",
+      "log": "/tmp/bybit-history-wiring.log",
+      "proof": "pass 376",
+      "sha256": "aa6ed757dcb003f55f394cc552efd5a6dbfb0f34428b864deaff007f7e267baa"
+    },
+    {
+      "gate": "Node cancellation",
+      "log": "/tmp/bybit-history-node-cancellation.log",
+      "proof": "pass 11",
+      "sha256": "64a5e141260976ceb5e8e13171431e107bb9e5399f4ee72ed6db25fe2efcc44d"
+    },
+    {
+      "gate": "TS extraction",
+      "log": "/tmp/bybit-history-final-extractor.log",
+      "proof": "Would update 0 manifests; 0 added, 0 orphaned symbols.",
+      "sha256": "74d36e665b281023372e92dafdce2cc5494cd140950d0462b828ae4bc5b8aa6e"
+    }
+  ],
+  "full_venue": {
+    "executables": 74,
+    "passed": 482,
+    "failed": 0,
+    "ignored": 0
+  },
+  "full_index": {
+    "rows": 7563,
+    "public_rust_items": 16351
+  },
+  "core_gate_tests": {
+    "cancellation": 7,
+    "override": 8,
+    "binding": 25
+  },
+  "controls": {
+    "compiled_red_exact_restore_green": 6,
+    "source_sha256": "470bd34044ac2e18e03cecfb4fda053f8d64bfe80fd7432859f190f8afcb28de"
+  },
+  "protected_files_sha256": {
+    "src/history_mapping.rs": "16ca6909c7c3b4af28e52063bbfc87c1abfb2eb493e77110a1730c66a2a45556",
+    "src/history_mapping/tests.rs": "4eec6a73206b7c2808d334fa6d331e7231a8bfc684e7bfa52a67e6d5f44d0a23",
+    "tests/fill_history_binding.rs": "bac96688f0a92e3309728e2adc508def23864d45257b3a242f9c4120ed64d813",
+    "scripts/history-fixtures.mjs": "ce257e918f5425e9b4472df9952ef8afac9dc127a1fa38aaad4ce971145e0a60"
+  }
+}
