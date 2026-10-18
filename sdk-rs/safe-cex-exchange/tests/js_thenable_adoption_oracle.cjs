@@ -3,7 +3,7 @@
   const modes = ['fulfill', 'nan', 'reject', 'getter-throw', 'call-throw',
     'resolve-then-throw', 'reject-then-resolve', 'nested', 'noncallable', 'pending-first'];
   const output = {};
-  for (const route of ['await', 'return', 'all', 'allSettled', 'resolve']) {
+  for (const route of ['await', 'return', 'all', 'allSettled', 'resolve', 'then', 'finally']) {
     output[route] = [];
     for (const mode of modes) {
       const trace = [];
@@ -43,6 +43,8 @@
         let promise;
         if (route === 'return') promise = (async () => input)();
         if (route === 'resolve') promise = Promise.resolve(input);
+        if (route === 'then') promise = Promise.resolve().then(() => input);
+        if (route === 'finally') promise = Promise.resolve(-0).finally(() => input);
         if (route === 'all' || route === 'allSettled') promise = Promise[route]([input]);
         trace.push('returned');
         try {

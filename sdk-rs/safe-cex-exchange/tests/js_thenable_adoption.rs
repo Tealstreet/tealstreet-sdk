@@ -223,12 +223,21 @@ async fn matrix(scope: Scope<()>, route: &'static str) {
             } else {
                 Js::array(vec![input.clone()])
             };
-            let Js::Promise(promise) = scope
-                .global("Promise")
-                .unwrap()
-                .call_method(route, vec![value])
-                .unwrap()
-            else {
+            let constructor = scope.global("Promise").unwrap();
+            let pending = if matches!(route, "then" | "finally") {
+                let returned = input.clone();
+                constructor
+                    .call_method("resolve", vec![Js::Number(-0.)])
+                    .unwrap()
+                    .call_method(
+                        route,
+                        vec![Js::function("callback", move |_, _| Ok(returned.clone()))],
+                    )
+                    .unwrap()
+            } else {
+                constructor.call_method(route, vec![value]).unwrap()
+            };
+            let Js::Promise(promise) = pending else {
                 panic!("native promise")
             };
             trace.borrow_mut().push("returned".into());
@@ -274,6 +283,14 @@ fn installed_all_settled_adopts_thenables() {
 #[test]
 fn canonical_resolve_control() {
     run(|scope| matrix(scope, "resolve"));
+}
+#[test]
+fn installed_then_adopts_callback_thenables() {
+    run(|scope| matrix(scope, "then"));
+}
+#[test]
+fn installed_finally_adopts_callback_thenables() {
+    run(|scope| matrix(scope, "finally"));
 }
 
 #[test]
