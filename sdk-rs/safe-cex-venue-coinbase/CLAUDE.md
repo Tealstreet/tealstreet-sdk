@@ -288,3 +288,11 @@ PortfolioState captures the canonical retained object directly; Serde flatten
 buffers must not inspect opaque metadata. Metadata keys retain UTF-16, while
 uuid/type remain strict native strings. The local Frame graph keeps own and array
 undefined values during real merge/read operations, alongside native numeric bits.
+
+The exported ListAccountsResponse and IntxInstrumentsResponse aliases keep their
+wire-decoder roles. `scripts/wire-alias-contracts.mjs` uses the maintained compiler
+context and native probe engine for exactly those two aliases; it reads every
+nested field, row order/cardinality and f64 bits before reporting. Its `--controls`
+mode independently truncates each decoded native vector and requires failure,
+then exact restoration. These finite UTF8 JSON cases do not classify the other
+aliases or remove the generic-registration guard in the full default inventory.

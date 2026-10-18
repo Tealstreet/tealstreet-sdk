@@ -3534,7 +3534,7 @@
         }
       }
     ],
-    "reason": "Source-only classification of 16 typed host/default operations; no fabricated concrete receiver or executed behavior claim. In particular, this does not classify all 53 defaults or the HTTP signing JSON parsing path.",
+    "reason": "Source-only classification of 16 typed host/default operations; no fabricated concrete receiver or executed behavior claim. In particular, this does not classify all 53 defaults or the HTTP signing JSON parsing path. Reviewed fallible Delete: only the synchronous BaseExchange reporting cleanup after the trait propagates its canonical property-removal error. The complete Exchange trait declaration, all default method APIs/bodies and classifications are byte-unchanged.",
     "reviewedMethods": [
       {
         "name": "after_method_called_in_worker",
@@ -3601,6 +3601,6 @@
         "reason": "No-op returns Ok(()) and ignores its symbol selector."
       }
     ],
-    "sourceSha256": "8088c20bb1267e631d526a72d47a885a29e9d804e062138eb24df7d8dd425ae2"
+    "sourceSha256": "97546639fdbdb1604873373a5fb5e4cb594e6d87c83e05df41453b0321d98e9b"
   }
 }

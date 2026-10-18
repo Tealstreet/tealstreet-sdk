@@ -1831,6 +1831,19 @@ event template. The real PM repeated-snapshot warning and native facade witnesse
 cover lone UTF16 units; native_console_default separately executes the runtime's
 typed console default and Base logging so both forwarding paths remain observed.
 
+
+## Property deletion
+
+Js::delete is strict and returns Result<(), Thrown>; Js::reflect_delete returns
+the reflective boolean completion for object targets. Both use one descriptor
+removal operation: nonconfigurable properties survive, getters are not read,
+and strict refusal stops the following source statement. Supplied receivers
+propagate errors; positive test teardown asserts success. Fixed Builtin own
+properties refuse visibly until mutable intrinsic storage exists; the maintained
+source/dependency check is scripts/js-intrinsic-delete-audit.cjs. The accepted
+boundary is recorded in known-residuals.md. tests/js_strict_delete_refusals.rs
+compares actual Node completions, original referents and primitive/array rules.
+
 Native exception reporting retains its context through the reporter capability,
 then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
 Serialization errors stay visible; `native_console_default` checks both paths

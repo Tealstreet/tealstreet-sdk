@@ -389,3 +389,32 @@ real-client tests. A single initial Future poll is not a completion guarantee.
 The API/signing corpus captures lone-surrogate prepared values through canonical
 retained numeric ingress and compares native UTF-16 units. Legacy UTF-8 prepared
 helper/output limits are separate from that capture; their existing source cases remain.
+
+Successful native HTTP responses retain canonical `RetainedJsonInput` through the
+response interceptor and native callback. Encoded bodies use the shared Axios
+transform once; already transformed data is forwarded directly. Unread UTF-16
+keys/values, own undefined and nonfinite numeric metadata reach model `info`
+without a JSON projection. Request/signing prepared inputs retain their existing
+typed policy. The two native routing regressions fail on the old response bridge
+and compare the maintained source interceptor/market method before native checks.
+
+The accepted receiver inventory reviews `MessageValue::equals_string` and
+`NativeValue::field` on the shared Js receiver with exact compiler impl hashes.
+The two native receiver tests in `adapter_classes.rs` cover strict UTF-16
+comparison and own-field forwarding, including native cell identity, presence,
+number bits and nullish refusal. These entries classify existing receiver roles;
+they do not widen the adapter's prepared-data profile.
+
+The Backpack alias census finds 16 live structural containers: nine have native
+Serde decoders, and seven hold already typed state, callbacks or prepared values.
+The seven generic containers register one fixed instantiation with exact compiler
+source and expanded targets. `scripts/container-alias-contracts.mjs` authenticates
+the full compiler inventory before running this finite cohort; the separate 18
+callable/future and two nominal aliases are outside this cohort.
+
+Native decoder observations inspect UTF-16 keys, duplicate-key order, holes,
+number bits, shared ownership and mutation visibility without JSON projection.
+The four container tests in `adapter_classes.rs` also construct the actual typed
+aliases, including `SigningRecord<Js>`, preserving native nonfinite values, own
+undefined and original cell identity. These observations cover the declared
+instantiations and prepared profiles, not every possible generic value type.

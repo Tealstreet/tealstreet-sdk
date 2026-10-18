@@ -3,10 +3,12 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { reviewedConstantOutput } from './accepted-constant-output.mjs';
 import { copyJsonSourceProperty } from './accepted-json-source.mjs';
+import { requiredFeatures } from './accepted-feature-contracts.mjs';
 
 export function contractFor(type, contracts, context = {}) {
   const contract = contracts[type.name];
   assert.ok(contract, `${type.name}: accepted-set assertion: unclassified deserializable type`);
+  requiredFeatures(contract, type.name);
   if (contract.nativeObservation !== undefined) {
     const native = contract.nativeObservation;
     assert.notEqual(contract.category, 'non-decoder', `${type.name}: accepted-set assertion: non-decoder cannot claim native decoder observations`);

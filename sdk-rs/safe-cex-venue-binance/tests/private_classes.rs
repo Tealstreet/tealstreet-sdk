@@ -5501,6 +5501,10 @@ fn production_native_private_clones_share_settlement_and_captured_receiver() {
 }
 
 #[cfg(feature = "native")]
+#[path = "support/private_action_key_binding.rs"]
+mod private_action_key_binding;
+
+#[cfg(feature = "native")]
 #[path = "support/snapshot_future_binding.rs"]
 mod snapshot_future_binding;
 
@@ -5642,6 +5646,10 @@ fn production_native_leverage_aliases_update_account_market_overlay() {
     }
 }
 
+#[cfg(feature = "native")]
+#[path = "support/live_flag_binding.rs"]
+mod live_flag_binding;
+
 #[test]
 #[cfg(feature = "native")]
 fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
@@ -5778,4 +5786,61 @@ fn production_native_candle_delegation_uses_market_socket_and_cleanup() {
         );
         owner.dispose().unwrap();
     }
+}
+
+#[cfg(feature = "native")]
+#[path = "support/private_owner_binding.rs"]
+mod private_owner_binding;
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_ticker_owner_source_cases_are_current() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/public-ticker-source.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let contracts: Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-parity/accepted-set/contracts/safe-cex-venue-binance.json"
+    )))
+    .unwrap();
+    assert_eq!(source.as_object().unwrap().len(), 7);
+    let mut observed = 0;
+    for name in [
+        "parse_field",
+        "handle_futures_book_events",
+        "handle_futures_mark_events",
+        "handle_futures_ticker_events",
+        "handle_pm_book_events",
+        "handle_pm_mark_events",
+        "handle_pm_ticker_events",
+    ] {
+        let cases = source[name].as_array().unwrap();
+        assert_eq!(
+            cases.len(),
+            if name == "parse_field" { 20 } else { 24 },
+            "{name}"
+        );
+        assert_eq!(
+            source[name],
+            contracts[format!("safe_cex_venue_binance::public_ticker_events::{name}")]["cases"],
+            "live maintained TypeScript ticker source changed for {name}"
+        );
+        observed += cases.len();
+    }
+    assert_eq!(observed, 164);
 }

@@ -658,8 +658,8 @@ fn worker_rpc(context: &Weak<JsSocketContext>, args: Vec<Js>) -> Result<Js, Thro
 /// The source object retains these handles; core receives them from its host.
 pub fn exchange_options(options: &Js) -> Result<ExchangeOptions, Thrown> {
     let structural = options.spread_object()?;
-    structural.delete(&super::value::utf16("remoteSigner"));
-    structural.delete(&super::value::utf16("payloadSigner"));
+    structural.delete(&super::value::utf16("remoteSigner"))?;
+    structural.delete(&super::value::utf16("payloadSigner"))?;
     to_typed(&structural)
 }
 
