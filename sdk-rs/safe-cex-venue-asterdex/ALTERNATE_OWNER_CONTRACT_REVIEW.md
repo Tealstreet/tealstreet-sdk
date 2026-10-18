@@ -92,4 +92,10 @@ This record makes no claim that the complete workspace or WASM cohort passed.
 
 The later master merge retains all eleven primary decoder records and all eleven
 supplemental corpora. The local marker-bearing merge commit was corrected in a
-new commit before push; no history was rewritten. Refreshed gate receipts follow.
+new commit before push; no history was rewritten. Refreshed primary source738/tooling150 and supplemental source435/runtime22
+all pass. All three compiled production controls fail again and exact restoration
+passes every33-owner receipt plus the conversion test
+(`/tmp/aster-alternate-controls-refreshed.log`). The refreshed real exchange target passes26tests; the cancellation Node suite
+passes11 and the all-features inventory passes6 with1explicit discovery export
+ignored (`/tmp/aster-alternate-exchange-refreshed.log` and
+`/tmp/aster-alternate-cancellation-refreshed.log`).
