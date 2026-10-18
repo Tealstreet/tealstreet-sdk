@@ -376,3 +376,7 @@ mod divergence_audit_tests;
 #[cfg(test)]
 #[path = "../../tests/support/fix_audit_binding.rs"]
 mod fix_audit_tests;
+
+#[cfg(test)]
+#[path = "../../tests/support/heartbeat_binding.rs"]
+mod heartbeat_binding_tests;

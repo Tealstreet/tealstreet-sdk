@@ -1,5 +1,7 @@
-//! Public heartbeat operations over the core-owned socket.
-use safe_cex_exchange::{runtime::ExchangeError, websocket::BaseWebSocket};
+//! Public ticker writers and the test-linked core message dispatcher.
+use safe_cex_exchange::runtime::ExchangeError;
+#[cfg(test)]
+use safe_cex_exchange::websocket::BaseWebSocket;
 #[cfg(test)]
 use safe_cex_num::{TableHit, js_table_lookup, js_truthy};
 #[cfg(test)]
@@ -7,6 +9,7 @@ use safe_cex_transport::how::json_parse;
 use safe_cex_types::retained_json::RetainedJsonInput;
 #[cfg(test)]
 use serde_json::Value;
+#[cfg(test)]
 use std::rc::Rc;
 
 // ts: handleTickersStreamEvents
@@ -151,21 +154,6 @@ fn type_error(message: &str) -> ExchangeError {
     let mut error = ExchangeError::new(message);
     error.name = "TypeError".into();
     error
-}
-
-/// Sends the legacy heartbeat after recording the monotonic ping time.
-pub fn ping(socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
-    if socket.is_disposed() {
-        return Ok(());
-    }
-    socket.mark_ping_sent();
-    socket.send(r#"{"event":"ping"}"#)
-}
-
-// ts: handlePingEvent
-/// Replies through core send, including its disposed and closed-socket guards.
-pub fn handle_ping_event(socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
-    socket.send(r#"{"event":"pong"}"#)
 }
 
 #[cfg(test)]
