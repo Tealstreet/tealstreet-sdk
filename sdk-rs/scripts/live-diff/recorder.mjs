@@ -117,6 +117,7 @@ export async function recordingProxy({
   forward = https.request,
   validateLive = false,
   captureDirectory,
+  replayOnly = false,
 }) {
   const certificateFor = certificateCache(directory, ca);
   let allowWrites = false;
@@ -167,6 +168,13 @@ export async function recordingProxy({
         } catch {}
       }
       records.push(record);
+      if (replayOnly && !cacheHit) {
+        record.blocked = true;
+        record.replayMiss = true;
+        response.writeHead(409, { 'content-type': 'application/json' });
+        response.end('{"error":"uncaptured replay input"}');
+        return;
+      }
       let live;
       // Even when mapping against one shared snapshot, both authenticated
       // implementations must have their own requests accepted by the exchange.

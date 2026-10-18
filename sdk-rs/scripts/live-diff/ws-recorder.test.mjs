@@ -8,10 +8,8 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { makeCA } from './recorder.mjs';
 import { buildConnectHook, connectHookEnvironment, websocketRecorder } from './ws-recorder.mjs';
 
-test(
-  'child-only socket hook records live TLS text/binary and replays exact messages',
-  { timeout: 20000 },
-  async (t) => {
+for (const port of [443, 8443, 9443])
+  test(`child-only socket hook records TLS on ${port} and replays exact text/binary`, { timeout: 20000 }, async (t) => {
     const directory = mkdtempSync(`${tmpdir()}/live-ws-test-`);
     const ca = makeCA(directory);
     const hook = buildConnectHook(directory, fileURLToPath(new URL('./ws-connect.c', import.meta.url)));
@@ -47,7 +45,7 @@ test(
       const script = `
       const WebSocket = require('ws');
       const frames = [];
-      const socket = new WebSocket('wss://public.exchange.test/stream?requestId=${implementation}', {
+      const socket = new WebSocket('wss://public.exchange.test:${port}/stream?requestId=${implementation}', {
         lookup: (_name, options, callback) => options.all
           ? callback(null, [{address:'${implementation === 'rust' ? '::2' : '127.0.0.2'}',family:${implementation === 'rust' ? 6 : 4}}])
           : callback(null,'${implementation === 'rust' ? '::2' : '127.0.0.2'}',${implementation === 'rust' ? 6 : 4}),
@@ -79,5 +77,4 @@ test(
     assert.equal(realSubscriptions, 1, 'replay never opens a second upstream data stream');
     assert.equal(records[0].inboundMessages, 2);
     assert.equal(records[1].frameHash, records[0].frameHash);
-  },
-);
+  });

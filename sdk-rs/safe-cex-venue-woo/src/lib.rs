@@ -54,8 +54,6 @@ pub mod v3_ws_state;
 
 pub mod v3_ws_private;
 
-pub mod v3_orderbook_recovery;
-
 pub mod v3_account_writes;
 
 pub mod v3_private;

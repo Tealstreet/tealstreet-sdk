@@ -498,78 +498,86 @@ impl BingxReadHistory {
         }
         Ok(executions)
     }
-    pub async fn tick(self: &Rc<Self>, count: f64) -> Result<(), ExchangeError> {
-        if self.reads.base.is_disposed() {
-            return Ok(());
-        }
-        let result = async {
-            if (count + 2.0) % 4.0 == 0.0 {
-                let orders = self.fetch_orders().await?;
-                if self.reads.base.is_disposed() {
-                    return Ok(());
-                }
-                let mut loaded = self.reads.base.store.loaded()?.clone();
-                loaded.orders = true;
-                self.reads
-                    .base
-                    .store
-                    .update(
-                        StoreUpdate {
-                            orders: Some(orders),
-                            loaded: Some(loaded),
-                            ..Default::default()
-                        },
-                        false,
-                    )
-                    .map_err(ExchangeError::from)?;
-            }
-            if count % 4.0 == 0.0 {
-                let balance = self.reads.fetch_balance().await?;
-                if self.reads.base.is_disposed() {
-                    return Ok(());
-                }
-                let mut loaded = self.reads.base.store.loaded()?.clone();
-                loaded.balance = true;
-                safe_cex_exchange::native_store::update_balance_and_loaded(
-                    self.reads.base.store.as_ref(),
-                    &balance,
-                    &loaded,
-                )
-                .map_err(ExchangeError::from)?;
-            }
-            let positions = self.reads.fetch_positions(None).await?;
-            if self.reads.base.is_disposed() {
+    pub fn tick(self: &Rc<Self>, count: f64) -> ExchangeFuture<'static, ()> {
+        let owner = self.clone();
+        let runtime = self.reads.base.runtime.clone();
+        safe_cex_exchange::eager::start_eager(&runtime, async move {
+            if owner.reads.base.is_disposed() {
                 return Ok(());
             }
-            self.reads
-                .base
-                .store
-                .add_or_update_positions_full(positions)
-                .map_err(ExchangeError::from)?;
-            Ok::<_, ExchangeError>(())
-        }
-        .await;
-        if let Err(e) = result {
-            self.report(e.message)?;
-        }
-        if !self.reads.base.is_disposed() {
-            let weak = Rc::downgrade(self);
-            self.host.loop_after(
-                self.reads.base.get_tick_interval(),
-                Rc::new(move || {
-                    let owner = weak.upgrade();
-                    Box::pin(async move {
-                        owner
-                            .ok_or_else(|| {
-                                ExchangeError::new("BingX history polling owner released")
-                            })?
-                            .tick(count + 1.0)
-                            .await
-                    })
-                }),
-            )?;
-        }
-        Ok(())
+            let result = async {
+                if (count + 2.0) % 4.0 == 0.0 {
+                    let orders = owner.fetch_orders().await?;
+                    if owner.reads.base.is_disposed() {
+                        return Ok(());
+                    }
+                    let mut loaded = owner.reads.base.store.loaded()?.clone();
+                    loaded.orders = true;
+                    owner
+                        .reads
+                        .base
+                        .store
+                        .update(
+                            StoreUpdate {
+                                orders: Some(orders),
+                                loaded: Some(loaded),
+                                ..Default::default()
+                            },
+                            false,
+                        )
+                        .map_err(ExchangeError::from)?;
+                }
+                if count % 4.0 == 0.0 {
+                    let balance = owner.reads.fetch_balance().await?;
+                    if owner.reads.base.is_disposed() {
+                        return Ok(());
+                    }
+                    let mut loaded = owner.reads.base.store.loaded()?.clone();
+                    loaded.balance = true;
+                    owner
+                        .reads
+                        .base
+                        .store
+                        .update(
+                            StoreUpdate {
+                                balance: Some((*balance).clone()),
+                                loaded: Some(loaded),
+                                ..Default::default()
+                            },
+                            false,
+                        )
+                        .map_err(ExchangeError::from)?;
+                }
+                let positions = owner.reads.fetch_positions(None).await?;
+                if owner.reads.base.is_disposed() {
+                    return Ok(());
+                }
+                owner
+                    .reads
+                    .base
+                    .store
+                    .add_or_update_positions_full(positions)
+                    .map_err(ExchangeError::from)?;
+                Ok::<_, ExchangeError>(())
+            }
+            .await;
+            if let Err(e) = result {
+                owner.report(e.message)?;
+            }
+            if !owner.reads.base.is_disposed() {
+                let weak = Rc::downgrade(&owner);
+                owner.host.loop_after(
+                    owner.reads.base.get_tick_interval(),
+                    Rc::new(move || match weak.upgrade() {
+                        Some(owner) => owner.tick(count + 1.0),
+                        None => Box::pin(async {
+                            Err(ExchangeError::new("BingX history polling owner released"))
+                        }),
+                    }),
+                )?;
+            }
+            Ok(())
+        })
     }
 }
 pub fn dispose_exchange<E>(
