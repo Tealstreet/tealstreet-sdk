@@ -115,6 +115,7 @@ pub(crate) fn bind(realm: &Host) {
     realm.bind_import("virtualClock", clock);
 
     super::host_spot::bind_spot_imports(realm).expect("shared dayjs import exists");
+    super::browser_imports::bind(realm);
     bind_cloid(realm);
     bind_startup(realm);
     super::imports_utils::bind(realm);

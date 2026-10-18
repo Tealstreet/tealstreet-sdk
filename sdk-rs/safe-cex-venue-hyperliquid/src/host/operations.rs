@@ -16,9 +16,10 @@ impl Host {
     pub(crate) fn native(&self, name: &str, length: u8, body: impl Fn(&mut Host, &Js, &[Js]) -> Result<Js, Thrown> + 'static) -> Js {
         let shared = Rc::downgrade(&self.shared);
         let lexical = self.lexical.clone();
+        let module = self.module;
         let function = Js::function(name, move |receiver, args| {
             let shared = shared.upgrade().ok_or_else(|| Thrown::error("Error", "Hyperliquid host disposed"))?;
-            body(&mut Host { shared, lexical: lexical.clone() }, &receiver, &args)
+            body(&mut Host { shared, lexical: lexical.clone(), module }, &receiver, &args)
         });
         function.define_property(&value::utf16("length"), &Js::object(vec![("value", Js::Number(length as f64))])).expect("fresh function length");
         function
@@ -26,16 +27,30 @@ impl Host {
     pub(crate) fn error_of(&self, class: &str, message: &str) -> Thrown { Thrown::error(class, message) }
     pub(crate) fn type_error(&self, message: &str) -> Thrown { Thrown::type_error(message) }
     pub(crate) fn error(&self, message: &str) -> Thrown { Thrown::error("Error", message) }
-    pub(crate) fn from_exchange_error(&self, error: safe_cex_exchange::runtime::ExchangeError) -> Thrown { error.into() }
-    pub(crate) fn exchange_error(&self, error: &Thrown) -> safe_cex_exchange::runtime::ExchangeError { error.to_exchange_error() }
+    pub(crate) fn from_exchange_error(&self, error: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
+        let thrown = Thrown::from(error.clone());
+        let mut source = std::error::Error::source(&error);
+        while let Some(cause) = source {
+            if let Some(owned) = cause.downcast_ref::<value::owned::OwnedCallbackError>() {
+                for (key, cell) in owned.value().to_js().own_entries().expect("owned diagnostic data") {
+                    if !matches!(String::from_utf16_lossy(&key).as_str(), "name" | "message" | "code" | "response") {
+                        thrown.value.define_key(&key, cell).expect("fresh diagnostic metadata");
+                    }
+                }
+                break;
+            }
+            source = cause.source();
+        }
+        thrown
+    }
+    pub(crate) fn exchange_error(&self, error: &Thrown) -> safe_cex_exchange::runtime::ExchangeError { error.native.as_ref().map(|native| (**native).clone()).unwrap_or_else(|| error.to_exchange_error()) }
     pub(crate) fn get(&mut self, value: &Js, key: &Js) -> Result<Js, Thrown> { value.get_property(key) }
     pub(crate) fn get_str(&mut self, value: &Js, key: &str) -> Result<Js, Thrown> { value.get(key) }
     pub(crate) fn set(&mut self, target: &Js, key: &Js, value: Js) -> Result<(), Thrown> {
-        if matches!(key, Js::SymbolIterator) { target.define_property_for(key, &Js::object(vec![("value",value),("writable",Js::Bool(true)),("enumerable",Js::Bool(true)),("configurable",Js::Bool(true))]))?; return Ok(()); }
         target.set_key(&key.to_js_string()?, value)
     }
     pub(crate) fn set_str(&mut self, target: &Js, key: &str, value: Js) -> Result<(), Thrown> { target.set(key, value) }
-    pub(crate) fn define(&mut self, target: &Js, key: Js, value: Js) -> Result<(), Thrown> { target.define_key(&key.to_js_string()?, value) }
+    pub(crate) fn define(&mut self, target: &Js, key: Js, value: Js) -> Result<(), Thrown> { target.define_property_for(&key, &Js::object(vec![("value", value), ("writable", Js::Bool(true)), ("enumerable", Js::Bool(true)), ("configurable", Js::Bool(true))])) }
     pub(crate) fn define_str(&mut self, target: &Js, key: &str, value: Js) -> Result<(), Thrown> { target.define(key, value) }
     pub(crate) fn define_hidden(&self, target: &Js, key: Js, value: Js) {
         target.define_property(&key.to_js_string().expect("literal key"), &Js::object(vec![("value",value),("writable",Js::Bool(true)),("enumerable",Js::Bool(false)),("configurable",Js::Bool(true))])).expect("fresh host prototype descriptor");
@@ -94,9 +109,10 @@ impl Host {
     pub(crate) fn constructor(&self, name: &str, length: u8, body: impl Fn(&mut Host, &[Js], &Js) -> Result<Js, Thrown> + 'static) -> Js {
         let shared = Rc::downgrade(&self.shared);
         let lexical = self.lexical.clone();
+        let module = self.module;
         let class = Js::constructor(name, None, move |target, args| {
             let shared = shared.upgrade().ok_or_else(|| Thrown::error("Error", "Hyperliquid host disposed"))?;
-            body(&mut Host { shared, lexical: lexical.clone() }, &args, &target)
+            body(&mut Host { shared, lexical: lexical.clone(), module }, &args, &target)
         });
         class.define_property(&value::utf16("length"), &Js::object(vec![("value",Js::Number(length as f64))])).expect("fresh constructor length");
         class
@@ -129,13 +145,7 @@ impl Host {
         Js::host_object(Rc::new(std::cell::RefCell::new(ForInRecord::get(value))))
     }
     pub(crate) fn instance_of(&mut self, value: &Js, class: &Js) -> Result<bool, Thrown> {
-        if !class.is_callable() { return Err(Thrown::type_error("Right-hand side of instanceof is not callable")); }
-        let prototype = class.get("prototype")?;
-        if !prototype.is_object() { return Err(Thrown::type_error("Function has non-object prototype in instanceof check")); }
-        if !value.is_object() { return Ok(false); }
-        let mut current = value.prototype();
-        while let Some(parent) = current { if parent.same_reference(&prototype) { return Ok(true); } current = parent.prototype(); }
-        Ok(false)
+        value.instance_of(class)
     }
     pub(crate) fn super_get(&mut self, home: &Js, receiver: &Js, name: &str) -> Result<Js, Thrown> {
         self.get_with_receiver(&home.prototype().unwrap_or(Js::Null), &Js::str(name), receiver)

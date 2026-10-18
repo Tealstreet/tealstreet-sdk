@@ -289,6 +289,33 @@ pub(super) fn all_iterable(
     combine(runtime, values, settled)
 }
 
+pub(super) fn race_iterable(runtime: &Rc<dyn ExchangeRuntime>, value: &Js) -> Promise {
+    let result = Promise::pending(runtime);
+    let iterator = match super::iterator::IteratorRecord::get(value) {
+        Ok(iterator) => iterator,
+        Err(error) => {
+            result.settle(Err(error));
+            return result;
+        }
+    };
+    loop {
+        let value = match iterator.step_value() {
+            Ok(Some(value)) => value,
+            Ok(None) => return result,
+            Err(error) => {
+                result.settle(Err(error));
+                return result;
+            }
+        };
+        let input = Promise::resolve(runtime, value);
+        let output = result.clone();
+        Promise::spawn(runtime, Box::pin(async move {
+            output.settle(input.wait().await);
+            Ok(Js::Undefined)
+        }));
+    }
+}
+
 fn combine(
     runtime: &Rc<dyn ExchangeRuntime>,
     values: impl Iterator<Item = Result<Js, Thrown>>,

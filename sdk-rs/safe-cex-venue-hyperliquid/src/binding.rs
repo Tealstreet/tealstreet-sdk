@@ -78,8 +78,8 @@ impl RateLimitClock for RuntimeClock {
 /// Error('Not implemented'))` (base.ts getAccount L734, fetchMarkets L754,
 /// fetchTickers L759, fetchSymbolMaxLeverage L799, changePositionMode L832,
 /// fetchPublicTrades L1138). No request, no emit.
-pub(crate) fn base_exchange_rejection<'a, T: 'a>() -> ExchangeFuture<'a, T> {
-    Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+pub(crate) fn base_exchange_rejection<T: 'static>(runtime: &Rc<dyn ExchangeRuntime>) -> ExchangeFuture<'static, T> {
+    safe_cex_exchange::eager::start_eager(runtime, async { Err(ExchangeError::new("Not implemented")) })
 }
 
 impl HyperliquidExchange {
@@ -446,7 +446,7 @@ impl Exchange for HyperliquidExchange {
             })
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
         Box::pin(self.typed("validateAccount", |_| Ok(vec![])))
@@ -458,13 +458,13 @@ impl Exchange for HyperliquidExchange {
         self.typed("fetchOrders", move |r| Ok(vec![opt(r, &symbols)?]))
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn set_leverage(
         &self,
@@ -485,7 +485,7 @@ impl Exchange for HyperliquidExchange {
         _hedged: bool,
         _symbol: Option<String>,
     ) -> ExchangeFuture<'_, ()> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
         self.unit("changeMarginType", move |r| {
@@ -513,6 +513,6 @@ impl Exchange for HyperliquidExchange {
         _symbol: String,
         _limit: Option<f64>,
     ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
 }

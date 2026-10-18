@@ -32,7 +32,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 pub struct HyperliquidSpotExchange {
     base: Rc<BaseExchange>,
     capabilities: ExchangeCapabilities,
-    binding: RefCell<Option<Binding>>,
+    pub(crate) binding: RefCell<Option<Binding>>,
 }
 impl HyperliquidSpotExchange {
     #[allow(clippy::arc_with_non_send_sync)]
@@ -277,7 +277,7 @@ impl Exchange for HyperliquidSpotExchange {
         })
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
         Box::pin(self.typed("validateAccount", |_| Ok(vec![])))
@@ -289,13 +289,13 @@ impl Exchange for HyperliquidSpotExchange {
         Box::pin(self.typed("fetchOrders", move |r| Ok(vec![opt(r, &symbols)?])))
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn fetch_symbol_max_leverage(&self, _: String) -> ExchangeFuture<'_, f64> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn set_leverage(
         &self,
@@ -312,7 +312,7 @@ impl Exchange for HyperliquidSpotExchange {
         }))
     }
     fn change_position_mode(&self, _: bool, _: Option<String>) -> ExchangeFuture<'_, ()> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("changeMarginType", move |r| {
@@ -326,13 +326,13 @@ impl Exchange for HyperliquidSpotExchange {
         Box::pin(self.unit("cancelOrders", move |r| Ok(vec![r.from_typed(&orders)?])))
     }
     fn schedule_cancel(&self, _: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn fetch_public_trades(
         &self,
         _: String,
         _: Option<f64>,
     ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
 }

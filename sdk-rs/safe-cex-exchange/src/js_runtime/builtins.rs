@@ -259,6 +259,17 @@ fn plain_string_member(s: Str, name: &str) -> Option<Js> {
             out.push(Js::utf16(&s[start..]));
             Ok(Js::array(out))
         }),
+        "substr" => method(name, move |a| {
+            let len = s.len() as f64;
+            let start = arg(&a, 0).to_number()?;
+            let start = if start.is_nan() { 0.0 } else { start.trunc() };
+            let start = if start < 0.0 { (len + start).max(0.0) } else { start.min(len) };
+            let count = arg(&a, 1);
+            let count = if count.is_undefined() { len - start } else { count.to_number()? };
+            let count = if count.is_nan() { 0.0 } else { count.trunc().max(0.0) };
+            let end = (start + count).min(len);
+            Ok(Js::utf16(&s[start as usize..end as usize]))
+        }),
         "slice" | "substring" => {
             let sub = name == "substring";
             method(name, move |a| {

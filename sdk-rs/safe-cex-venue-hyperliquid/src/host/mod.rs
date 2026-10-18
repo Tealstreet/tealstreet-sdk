@@ -16,6 +16,8 @@ use std::{cell::RefCell, collections::HashMap, rc::{Rc, Weak}, sync::Arc};
 
 pub(crate) struct Modules {
     imports: RefCell<HashMap<String, Js>>,
+    browser_modules: RefCell<HashMap<&'static str, Js>>,
+    telemetry: RefCell<Option<Rc<dyn safe_cex_types::telemetry::TelemetrySink>>>,
     singletons: RefCell<HashMap<&'static str, Js>>,
 }
 
@@ -23,6 +25,7 @@ pub(crate) struct Modules {
 pub(crate) struct Host {
     pub shared: Rc<ScopeShared<Modules>>,
     lexical: Option<Weak<FunctionData>>,
+    module: Option<&'static str>,
 }
 
 impl Host {
@@ -31,21 +34,27 @@ impl Host {
         let http: Rc<dyn JsHttpHost> = rest_http_host(runtime.clone(), http);
         let shared = Rc::new(ScopeShared::new(runtime, http, store, globals.clone(), Modules {
             imports: RefCell::default(), singletons: RefCell::default(),
+            browser_modules: RefCell::default(), telemetry: RefCell::default(),
         }));
         install_builtins(&globals, Rc::downgrade(&shared));
         install_library(&globals, Rc::downgrade(&shared));
-        Self { shared, lexical: None }
+        Self { shared, lexical: None, module: None }
     }
     pub(crate) fn runtime(&self) -> Rc<dyn ExchangeRuntime> { self.shared.runtime.clone() }
     pub(crate) fn with_lexical(&self, class: &Js) -> Self {
         let Js::Function(class) = class else { panic!("class binding must be a function") };
-        Self { shared: self.shared.clone(), lexical: Some(Rc::downgrade(class)) }
+        Self { shared: self.shared.clone(), lexical: Some(Rc::downgrade(class)), module: self.module }
+    }
+    fn with_module(&self, name: &'static str) -> Self {
+        Self { shared: self.shared.clone(), lexical: self.lexical.clone(), module: Some(name) }
     }
     pub(crate) fn bind_import(&self, name: &str, value: Js) {
         self.shared.extra.imports.borrow_mut().insert(name.into(), value);
     }
     pub(crate) fn import(&mut self, name: &str) -> Result<Js, Thrown> { self.global_binding(name) }
     pub(crate) fn global_binding(&mut self, name: &str) -> Result<Js, Thrown> {
+        let module = self.module.and_then(|name| self.shared.extra.browser_modules.borrow().get(name).cloned());
+        if let Some(module) = module && module.has_own(name) { return module.get(name); }
         if name == "HyperliquidExchange" && let Some(class) = self.lexical.as_ref().and_then(Weak::upgrade) {
             return Ok(Js::Function(class));
         }
@@ -97,3 +106,5 @@ mod spot_limiter_tests;
 mod table_hook_tests;
 
 mod operators;
+mod browser_imports;
+mod signature;

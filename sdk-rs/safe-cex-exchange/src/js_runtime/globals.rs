@@ -772,6 +772,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     let promise_rt = rt.clone();
     let settled_rt = rt.clone();
+    let race_rt = rt.clone();
     let resolve_rt = rt.clone();
     let reject_rt = rt.clone();
     let constructor_rt = rt.clone();
@@ -782,6 +783,13 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         )
     });
     for (name, method) in [
+        (
+            "race",
+            Js::function("race", move |_, args| {
+                let runtime = scope_of(&race_rt)?.exchange_runtime();
+                Ok(Js::Promise(promise::race_iterable(&runtime, &arg(&args, 0))))
+            }),
+        ),
         (
             "all",
             Js::function("all", move |_, a| {

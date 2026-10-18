@@ -671,6 +671,31 @@ impl Js {
         matches!(self, Js::Function(function) if function.construct.is_some())
     }
 
+    pub fn instance_of(&self, constructor: &Js) -> Result<bool, Thrown> {
+        if !constructor.is_object() {
+            return Err(Thrown::type_error("Right-hand side of 'instanceof' is not an object"));
+        }
+        if !constructor.is_callable() {
+            return Err(Thrown::type_error("Right-hand side of 'instanceof' is not callable"));
+        }
+        if let Js::Function(function) = constructor
+            && let Some(Construct::Bound { target, .. }) = &function.construct
+        {
+            return self.instance_of(target);
+        }
+        if !self.is_object() { return Ok(false); }
+        let prototype = constructor.get("prototype")?;
+        if !prototype.is_object() {
+            return Err(Thrown::type_error(&format!("Function has non-object prototype '{}' in instanceof check", prototype.to_display())));
+        }
+        let mut current = self.prototype();
+        while let Some(parent) = current {
+            if parent.same_reference(&prototype) { return Ok(true); }
+            current = parent.prototype();
+        }
+        Ok(false)
+    }
+
     /// GetSuperConstructor reads metadata, without the shadowable `__proto__` property.
     pub fn super_constructor(&self) -> Result<Js, Thrown> {
         if !self.is_callable() {

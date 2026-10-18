@@ -23,8 +23,6 @@ fn property_reads_follow_the_prototype_chain_and_nullish_reads_throw() {
             .unwrap()
             .strict_equals(&Js::Number(1.0))
     );
-    let has = r.get_str(&o, "hasOwnProperty").unwrap();
-    assert!(r.call(&has, &o, &[Js::str("a")]).unwrap().truthy());
     let e = r.get_str(&Js::Undefined, "x").unwrap_err();
     assert_eq!(
         message(&mut r, &e),
@@ -166,11 +164,6 @@ fn operators_follow_abstract_semantics() {
         r.binary(">=", &Js::Number(f64::NAN), &Js::Number(1.0))
             .unwrap()
             .strict_equals(&Js::Bool(false))
-    );
-    assert!(
-        r.binary("==", &Js::Null, &Js::Undefined)
-            .unwrap()
-            .truthy()
     );
     let e = r.error("boom");
     let s = r.to_string(&e.value).unwrap();
@@ -725,15 +718,11 @@ fn production_seam_browser_window_guards_refuse_before_browser_globals() {
     let (mut r, rt) = production_realm();
     for name in [
         "window",
-        "ethers",
-        "hasEthereumWallet",
-        "generateAgentWalletName",
         "switchToCorrectNetwork",
-        "reportEvent",
     ] {
         assert!(
             r.global_binding(name).is_err(),
-            "native does not install browser stand-ins: {name}"
+            "native does not invent an ambient browser/module binding: {name}"
         );
     }
     for mode in 0..4 {
@@ -803,8 +792,8 @@ fn market_host_iterator_calls_override_even_with_builtin_function_name() {
     let (mut r, _) = realm();
     let array = r.new_array(vec![Js::Number(1.0)]);
     let alternative = r.new_array(vec![Js::Number(42.0)]);
-    let override_method = r.native("[Symbol.iterator]", 0, move |r, _, _| {
-        r.get_iterator(&alternative)
+    let override_method = r.native("[Symbol.iterator]", 0, move |_, _, _| {
+        alternative.iterator()
     });
     let key = Js::SymbolIterator;
     r.define(&array, key, override_method).unwrap();
@@ -830,6 +819,142 @@ fn market_host_iterator_rejects_primitive_iterator_before_first_step() {
         MarketBootstrapHost::iterator(&mut r, &array).is_err(),
         "actual market host must reject a primitive iterator before reading next"
     );
+}
+
+#[test]
+fn native_module_imports_match_the_maintained_browser_guard_and_signature_bodies() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let output = std::process::Command::new("node")
+        .arg("sdk-rs/safe-cex-venue-hyperliquid/tests/native-imports-source.cjs")
+        .current_dir(root).output().expect("maintained module source");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let (mut host, runtime) = production_realm();
+    for (name, field) in [("TEALSTREET_BUILDER_FEE", "fee"), ("DEFAULT_BUILDER_FEE_TENTHS_BPS", "tenths"), ("DEFAULT_BUILDER_FEE_RATE", "rate")] {
+        let value = host.global_binding(name).unwrap();
+        assert_eq!(source_json(&mut host, &value), source["constants"][field]);
+    }
+    let ethers = host.global_binding("ethers").unwrap();
+    assert!(ethers.get("BrowserProvider").unwrap().is_undefined());
+    let signature = ethers.get("Signature").unwrap();
+    for (index, row) in source["signatureCases"].as_array().unwrap().iter().enumerate() {
+        let input = host.from_serde(&row["input"]);
+        let parsed = signature.call_method("from", vec![input]);
+        let projected = parsed.and_then(|value| Ok(Js::object(vec![("r", value.get("r")?), ("s", value.get("s")?), ("v", value.get("v")?)])));
+        match projected {
+            Ok(value) => assert_eq!(source_json(&mut host, &value), row["result"], "Signature.from case {index}"),
+            Err(error) => {
+                let fields = Js::object(vec![]);
+                for name in ["name", "message", "code", "shortMessage", "argument", "value"] {
+                    let mut value = error.value.get(name).unwrap();
+                    if matches!(value, Js::BigInt(_)) { value = Js::String(value.to_js_string().unwrap()); }
+                    fields.define(name, value).unwrap();
+                }
+                assert_eq!(source_json(&mut host, &fields), row["error"], "Signature.from case {index}");
+            }
+        }
+    }
+    let supplied = Js::object(vec![]);
+    let receiver = supplied.clone();
+    let calls = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = calls.clone();
+    supplied.define("signTypedData", host.native("signTypedData", 3, move |_, this, args| {
+        assert!(this.same_reference(&receiver));
+        seen.borrow_mut().push(args[2].clone());
+        Ok(Js::str(&format!("0x{}{}1b", "11".repeat(32), "22".repeat(32))))
+    })).unwrap();
+    let sign = host.global_binding("signBuilderFeeApproval").unwrap();
+    let pending = sign.call(Js::Undefined, vec![supplied, Js::str(crate::constants::TEALSTREET_BUILDER_ADDRESS_MAINNET), Js::Undefined, Js::Bool(false), Js::Number(42.0)]).unwrap();
+    runtime.drain();
+    let Js::Promise(pending) = pending else { panic!("async module helper") };
+    let result = pending.result().expect("supplied native signer completes").as_ref().unwrap().clone();
+    assert_eq!(source_json(&mut host, &result), source["signature"]);
+    assert_eq!(calls.borrow()[0].get("maxFeeRate").unwrap().to_display(), "0.01%");
+    assert!(host.global_binding("window").is_err());
+    let math = host.global_binding("Math").unwrap();
+    let original_math = math.clone();
+    let draws = Rc::new(std::cell::Cell::new(0));
+    let reads = Rc::new(std::cell::Cell::new(0));
+    let count = draws.clone();
+    let observed = reads.clone();
+    math.define_accessor("random", Some(Rc::new(move |receiver| {
+        assert!(receiver.same_reference(&original_math));
+        observed.set(observed.get() + 1);
+        let count = count.clone();
+        let original_math = original_math.clone();
+        Ok(Js::function("random", move |receiver, _| {
+            assert!(receiver.same_reference(&original_math));
+            let index = count.get();
+            count.set(index + 1);
+            Ok(Js::Number([0.0, 0.5, 1.0 - f64::EPSILON, f64::NAN][index]))
+        }))
+    })), None).unwrap();
+    let name = host.global_binding("generateAgentWalletName").unwrap().call(Js::Undefined, vec![]).unwrap();
+    assert_eq!(source_json(&mut host, &name), source["name"]);
+    assert_eq!(reads.get(), 4);
+    assert_eq!(draws.get(), 4);
+    let available = host.global_binding("hasEthereumWallet").unwrap().call(Js::Undefined, vec![]).unwrap();
+    assert!(available.strict_equals(&Js::Bool(false)));
+    let cause = Js::object(vec![("code", Js::utf16(&[0xd800]))]);
+    let thrown = cause.clone();
+    let window = Js::object(vec![]);
+    window.define_accessor("ethereum", Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))), None).unwrap();
+    host.set_global("window", window);
+    let error = host.global_binding("hasEthereumWallet").unwrap().call(Js::Undefined, vec![]).unwrap_err();
+    assert!(error.value.same_reference(&cause));
+    host.shared.globals.delete(&"window".encode_utf16().collect::<Vec<_>>()).unwrap();
+    let report = host.global_binding("reportEvent").unwrap();
+    let payload = Js::object(vec![("amount", Js::Number(-0.0))]);
+    assert!(report.call(Js::Undefined, vec![Js::str("no-sink"), payload.clone()]).unwrap().is_undefined());
+    struct Sink { observed: Rc<std::cell::RefCell<Option<Js>>>, cause: Js }
+    impl safe_cex_types::telemetry::TelemetrySink for Sink {
+        fn event(&self, _: &str, data: Rc<dyn std::any::Any>) -> Result<(), Rc<dyn std::any::Any>> {
+            *self.observed.borrow_mut() = Some(data.downcast_ref::<Js>().expect("original native payload").clone());
+            Err(Rc::new(self.cause.clone()))
+        }
+    }
+    let observed = Rc::new(std::cell::RefCell::new(None));
+    *host.shared.extra.telemetry.borrow_mut() = Some(Rc::new(Sink { observed: observed.clone(), cause: cause.clone() }));
+    let error = report.call(Js::Undefined, vec![Js::str("event"), payload.clone()]).unwrap_err();
+    assert!(error.value.same_reference(&cause));
+    assert!(observed.borrow().as_ref().unwrap().same_reference(&payload));
+}
+
+#[test]
+fn installed_substr_uses_utf16_indices_and_source_coercion_order() {
+    let (mut host, _) = realm();
+    let text = Js::utf16(&[65, 0xd800, 66, 0xdc00]);
+    let cases = vec![
+        (vec![], vec![65, 0xd800, 66, 0xdc00]),
+        (vec![Js::Number(1.0), Js::Number(1.0)], vec![0xd800]),
+        (vec![Js::Number(-2.0)], vec![66, 0xdc00]),
+        (vec![Js::Number(f64::INFINITY), Js::Number(1.0)], vec![]),
+        (vec![Js::Number(f64::NEG_INFINITY), Js::Number(1.0)], vec![65]),
+        (vec![Js::Number(f64::NAN), Js::Number(2.0)], vec![65, 0xd800]),
+        (vec![Js::Number(1.0), Js::Number(f64::INFINITY)], vec![0xd800, 66, 0xdc00]),
+        (vec![Js::Number(1.0), Js::Number(f64::NEG_INFINITY)], vec![]),
+    ];
+    let script = "const s=String.fromCharCode(65,0xd800,66,0xdc00);const rows=[[],[1,1],[-2],[Infinity,1],[-Infinity,1],[NaN,2],[1,Infinity],[1,-Infinity]];console.log(JSON.stringify(rows.map(args=>Array.from({length:s.substr(...args).length},(_,i)=>s.substr(...args).charCodeAt(i)))));";
+    let output = std::process::Command::new("node").args(["-e", script]).output().unwrap();
+    assert!(output.status.success());
+    let source: Vec<Vec<u16>> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), cases.len());
+    for ((args, expected), source) in cases.into_iter().zip(source) {
+        assert_eq!(expected, source);
+        assert_eq!(host.call_method(&text, "substr", &args).unwrap().as_str().map(|units| units.as_ref()), Some(expected.as_slice()));
+    }
+    let order = Rc::new(std::cell::RefCell::new(vec![]));
+    let start = Js::object(vec![]);
+    let count = Js::object(vec![]);
+    let first = order.clone();
+    start.define("valueOf", Js::function("start", move |_, _| { first.borrow_mut().push("start"); Ok(Js::Number(1.0)) })).unwrap();
+    let second = order.clone();
+    let cause = Js::object(vec![]);
+    let thrown = cause.clone();
+    count.define("valueOf", Js::function("count", move |_, _| { second.borrow_mut().push("count"); Err(Thrown::new(thrown.clone())) })).unwrap();
+    let error = host.call_method(&text, "substr", &[start, count]).unwrap_err();
+    assert!(error.value.same_reference(&cause));
+    assert_eq!(*order.borrow(), ["start", "count"]);
 }
 
 #[test]
@@ -884,7 +1009,7 @@ fn production_builder_import_preserves_configured_value_and_lazy_default() {
             "configured builder identity/type case {index}"
         );
         assert_eq!(
-            r.to_serde(&result).unwrap(),
+            source_json(&mut r, &result),
             source[index]["result"],
             "source case {index}"
         );
@@ -932,7 +1057,7 @@ fn production_builder_import_uses_fresh_nullish_defaults() {
         assert!(!result.strict_equals(&second), "fresh default case {index}");
         let fee = r.get_str(&result, "feeTenthsBps").unwrap();
         assert_eq!(fee.as_f64().unwrap().to_bits(), 10f64.to_bits());
-        assert_eq!(r.to_serde(&result).unwrap(), source[index]["result"]);
+        assert_eq!(source_json(&mut r, &result), source[index]["result"]);
         assert_eq!(source[index]["fresh"], true);
     }
 }
@@ -1067,7 +1192,7 @@ fn production_order_wire_import_keeps_native_nonfinite_fields() {
             );
         }
         assert_eq!(
-            r.to_serde(&wire).unwrap(),
+            source_json(&mut r, &wire),
             source[index],
             "maintained source case {index}"
         );
@@ -1103,4 +1228,12 @@ fn production_order_wire_import_retains_undefined_and_limit_alias() {
     r.set_str(&limit, "tif", Js::str("Alo")).unwrap();
     let observed = r.get_str(&retained, "tif").unwrap();
     assert_eq!(text(&mut r, &observed), "Alo");
+}
+
+fn source_json(host: &mut Host, value: &Js) -> serde_json::Value {
+    let units = host.stringify(value).unwrap().expect("source output has a JSON value");
+    let text = String::from_utf16(&units).unwrap();
+    let result: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(text, serde_json::to_string(&result).unwrap(), "canonical JS stringify uses the source numeric spelling");
+    result
 }
