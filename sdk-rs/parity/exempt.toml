@@ -7548,3 +7548,11 @@ reason = "Shared ECMAScript coercion over the canonical retained data carrier fo
 [[exempt]]
 rs = "safe-cex-num/src/coercion.rs::js_retained_string"
 reason = "Shared ECMAScript coercion over the canonical retained data carrier for mapped model info consumers. Native source-derived contracts observe number bits and explicit UTF-8 boundary refusals; no separate TypeScript SDK declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/info_record.rs::STORE_RECORD"
+reason = "Native Serde record hint retains an own undefined zkLinkConfig update without admitting undefined on other Store fields. It is internal codec coordination, covered by actual Store replacement parity."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json/native.rs::Input::decode_native"
+reason = "Shared native Serde reader moved below Num so nested retained model variants and the production JS bridge use one decoder. The raw tree is canonical RetainedJsonInput; no JSON reconstruction or new TypeScript policy."

@@ -5,6 +5,7 @@ use ts_rs::TS;
 pub mod model_field;
 pub use model_field::ModelField;
 mod info_record;
+pub use info_record::STORE_RECORD;
 pub mod query_value;
 pub mod retained_json;
 pub mod telemetry;
@@ -3767,16 +3768,27 @@ mod strict_codecs {
         }
     }
 
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::CurrencyBalance", untagged)]
-    enum WireCurrencyBalance {
-        Declared(super::Balance),
-        AvailableLocked { available: f64, locked: f64 },
-    }
-
     impl<'de> serde::Deserialize<'de> for super::CurrencyBalance {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireCurrencyBalance::deserialize(crate::strict_decode::object(deserializer))
+            let input = crate::retained_json::RetainedJsonInput::deserialize(deserializer)?;
+            if !input.is_object() {
+                return Err(serde::de::Error::custom("CurrencyBalance must be an object"));
+            }
+            if let Ok(balance) = input.clone().decode_native::<super::Balance>(false) {
+                return Ok(Self::Declared(balance));
+            }
+            #[derive(serde::Deserialize)]
+            struct AvailableLocked {
+                available: f64,
+                locked: f64,
+            }
+            let value = input
+                .decode_native::<AvailableLocked>(false)
+                .map_err(serde::de::Error::custom)?;
+            Ok(Self::AvailableLocked {
+                available: value.available,
+                locked: value.locked,
+            })
         }
     }
 
@@ -7546,34 +7558,43 @@ impl serde::Serialize for Position {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
         let mut state = serializer.serialize_struct(crate::model_field::MODEL_RECORD, 17)?;
-        state.serialize_field("id", &self.id)?;
-        state.serialize_field("symbol", &self.symbol)?;
-        self.side.serialize_field(&mut state, "side")?;
-        state.serialize_field("entryPrice", &self.entry_price)?;
-        state.serialize_field("notional", &self.notional)?;
-        state.serialize_field("leverage", &self.leverage)?;
-        self.margin_type.serialize_field(&mut state, "marginType")?;
-        self.position_mode
-            .serialize_field(&mut state, "positionMode")?;
-        state.serialize_field("unrealizedPnl", &self.unrealized_pnl)?;
-        self.realized_pnl
-            .serialize_field(&mut state, "realizedPnl")?;
-        state.serialize_field("contracts", &self.contracts)?;
-        state.serialize_field("liquidationPrice", &self.liquidation_price)?;
-        self.margin_size.serialize_field(&mut state, "marginSize")?;
-        match &self.info {
-            ModelField::Absent => {}
-            ModelField::Undefined
-            | ModelField::Value(crate::retained_json::RetainedJsonInput::Undefined) => {
-                state.skip_field("info")?
-            }
-            ModelField::Value(value) => state.serialize_field("info", value)?,
-        }
-        self.extra.serialize_field(&mut state, "extra")?;
-        self.last_update.serialize_field(&mut state, "lastUpdate")?;
-        self.option.serialize_field(&mut state, "option")?;
+        serialize_position_fields(self, &mut state)?;
         state.end()
     }
+}
+fn serialize_position_fields<S: serde::ser::SerializeStruct>(
+    position: &Position,
+    state: &mut S,
+) -> Result<(), S::Error> {
+    state.serialize_field("id", &position.id)?;
+    state.serialize_field("symbol", &position.symbol)?;
+    position.side.serialize_field(state, "side")?;
+    state.serialize_field("entryPrice", &position.entry_price)?;
+    state.serialize_field("notional", &position.notional)?;
+    state.serialize_field("leverage", &position.leverage)?;
+    position.margin_type.serialize_field(state, "marginType")?;
+    position
+        .position_mode
+        .serialize_field(state, "positionMode")?;
+    state.serialize_field("unrealizedPnl", &position.unrealized_pnl)?;
+    position
+        .realized_pnl
+        .serialize_field(state, "realizedPnl")?;
+    state.serialize_field("contracts", &position.contracts)?;
+    state.serialize_field("liquidationPrice", &position.liquidation_price)?;
+    position.margin_size.serialize_field(state, "marginSize")?;
+    match &position.info {
+        ModelField::Absent => {}
+        ModelField::Undefined
+        | ModelField::Value(crate::retained_json::RetainedJsonInput::Undefined) => {
+            state.skip_field("info")?
+        }
+        ModelField::Value(value) => state.serialize_field("info", value)?,
+    }
+    position.extra.serialize_field(state, "extra")?;
+    position.last_update.serialize_field(state, "lastUpdate")?;
+    position.option.serialize_field(state, "option")?;
+    Ok(())
 }
 
 pub mod prepared_order;

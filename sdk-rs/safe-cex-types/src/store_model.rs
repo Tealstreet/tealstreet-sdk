@@ -30,100 +30,24 @@ pub enum SliceAction {
     Next,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DisplayedPosition {
     /// TS adds key via a local intersection cast on real positions and OMITS it
     /// on fake positions. This Option represents the observable heterogeneous array.
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
     pub key: Option<String>,
-    #[serde(flatten)]
     pub position: Position,
     pub account: String,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
     pub ticker: Option<Ticker>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
     pub market: Option<Market>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
     pub balance: Option<Balance>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "exchangeName")]
     pub exchange_name: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "oneMinUpnl")]
     pub one_min_upnl: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "fiveMinUpnl")]
     pub five_min_upnl: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "hasActiveChaser")]
     pub has_active_chaser: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "hasActiveTWAP")]
     pub has_active_twap: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "isFakePosition")]
     pub is_fake_position: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "chaserSize")]
     pub chaser_size: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "hasFullStop")]
     pub has_full_stop: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "crate::deserialize_present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[serde(rename = "hasFullTP")]
     pub has_full_tp: Option<bool>,
 }
 
@@ -621,6 +545,12 @@ mod strict_codecs {
             formatter.write_str("a displayed position map")
         }
 
+        fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+            self,
+            deserializer: D,
+        ) -> Result<Self::Value, D::Error> {
+            deserializer.deserialize_map(self)
+        }
         fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
             use serde::de::MapAccess;
             let mut fields = DisplayedPositionMap {
@@ -674,14 +604,16 @@ mod strict_codecs {
         fn deserialize<'de, D: serde::Deserializer<'de>>(
             deserializer: D,
         ) -> Result<Self, D::Error> {
-            deserializer.deserialize_map(DisplayedPositionVisitor)
+            deserializer.deserialize_newtype_struct(
+                crate::model_field::INFO_RECORD,
+                DisplayedPositionVisitor,
+            )
         }
     }
 
     impl<'de> serde::Deserialize<'de> for super::DisplayedPosition {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let wire =
-                WireDisplayedPosition::deserialize(crate::strict_decode::object(deserializer))?;
+            let wire = WireDisplayedPosition::deserialize(deserializer)?;
             Ok(Self {
                 key: wire.key,
                 position: wire.position,
