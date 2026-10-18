@@ -28,3 +28,33 @@ The explicit host ABI still supplies function-source text, infallible callbacks
 and warnings, and String-valued sleep/scheduling failures. These are visible
 native capabilities; arbitrary JS callback/property behavior is not claimed.
 The separate warning rendering row is outside this timing assignment.
+
+## Journal read ownership and settlement callback
+
+Assignment rows 1 (`buildFoldedPositionRecords`) and 14 (`BuildRecordsOptions`)
+from codex-l89ogr's zero-based handoff. The maintained TS function calls its first
+income/fills reader synchronously, awaits the response, then completes the fold
+independently of whether its caller observes the returned Promise. The original
+borrowed Rust async function compiled RED on immediate entry. Independently,
+polling it to a held read and dropping it compiled RED on the missing subsequent
+settlement callback. The direct owned runtime/callback cutover uses shared
+`eager::start_eager`; each child read keeps the source await fence even when ready.
+There is no provisional spawn or JSON result/error projection.
+
+Row 1 verdict: FIX for immediate entry and discarded-waiter continuation.
+`tests/journal.rs::journal_read_starts_at_call_and_finishes_after_waiter_drop`
+compares both first-read branches with `scripts/journal-oracle.cjs`, which executes
+the whole maintained TS function and its actual interval/fold dependencies.
+The preexisting 12 build scenarios compare call ordering, options, results and
+wrapped income failures. Arbitrary malformed income/Execution objects and the
+external JournalFolder installation remain separate unclosed input/composition
+scope; this scheduling repair does not authorize them.
+
+Row 14 verdict: ACCEPT for the claimed infallible-callback gap on current master:
+it was already repaired when Store lookup became fallible. The actual options
+callback returns Result, and `map_folded_interval` propagates it immediately.
+`journal_ready_reads_defer_fold_and_preserve_settlement_rejection` compares the
+maintained throwing callback and asserts exact name/message/original referent,
+one callback, no later record and the ready-read await fence. Ownership of the
+immutable account string is the accepted owned-snapshot boundary (decision 2),
+not a lost option or diagnostic. The cutover preserves all five options fields.

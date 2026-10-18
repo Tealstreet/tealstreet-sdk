@@ -77,14 +77,21 @@
     {
       "owner": "src/build_records.rs::build_folded_position_records",
       "boundaries": [
-        "async-function",
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await",
+        "async-block",
         "await",
         "await",
+        "await",
+        "async-block",
         "await"
       ],
-      "producer_sha256": "73057c9c8fdc54850175ecd744fa4c13f062811ca9f8375da67a276ba061be7d",
-      "classification": "no-owned-latch",
-      "reason": "Funding, symbols, intervals and counters are caller-local; dropping the caller drops the currently borrowed read future without a shared reservation. Reviewed Store cutover: settlement lookup is fallible and propagates the original Store failure; the existing fold continuation owns no additional latch or reservation."
+      "producer_sha256": "f1c1019e962e34a905c8381fdc327979c78786ecd8fe762f2178fb9dc2d288a8",
+      "classification": "delegated",
+      "reason": "The owned journal read/fold body is driven by the canonical eager Promise boundary. Returned futures are waiters only; child reads preserve source ready-result await fences. Native result/cause storage introduces no borrowed reservation. Real source/native immediate-entry, held-read/drop and ready-settlement rejection probes are in tests/journal.rs.",
+      "delegate": "eager::start_eager / canonical Promise Jobs driver"
     },
     {
       "owner": "src/capabilities.rs::CapabilityBinding < A , R >::call",

@@ -1,0 +1,27 @@
+{
+  "assignment": "codex-l89ogr Exchange handoff; zero-based original rows",
+  "rows": [
+    {
+      "row": 1,
+      "ts": "buildFoldedPositionRecords",
+      "verdict": "FIX",
+      "scope": "Immediate first read and continuation after returned waiter is dropped",
+      "reason": "The original borrowed async body deferred the first income/fills call and lost post-read folding on waiter drop. Owned callbacks and runtime use canonical eager::start_eager, preserving the source ready-result await fences and native result/error values.",
+      "production_binding": "src/build_records.rs::build_folded_position_records",
+      "probe": "tests/journal.rs::journal_read_starts_at_call_and_finishes_after_waiter_drop",
+      "source": "scripts/journal-oracle.cjs::buildTimingCases",
+      "controls": "Original production body compiled RED separately on immediate-entry and held-read/drop assertions; exact fixed body GREEN",
+      "remaining_scope": "Arbitrary malformed income/Execution outputs and external JournalFolder installation are not closed by this scheduling batch"
+    },
+    {
+      "row": 14,
+      "ts": "BuildRecordsOptions",
+      "verdict": "ACCEPT",
+      "reason": "The claimed infallible callback is stale: current production already returns Result and propagates the original settlement rejection. Native callback composition preserves name/message/referent and stops the fold; owned immutable account text follows decision 2 and every options field remains represented.",
+      "production_binding": "src/build_records.rs::BuildRecordsOptions and fold_position_adapter::map_folded_interval",
+      "probe": "tests/journal.rs::journal_ready_reads_defer_fold_and_preserve_settlement_rejection",
+      "source": "scripts/journal-oracle.cjs::buildTimingCases",
+      "evidence": "Full maintained TS throws the supplied SettlementDenied object after exactly one BTC settlement lookup; native preserves that referent, exact metadata, callback count and ready-read await fence"
+    }
+  ]
+}
