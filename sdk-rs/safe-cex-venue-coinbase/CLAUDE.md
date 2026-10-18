@@ -334,3 +334,15 @@ it observes callback/frame/book roots, live iteration, errors and numeric bits.
 price projection independently, requires named compiled failures, restores exact
 source bytes and reruns the corresponding witness. This is a finite capability
 census, not full transport or all-callback coverage.
+
+Eight configuration/signing aliases have specific non-decoder role records.
+The finite `config-alias-contracts.mjs` probe authenticates exact current compiler
+identities and refuses a new Deserialize capability. `config_alias_native` uses
+constructed classes and actual request/private-option/account/candle/event
+adapters, inspects shared native input roots and presence flags, imports the
+maintained RFC signing key through CryptoHost, checks cache identity and verifies
+actual websocket tokens with the Node/WebCrypto oracle. Amendment-root fields
+are observed directly; full amendment and remote-signer flows are not claimed.
+`config-alias-controls.py` independently changes actual key-cache identity policy
+and event-array projection, requires named compiled failures, restores exact
+source bytes and reruns the same witnesses.

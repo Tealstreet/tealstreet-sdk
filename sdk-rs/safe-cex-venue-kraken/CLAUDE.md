@@ -466,3 +466,12 @@ terminal rendering belongs to the host. The actual constructed-Scope witnesses
 live in `tests/support/accepted_diagnostic_receivers.rs`; their two original-body
 regression controls are in `scripts/diagnostic-receiver-controls.py`. Refresh
 reviewed impl/file pins whenever those enclosing bodies change.
+
+### Trading error receiver members
+
+`TRADING_ERROR_RECEIVER_REVIEW.md` covers the three concrete ErrorHost methods.
+Resolve the native case member once and invoke it with its original receiver;
+do not restore the String-only guard or stringify the returned cell. The native
+constructed-Scope witnesses and compiled controls are named
+`accepted_trading_error_receivers` and `trading-error-receiver-controls.py`.
+`trading-error-receiver-source.cjs` executes the live TypeScript callers directly.

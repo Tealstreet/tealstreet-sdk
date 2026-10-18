@@ -1,4 +1,8 @@
 //! Production BybitExchange: the typed core assembled with its receiver, behind `Exchange`.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "receiver_tests.rs"]
+mod receiver_tests;
+
 use super::{
     globals,
     promise::await_js,
