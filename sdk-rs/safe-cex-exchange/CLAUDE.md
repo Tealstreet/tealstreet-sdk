@@ -1822,3 +1822,8 @@ thrown values. Native builtin adapters keep their existing separate surfaces.
 `js_builtins_native` compares eight actual NativeRuntime operator hook cases with
 Node; the unchanged Dayjs, Breakout, Kraken candle and Paradex ticker consumers
 cover malformed objects reaching their source Date/arithmetic branches.
+
+Native exception reporting retains its context through the reporter capability,
+then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
+Serialization errors stay visible; `native_console_default` checks both paths
+against Node and verifies that reporting leaves the retained input unchanged.
