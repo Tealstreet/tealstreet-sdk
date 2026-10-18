@@ -120,8 +120,16 @@ fn captured_balance_is_lazy_retains_generation_and_does_not_retain_store_owner()
     let owner = Rc::downgrade(&native);
     let balance = facade.get("balance").unwrap();
     let handle = native.balance_handle().unwrap();
+    let cloned_handle = handle.clone();
     let native_handle = handle.native_value().downcast::<Js>().unwrap();
     assert!(native_handle.same_reference(&balance));
+    assert!(
+        cloned_handle
+            .native_value()
+            .downcast::<Js>()
+            .unwrap()
+            .same_reference(&balance)
+    );
     balance.set("total", Js::Number(-0.0)).unwrap();
     assert_eq!(handle.read().unwrap().total.to_bits(), (-0.0_f64).to_bits());
     facade
@@ -166,7 +174,17 @@ fn captured_balance_is_lazy_retains_generation_and_does_not_retain_store_owner()
     assert!(owner.upgrade().is_none());
     assert_eq!(new_handle.read().unwrap().total, 3.0);
     for expected_calls in 1..=2 {
-        let error = handle.read().unwrap_err();
+        let error = if expected_calls == 1 {
+            handle.read()
+        } else {
+            cloned_handle.read()
+        }
+        .unwrap_err();
+        let copy = error.clone();
+        assert_eq!(copy.phase(), error.phase());
+        assert!(Rc::ptr_eq(copy.native_cause(), error.native_cause()));
+        drop(error);
+        let error = copy;
         assert_eq!(error.phase(), StoreReadPhase::Projection);
         assert!(
             error
