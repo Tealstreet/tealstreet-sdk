@@ -630,8 +630,10 @@ impl TickerBatchHost<u64> for BatchHost {
     fn is_connected(&self) -> bool {
         self.connected.get()
     }
-    fn markets(&self) -> Rc<AddedMarkets> {
-        self.markets.clone()
+    fn markets(
+        &self,
+    ) -> Result<Rc<RefCell<Vec<Rc<RefCell<safe_cex_types::Market>>>>>, ExchangeError> {
+        Ok(self.markets.clone())
     }
     fn clear(&self, timer: &u64) -> Result<(), ExchangeError> {
         self.events.borrow_mut().push(json!(["clear", timer]));

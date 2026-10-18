@@ -81,21 +81,24 @@ impl<H: ChaserHost> ChaserEngine<H> {
             safe_cex_exchange::js_runtime::value::Js::str(message),
         )
     }
-    fn cancel_input(instance: &ChaserOrderInstance, id: &str) -> ChaserCancel {
+    fn cancel_input(
+        instance: &ChaserOrderInstance,
+        id: &str,
+    ) -> Result<ChaserCancel, ExchangeError> {
         let order = instance
             .exchange
             .base()
             .store
-            .orders()
+            .orders()?
             .iter()
             .find(|o| o.id == id)
             .cloned();
-        order
+        Ok(order
             .map(|o| ChaserCancel::Full(Box::new(o)))
             .unwrap_or_else(|| ChaserCancel::ById {
                 id: id.into(),
                 symbol: instance.options().borrow().symbol.clone(),
-            })
+            }))
     }
     // ts: cleanupInstance. Execute all pre-await work at construction time.
     pub fn cleanup_instance(
@@ -113,26 +116,33 @@ impl<H: ChaserHost> ChaserEngine<H> {
         if !ids.is_empty() {
             instance.set_current_order_ids(vec![]);
         }
-        let first = ids.first().map(|id| {
-            self.host.construct_cancel(
-                instance.exchange.clone(),
-                vec![Self::cancel_input(&instance, id)],
-            )
-        });
-        let immediate = if ids.is_empty() && owns {
+        let first = ids
+            .first()
+            .map(|id| {
+                Self::cancel_input(&instance, id).map(|input| {
+                    self.host
+                        .construct_cancel(instance.exchange.clone(), vec![input])
+                })
+            })
+            .transpose();
+        // Source cleanupInstance catches a failure evaluating its cancel-loop
+        // input, then still emits completion (ChaserOrderManager.ts:884-903).
+        let immediate = if !matches!(&first, Ok(Some(_))) && owns {
             Some(self.emit_complete(instance.clone()))
         } else {
             None
         };
         let engine = self.clone();
         Box::pin(async move {
-            if let Some(first) = first {
+            if let Ok(Some(first)) = first {
                 let _ = first.await;
                 for id in ids.iter().skip(1) {
-                    let cancel = engine.host.construct_cancel(
-                        instance.exchange.clone(),
-                        vec![Self::cancel_input(&instance, id)],
-                    );
+                    let Ok(input) = Self::cancel_input(&instance, id) else {
+                        break;
+                    };
+                    let cancel = engine
+                        .host
+                        .construct_cancel(instance.exchange.clone(), vec![input]);
                     let _ = cancel.await;
                 }
                 if owns {
@@ -156,18 +166,24 @@ impl<H: ChaserHost> ChaserEngine<H> {
             .iter()
             .cloned()
             .collect();
-        for id in &ids {
-            let order = instance
-                .exchange
-                .base()
-                .store
-                .orders()
-                .iter()
-                .find(|o| &o.id == id)
-                .cloned();
-            if let Some(order) = order {
-                instance.set_filled_amount(&order.id, placement_filled(&order));
+        let cached: Result<(), ExchangeError> = (|| {
+            for id in &ids {
+                let order = instance
+                    .exchange
+                    .base()
+                    .store
+                    .orders()?
+                    .iter()
+                    .find(|o| &o.id == id)
+                    .cloned();
+                if let Some(order) = order {
+                    instance.set_filled_amount(&order.id, placement_filled(&order));
+                }
             }
+            Ok(())
+        })();
+        if let Err(error) = cached {
+            return Box::pin(async move { Err(error) });
         }
         let method = self.host.fill_lookup(instance.exchange.clone());
         let eligible = instance
@@ -224,7 +240,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
         } else {
             safe_cex_num::math_max(
                 instance.filled_size(),
-                chaser_manager::bybit_demo_position_fill(&instance),
+                chaser_manager::bybit_demo_position_fill(&instance)?,
             )
         };
         let event = ChaserCompleteEvent {
@@ -411,7 +427,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
                 close: None,
                 implied_volatility: None,
             };
-            let id = instance.exchange.base().mint_client_order_id(&order);
+            let id = instance.exchange.base().mint_client_order_id(&order)?;
             if id.as_ref().is_some_and(|id| !id.is_empty()) {
                 order.client_order_id = id.clone();
             }
@@ -811,7 +827,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                     .exchange
                     .base()
                     .store
-                    .positions()
+                    .positions()?
                     .iter()
                     .any(|p| p.symbol == options.symbol && p.side == closing && p.notional != 0.);
                 if !exists {
@@ -910,7 +926,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
             Ok(())
         })
     }
-    fn current(&self) -> Vec<Order> {
+    fn current(&self) -> Result<Vec<Order>, ExchangeError> {
         chaser_manager::get_current_orders(&self.instance)
     }
     fn filter(&self, orders: Vec<Order>) -> Vec<Order> {
@@ -928,11 +944,9 @@ impl<H: ChaserHost> ChaserMonitor<H> {
             let options = options.borrow().clone();
             if let Some(terminate) = options.terminate {
                 let store = &self.instance.exchange.base().store;
-                let ticker = store
-                    .tickers_by_symbol()
-                    .get(&options.symbol)
-                    .cloned()
-                    .or_else(|| {
+                let mut ticker = store.tickers_by_symbol()?.get(&options.symbol).cloned();
+                if ticker.is_none() {
+                    ticker = {
                         if matches!(
                             safe_cex_num::js_table_lookup::<&str, ()>(&[], &options.symbol),
                             safe_cex_num::TableHit::Inherited(_)
@@ -940,12 +954,13 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                             None
                         } else {
                             store
-                                .tickers()
+                                .tickers()?
                                 .iter()
                                 .find(|t| t.symbol == options.symbol)
                                 .cloned()
                         }
-                    });
+                    };
+                }
                 if let Some(price) = ticker.map(|t| t.last).filter(|p| *p != 0. && !p.is_nan()) {
                     if self.instance.should_terminate(price) {
                         let kind = match terminate.kind {
@@ -968,7 +983,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                     }
                 }
             }
-            if chaser_manager::has_reached_target_position(&self.instance) {
+            if chaser_manager::has_reached_target_position(&self.instance)? {
                 chaser_manager::log(
                     "target position reached - marking ourselves completed",
                     &self.instance,
@@ -1003,7 +1018,10 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                 if monitor.cleaned.get() || monitor.instance.is_stopped() {
                     return;
                 }
-                let f = monitor.run_price_check(monitor.current(), false);
+                let f = match monitor.current() {
+                    Ok(orders) => monitor.run_price_check(orders, false),
+                    Err(error) => Box::pin(async move { Err(error) }),
+                };
                 monitor.spawn_caught(f, "queued order update");
             }),
             50.,
@@ -1045,7 +1063,10 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                         Box::pin(async move { prefix })
                     }
                 } else {
-                    monitor.run_price_check(monitor.current(), false)
+                    match monitor.current() {
+                        Ok(orders) => monitor.run_price_check(orders, false),
+                        Err(error) => Box::pin(async move { Err(error) }),
+                    }
                 };
                 monitor.spawn_caught(f, "queued price update");
             }),

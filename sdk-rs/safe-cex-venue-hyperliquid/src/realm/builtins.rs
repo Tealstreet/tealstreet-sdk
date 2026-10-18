@@ -195,7 +195,7 @@ fn install_object(realm: &mut Realm) {
     let p = realm.intrinsics().object_proto.clone();
     def(realm, &p, "hasOwnProperty", 1, |r, this, args| {
         let key = r.to_property_key(&arg(args, 0))?;
-        Ok(Value::Bool(r.has_own(this, &key)))
+        Ok(Value::Bool(r.has_own(this, &key)?))
     });
     def(realm, &p, "toString", 0, |r, this, _| {
         Ok(Value::str(match this {
@@ -227,7 +227,7 @@ fn install_object(realm: &mut Realm) {
             return Err(r.type_error("Cannot convert undefined or null to object"));
         }
         let keys = r
-            .own_keys(&v, true)
+            .own_keys(&v, true)?
             .into_iter()
             .map(|k| k.to_value())
             .collect();
@@ -310,7 +310,7 @@ fn install_object(realm: &mut Realm) {
     });
     def(realm, &o, "hasOwn", 2, |r, _, args| {
         let key = r.to_property_key(&arg(args, 1))?;
-        Ok(Value::Bool(r.has_own(&arg(args, 0), &key)))
+        Ok(Value::Bool(r.has_own(&arg(args, 0), &key)?))
     });
     realm.set_global("Object", object);
 }

@@ -145,7 +145,7 @@ fn update_body(rt: &Rt, opts: Js, primary: bool) -> Result<Js, Thrown> {
             let mark = venue(&rt)?
                 .base
                 .store
-                .tickers()
+                .tickers()?
                 .iter()
                 .find(|t| t.symbol == symbol)
                 .map(|t| t.mark);
@@ -193,7 +193,7 @@ fn update_body(rt: &Rt, opts: Js, primary: bool) -> Result<Js, Thrown> {
             let parent = venue(&rt)?
                 .base
                 .store
-                .orders()
+                .orders()?
                 .iter()
                 .find(|o| o.id == parent_id)
                 .map(|o| o.id.clone());

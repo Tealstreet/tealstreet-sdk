@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/store/store.base.ts"
-rust_files = [ "safe-cex-store/src/model_patch.rs", "safe-cex-store/src/store.rs" ]
+rust_files = [ "safe-cex-store/src/model_patch.rs", "safe-cex-store/src/store.rs", "safe-cex-exchange/src/js_runtime/native_store/mod.rs", "safe-cex-exchange/src/js_runtime/native_store/graph.rs" ]
 
 [[symbol]]
 ts = "PACKED_TICKER_FIELDS"
@@ -14,622 +14,622 @@ note = "Typed store model; borrowed dictionary views retain insertion order. Map
 ts = "defaultStore"
 kind = "const"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DEFAULT_STORE"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::initial_state", "safe-cex-store/src/store.rs::DEFAULT_STORE" ]
 status = "ported"
-note = "Rename: `defaultStore` -> `DEFAULT_STORE`; complete default snapshot. Mapped `safe-cex-store/src/store.rs::DEFAULT_STORE`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::initial_state`. Mapped `safe-cex-store/src/store.rs::DEFAULT_STORE`."
 
 [[symbol]]
 ts = "DefaultStore"
 kind = "class"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::new", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::facade", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::state", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::find_row", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::market_for_id", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::facade" ]
 status = "ported"
-note = "Complete collection and transport state; DefaultStore implements the shared Store contract directly; its private StoreState owns collection algorithms. Owned callback snapshots and retained dictionary copies are Rust representation adaptations."
+note = "The canonical graph supplies the source operation; native captures keep the original referent and typed reads project only when reached. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::new`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::facade`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::state`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::find_row`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::market_for_id`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::facade`."
 
 [[symbol]]
 ts = "DefaultStore.constructor"
 kind = "constructor"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::new"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::new", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::facade" ]
 status = "ported"
-note = "Complete default state and all collection indexes."
+note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::new`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::facade`."
 
 [[symbol]]
 ts = "DefaultStore#buildIdIndexMap"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::build_id_index_map"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_index"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::build_id_index_map`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::build_id_index_map`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_index`."
 
 [[symbol]]
 ts = "DefaultStore#buildIdLookup"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::build_id_lookup"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::build_id_lookup`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::build_id_lookup`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup`."
 
 [[symbol]]
 ts = "DefaultStore#findIndexById"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::find_index_by_id"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::find"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::find_index_by_id`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::find_index_by_id`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::find`."
 
 [[symbol]]
 ts = "DefaultStore.serialize"
 kind = "method"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::serialize"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::serialize", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::serialize" ]
 status = "ported"
-note = "ts-bug: preserves source omission of userData and zkLinkConfig from the warm-boot snapshot."
+note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::serialize`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::serialize`."
 
 [[symbol]]
 ts = "DefaultStore.get messageHandlerStats"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::message_handler_stats"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::message_handler_stats"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::message_handler_stats`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::message_handler_stats`."
 
 [[symbol]]
 ts = "DefaultStore.get latency"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::latency"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::latency"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::latency`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::latency`."
 
 [[symbol]]
 ts = "DefaultStore.get balance"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::balance"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance_handle", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::balance_reference" ]
 status = "ported"
-note = "Borrowed view of the current retained balance allocation. DefaultStore keeps the same allocation on unrelated writes and replaces it on balance updates/reset, synchronizing the owned notification/snapshot projection. The Store contract also exposes guard-free retention. Witness: safe-cex-venue-bitrue/tests/balance_retention.rs asserts native pointer identity, ticker mutation, balance replacement and reset while old results remain alive."
+note = "The canonical graph supplies the source operation; native captures keep the original referent and typed reads project only when reached. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::balance_handle`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::balance_reference`."
 
 [[symbol]]
 ts = "DefaultStore.get markets"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::markets"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::markets"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::markets`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::markets`."
 
 [[symbol]]
 ts = "DefaultStore.get tickers"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::tickers"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::tickers`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers`."
 
 [[symbol]]
 ts = "DefaultStore.get orders"
 kind = "accessor"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::orders"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::orders"
 status = "ported"
-note = ""
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::orders`."
 
 [[symbol]]
 ts = "DefaultStore.get ordersRisk"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::orders_risk"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::orders_risk"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::orders_risk`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::orders_risk`."
 
 [[symbol]]
 ts = "DefaultStore.get positions"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::positions"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::positions"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::positions`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::positions`."
 
 [[symbol]]
 ts = "DefaultStore.get displayedPositions"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::displayed_positions"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::displayed_positions"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::displayed_positions`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::displayed_positions`."
 
 [[symbol]]
 ts = "DefaultStore.get displayedMargin"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::displayed_margin"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::displayed_margin"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::displayed_margin`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::displayed_margin`."
 
 [[symbol]]
 ts = "DefaultStore.get activeChasers"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::active_chasers"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::active_chasers"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::active_chasers`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::active_chasers`."
 
 [[symbol]]
 ts = "DefaultStore.get activeTWAPs"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::active_twaps"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::active_twaps"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::active_twaps`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::active_twaps`."
 
 [[symbol]]
 ts = "DefaultStore.get loaded"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::loaded"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::loaded"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::loaded`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::loaded`."
 
 [[symbol]]
 ts = "DefaultStore.get updateIds"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_ids"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_ids"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::update_ids`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_ids`."
 
 [[symbol]]
 ts = "DefaultStore.get options"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::options"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::options"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::options`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::options`."
 
 [[symbol]]
 ts = "DefaultStore.get tickersById"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::tickers_by_id"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers_by_id"
 status = "divergent"
-note = "CHOSEN: retain the borrowed typed IndexMap getter ABI for existing typed indexing consumers rather than replace their public view with a dynamic object. Native eleven-case direct Store floor through10 noncanonical-index asserts the own __proto__ entry; actual source Object.hasOwn excludes that key because assignment installs a prototype instead. The separate update_ticker operation now observes the retained prototype row and preserves known-field primitive TypeErrors. This is an explicit getter-shape price, not universal dictionary parity. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers_by_id`."
 
 [[symbol]]
 ts = "DefaultStore.get marketsById"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::markets_by_id"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::markets_by_id"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::markets_by_id`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::markets_by_id`."
 
 [[symbol]]
 ts = "DefaultStore.get tickersBySymbol"
 kind = "accessor"
 layer = "adapted"
-rs = [ "safe-cex-store/src/store.rs::DefaultStore::tickers_by_symbol", "safe-cex-store/src/store.rs::DefaultStore::lookup_ticker_by_symbol" ]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers_by_symbol", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::native_value" ]
 status = "divergent"
-note = "CHOSEN: retain the borrowed typed IndexMap getter ABI for existing typed indexing consumers; replacing that public view with a dynamic object would change those consumers. Source property semantics are exposed separately by lookup_ticker_by_symbol, with retained prototype ticker and current field reads. Direct native/source witness after symbol __proto__ seed: Rust borrowed view has an own __proto__ key, source Object.hasOwn/Object.keys exclude it and source dictionary.symbol returns the prototype ticker string. This price is explicit; no universal claim that typed indexing or all Store consumers now follow replaced chains. Canonical references: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename target: `safe-cex-store/src/store.rs::DefaultStore::lookup_ticker_by_symbol`."
+note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::tickers_by_symbol`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::get`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::native_value`."
 
 [[symbol]]
 ts = "DefaultStore.get marketsBySymbol"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::markets_by_symbol"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::markets_by_symbol"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::markets_by_symbol`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::markets_by_symbol`."
 
 [[symbol]]
 ts = "DefaultStore.getMarketsVersion"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::get_markets_version"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::get_markets_version`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke`."
 
 [[symbol]]
 ts = "DefaultStore.getTickersVersion"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::get_tickers_version"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::get_tickers_version`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::invoke`."
 
 [[symbol]]
 ts = "DefaultStore.static packTickerDeltas"
 kind = "method"
 layer = "adapted"
-rs = [ "safe-cex-store/src/store.rs::DefaultStore::pack_ticker_deltas", "safe-cex-store/src/store.rs::PackedTickerDeltas" ]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::pack_ticker_deltas", "safe-cex-store/src/store.rs::PackedTickerDeltas", "safe-cex-store/src/store.rs::pack_ticker_deltas" ]
 status = "ported"
-note = "Split: associated packer and typed one-field packed-result wrapper preserve the source return shape. Mapped `safe-cex-store/src/store.rs::DefaultStore::pack_ticker_deltas`, `safe-cex-store/src/store.rs::PackedTickerDeltas`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::pack_ticker_deltas`. Mapped `safe-cex-store/src/store.rs::PackedTickerDeltas`. Mapped `safe-cex-store/src/store.rs::pack_ticker_deltas`."
 
 [[symbol]]
 ts = "DefaultStore.consumeTickerDeltas"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::consume_ticker_deltas"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::consume_ticker_deltas"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::consume_ticker_deltas`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::consume_ticker_deltas`."
 
 [[symbol]]
 ts = "DefaultStore#stripTickerInfo"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::strip_ticker_info"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::strip_info"
 status = "ported"
-note = "ts-bug: strips venue info from store tickers. Mapped `safe-cex-store/src/store.rs::StoreState::strip_ticker_info`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::strip_ticker_info`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::strip_info`."
 
 [[symbol]]
 ts = "DefaultStore#stripTickerInfoFromChanges"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::strip_ticker_info_from_changes"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::strip_info"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::strip_ticker_info_from_changes`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::strip_ticker_info`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::strip_info`."
 
 [[symbol]]
 ts = "DefaultStore#patchObjectInPlace"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::patch_object_in_place"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::patch"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::patch_object_in_place`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::patch_object_in_place`; DefaultStore owns this state internally. Omitted option terms now retain the existing Market.option during the same native merge; source worker-refresh evidence is in sdk-rs/parity/OPTION_FIELDS_AUDIT.md."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::patch`."
 
 [[symbol]]
 ts = "DefaultStore#patchTickerInPlace"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::patch_ticker_in_place"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_ticker"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::patch_ticker_in_place`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::patch_ticker_in_place`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_ticker`."
 
 [[symbol]]
 ts = "DefaultStore#patchWorkerTickersInPlace"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::patch_worker_tickers_in_place"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::worker_patch"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::patch_worker_tickers_in_place`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::patch_worker_tickers_in_place`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::worker_patch`."
 
 [[symbol]]
 ts = "DefaultStore#patchWorkerMarketsInPlace"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::patch_worker_markets_in_place"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::worker_patch"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::patch_worker_markets_in_place`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::patch_worker_markets_in_place`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::worker_patch`."
 
 [[symbol]]
 ts = "DefaultStore.get zkLinkConfig"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::zk_link_config"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::zk_link_config"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::zk_link_config`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::zk_link_config`."
 
 [[symbol]]
 ts = "DefaultStore.get starkConfig"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::stark_config"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::stark_config"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::stark_config`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::stark_config`."
 
 [[symbol]]
 ts = "DefaultStore.get userData"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::user_data"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::user_data"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::user_data`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::user_data`."
 
 [[symbol]]
 ts = "DefaultStore.get fetchedLeverage"
 kind = "accessor"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::fetched_leverage"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::fetched_leverage"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::fetched_leverage`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::fetched_leverage`."
 
 [[symbol]]
 ts = "DefaultStore.get socketHealth"
 kind = "accessor"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::socket_health"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::socket_health"
 status = "ported"
-note = ""
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::socket_health`."
 
 [[symbol]]
 ts = "DefaultStore.updateSocketHealth"
 kind = "method"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_socket_health"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_socket_health"
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_socket_health`."
 
 [[symbol]]
 ts = "DefaultStore.get requestStats"
 kind = "accessor"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::request_stats"
+rs = "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::request_stats"
 status = "ported"
-note = ""
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::request_stats`."
 
 [[symbol]]
 ts = "DefaultStore.recordRequestOutcome"
 kind = "method"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::record_request_outcome"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::record_request_outcome", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::record_request_outcome" ]
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::record_request_outcome`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::record_request_outcome`."
 
 [[symbol]]
 ts = "DefaultStore.auditPositions"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::audit_positions"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::audit_positions", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::audit_positions" ]
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::audit_positions`."
+note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::audit_positions`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::audit_positions`."
 
 [[symbol]]
 ts = "DefaultStore#isRememberedTerminal"
 kind = "method"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::StoreState::is_remembered_terminal"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::remembered"
 status = "ported"
-note = " Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::is_remembered_terminal`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::remembered`."
 
 [[symbol]]
 ts = "DefaultStore#keepTerminalOrdersClosed"
 kind = "method"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::StoreState::keep_terminal_orders_closed"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::keep_terminal"
 status = "ported"
-note = " Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::keep_terminal_orders_closed`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::keep_terminal`."
 
 [[symbol]]
 ts = "DefaultStore.markOrdersTerminal"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::mark_orders_terminal"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::mark_terminal"
 status = "ported"
-note = "Valid TS narrowed Closed/Canceled inputs preserved; Rust Result rejects other existing OrderStatus variants rather than inventing a terminal enum."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::mark_terminal`."
 
 [[symbol]]
 ts = "DefaultStore.update"
 kind = "field-fn"
 layer = "mirror"
-rs = [ "safe-cex-store/src/store.rs::DefaultStore::update", "safe-cex-store/src/store.rs::DefaultStore::update_full" ]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_full", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_native", "safe-cex-exchange/src/js_runtime/native_store/mod.rs::update_balance_and_loaded" ]
 status = "ported"
-note = "Split: legacy `safe-cex-store/src/store.rs::DefaultStore::update` and full `safe-cex-store/src/store.rs::DefaultStore::update_full` entry points share permanent state; rename full update to `safe-cex-store/src/store.rs::DefaultStore::update_full`."
+note = "The canonical graph supplies the source operation; native captures keep the original referent and typed reads project only when reached. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_full`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::update_native`. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::update_balance_and_loaded`."
 
 [[symbol]]
 ts = "DefaultStore.reset"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::reset"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::reset"
 status = "ported"
-note = "Resets complete state, versions, indexes and terminal memory; retains subscriptions."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::reset`."
 
 [[symbol]]
 ts = "DefaultStore.subscribe"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::subscribe"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::subscribe", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::subscribe_typed" ]
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::subscribe`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::subscribe_typed`."
 
 [[symbol]]
 ts = "DefaultStore.removeOrders"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::remove_orders"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::remove_many"
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::remove_many`."
 
 [[symbol]]
 ts = "DefaultStore.removeOrder"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::remove_order"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::remove_one"
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::remove_one`."
 
 [[symbol]]
 ts = "DefaultStore.updateOrdersStatus"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_orders_status"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_statuses"
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_statuses`."
 
 [[symbol]]
 ts = "DefaultStore.updateOrderStatus"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_order_status"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_statuses"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::update_order_status`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_statuses`."
 
 [[symbol]]
 ts = "DefaultStore.updateOrder"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_order"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one"
 status = "divergent"
-note = "CHOSEN: safe-cex-store/src/store.rs::DefaultStore::update_order; The partial-update choice and its local reason are declared once at sdk-rs/parity/MANIFEST-SPEC.md#store-typed-patch-choice; ownership cites sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Admitted literal info objects now remain objects through direct patching; patch_info tests the public operation paths. Numeric ingress references sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one`."
 
 [[symbol]]
 ts = "DefaultStore.addOrder"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::add_order"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one"
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one`."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdateOrder"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-store/src/store.rs::DefaultStore::add_or_update_order", "safe-cex-store/src/store.rs::merge_order" ]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many" ]
 status = "ported"
-note = "Adapted split helper safe-cex-store/src/store.rs::merge_order applies the shared typed property overlay. ModelField overlay preserves absent properties and overwrites own undefined across all 15 Order fields. The production facade order_model_merge target compares 270 actual-source cases and checks native nonfinite/signed-zero bits before serialization."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many`."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdateOrders"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-store/src/store.rs::DefaultStore::add_or_update_orders", "safe-cex-store/src/store.rs::merge_order" ]
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many"
 status = "divergent"
-note = "Adapted split helper safe-cex-store/src/store.rs::merge_order applies the shared typed property overlay. CHOSEN ts-bug: deliberately preserve source duplicate-ID lookup asymmetry, not normalize it: indexed lookup chooses LAST existing duplicate only when incoming surviving orders > 1 AND existing stored orders > 1; otherwise linear lookup chooses FIRST. A uniform lookup could remove the defect but would change which order is updated. bucket_witnesses executes the actual DefaultStore for all four threshold combinations and asserts native prices. ModelField overlay preserves absent properties and overwrites own undefined; order_model_merge compares both upsert methods against 270 actual-source cases across all 15 carried fields."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many`."
 
 [[symbol]]
 ts = "DefaultStore.updatePosition"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_position"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one"
 status = "divergent"
-note = "CHOSEN: safe-cex-store/src/store.rs::DefaultStore::update_position; The partial-update choice and its local reason are declared once at sdk-rs/parity/MANIFEST-SPEC.md#store-typed-patch-choice; ownership cites sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Admitted literal info objects now remain objects through direct patching; patch_info tests the public operation paths. Numeric ingress references sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one`."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdatePosition"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::add_or_update_position"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::add_or_update_position`. Omitted Position.option retains the prior metadata; a present empty option object still replaces it. Source mutation evidence: sdk-rs/parity/OPTION_FIELDS_AUDIT.md."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::add_one`."
 
 [[symbol]]
 ts = "DefaultStore.updatePositions"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_positions"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_positions"
 status = "divergent"
-note = "CHOSEN: safe-cex-store/src/store.rs::DefaultStore::update_positions; The partial-update choice and its local reason are declared once at sdk-rs/parity/MANIFEST-SPEC.md#store-typed-patch-choice; ownership cites sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Admitted literal info objects now remain objects through direct patching; patch_info tests the public operation paths. Numeric ingress references sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_positions`."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdatePositions"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::add_or_update_positions"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::add_or_update_positions`. Omitted Position.option retains the prior metadata through the shared merge, including native Greek number bits. Source mutation evidence: sdk-rs/parity/OPTION_FIELDS_AUDIT.md."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many`."
 
 [[symbol]]
 ts = "DefaultStore.createEmptyPositionFrom"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::create_empty_position_from"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::create_empty_position_from", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::empty_position" ]
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::create_empty_position_from`."
+note = "The single canonical Graph supplies the source operation; native adapters preserve its referents and typed reads project only at explicit boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::create_empty_position_from`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::empty_position`."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdatePositionsFull"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::add_or_update_positions_full"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::add_or_update_positions_full`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many`."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdateOrdersFull"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::add_or_update_orders_full"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many"
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many`."
 
 [[symbol]]
 ts = "DefaultStore.setOrdersForSymbol"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::DefaultStore::set_orders_for_symbol"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::set_orders_for_symbol"
 status = "ported"
-note = ""
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::set_orders_for_symbol`."
 
 [[symbol]]
 ts = "DefaultStore.updateTicker"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_ticker"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_ticker"
 status = "divergent"
-note = "CHOSEN: safe-cex-store/src/store.rs::DefaultStore::update_ticker; The partial-update choice and its local reason are declared once at sdk-rs/parity/MANIFEST-SPEC.md#store-typed-patch-choice; ownership cites sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Both runtimes strip ticker info on this public path; this row receives rationale only, not an info-object repair claim. The distinct primitive ID-dictionary defect measured at 6efabdbf928acfa9e4ed98291ca4381a9fd8497f (source0, compiled native diagnostic101) is repaired: eleven direct native cases through10 noncanonical-index assert public TypeError kind, exact failed field/message, unchanged decoded ticker bits and both subscriber counts before source projection. Empty/info-only patches, own-key shadowing, current prototype reads and reset are covered; the old ignored failing diagnostic is removed. Unknown patch properties, including the inherited __proto__ setter on primitive receivers and arbitrary property-descriptor/proxy effects, are outside this known-field floor and remain an explicitly priced limitation of the typed patch policy. Truthy info-object proposals are not valid stored-input witnesses: real Store.update strips them before the handler."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_ticker`."
 
 [[symbol]]
 ts = "DefaultStore.applyTickerDeltas"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::apply_ticker_deltas"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::apply_ticker_deltas", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::apply_deltas" ]
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::apply_ticker_deltas`."
+note = "The canonical graph supplies the source operation; native captures keep the original referent and typed reads project only when reached. Mapped `safe-cex-exchange/src/js_runtime/native_store/mod.rs::DefaultStore::apply_ticker_deltas`. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::apply_deltas`."
 
 [[symbol]]
 ts = "DefaultStore#applyPackedTickerDeltasInPlace"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::StoreState::apply_packed_ticker_deltas_in_place"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::packed_in_place"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::apply_packed_ticker_deltas_in_place`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::apply_packed_ticker_deltas_in_place`; DefaultStore owns this state internally."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::packed_in_place`."
 
 [[symbol]]
 ts = "DefaultStore.applyPackedTickerDeltas"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::apply_packed_ticker_deltas"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::apply_packed"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::apply_packed_ticker_deltas`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::apply_packed`."
 
 [[symbol]]
 ts = "DefaultStore.updateStarkConfig"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_stark_config"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::replace_field"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::update_stark_config`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::replace_field`."
 
 [[symbol]]
 ts = "DefaultStore.updateZkLinkConfig"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_zk_link_config"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::replace_field"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::update_zk_link_config`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::replace_field`."
 
 [[symbol]]
 ts = "DefaultStore.updateUserData"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_user_data"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::replace_field"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::update_user_data`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::replace_field`."
 
 [[symbol]]
 ts = "DefaultStore.updateMarket"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::update_market"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_market"
 status = "divergent"
-note = "CHOSEN: safe-cex-store/src/store.rs::DefaultStore::update_market; The partial-update choice and its local reason are declared once at sdk-rs/parity/MANIFEST-SPEC.md#store-typed-patch-choice; ownership cites sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Admitted literal info objects now remain objects through direct patching; patch_info tests the public operation paths. Numeric ingress references sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_market`."
 
 [[symbol]]
 ts = "DefaultStore.setSetting"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/store.rs::DefaultStore::set_setting"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::set_setting"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::set_setting`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::set_setting`."
 
 [[symbol]]
 ts = "DefaultStore#updateInArray"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-store/src/store.rs::StoreState::update_in_array", "safe-cex-store/src/model_patch.rs::apply" ]
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_in_array", "safe-cex-store/src/model_patch.rs::apply" ]
 status = "divergent"
-note = "CHOSEN: safe-cex-store/src/store.rs::StoreState::update_in_array safe-cex-store/src/model_patch.rs::apply; The partial-update choice and its local reason are declared once at sdk-rs/parity/MANIFEST-SPEC.md#store-typed-patch-choice; ownership cites sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Admitted literal info objects now remain objects through direct patching; patch_info tests the public operation paths. Numeric ingress references sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect. Known Market.option and Position.option patches use their typed nested model rather than unknown-key omission. JS option patches retain native number bits through ModelPatch; other fields keep their existing profile. Evidence: sdk-rs/parity/OPTION_FIELDS_AUDIT.md."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_in_array`. Mapped `safe-cex-store/src/model_patch.rs::apply`."
 
 [[symbol]]
 ts = "DefaultStore#notify"
 kind = "field-fn"
 layer = "mirror"
-rs = "safe-cex-store/src/store.rs::shared_notify"
+rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::notify"
 status = "ported"
-note = "Rename: DefaultStore#notify -> `safe-cex-store/src/store.rs::shared_notify`. Production fallible fanout is shared_notify, not the private queue helper. It stops at the first subscriber error after committed mutation; opaque callback identity and cause reach the caller. No silent skip or Store catch. Core/venue callback migration remains independently owned."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::notify`."

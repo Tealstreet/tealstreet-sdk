@@ -1,6 +1,7 @@
 #[path = "support/binding_runtime.rs"]
 #[allow(dead_code)]
 mod support;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -10,7 +11,7 @@ use safe_cex_exchange::{
     },
     runtime::ExchangeRuntime,
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_bitrue::{BitrueDependencies, BitrueExchange};
 use serde_json::json;
@@ -145,7 +146,7 @@ fn background_refresh_reads_symbols_from_the_real_priority_set() {
         "source background loop must read the listed market; reports={:?}",
         f.runtime.reports.borrow()
     );
-    let orders = f.venue.base().store.orders();
+    let orders = f.venue.base().store.orders().unwrap();
     assert_eq!(orders.len(), 2);
     assert!(orders.iter().any(|order| order.id == "known-order"));
     assert!(orders.iter().any(|order| order.id == "native-order"));
@@ -217,7 +218,7 @@ fn background_refresh_commits_unmapped_native_order_types() {
             f.runtime.advance(100.0);
         }
         assert_eq!(f.http.order_reads.get(), 1);
-        let orders = f.venue.base().store.orders();
+        let orders = f.venue.base().store.orders().unwrap();
         assert_eq!(
             orders.len(),
             2,

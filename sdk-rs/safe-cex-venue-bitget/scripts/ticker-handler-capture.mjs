@@ -71,6 +71,10 @@ for(const [file,name] of [['bitget.ws-public.ts','BitgetPublicWebsocket'],['bitg
  const utf16=['\ud800','x\udc00'].map(id=>{const store=new Store();store.update({tickers:[ticker('x',id)]});const r=new Source();r.parent={store};r.handleTickerTopic({data:[{instId:id,lastPr:'9'}]});return {input:JSON.stringify(id),last:store.tickers[0].last};});
  if(process.argv.includes('--prototype-floor')) {
   cases.length=0;
+  const shapeStore=new Store();shapeStore.update({tickers:[ticker("poison","__proto__"),ticker("undefined","sentinel")]});
+  const table=shapeStore.tickersBySymbol;
+  const getterShape={hasOwnPrototype:Object.hasOwn(table,"__proto__"),hasOwnSymbol:Object.hasOwn(table,"symbol"),inheritedSymbol:table.symbol,idKey:String(table.symbol.id),prototypeIsRow:Object.getPrototypeOf(table)===shapeStore.tickers[0]};
+  assert.deepEqual(getterShape,{hasOwnPrototype:false,hasOwnSymbol:false,inheritedSymbol:"__proto__",idKey:"undefined",prototypeIsRow:true},"maintained Store plain dictionary prototype shape");
   const poison=(last=0,info)=>({...ticker('poison','__proto__'),last,...info!==undefined?{info}:{}}),sentinel=()=>ticker('undefined','sentinel');
   const input=(key,patch={lastPr:'9'})=>({data:[{instId:key,...patch}]});
   capture('symbol-sentinel',input('symbol'),[poison(),sentinel()]);
@@ -102,7 +106,7 @@ for(const [file,name] of [['bitget.ws-public.ts','BitgetPublicWebsocket'],['bitg
   assert.equal(dictionary.symbol,'__proto__','source getter traverses native ticker prototype');
   for(const c of cases.filter(c=>c.name.includes('stripped')))assert.equal(c.after[0].info,undefined,'source truthy info removed by real ingress');
   for(const c of cases){const first=c.events.filter(e=>e.phase==='first');if(c.name==='symbol-sentinel')assert.equal(first.length,1,'source original prototype write notifies once');if(c.name==='number-nan'||c.name==='number-negative-zero')assert.equal(first.length,0,'source falsy numeric prototype field skips mutation');}
-  output.push({file,cases:cases.map(c=>({name:c.name,error:c.error,after:c.after.map(t=>({id:t.id,symbol:t.symbol,last:t.last})),first:c.events.filter(e=>e.phase==='first').length,second:c.events.filter(e=>e.phase==='second').length})),last_index:21,getter:{hasOwnPrototype:false}});continue;
+  output.push({file,cases:cases.map(c=>({name:c.name,error:c.error,after:c.after.map(t=>({id:t.id,symbol:t.symbol,last:t.last})),first:c.events.filter(e=>e.phase==='first').length,second:c.events.filter(e=>e.phase==='second').length})),last_index:21,getter:getterShape});continue;
  }
  if(process.argv.includes('--field-identity')) {
   cases.length=0;

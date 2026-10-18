@@ -18,7 +18,7 @@ where
     F: Future<Output = Result<(), ExchangeError>>,
 {
     if store
-        .positions()
+        .positions()?
         .iter()
         .any(|position| position.contracts > 0.0)
     {

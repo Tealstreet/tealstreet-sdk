@@ -54,7 +54,7 @@ impl BingxExchange {
             ));
         }
         let runtime = deps.runtime.clone();
-        let host = Host::new(options.clone(), store.clone(), deps);
+        let host = Host::new(options.clone(), store.clone(), deps)?;
         let inner = Bodies::new(
             name,
             options,

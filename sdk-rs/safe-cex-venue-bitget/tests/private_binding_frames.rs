@@ -166,9 +166,9 @@ impl Scene {
 }
 fn real_private_order_frame_populates_store_without_fill_for_name(name: ExchangeName) {
     let s = Scene::connect_for(name);
-    assert!(s.h.store.orders().is_empty());
+    assert!(s.h.store.orders().unwrap().is_empty());
     s.send("orders", json!([order("live")]));
-    let orders = s.h.store.orders();
+    let orders = s.h.store.orders().unwrap();
     assert_eq!(orders.len(), 1, "real orders frame must reach Store");
     assert_eq!(orders[0].id, "private-native-order");
     assert_eq!(orders[0].symbol, s.symbol);
@@ -183,12 +183,12 @@ fn real_private_fill_closes_known_order_and_emits_exact_payload_for_name(name: E
     let s = Scene::connect_for(name);
     s.send("orders", json!([order("live")]));
     assert_eq!(
-        s.h.store.orders().len(),
+        s.h.store.orders().unwrap().len(),
         1,
         "fill witness must start with known open order"
     );
     s.send("orders", json!([order("filled")]));
-    let orders = s.h.store.orders();
+    let orders = s.h.store.orders().unwrap();
     assert_eq!(orders.len(), 1);
     assert_eq!(
         orders[0].status,
@@ -211,7 +211,7 @@ fn real_private_fill_closes_known_order_and_emits_exact_payload_for_name(name: E
 fn real_private_position_snapshot_updates_native_position_for_name(name: ExchangeName) {
     let s = Scene::connect_for(name);
     s.send("positions", json!([position("0.25")]));
-    let positions = s.h.store.positions();
+    let positions = s.h.store.positions().unwrap();
     assert_eq!(
         positions.len(),
         1,
@@ -241,7 +241,7 @@ fn real_private_account_frame_updates_native_balance_for_name(name: ExchangeName
     )
     .unwrap();
     s.send("account",json!([{"marginCoin":"USDT","unionTotalMargin":"130","unionAvailable":"90","unrealizedPL":"3.5"}]));
-    let balance = s.h.store.balance();
+    let balance = s.h.store.balance().unwrap();
     assert_eq!(
         balance.free, 90.0,
         "real account frame must reach Store balance"
@@ -278,7 +278,7 @@ fn synced_clock_keeps_fresh_private_position_during_rest_reconciliation() {
         "private frame must trigger actual REST position reconciliation"
     );
     assert_eq!(
-        s.h.store.positions()[0].contracts,
+        s.h.store.positions().unwrap()[0].contracts,
         0.25,
         "fresh private position must survive the older REST payload under the synced clock"
     );

@@ -5,6 +5,7 @@ mod virtual_time {
     ));
 }
 // Scripted I/O support; callers allow unused helpers at module scope.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::ExchangeSettings,
     http::{HttpClientOptions, HttpFuture, HttpHost},
@@ -12,7 +13,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportFuture, TransportProvider, rate_limit::RateLimitClock, socket::TunnelHost,

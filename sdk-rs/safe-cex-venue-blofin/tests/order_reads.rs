@@ -1,7 +1,8 @@
 #[path = "support/retained_assert.rs"]
 mod retained_assert;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_num::numeric_ingress::js_from_value;
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };
@@ -545,7 +546,7 @@ fn run(case: &Value, variant: u8) {
             }
         }
     }
-    native_orders(&store.orders(), &case["stored"]);
+    native_orders(&store.orders().unwrap(), &case["stored"]);
     // Request/clock/log records are compared only AFTER every native output/store assertion.
     wire_values(&Value::Array(trace.borrow().clone()), &case["trace"]);
     assert!(

@@ -61,7 +61,7 @@ impl InProcessPublicDataProvider {
         let data = self.source.snapshot()?;
         if data.loaded.borrow().tickers && !data.tickers.borrow().is_empty() {
             self.note_data_observed();
-            let mut loaded = self.parent.loaded();
+            let mut loaded = self.parent.loaded()?;
             loaded.tickers = true;
             self.parent.update(PublicDataUpdate {
                 tickers: Some(data.tickers),
@@ -72,7 +72,7 @@ impl InProcessPublicDataProvider {
         if data.loaded.borrow().markets && !data.markets.borrow().is_empty() {
             self.note_data_observed();
             let markets = self.parent.adapt_markets(data.markets)?;
-            let mut loaded = self.parent.loaded();
+            let mut loaded = self.parent.loaded()?;
             loaded.markets = true;
             self.parent.update(PublicDataUpdate {
                 tickers: None,
@@ -121,7 +121,7 @@ impl InProcessPublicDataProvider {
             } else {
                 None
             };
-            let mut loaded = provider.parent.loaded();
+            let mut loaded = provider.parent.loaded()?;
             if tickers_changed {
                 loaded.tickers = true;
             }

@@ -69,9 +69,9 @@ async fn set_leverage<F>(
 where
     F: Future<Output = Result<(), ExchangeError>>,
 {
-    let market = store.markets_by_symbol().get(symbol).cloned();
+    let market = store.markets_by_symbol()?.get(symbol).cloned();
     let position = store
-        .positions()
+        .positions()?
         .iter()
         .find(|p| p.symbol == symbol)
         .cloned();

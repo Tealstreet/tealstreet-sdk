@@ -2,6 +2,7 @@
 #[path = "support/exchange_runtime.rs"]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_store::Store;
 use serde_json::json;
 use support::drive;
 fn script(wire: &support::Wire) {
@@ -15,13 +16,13 @@ fn public_constructor_and_start_execute_existing_market_workflows() {
         support::fixture_with(json!({"key":"","secret":"","publicDataOnly":true}), script);
     assert!(venue.is_public_data_only());
     drive(&rt, venue.start()).unwrap();
-    assert!(store.loaded().markets && store.loaded().tickers);
-    assert_eq!(store.markets().len(), 1);
-    assert_eq!(store.markets()[0].symbol, "BTC-USD-PERP");
-    assert_eq!(store.markets()[0].precision.amount, 0.003);
-    assert_eq!(store.markets()[0].precision.price, 0.25);
-    assert_eq!(store.tickers().len(), 1);
-    assert_eq!(store.tickers()[0].bid, 101.0);
+    assert!(store.loaded().unwrap().markets && store.loaded().unwrap().tickers);
+    assert_eq!(store.markets().unwrap().len(), 1);
+    assert_eq!(store.markets().unwrap()[0].symbol, "BTC-USD-PERP");
+    assert_eq!(store.markets().unwrap()[0].precision.amount, 0.003);
+    assert_eq!(store.markets().unwrap()[0].precision.price, 0.25);
+    assert_eq!(store.tickers().unwrap().len(), 1);
+    assert_eq!(store.tickers().unwrap()[0].bid, 101.0);
     assert!(wire.requests.borrow().iter().any(|r| r.url == "/markets"));
     venue.dispose().unwrap();
     assert!(venue.base().is_disposed());
@@ -68,13 +69,13 @@ fn public_socket_subscribes_and_delivers_throttled_source_tickers() {
     for _ in 0..8 {
         runtime.pump();
     }
-    assert_eq!(store.tickers()[0].bid, 120.25);
+    assert_eq!(store.tickers().unwrap()[0].bid, 120.25);
     push("122.5");
     for _ in 0..8 {
         runtime.pump();
     }
     assert_eq!(
-        store.tickers()[0].bid,
+        store.tickers().unwrap()[0].bid,
         120.25,
         "second source update waits for throttle"
     );
@@ -83,12 +84,12 @@ fn public_socket_subscribes_and_delivers_throttled_source_tickers() {
         runtime.pump();
     }
     assert_eq!(
-        store.tickers()[0].bid,
+        store.tickers().unwrap()[0].bid,
         122.5,
         "latest source update delivered at trailing edge"
     );
-    assert_eq!(store.tickers()[0].ask, 123.75);
-    assert_eq!(store.tickers()[0].index, 121.125);
+    assert_eq!(store.tickers().unwrap()[0].ask, 123.75);
+    assert_eq!(store.tickers().unwrap()[0].index, 121.125);
     assert!(
         runtime.errors.borrow().is_empty(),
         "feed callback errors: {:?}",
@@ -131,8 +132,12 @@ fn private_start_signs_jwt_and_subscribes_only_after_the_matching_auth_reply() {
         runtime.errors.borrow(),
         runtime.console.borrow()
     );
-    assert!(store.loaded().balance && store.loaded().positions && store.loaded().orders);
-    assert_eq!(store.balance().total, 500.);
+    assert!(
+        store.loaded().unwrap().balance
+            && store.loaded().unwrap().positions
+            && store.loaded().unwrap().orders
+    );
+    assert_eq!(store.balance().unwrap().total, 500.);
     let frames: Vec<serde_json::Value> = runtime
         .sent
         .borrow()
@@ -328,7 +333,7 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
         "orders.ALL",
         json!({"id":"ws-order-7","market":"BTC-USD-PERP","side":"SELL","type":"LIMIT","status":"OPEN","price":"109.25","size":"0.012","remaining_size":"0.009","reduce_only":false,"time_in_force":"GoodTillCancel"}),
     );
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     assert_eq!(orders.len(), 1, "PARADEX private order census");
     let order = &orders[0];
     assert_eq!(order.id, "ws-order-7");
@@ -351,7 +356,7 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
         "orders.ALL",
         json!({"id":"ws-order-7","market":"BTC-USD-PERP","side":"SELL","type":"LIMIT","status":"FILLED","price":"109.25","size":"0.012","remaining_size":"0","reduce_only":false,"time_in_force":"GoodTillCancel"}),
     );
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let terminal = orders
         .iter()
         .find(|order| order.id == "ws-order-7")
@@ -392,7 +397,7 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
         "balance_events",
         json!({"total_collateral":"777.25","free_collateral":"601.5","initial_margin_requirement":"171.125"}),
     );
-    let balance = store.balance();
+    let balance = store.balance().unwrap();
     assert_eq!(
         (balance.total, balance.free, balance.used, balance.upnl),
         (777.25, 601.5, 171.125, 0.)
@@ -538,7 +543,11 @@ fn all_sixteen_exchange_entrypoints_execute_source_workflows() {
     let candles=drive(&runtime,venue.fetch_ohlcv(typed(json!({"symbol":"BTC-USD-PERP","interval":"1m","from":1699999980000.0,"to":1700000040000.0})))).unwrap();
     assert_eq!(candles.len(), 1);
     assert_eq!(candles[0].close, 102.);
-    assert!(store.loaded().markets && store.loaded().positions && store.loaded().orders);
+    assert!(
+        store.loaded().unwrap().markets
+            && store.loaded().unwrap().positions
+            && store.loaded().unwrap().orders
+    );
     let requests = wire.requests.borrow();
     let post = requests
         .iter()
@@ -862,11 +871,11 @@ fn numeric_created_at_survives_constructed_fetch_orders() {
         1784505600000.0f64.to_bits()
     );
     assert!(
-        store.loaded().orders,
+        store.loaded().unwrap().orders,
         "startup commits the native order snapshot"
     );
-    assert_eq!(store.orders().len(), 1);
-    assert_eq!(store.orders()[0].id, "epoch-order");
+    assert_eq!(store.orders().unwrap().len(), 1);
+    assert_eq!(store.orders().unwrap()[0].id, "epoch-order");
     assert!(
         wire.requests
             .borrow()
@@ -910,8 +919,8 @@ fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
         5,
         "retain every odd row and its valid sibling"
     );
-    assert!(store.loaded().orders);
-    assert_eq!(store.orders().len(), 5);
+    assert!(store.loaded().unwrap().orders);
+    assert_eq!(store.orders().unwrap().len(), 5);
     for (order, id) in orders.iter().zip([
         "null-date",
         "false-date",
@@ -925,6 +934,7 @@ fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
         assert_eq!(order.filled.to_bits(), (0.006_f64 - 0.003).to_bits());
         let stored = store
             .orders()
+            .unwrap()
             .iter()
             .find(|row| row.id == id)
             .unwrap()
@@ -1096,7 +1106,7 @@ fn constructed_orders_use_host_local_timezone(private: bool) {
             "only the local date converts, one more time during the explicit REST read"
         );
     }
-    let stored = store.orders();
+    let stored = store.orders().unwrap();
     assert_eq!(stored.len(), dates.len());
     for (index, expected) in expected.iter().enumerate() {
         let order = stored
@@ -1122,7 +1132,7 @@ fn constructed_orders_use_host_local_timezone(private: bool) {
 fn cancel_all_orders_reaches_venue_even_when_store_is_empty() {
     let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
     drive(&runtime, venue.start()).unwrap();
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
     let venue: &dyn Exchange = venue.as_ref();
     drive(&runtime, venue.cancel_all_orders()).unwrap();
     let requests = wire.requests.borrow();
@@ -1134,14 +1144,14 @@ fn cancel_all_orders_reaches_venue_even_when_store_is_empty() {
     );
     assert_eq!(deletes[0].url, "/orders");
     assert!(deletes[0].params.is_none());
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
 }
 
 #[test]
 fn cancel_symbol_orders_reaches_venue_even_when_store_is_empty() {
     let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
     drive(&runtime, venue.start()).unwrap();
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
     let venue: &dyn Exchange = venue.as_ref();
     drive(&runtime, venue.cancel_symbol_orders("BTC-USD-PERP".into())).unwrap();
     let requests = wire.requests.borrow();
@@ -1153,7 +1163,7 @@ fn cancel_symbol_orders_reaches_venue_even_when_store_is_empty() {
     );
     assert_eq!(deletes[0].url, "/orders?market=BTC-USD-PERP");
     assert!(deletes[0].params.is_none());
-    assert!(store.orders().is_empty());
+    assert!(store.orders().unwrap().is_empty());
 }
 
 #[test]
@@ -1162,7 +1172,7 @@ fn venue_wide_cancellations_propagate_http_errors() {
         let (venue, runtime, store, wire) =
             support::fixture_with(private_options(), private_script);
         drive(&runtime, venue.start()).unwrap();
-        assert!(store.orders().is_empty());
+        assert!(store.orders().unwrap().is_empty());
         wire.statuses.borrow_mut().insert("/orders".into(), 400);
         let venue: &dyn Exchange = venue.as_ref();
         let result = if symbol_scoped {
@@ -1182,7 +1192,7 @@ fn venue_wide_cancellations_propagate_http_errors() {
                 .count(),
             1
         );
-        assert!(store.orders().is_empty());
+        assert!(store.orders().unwrap().is_empty());
     }
 }
 
@@ -1671,7 +1681,7 @@ fn order_identity_refusals_keep_good_rows_and_report_fields() {
                 assert_eq!(order.last_update.to_bits(), 1784505600000_f64.to_bits());
             }
             assert!(
-                store.orders().is_empty(),
+                store.orders().unwrap().is_empty(),
                 "fetch returns the snapshot; caller commits it"
             );
             let logs = logs.borrow();
@@ -1799,7 +1809,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
                 .unwrap();
             runtime.pump();
         }
-        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
     }
     assert!(
         runtime.errors.borrow().is_empty(),
@@ -1847,8 +1857,8 @@ fn undefined_order_sides_survive_constructed_start_reads_and_store() {
     let orders = drive(&runtime, venue.fetch_orders(None))
         .expect("read must retain rows with undefined side");
     assert_eq!(orders.len(), 11);
-    assert_eq!(store.orders().len(), 11);
-    for order in orders.iter().chain(store.orders().iter()) {
+    assert_eq!(store.orders().unwrap().len(), 11);
+    for order in orders.iter().chain(store.orders().unwrap().iter()) {
         if order.id.starts_with("undefined-") {
             assert!(
                 order.side.is_undefined(),
@@ -1866,7 +1876,7 @@ fn undefined_order_sides_survive_constructed_start_reads_and_store() {
         assert_eq!(order.amount.to_bits(), 0.006_f64.to_bits());
         assert_eq!(order.last_update.to_bits(), 1784505600000_f64.to_bits());
     }
-    assert!(store.loaded().orders);
+    assert!(store.loaded().unwrap().orders);
     assert!(
         wire.requests
             .borrow()
@@ -1949,7 +1959,7 @@ fn retained_info_order_rest_keeps_opaque_native_fields() {
     let orders = drive(&runtime, venue.fetch_orders(None)).expect("native opaque order read");
     assert_eq!(orders.len(), 1, "opaque siblings cannot hide valid order");
     store.add_or_update_order(orders[0].clone()).unwrap();
-    let orders = store.orders();
+    let orders = store.orders().unwrap();
     let opaque = orders[0].info.as_ref().unwrap().get("opaque").unwrap();
     assert_eq!(
         opaque.get("text").unwrap().as_text(),

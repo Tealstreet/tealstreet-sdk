@@ -345,7 +345,7 @@ fn removed_original_message_preserves_worker_extra_order() {
     let base = BaseExchange::new(
         safe_cex_types::ExchangeName::Bybit,
         serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         runtime.clone(),
         ExchangeSettings::default(),
     );

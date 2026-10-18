@@ -314,7 +314,7 @@ fn hyperliquid_registry_uses_real_http_and_hosted_signing_without_a_secret() {
                     .construct(
                         ExchangeName::Hyperliquid,
                         options,
-                        Rc::new(safe_cex_store::store::DefaultStore::new()),
+                        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
                     )
                     .unwrap();
                 assert_eq!(exchange.name(), &ExchangeName::Hyperliquid);
