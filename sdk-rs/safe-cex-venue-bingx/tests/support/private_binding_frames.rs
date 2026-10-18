@@ -85,9 +85,9 @@ fn private_fill_frame_closes_the_order_and_emits_the_fill() {
 
 #[test]
 fn private_position_frame_commits_before_the_delayed_rest_heal() {
-    use std::{cell::Cell, rc::Rc};
+    use std::rc::Rc;
     let h = started_private_fixture();
-    let gate = Rc::new(Cell::new(false));
+    let gate = Rc::new(support::Release::default());
     *h.http.held_request.borrow_mut() = Some(("GET".into(), POSITIONS.into(), gate));
     private_frame(
         &h,

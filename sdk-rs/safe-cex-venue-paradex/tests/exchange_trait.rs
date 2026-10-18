@@ -1370,6 +1370,21 @@ fn real_trait_stream_book_delivers_and_cleans_up_socket_listener() {
 #[test]
 fn real_trait_stream_ohlcv_polls_then_stops_after_cleanup() {
     use std::{cell::RefCell, rc::Rc};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/public_ingress_oracle.cjs"
+        ))
+        .arg("--binding-recovery")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source["counts"], json!([1, 1, 2]));
     let (venue, runtime, _, wire) = support::fixture_with(
         json!({"key":"","secret":"","publicDataOnly":true}),
         |wire| {
@@ -1381,6 +1396,32 @@ fn real_trait_stream_ohlcv_polls_then_stops_after_cleanup() {
         },
     );
     drive(&runtime, venue.start()).unwrap();
+    let trade_subscriptions = || {
+        runtime
+            .sent
+            .borrow()
+            .iter()
+            .filter(|raw| {
+                let frame: serde_json::Value = serde_json::from_str(raw).unwrap();
+                frame["method"] == "subscribe"
+                    && frame["params"]["channel"] == "trades.BTC-USD-PERP"
+            })
+            .count()
+    };
+    let before = trade_subscriptions();
+    let warnings = Rc::new(RefCell::new(Vec::<serde_json::Value>::new()));
+    let sink = warnings.clone();
+    venue.base().on_args(
+        "log",
+        Rc::new(move |_, args| {
+            if args.get(1).is_some_and(|v| v.to_display() == "warning") {
+                sink.borrow_mut().push(json!(
+                    args.iter().map(|v| v.to_display()).collect::<Vec<_>>()
+                ));
+            }
+            Ok(())
+        }),
+    );
     let seen = Rc::new(RefCell::new(Vec::<safe_cex_types::Candle>::new()));
     let sink = seen.clone();
     let cleanup = venue
@@ -1394,6 +1435,11 @@ fn real_trait_stream_ohlcv_polls_then_stops_after_cleanup() {
     }
     assert_eq!(seen.borrow().len(), 1, "initial real REST candle poll");
     assert_eq!(seen.borrow()[0].close, 102.0);
+    assert_eq!(
+        trade_subscriptions() - before,
+        source["counts"][0].as_u64().unwrap() as usize,
+        "initial stale trade stream is resubscribed through the real socket"
+    );
     wire.responses.borrow_mut().insert(
         "/markets/klines".into(),
         json!({"results":[[1700000000000.0,101,105,100,104,9]]}),
@@ -1403,6 +1449,27 @@ fn real_trait_stream_ohlcv_polls_then_stops_after_cleanup() {
         runtime.pump();
     }
     assert_eq!(seen.borrow().last().unwrap().close, 104.0);
+    assert_eq!(
+        trade_subscriptions() - before,
+        source["counts"][1].as_u64().unwrap() as usize,
+        "three-second poll preserves the recovery cooldown"
+    );
+    runtime.now.set(runtime.now.get() + 27000.0);
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    assert_eq!(
+        trade_subscriptions() - before,
+        source["counts"][2].as_u64().unwrap() as usize,
+        "exact thirty-second boundary permits the next real subscription"
+    );
+    let source_warnings: Vec<_> = source["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| json!([format!("[paradex] {}", row[0].as_str().unwrap()), row[1]]))
+        .collect();
+    assert_eq!(*warnings.borrow(), source_warnings);
     cleanup().unwrap();
     let reads = wire
         .requests

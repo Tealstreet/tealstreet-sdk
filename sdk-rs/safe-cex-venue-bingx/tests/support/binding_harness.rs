@@ -1,4 +1,11 @@
 //! Scripted transport and runtime for driving the production BingxExchange.
+mod release {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/release.rs"
+    ));
+}
+pub use release::Release;
 mod virtual_time {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -255,7 +262,7 @@ pub struct Http {
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
     pub advance_ms: Cell<f64>,
-    pub held_request: RefCell<Option<(String, String, Rc<Cell<bool>>)>>,
+    pub held_request: RefCell<Option<(String, String, Rc<Release>)>>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
@@ -363,14 +370,7 @@ impl JsHttpHost for Http {
             .map(|(_, _, gate)| gate.clone());
         Box::pin(async move {
             if let Some(gate) = gate {
-                std::future::poll_fn(|_| {
-                    if gate.get() {
-                        Poll::Ready(())
-                    } else {
-                        Poll::Pending
-                    }
-                })
-                .await;
+                gate.wait().await;
             }
             result
         })
