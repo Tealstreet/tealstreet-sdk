@@ -57,8 +57,19 @@ impl JsHttpHost for Http {
             .find(|(path, _)| url.contains(path.as_str()))
             .map(|(_, gate)| gate.clone());
         let data = if url.contains("/depth") {
-            assert_eq!(config.get("params").unwrap().get("symbol").unwrap().to_display(), "BTCUSDT");
-            self.depth.borrow().clone().expect("scripted depth response")
+            assert_eq!(
+                config
+                    .get("params")
+                    .unwrap()
+                    .get("symbol")
+                    .unwrap()
+                    .to_display(),
+                "BTCUSDT"
+            );
+            self.depth
+                .borrow()
+                .clone()
+                .expect("scripted depth response")
         } else if url.contains("/time") {
             json!({"serverTime":1_800_000_001_000_u64})
         } else if url.contains("/openInterest") {
@@ -566,36 +577,79 @@ mod fixture_cleanup {
     }
 }
 
-fn book_sort_source() -> Vec<serde_json::Value> {
+fn book_sort_source(side: &str) -> Vec<serde_json::Value> {
     let output = std::process::Command::new("node")
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/book-sort-source.cjs"))
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/book-sort-source.cjs"
+        ))
+        .arg(side)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
 fn sort_number_bits(number: f64) -> String {
-    if number.is_nan() { "NaN".into() } else { format!("{:016x}", number.to_bits()) }
+    if number.is_nan() {
+        "NaN".into()
+    } else {
+        format!("{:016x}", number.to_bits())
+    }
 }
 
 fn rest_book_sort_matches_source(side: &str) {
-    let cases = book_sort_source();
+    let cases = book_sort_source(side);
     assert_eq!(cases.len(), 10, "actual source book-sort profile floor");
     run(async {
         let f = Fixture::new();
         for case in cases {
             *f.http.depth.borrow_mut() = Some(case["depth"].clone());
-            let book: safe_cex_types::OrderBook = tokio::time::timeout(std::time::Duration::from_secs(2), f.venue.invoke("fetchOrderBook", vec![Js::str("BTCUSDT"), Js::Number(1000.0)])).await.expect("ASTER-REST-SORT must settle without a comparator panic").unwrap();
-            let levels = if side == "bids" { &book.bids } else { &book.asks };
-            let actual = levels.iter().map(|level| json!({
-                "price":sort_number_bits(level.price),
-                "amount":sort_number_bits(level.amount),
-                "total":sort_number_bits(level.total)
-            })).collect::<Vec<_>>();
-            assert_eq!(json!(actual), case[side], "ASTER-REST-SORT {side} profile {} retains source order and cumulative totals", case["name"]);
+            let book: safe_cex_types::OrderBook = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                f.venue.invoke(
+                    "fetchOrderBook",
+                    vec![Js::str("BTCUSDT"), Js::Number(1000.0)],
+                ),
+            )
+            .await
+            .expect("ASTER-REST-SORT must settle without a comparator panic")
+            .unwrap();
+            let levels = if side == "bids" {
+                &book.bids
+            } else {
+                &book.asks
+            };
+            let actual = levels
+                .iter()
+                .map(|level| {
+                    json!({
+                        "price":sort_number_bits(level.price),
+                        "amount":sort_number_bits(level.amount),
+                        "total":sort_number_bits(level.total)
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                json!(actual),
+                case[side],
+                "ASTER-REST-SORT {side} profile {} retains source order and cumulative totals",
+                case["name"]
+            );
         }
-        assert_eq!(f.http.requests.borrow().iter().filter(|url| url.ends_with("/fapi/v1/depth")).count(), 10);
+        assert_eq!(
+            f.http
+                .requests
+                .borrow()
+                .iter()
+                .filter(|url| url.ends_with("/fapi/v1/depth"))
+                .count(),
+            10
+        );
         f.venue.dispose().unwrap();
     });
 }

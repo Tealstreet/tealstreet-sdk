@@ -16,6 +16,8 @@ const members = ['getFapiPath', 'fetchOrderBook'].map(name => {
 const compiled = ts.transpileModule(`export class Source { ${members} }`, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+const side = process.argv[2];
+assert(['bids', 'asks'].includes(side));
 const result = {};
 new Function('exports', 'getAsterDEXFapiPath', compiled)(result, values.getAsterDEXFapiPath);
 function bits(value) {
@@ -31,7 +33,7 @@ function bits(value) {
       i % 7 === 0 || i % 11 === 0 ? 'NaN' : String((i * 197 + 558) % 997),
       String(i + 1),
     ]);
-    const depth = { lastUpdateId: 123, E: 123000, T: 123001, bids: levels, asks: levels };
+    const depth = { lastUpdateId: 123, E: 123000, T: 123001, bids: side === 'bids' ? levels : [], asks: side === 'asks' ? levels : [] };
     const source = new result.Source();
     source.apiVersion = 'v1';
     let calls = 0;
