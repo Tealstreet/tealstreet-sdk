@@ -266,6 +266,7 @@ fn assert_history_reports(surrogates: bool) {
             .filter(|raw| raw.contains("\\ud") == surrogates)
         {
             let source = Command::new("node")
+                .args(["--import", "tsx"])
                 .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/history-query-source.cjs"))
                 .arg(json!({"kind":"report", "method":method, "raw":raw, "timestamps":vec![1700000000000_i64; 20]}).to_string())
                 .output().unwrap();
