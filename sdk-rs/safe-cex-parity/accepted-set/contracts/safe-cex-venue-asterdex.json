@@ -20397,6 +20397,2614 @@
     },
     "evidence": "Reviewed public_depth_snapshot and its live caller AsterDEXPublicWebsocket.handleDepthSnapshot: raw JSON levels enter the actual production function. Native observations inspect each price/amount/cumulative-amount total as binary64 bits before owner serialization, with unsorted/fractional/hex positives and malformed, empty, crossed, zero, nonfinite and non-string refusal cases. Expectations are independently authored from source arithmetic, not captured production output. tests/live_ws_helpers.rs::public_depth_snapshot_matches_typescript supplies the maintained-source counterpart. No host, transport, or callback is stubbed by this contract."
   },
+  "safe_cex_venue_asterdex::exchange_helpers::is_raw_algo_order": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_raw_algo_order",
+      "signature": {
+        "inputs": [
+          [
+            "info",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.get(\"info\")))",
+    "cases": [
+      {
+        "input": {},
+        "output": false
+      },
+      {
+        "input": {
+          "info": null
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "info": {
+            "type": "STOP"
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "info": {
+            "type": "TAKE_PROFIT_MARKET"
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "info": {
+            "type": "TRAILING_STOP_MARKET"
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "info": {
+            "type": "TRAILING_STOP"
+          }
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "info": {
+            "type": "limit"
+          }
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "info": {
+            "type": 5
+          }
+        },
+        "output": false
+      }
+    ],
+    "evidence": "Reviewed the private raw-info predicate: exactly five uppercase source algorithmic kinds, with absent/null/non-string cases. Source equivalent is the raw-info branch in isAlgoOrder; this predicate does not classify shared Order.type. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::get_open_algo_orders_count": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_open_algo_orders_count",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "orders",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Order",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "usize"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let orders:Vec<safe_cex_types::Order>=serde_json::from_value($value[\"orders\"].clone()).unwrap(); serde_json::json!($type($value[\"symbol\"].as_str().unwrap(),&orders)) }",
+    "cases": [
+      {
+        "input": {
+          "symbol": "BTC",
+          "orders": []
+        },
+        "output": 0
+      },
+      {
+        "input": {
+          "symbol": "BTC",
+          "orders": [
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "limit",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1,
+              "info": {
+                "type": "STOP"
+              }
+            },
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "take_profit_market",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1
+            },
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "stop_market",
+              "status": "closed",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1
+            },
+            {
+              "id": "1",
+              "symbol": "ETH",
+              "type": "stop_market",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1
+            }
+          ]
+        },
+        "output": 2
+      },
+      {
+        "input": {
+          "symbol": "ETH",
+          "orders": [
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "limit",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1,
+              "info": {
+                "type": "STOP"
+              }
+            },
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "take_profit_market",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1
+            },
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "stop_market",
+              "status": "closed",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1
+            },
+            {
+              "id": "1",
+              "symbol": "ETH",
+              "type": "stop_market",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1
+            }
+          ]
+        },
+        "output": 1
+      },
+      {
+        "input": {
+          "symbol": "BTC",
+          "orders": [
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "limit",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1
+            },
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "limit",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1,
+              "info": {
+                "type": "TRAILING_STOP"
+              }
+            }
+          ]
+        },
+        "output": 0
+      }
+    ],
+    "evidence": "Reviewed getOpenAlgoOrdersCount filter order: symbol and Open status precede shared typed/raw algorithmic-kind detection. Covers raw-info detection, typed kind, unrelated symbol and terminal status. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::assert_algo_order_capacity": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "assert_algo_order_capacity",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "new_algo_orders",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "market",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Market",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "orders",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Order",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let market:safe_cex_types::Market=serde_json::from_value(serde_json::json!({\"id\":\"BTC\",\"symbol\":\"BTC\",\"base\":\"BTC\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"price\":0.1,\"amount\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":1},\"leverage\":{\"min\":1,\"max\":10}},\"info\":$value[\"info\"]})).unwrap();let orders:Vec<safe_cex_types::Order>=serde_json::from_value($value[\"orders\"].clone()).unwrap();let result=$type(\"BTC\",$value[\"added\"].as_f64().unwrap(),Some(&market),&orders);match result { Ok(())=>serde_json::json!({\"ok\":true}),Err((name,message))=>serde_json::json!({\"ok\":false,\"name\":name,\"message\":message}) } }",
+    "cases": [
+      {
+        "input": {
+          "info": {},
+          "added": 1,
+          "orders": []
+        },
+        "output": {
+          "ok": true
+        }
+      },
+      {
+        "input": {
+          "info": {
+            "filters": [
+              {
+                "filterType": "MAX_NUM_ALGO_ORDERS",
+                "limit": "2"
+              }
+            ]
+          },
+          "added": 1,
+          "orders": [
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "limit",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1,
+              "info": {
+                "type": "STOP"
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true
+        }
+      },
+      {
+        "input": {
+          "info": {
+            "filters": [
+              {
+                "filterType": "MAX_NUM_ALGO_ORDERS",
+                "limit": "2"
+              }
+            ]
+          },
+          "added": 2,
+          "orders": [
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "limit",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1,
+              "info": {
+                "type": "STOP"
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "AsterDEX max algo order limit reached for BTC: 1/2 open, 2 new requested"
+        }
+      },
+      {
+        "input": {
+          "info": {
+            "filters": [
+              null
+            ]
+          },
+          "added": 0,
+          "orders": []
+        },
+        "output": {
+          "ok": true
+        }
+      },
+      {
+        "input": {
+          "info": {
+            "filters": [
+              null
+            ]
+          },
+          "added": 1,
+          "orders": []
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'filterType')"
+        }
+      },
+      {
+        "input": {
+          "info": {
+            "filters": [
+              {
+                "filterType": "MAX_NUM_ALGO_ORDERS",
+                "limit": 0
+              }
+            ]
+          },
+          "added": 9,
+          "orders": [
+            {
+              "id": "1",
+              "symbol": "BTC",
+              "type": "limit",
+              "status": "open",
+              "side": "buy",
+              "price": 1,
+              "amount": 1,
+              "filled": 0,
+              "remaining": 1,
+              "reduceOnly": false,
+              "lastUpdate": 1,
+              "info": {
+                "type": "STOP"
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true
+        }
+      }
+    ],
+    "evidence": "Reviewed assertAlgoOrderCapacity: nonpositive additions bypass malformed filters; finite truthy cap combines only existing open algorithmic orders; error preserves name/message. Covers exact capacity, overflow, no cap, zero cap and coercion error. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::parse_leverage_brackets_response": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_leverage_brackets_response",
+      "signature": {
+        "inputs": [
+          [
+            "response",
+            {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "tuple": [
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": [
+                            {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "serde_json::value::Value",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "serde_json::value::Value",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            },
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::LogSeverity",
+                "args": null
+              }
+            }
+          ]
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let result=if let Some(error)=$value.get(\"error\").and_then(serde_json::Value::as_str){$type(Err(error))}else{$type(Ok(&$value[\"data\"]))};let(entries,message,severity)=result;let entries=entries.into_iter().map(|(key,value)|serde_json::json!({\"keyPresent\":key.is_some(),\"key\":key,\"valuePresent\":value.is_some(),\"value\":value})).collect::<Vec<_>>();serde_json::json!({\"entries\":entries,\"message\":message,\"warning\":severity==safe_cex_exchange::runtime::LogSeverity::Warning}) }",
+    "cases": [
+      {
+        "input": {
+          "data": [
+            {
+              "symbol": "BTC",
+              "brackets": [
+                {
+                  "initialLeverage": 20
+                }
+              ]
+            },
+            {
+              "symbol": "ETH",
+              "brackets": [
+                {
+                  "initialLeverage": 7
+                }
+              ]
+            },
+            {
+              "symbol": "BTC",
+              "brackets": [
+                {
+                  "initialLeverage": 30
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "entries": [
+            {
+              "keyPresent": true,
+              "key": "BTC",
+              "valuePresent": true,
+              "value": 30
+            },
+            {
+              "keyPresent": true,
+              "key": "ETH",
+              "valuePresent": true,
+              "value": 7
+            }
+          ],
+          "message": "Loaded leverage brackets for 2 symbols",
+          "warning": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "symbol": "BTC",
+            "brackets": [
+              {}
+            ]
+          }
+        },
+        "output": {
+          "entries": [
+            {
+              "keyPresent": true,
+              "key": "BTC",
+              "valuePresent": false,
+              "value": null
+            }
+          ],
+          "message": "Loaded leverage brackets for 1 symbols",
+          "warning": false
+        }
+      },
+      {
+        "input": {
+          "data": [
+            {
+              "symbol": "BTC",
+              "brackets": [
+                {
+                  "initialLeverage": 20
+                }
+              ]
+            },
+            null
+          ]
+        },
+        "output": {
+          "entries": [
+            {
+              "keyPresent": true,
+              "key": "BTC",
+              "valuePresent": true,
+              "value": 20
+            }
+          ],
+          "message": "Failed to fetch leverage brackets: Cannot read properties of null (reading 'brackets'). Using default leverage of 10",
+          "warning": true
+        }
+      },
+      {
+        "input": {
+          "error": "network"
+        },
+        "output": {
+          "entries": [],
+          "message": "Failed to fetch leverage brackets: network. Using default leverage of 10",
+          "warning": true
+        }
+      }
+    ],
+    "evidence": "Reviewed fetchLeverageBrackets response projection: Map insertion/last-value overwrite, absent versus null value, retained prefix before failure, logging severity/count and transport refusal. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::map_public_trade": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "map_public_trade",
+      "signature": {
+        "inputs": [
+          [
+            "trade",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_asterdex::types::AsterDEXTradeResponse",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::PublicTrade",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let trade:crate::types::AsterDEXTradeResponse=serde_json::from_value($value[\"trade\"].clone()).unwrap(); match $type(&trade,$value[\"symbol\"].as_str().unwrap()){Ok(trade)=>serde_json::json!({\"ok\":true,\"id\":trade.id}),Err((name,message))=>serde_json::json!({\"ok\":false,\"name\":name,\"message\":message})} }",
+    "cases": [
+      {
+        "input": {
+          "symbol": "BTC",
+          "trade": {
+            "id": 12,
+            "price": "20.5",
+            "qty": "1.5",
+            "quoteQty": "30.75",
+            "time": 1234,
+            "isBuyerMaker": true
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError",
+          "message": "fetchPublicTrades side SELL is outside the shared closed enum"
+        }
+      },
+      {
+        "input": {
+          "symbol": "BTC",
+          "trade": {
+            "id": 12,
+            "price": "20.5",
+            "qty": "1.5",
+            "quoteQty": "30.75",
+            "time": 1234,
+            "isBuyerMaker": false
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError",
+          "message": "fetchPublicTrades side BUY is outside the shared closed enum"
+        }
+      }
+    ],
+    "evidence": "Reviewed fetchPublicTrades uppercase BUY/SELL cast and canonical shared closed-output refusal. Both maker directions execute the actual mapper; this contract documents visible refusal rather than inventing lowercase side values. Source produces those exact uppercase directions; no claim of same accepted set across the documented boundary. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::transform_ticker": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "transform_ticker",
+      "signature": {
+        "inputs": [
+          [
+            "ticker",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_asterdex::types::AsterDEXTickerResponse",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "open_interest",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::collections::btree::map::BTreeMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "primitive": "f64"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Ticker",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let ticker:crate::types::AsterDEXTickerResponse=serde_json::from_value($value[\"ticker\"].clone()).unwrap();let oi=$value.get(\"oi\").and_then(serde_json::Value::as_f64).map(|value|std::collections::BTreeMap::from([(\"BTC\".to_owned(),value)]));let ticker=$type(&ticker,oi.as_ref()).unwrap();serde_json::json!({\"symbol\":ticker.symbol,\"last\":format!(\"{:016x}\",ticker.last.to_bits()),\"percentage\":format!(\"{:016x}\",ticker.percentage.to_bits()),\"volume\":format!(\"{:016x}\",ticker.volume.to_bits()),\"quoteVolume\":format!(\"{:016x}\",ticker.quote_volume.to_bits()),\"openInterest\":format!(\"{:016x}\",ticker.open_interest.to_bits())}) }",
+    "cases": [
+      {
+        "input": {
+          "ticker": {
+            "symbol": "BTC",
+            "priceChange": "wire.priceChange",
+            "priceChangePercent": "-2.5",
+            "weightedAvgPrice": "wire.weightedAvgPrice",
+            "lastPrice": "12.5",
+            "lastQty": "wire.lastQty",
+            "openPrice": "wire.openPrice",
+            "highPrice": "wire.highPrice",
+            "lowPrice": "wire.lowPrice",
+            "volume": "4",
+            "quoteVolume": "50",
+            "openTime": 12.25,
+            "closeTime": 13.25,
+            "firstId": 14.25,
+            "lastId": 15.25,
+            "count": 16.25
+          }
+        },
+        "output": {
+          "symbol": "BTC",
+          "last": "4029000000000000",
+          "percentage": "c004000000000000",
+          "volume": "4010000000000000",
+          "quoteVolume": "4049000000000000",
+          "openInterest": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "ticker": {
+            "symbol": "BTC",
+            "priceChange": "wire.priceChange",
+            "priceChangePercent": "7tail",
+            "weightedAvgPrice": "wire.weightedAvgPrice",
+            "lastPrice": "-0",
+            "lastQty": "wire.lastQty",
+            "openPrice": "wire.openPrice",
+            "highPrice": "wire.highPrice",
+            "lowPrice": "wire.lowPrice",
+            "volume": "Infinity",
+            "quoteVolume": "0x10",
+            "openTime": 12.25,
+            "closeTime": 13.25,
+            "firstId": 14.25,
+            "lastId": 15.25,
+            "count": 16.25
+          },
+          "oi": 3.5
+        },
+        "output": {
+          "symbol": "BTC",
+          "last": "8000000000000000",
+          "percentage": "401c000000000000",
+          "volume": "7ff0000000000000",
+          "quoteVolume": "0000000000000000",
+          "openInterest": "400c000000000000"
+        }
+      }
+    ],
+    "evidence": "Reviewed transformTicker: original symbol, parseFloat fields, missing open interest zero and matching Map value, signed-zero/nonfinite/prefix arithmetic before serialization. Raw info uses the separately witnessed retained_info helper. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::transform_position": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "transform_position",
+      "signature": {
+        "inputs": [
+          [
+            "pos",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "existing",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Position",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Position",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let mut stored=Vec::new(); if let Some(stored_value)=$value.get(\"stored\"){let mut position=$type(&$value[\"position\"],&[]).unwrap();position.id=stored_value[\"id\"].as_str().unwrap().to_owned();position.realized_pnl=Some(stored_value[\"pnl\"].as_f64().unwrap()).into();stored.push(position);}match $type(&$value[\"position\"],&stored){Ok(position)=>serde_json::json!({\"ok\":true,\"id\":position.id,\"side\":position.side.into_value().map(|side|if side==safe_cex_types::PositionSide::Long{\"long\"}else{\"short\"}),\"contracts\":format!(\"{:016x}\",position.contracts.to_bits()),\"leverage\":format!(\"{:016x}\",position.leverage.to_bits()),\"realizedPnl\":format!(\"{:016x}\",position.realized_pnl.into_value().unwrap().to_bits()),\"notional\":format!(\"{:016x}\",position.notional.to_bits())}),Err((name,message))=>serde_json::json!({\"ok\":false,\"name\":name,\"message\":message})} }",
+    "cases": [
+      {
+        "input": {
+          "position": {
+            "symbol": "BTC",
+            "positionSide": "BOTH",
+            "positionAmt": "-2.5",
+            "leverage": "-5",
+            "entryPrice": "21.5",
+            "notional": "-53.75",
+            "unRealizedProfit": "-4.25",
+            "liquidationPrice": "0",
+            "marginType": "ISOLATED"
+          }
+        },
+        "output": {
+          "ok": true,
+          "id": "BTC",
+          "side": "short",
+          "contracts": "4004000000000000",
+          "leverage": "4014000000000000",
+          "realizedPnl": "0000000000000000",
+          "notional": "c04ae00000000000"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "symbol": "BTC",
+            "positionSide": "LONG",
+            "positionAmt": "3",
+            "leverage": "bad",
+            "entryPrice": "21.5",
+            "notional": "-53.75",
+            "unRealizedProfit": "-4.25",
+            "liquidationPrice": "0",
+            "marginType": "ISOLATED"
+          },
+          "stored": {
+            "id": "BTC:long",
+            "pnl": 4.5
+          }
+        },
+        "output": {
+          "ok": true,
+          "id": "BTC:long",
+          "side": "long",
+          "contracts": "4008000000000000",
+          "leverage": "3ff0000000000000",
+          "realizedPnl": "4012000000000000",
+          "notional": "c04ae00000000000"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "symbol": 5,
+            "positionSide": "BOTH",
+            "positionAmt": "-2.5",
+            "leverage": "-5",
+            "entryPrice": "21.5",
+            "notional": "-53.75",
+            "unRealizedProfit": "-4.25",
+            "liquidationPrice": "0",
+            "marginType": "ISOLATED"
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError",
+          "message": "transformPosition symbol is outside the shared string boundary"
+        }
+      }
+    ],
+    "evidence": "Reviewed transformPosition: one-way sign versus hedged explicit side; absolute amount/leverage with truthy default1; matching-ID realized PnL retained; visible canonical symbol-string refusal. Native scalars observed before serialization. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::transform_market": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "transform_market",
+      "signature": {
+        "inputs": [
+          [
+            "market",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_asterdex::types::AsterDEXMarketResponse",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "leverage_brackets",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::collections::btree::map::BTreeMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Market",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let market:crate::types::AsterDEXMarketResponse=serde_json::from_value($value[\"market\"].clone()).unwrap();let mut brackets=std::collections::BTreeMap::new();if let Some(value)=$value.get(\"leverage\"){brackets.insert(\"BTC\".to_owned(),safe_cex_exchange::js_runtime::value::from_json(value));}match $type(&market,&brackets){Ok(market)=>serde_json::json!({\"ok\":true,\"symbol\":market.symbol,\"active\":market.active,\"price\":format!(\"{:016x}\",market.precision.price.to_bits()),\"amount\":format!(\"{:016x}\",market.precision.amount.to_bits()),\"min\":format!(\"{:016x}\",market.limits.amount.min.to_bits()),\"max\":format!(\"{:016x}\",market.limits.amount.max.to_bits()),\"leverage\":format!(\"{:016x}\",market.limits.leverage.max.to_bits())}),Err((name,message))=>serde_json::json!({\"ok\":false,\"name\":name,\"message\":message})} }",
+    "cases": [
+      {
+        "input": {
+          "market": {
+            "symbol": "BTC",
+            "baseAsset": "BTC",
+            "quoteAsset": "USDT",
+            "contractType": "wire.contractType",
+            "deliveryDate": 5.25,
+            "onboardDate": 6.25,
+            "status": "TRADING",
+            "maintMarginPercent": "wire.maintMarginPercent",
+            "requiredMarginPercent": "wire.requiredMarginPercent",
+            "pricePrecision": 2,
+            "quantityPrecision": 3,
+            "baseAssetPrecision": 12.25,
+            "quotePrecision": 13.25,
+            "underlyingType": "wire.underlyingType",
+            "underlyingSubType": [
+              "wire.underlyingSubType[0]"
+            ],
+            "settlePlan": 16.25,
+            "triggerProtect": "wire.triggerProtect",
+            "filters": [
+              {
+                "filterType": "LOT_SIZE",
+                "minQty": "0.1",
+                "maxQty": "20"
+              }
+            ],
+            "orderTypes": [
+              "wire.orderTypes[0]"
+            ],
+            "timeInForce": [
+              "wire.timeInForce[0]"
+            ],
+            "liquidationFee": "wire.liquidationFee",
+            "marketTakeBound": "wire.marketTakeBound"
+          }
+        },
+        "output": {
+          "ok": true,
+          "symbol": "BTC",
+          "active": true,
+          "price": "3f847ae147ae147b",
+          "amount": "3f50624dd2f1a9fc",
+          "min": "3fb999999999999a",
+          "max": "4034000000000000",
+          "leverage": "4024000000000000"
+        }
+      },
+      {
+        "input": {
+          "market": {
+            "symbol": "BTC",
+            "baseAsset": "BTC",
+            "quoteAsset": "USDT",
+            "contractType": "wire.contractType",
+            "deliveryDate": 5.25,
+            "onboardDate": 6.25,
+            "status": "PENDING",
+            "maintMarginPercent": "wire.maintMarginPercent",
+            "requiredMarginPercent": "wire.requiredMarginPercent",
+            "pricePrecision": 2,
+            "quantityPrecision": 3,
+            "baseAssetPrecision": 12.25,
+            "quotePrecision": 13.25,
+            "underlyingType": "wire.underlyingType",
+            "underlyingSubType": [
+              "wire.underlyingSubType[0]"
+            ],
+            "settlePlan": 16.25,
+            "triggerProtect": "wire.triggerProtect",
+            "filters": [
+              {
+                "filterType": "LOT_SIZE",
+                "minQty": "0.1",
+                "maxQty": "20"
+              }
+            ],
+            "orderTypes": [
+              "wire.orderTypes[0]"
+            ],
+            "timeInForce": [
+              "wire.timeInForce[0]"
+            ],
+            "liquidationFee": "wire.liquidationFee",
+            "marketTakeBound": "wire.marketTakeBound"
+          },
+          "leverage": 0
+        },
+        "output": {
+          "ok": true,
+          "symbol": "BTC",
+          "active": false,
+          "price": "3f847ae147ae147b",
+          "amount": "3f50624dd2f1a9fc",
+          "min": "3fb999999999999a",
+          "max": "4034000000000000",
+          "leverage": "4024000000000000"
+        }
+      },
+      {
+        "input": {
+          "market": {
+            "symbol": "BTC",
+            "baseAsset": "BTC",
+            "quoteAsset": "USDT",
+            "contractType": "wire.contractType",
+            "deliveryDate": 5.25,
+            "onboardDate": 6.25,
+            "status": "TRADING",
+            "maintMarginPercent": "wire.maintMarginPercent",
+            "requiredMarginPercent": "wire.requiredMarginPercent",
+            "pricePrecision": 2,
+            "quantityPrecision": 3,
+            "baseAssetPrecision": 12.25,
+            "quotePrecision": 13.25,
+            "underlyingType": "wire.underlyingType",
+            "underlyingSubType": [
+              "wire.underlyingSubType[0]"
+            ],
+            "settlePlan": 16.25,
+            "triggerProtect": "wire.triggerProtect",
+            "filters": [
+              {
+                "filterType": "LOT_SIZE",
+                "minQty": "0.1",
+                "maxQty": "20"
+              }
+            ],
+            "orderTypes": [
+              "wire.orderTypes[0]"
+            ],
+            "timeInForce": [
+              "wire.timeInForce[0]"
+            ],
+            "liquidationFee": "wire.liquidationFee",
+            "marketTakeBound": "wire.marketTakeBound"
+          },
+          "leverage": "7"
+        },
+        "output": {
+          "ok": true,
+          "symbol": "BTC",
+          "active": true,
+          "price": "3f847ae147ae147b",
+          "amount": "3f50624dd2f1a9fc",
+          "min": "3fb999999999999a",
+          "max": "4034000000000000",
+          "leverage": "401c000000000000"
+        }
+      },
+      {
+        "input": {
+          "market": {
+            "symbol": "BTC",
+            "baseAsset": "BTC",
+            "quoteAsset": "USDT",
+            "contractType": "wire.contractType",
+            "deliveryDate": 5.25,
+            "onboardDate": 6.25,
+            "status": "TRADING",
+            "maintMarginPercent": "wire.maintMarginPercent",
+            "requiredMarginPercent": "wire.requiredMarginPercent",
+            "pricePrecision": 2,
+            "quantityPrecision": 3,
+            "baseAssetPrecision": 12.25,
+            "quotePrecision": 13.25,
+            "underlyingType": "wire.underlyingType",
+            "underlyingSubType": [
+              "wire.underlyingSubType[0]"
+            ],
+            "settlePlan": 16.25,
+            "triggerProtect": "wire.triggerProtect",
+            "filters": [
+              {
+                "filterType": "LOT_SIZE",
+                "minQty": "0.1",
+                "maxQty": "20"
+              }
+            ],
+            "orderTypes": [
+              "wire.orderTypes[0]"
+            ],
+            "timeInForce": [
+              "wire.timeInForce[0]"
+            ],
+            "liquidationFee": "wire.liquidationFee",
+            "marketTakeBound": "wire.marketTakeBound"
+          },
+          "leverage": {
+            "toString": null
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      }
+    ],
+    "evidence": "Reviewed transformMarket: precisionToString exponents, LOT_SIZE first match, TRADING status, truthy leverage fallback then Number policy. Includes source raw string leverage and throwing coercion; retains shared numeric-limit decision. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::after_method_called_in_worker": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "after_method_called_in_worker",
+      "signature": {
+        "inputs": [
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "first_arg",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "set_setting",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "primitive": "bool"
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(&str, bool) -> Result<(), safe_cex_exchange::runtime::ExchangeError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "primitive": "bool"
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let mut effects=Vec::new();let result=$type($value[\"method\"].as_str().unwrap(),$value.get(\"arg\"),|key,hedged|{effects.push(serde_json::json!([key,hedged]));if $value[\"reject\"].as_bool()==Some(true){Err(safe_cex_exchange::runtime::ExchangeError::new(\"setting failed\"))}else{Ok(())}});serde_json::json!({\"ok\":result.is_ok(),\"effects\":effects,\"error\":result.err().map(|error|error.message)}) }",
+    "cases": [
+      {
+        "input": {
+          "method": "changePositionMode",
+          "arg": []
+        },
+        "output": {
+          "ok": true,
+          "effects": [
+            [
+              "isHedged",
+              true
+            ]
+          ],
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "method": "changePositionMode",
+          "arg": 0
+        },
+        "output": {
+          "ok": true,
+          "effects": [
+            [
+              "isHedged",
+              false
+            ]
+          ],
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "method": "setLeverage",
+          "arg": true
+        },
+        "output": {
+          "ok": true,
+          "effects": [],
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "method": "changePositionMode",
+          "arg": true,
+          "reject": true
+        },
+        "output": {
+          "ok": false,
+          "effects": [
+            [
+              "isHedged",
+              true
+            ]
+          ],
+          "error": "setting failed"
+        }
+      }
+    ],
+    "evidence": "Reviewed afterMethodCalledInWorker: only changePositionMode writes isHedged with Boolean(arg), and setting failure propagates. Callback records the actual host effect and can reject; it does not implement the production conditional. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::retained_info": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "retained_info",
+      "signature": {
+        "inputs": [
+          [
+            "record",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "T"
+                }
+              }
+            }
+          ],
+          [
+            "fields",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::iter::traits::collect::IntoIterator",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Item",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "tuple": [
+                                      {
+                                        "resolved_path": {
+                                          "path": "alloc::string::String",
+                                          "args": null
+                                        }
+                                      },
+                                      {
+                                        "resolved_path": {
+                                          "path": "core::option::Option",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "primitive": "f64"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::ser::Serialize",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl IntoIterator<Item = (String, Option<f64>)>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::iter::traits::collect::IntoIterator",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [],
+                            "constraints": [
+                              {
+                                "name": "Item",
+                                "args": null,
+                                "binding": {
+                                  "equality": {
+                                    "type": {
+                                      "tuple": [
+                                        {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        },
+                                        {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "primitive": "f64"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let fields=$value[\"fields\"].as_array().unwrap().iter().map(|row|(row[0].as_str().unwrap().to_owned(),if row[1].is_null(){None}else{Some(row[1].as_f64().unwrap_or_else(||safe_cex_num::number_from_string(row[1].as_str().unwrap())))})).collect::<Vec<_>>();match $type(&$value[\"record\"],fields){Ok(info)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",safe_cex_num::numeric_ingress::js_value_as_f64(&info[\"n\"]).unwrap().to_bits()),\"raw\":info.get(\"raw\")}),Err(error)=>serde_json::json!({\"ok\":false,\"message\":error.to_string()})} }",
+    "cases": [
+      {
+        "input": {
+          "record": {
+            "n": 1,
+            "raw": "keep"
+          },
+          "fields": [
+            [
+              "/n",
+              "-0"
+            ]
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000",
+          "raw": "keep"
+        }
+      },
+      {
+        "input": {
+          "record": {
+            "n": 1,
+            "raw": false
+          },
+          "fields": [
+            [
+              "/n",
+              "Infinity"
+            ]
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000",
+          "raw": false
+        }
+      },
+      {
+        "input": {
+          "record": {
+            "n": 4
+          },
+          "fields": [
+            [
+              "/missing",
+              null
+            ]
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "4010000000000000",
+          "raw": null
+        }
+      },
+      {
+        "input": {
+          "record": {
+            "n": 1
+          },
+          "fields": [
+            [
+              "/missing",
+              2
+            ]
+          ]
+        },
+        "output": {
+          "ok": false,
+          "message": "Missing native metadata field /missing"
+        }
+      }
+    ],
+    "evidence": "Reviewed generic retained_info serialization boundary: native numeric pointer overwrites preserve signed zero and infinity; unrelated metadata survives, None leaves the record untouched, and a missing target refuses visibly. Concrete Value plus native numeric descriptors exercise the real generic helper. Observations read the returned retained numeric bits directly, never serialize/redecode the owner. These Rust-only pointer invariants support the source raw-info preservation contract; they are not presented as a separate TypeScript API. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::assert_v3_feature": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "assert_v3_feature",
+      "signature": {
+        "inputs": [
+          [
+            "base",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::exchange::BaseExchange",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "version",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_asterdex::types::AsterDEXAPIVersion",
+                "args": null
+              }
+            }
+          ],
+          [
+            "feature",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ struct Runtime; impl safe_cex_exchange::runtime::ExchangeRuntime for Runtime {fn monotonic_now_ms(&self)->f64{1.0}fn now_ms(&self)->f64{1.0}fn sleep(&self,_:u64)->safe_cex_exchange::runtime::ExchangeFuture<'static,()>{panic!(\"unexpected timer\")}fn spawn_local(&self,_:std::pin::Pin<Box<dyn std::future::Future<Output=()>>>)->Box<dyn safe_cex_exchange::runtime::ExchangeTask>{panic!(\"unexpected task\")}fn console_values(&self,_:&str,_:&[safe_cex_exchange::js_runtime::value::Js]){}fn unique_id(&self)->String{\"guard\".to_owned()}fn is_worker(&self)->bool{false}fn random(&self)->f64{0.5}fn report_exception(&self,_:&safe_cex_exchange::runtime::ExchangeError,_:&serde_json::Value){}fn report_raw_exception(&self,_:&safe_cex_exchange::js_runtime::value::Js,_:&serde_json::Value){}fn execute_worker_request(&self,_:serde_json::Value)->safe_cex_exchange::runtime::ExchangeFuture<'static,serde_json::Value>{panic!(\"unexpected worker\")}}let base=safe_cex_exchange::exchange::BaseExchange::new(safe_cex_types::ExchangeName::Asterdex,serde_json::from_value(serde_json::json!({\"key\":\"\",\"secret\":\"\"})).unwrap(),std::rc::Rc::new(safe_cex_store::store::DefaultStore::new()),std::rc::Rc::new(Runtime),safe_cex_exchange::exchange::ExchangeSettings::default());let messages=std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));let recorded=messages.clone();base.on(\"error\",std::rc::Rc::new(move|_,value|{recorded.borrow_mut().push(String::from_utf16(&value.to_js_string()?).unwrap());Ok(())}));let result=$type(&base,serde_json::from_value($value[\"version\"].clone()).unwrap(),$value[\"feature\"].as_str().unwrap());let output=serde_json::json!({\"ok\":result.is_ok(),\"message\":result.err().map(|error|error.message),\"events\":messages.borrow().clone()});output }",
+    "cases": [
+      {
+        "input": {
+          "version": "v3",
+          "feature": "self-trade prevention"
+        },
+        "output": {
+          "ok": true,
+          "message": null,
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "version": "v1",
+          "feature": "self-trade prevention"
+        },
+        "output": {
+          "ok": false,
+          "message": "AsterDEX self-trade prevention requires API v3",
+          "events": [
+            "Exchange Error: AsterDEX self-trade prevention requires API v3"
+          ]
+        }
+      },
+      {
+        "input": {
+          "version": "v1",
+          "feature": "per-order self-trade prevention"
+        },
+        "output": {
+          "ok": false,
+          "message": "AsterDEX per-order self-trade prevention requires API v3",
+          "events": [
+            "Exchange Error: AsterDEX per-order self-trade prevention requires API v3"
+          ]
+        }
+      }
+    ],
+    "evidence": "Reviewed assertV3Feature through an actual BaseExchange, DefaultStore and error emitter: V3 bypasses; V1 emits the exact feature-specific error then returns it. Runtime fixture supplies only primitive clock/console ports and panics on unexpected async work. Existing live_feature_guard provides maintained-source emit-before-throw checks. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::fetch_open_interest_map": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fetch_open_interest_map",
+      "signature": {
+        "inputs": [
+          [
+            "adapter",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "symbols",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "allow_per_symbol_fallback",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "log_warning",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::map::Map",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(String)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ use safe_cex_transport::{RestAdapter,RestFuture,RestRequest,RestResponse,RestResponseBody,RestFailure};struct Adapter{responses:std::cell::RefCell<std::collections::VecDeque<serde_json::Value>>,requests:std::cell::RefCell<Vec<serde_json::Value>>}impl RestAdapter for Adapter{fn execute(&self,request:RestRequest)->RestFuture<'_,RestResponse>{self.requests.borrow_mut().push(serde_json::json!({\"url\":request.url,\"symbol\":request.params.as_ref().and_then(|params|params.get(\"symbol\")).cloned(),\"timeout\":request.timeout_ms}));let response=self.responses.borrow_mut().pop_front().expect(\"scripted REST response\");let result=if let Some(error)=response.get(\"error\").and_then(serde_json::Value::as_str){Err(RestFailure::pre_transmit(error.to_owned(),request))}else{Ok(RestResponse{status:200,reason:None,headers:Default::default(),body:RestResponseBody::Encoded(serde_json::to_vec(&response[\"data\"]).unwrap())})};Box::pin(async move{result})}}let adapter=Adapter{responses:std::cell::RefCell::new($value[\"responses\"].as_array().unwrap().iter().cloned().collect()),requests:Default::default()};let symbols=$value.get(\"symbols\").and_then(serde_json::Value::as_array).map(|values|values.iter().map(|value|value.as_str().unwrap().to_owned()).collect::<Vec<_>>());let mut warnings=Vec::new();let output={let future=$type(&adapter,\"/openInterest\",symbols.as_deref(),$value[\"allow\"].as_bool().unwrap(),|message|warnings.push(message));let mut future=std::pin::pin!(future);let waker=std::task::Waker::noop();let mut context=std::task::Context::from_waker(waker);match std::future::Future::poll(future.as_mut(),&mut context){std::task::Poll::Ready(map)=>{let entries=map.iter().map(|(key,value)|serde_json::json!([key,format!(\"{:016x}\",safe_cex_num::numeric_ingress::js_value_as_f64(value).unwrap().to_bits())])).collect::<Vec<_>>();entries},std::task::Poll::Pending=>panic!(\"scripted REST unexpectedly suspended\")}};serde_json::json!({\"entries\":output,\"warnings\":warnings,\"requests\":adapter.requests.borrow().clone()}) }",
+    "cases": [
+      {
+        "input": {
+          "responses": [
+            {
+              "data": {
+                "symbol": "BTC",
+                "openInterest": "2.5"
+              }
+            }
+          ],
+          "symbols": [
+            "ETH"
+          ],
+          "allow": true
+        },
+        "output": {
+          "entries": [
+            [
+              "BTC",
+              "4004000000000000"
+            ]
+          ],
+          "warnings": [],
+          "requests": [
+            {
+              "url": "/openInterest",
+              "symbol": null,
+              "timeout": 2000
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "responses": [
+            {
+              "error": "offline"
+            },
+            {
+              "data": {
+                "symbol": "BTC",
+                "openInterest": "3"
+              }
+            },
+            {
+              "error": "absent"
+            }
+          ],
+          "symbols": [
+            "",
+            "BTC",
+            "ETH"
+          ],
+          "allow": true
+        },
+        "output": {
+          "entries": [
+            [
+              "BTC",
+              "4008000000000000"
+            ]
+          ],
+          "warnings": [
+            "Bulk open-interest fetch failed: offline"
+          ],
+          "requests": [
+            {
+              "url": "/openInterest",
+              "symbol": null,
+              "timeout": 2000
+            },
+            {
+              "url": "/openInterest",
+              "symbol": "BTC",
+              "timeout": 2000
+            },
+            {
+              "url": "/openInterest",
+              "symbol": "ETH",
+              "timeout": 2000
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "responses": [
+            {
+              "data": []
+            }
+          ],
+          "symbols": [
+            "BTC"
+          ],
+          "allow": false
+        },
+        "output": {
+          "entries": [],
+          "warnings": [],
+          "requests": [
+            {
+              "url": "/openInterest",
+              "symbol": null,
+              "timeout": 2000
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "responses": [
+            {
+              "data": [
+                {
+                  "symbol": "BTC",
+                  "openInterest": 4
+                },
+                {
+                  "symbol": "BAD",
+                  "openInterest": {
+                    "toString": null
+                  }
+                }
+              ]
+            }
+          ],
+          "symbols": [
+            "ETH"
+          ],
+          "allow": true
+        },
+        "output": {
+          "entries": [
+            [
+              "BTC",
+              "4010000000000000"
+            ]
+          ],
+          "warnings": [
+            "Bulk open-interest fetch failed: Cannot convert object to primitive value"
+          ],
+          "requests": [
+            {
+              "url": "/openInterest",
+              "symbol": null,
+              "timeout": 2000
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Reviewed fetchOpenInterestMap against real production async helper with a RestAdapter backend fixture: bulk success prevents fallback; failure logs once; sequential nonempty symbols use timeout2000; per-symbol rejection remains silent; retained prefix prevents fallback after coercion error. Fixture supplies raw HTTP replies only and records actual outgoing requests. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+  },
   "safe_cex_venue_asterdex::types::AsterDEXPlaceOrderOptsWire": {
     "shape": "union",
     "entrypoints": [],
