@@ -46,7 +46,7 @@ export function parseManifest(text: string, expectedSource: string, manifestPath
   const symbols = root.symbol ?? [];
   if (!Array.isArray(symbols)) throw new Error(`${expectedSource}: expected [[symbol]] rows`);
   const seen = new Set<string>();
-  const rows = symbols.map((value) => {
+  const rows = symbols.map((value): SymbolRow => {
     const row = table(value, rowFields, expectedSource);
     for (const field of rowFields) {
       if (field !== 'rs' && typeof row[field] !== 'string') throw new Error(`${expectedSource}: ${String(row.ts)} missing string ${field}`);
@@ -63,9 +63,16 @@ export function parseManifest(text: string, expectedSource: string, manifestPath
     const identity = key(row as unknown as SymbolRow);
     if (seen.has(identity)) throw new Error(`${expectedSource}: duplicate symbol ${identity}`);
     seen.add(identity);
-    return row as unknown as SymbolRow;
+    return {
+      ts: row.ts as string,
+      kind: row.kind as SymbolRow['kind'],
+      layer: row.layer as SymbolRow['layer'],
+      rs: Array.isArray(row.rs) ? [...row.rs] : row.rs as string,
+      status: row.status as SymbolRow['status'],
+      note: row.note as string,
+    };
   });
-  return { file: { ts: expectedSource, ...(file.rust_files !== undefined ? { rust_files: file.rust_files as string[] } : {}) }, symbol: rows };
+  return { file: { ts: expectedSource, ...(file.rust_files !== undefined ? { rust_files: [...(file.rust_files as string[])] } : {}) }, symbol: rows };
 }
 
 export function serializeManifest(manifest: Manifest): string {

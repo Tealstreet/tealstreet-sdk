@@ -41,6 +41,15 @@ function annotatedManifest(): Manifest {
   };
 }
 
+test('parseManifest returns plain objects independent of parser internals', () => {
+  const original = annotatedManifest();
+  original.file = { ...original.file, rust_files: ['crate/src/lib.rs'] };
+  const manifest = parseManifest(serializeManifest(original), fixtureSource);
+  assert.equal(Object.getPrototypeOf(manifest.file), Object.prototype);
+  assert.equal(Object.getPrototypeOf(manifest.symbol[0]), Object.prototype);
+  assert.deepEqual(manifest, original);
+});
+
 test('Program resolves exported declarations and callable fields, in source order', (t) => {
   const { root } = fixture(t);
   write(join(root, fixtureSource), `
