@@ -4127,6 +4127,7 @@ dependencies = [
 name = "safe-cex-venue-bingx"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
@@ -4134,6 +4135,8 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -4241,6 +4244,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "syn 3.0.7",
+ "tokio",
 ]
 
 [[package]]

@@ -1,5 +1,7 @@
 #[path = "support/oracle_clock.rs"]
 mod oracle_clock;
+#[path = "support/retained_observe.rs"]
+mod retained_observe;
 
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
@@ -89,7 +91,7 @@ fn order(v: &Order) -> Value {
         out["slTriggerType"] = json!(t);
     }
     if let Some(info) = v.info.as_ref() {
-        out["info"] = observe(info);
+        out["info"] = retained_observe::observe(info);
     }
     assert!(
         v.parent_id.is_none()
@@ -113,7 +115,7 @@ fn position(v: &Position) -> Value {
         out["marginSize"] = number(n);
     }
     if let Some(info) = v.info.as_ref() {
-        out["info"] = observe(info);
+        out["info"] = retained_observe::observe(info);
     }
     assert!(
         v.realized_pnl.is_none() && v.extra.is_none() && v.last_update.is_none(),
@@ -177,8 +179,13 @@ impl PrivateEventHost for Host {
             }
         }
     }
-    fn emit_fill(&self, payload: Value) -> Result<(), ExchangeError> {
-        self.fills.borrow_mut().push(observe(&payload));
+    fn emit_fill(
+        &self,
+        payload: safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), ExchangeError> {
+        self.fills
+            .borrow_mut()
+            .push(retained_observe::observe(&payload));
         Ok(())
     }
     fn report_exception(&self, error: &ExchangeError) {
@@ -315,7 +322,7 @@ fn run(c: &Value) {
     let method = c["method"].as_str().unwrap();
     let input = &c["input"];
     let (v, store, host) = fixture(input);
-    let events = input
+    let events: Vec<safe_cex_types::retained_json::RetainedJsonInput> = input
         .get("events")
         .and_then(Value::as_array)
         .cloned()
@@ -325,17 +332,23 @@ fn run(c: &Value) {
             } else {
                 json!({"o":input["wireOrder"]})
             }]
-        });
+        })
+        .into_iter()
+        .map(Into::into)
+        .collect();
     let clock = oracle_clock::ClockWindow::start();
     let result: Result<Value, ExchangeError> = match method {
         "mapOrder" => map_order(&input["wireOrder"], &store.orders(), 5678.0)
             .map(|o| o.as_ref().map_or(json!({"undefined":true}), order)),
         "normalizeSymbol" => v
-            .normalize_symbol(Some(&input["symbol"]))
+            .normalize_symbol(Some(&input["symbol"].clone().into()))
             .map(Value::String),
-        "extractAccountPositions" => Ok(observe(&json!(
-            v.extract_account_positions(&input["account"])
-        ))),
+        "extractAccountPositions" => Ok(Value::Array(
+            v.extract_account_positions(&input["account"].clone().into())
+                .iter()
+                .map(retained_observe::observe)
+                .collect(),
+        )),
         "schedulePositionRefresh" => v
             .schedule_position_refresh()
             .map(|_| json!({"undefined":true})),
@@ -599,7 +612,7 @@ fn typed_order_and_snapshot_boundaries_are_explicit() {
     );
     let (v, _, _) = fixture(input);
     let mut event = input["account"].clone();
-    let snapshot = v.extract_account_positions(&event);
+    let snapshot = v.extract_account_positions(&event.clone().into());
     assert_eq!(
         corpus()["boundary"]["aliasPrice"],
         "changed",
@@ -607,7 +620,8 @@ fn typed_order_and_snapshot_boundaries_are_explicit() {
     );
     event["a"]["P"][0]["ep"] = json!("changed");
     assert_eq!(
-        snapshot[0]["ep"], "12",
+        snapshot[0].get("ep").unwrap(),
+        &safe_cex_types::retained_json::RetainedJsonInput::from(json!("12")),
         "BINGX-PRIVATE CHOSEN owned row snapshot"
     );
     assert_eq!(

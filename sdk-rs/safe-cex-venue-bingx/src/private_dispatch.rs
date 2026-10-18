@@ -3,8 +3,7 @@ use crate::{
     listen_key::BingxListenKey, private_events::BingxPrivateEvents, public_stream::PublicFrame,
 };
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
-use safe_cex_num::js_truthy;
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use std::rc::Rc;
 pub trait PrivateMessageHost {
     fn is_disposed(&self) -> bool;
@@ -17,8 +16,8 @@ pub trait PrivateMessageHost {
 }
 pub trait PrivateDispatchOperations {
     fn rebuild(&self) -> ExchangeFuture<'_, ()>;
-    fn account(&self, events: Vec<Value>) -> ExchangeFuture<'_, ()>;
-    fn order(&self, events: &[Value]) -> Result<(), ExchangeError>;
+    fn account(&self, events: Vec<Input>) -> ExchangeFuture<'_, ()>;
+    fn order(&self, events: &[Input]) -> Result<(), ExchangeError>;
 }
 pub struct NativePrivateDispatchOperations {
     pub events: Rc<BingxPrivateEvents>,
@@ -28,10 +27,10 @@ impl PrivateDispatchOperations for NativePrivateDispatchOperations {
     fn rebuild(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.keys.rebuild_with_fresh_listen_key())
     }
-    fn account(&self, events: Vec<Value>) -> ExchangeFuture<'_, ()> {
+    fn account(&self, events: Vec<Input>) -> ExchangeFuture<'_, ()> {
         Box::pin(async move { self.events.handle_account_events(&events).await })
     }
-    fn order(&self, events: &[Value]) -> Result<(), ExchangeError> {
+    fn order(&self, events: &[Input]) -> Result<(), ExchangeError> {
         self.events.handle_order_events(events)
     }
 }
@@ -56,36 +55,26 @@ impl BingxPrivateDispatcher {
             }
         };
         self.host.diagnostic_receive(&raw)?;
-        let json = safe_cex_transport::how::big_int_as_string_json_parse(&raw)
-            .into_value()
-            .map_err(|_| {
-                ExchangeError::new("BingX private frame UTF-8 boundary refuses a lone surrogate")
-            })?;
-        if json.is_null()
-            && serde_json::from_str::<Box<serde_json::value::RawValue>>(&raw).is_ok()
-            && serde_json::from_str::<Value>(&raw).is_err()
-        {
-            return Err(ExchangeError::new(
-                "BingX private frame UTF-8 boundary refuses a lone surrogate",
-            ));
-        }
-        if raw == "Ping" || js_truthy(json.get("ping")) {
+        let json = safe_cex_transport::how::big_int_as_string_json_parse(&raw);
+        if raw == "Ping" || json.get("ping").is_some_and(Input::is_truthy) {
             return self.host.send_with_log("Pong");
         }
-        if raw == "Pong" || js_truthy(json.get("pong")) {
+        if raw == "Pong" || json.get("pong").is_some_and(Input::is_truthy) {
             return self.host.handle_pong();
         }
-        let event = json.get("e").and_then(Value::as_str);
-        if event == Some("listenKeyExpired") {
+        let event = json.get("e");
+        if event.is_some_and(|v| v.text_equals("listenKeyExpired")) {
             self.host.record_stats("listenKey")?;
             self.operations.rebuild().await?;
             return Ok(());
         }
-        if event == Some("ACCOUNT_UPDATE") {
+        if event.is_some_and(|v| v.text_equals("ACCOUNT_UPDATE")) {
             self.operations.account(vec![json.clone()]).await?;
             self.host.record_stats("position")?;
         }
-        if matches!(event, Some("ORDER_TRADE_UPDATE" | "TRADE_UPDATE")) {
+        if event
+            .is_some_and(|v| v.text_equals("ORDER_TRADE_UPDATE") || v.text_equals("TRADE_UPDATE"))
+        {
             self.operations.order(&[json])?;
             self.host.record_stats("order")?;
         }

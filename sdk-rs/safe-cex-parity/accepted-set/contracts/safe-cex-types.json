@@ -721,6 +721,114 @@
       "info": null,
       "currencies": {},
       "coins": {}
+    },
+    "nativeObservation": {
+      "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let decoded:Result<$type,_>=serde_json::from_value($value.clone());match decoded {Ok(decoded)=>serde_json::json!({\"ok\":true,\"infoPresent\":decoded.info.is_some(),\"infoNative\":decoded.info.as_ref().map(__native)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "nativeFields": [
+        "infoPresent",
+        "infoNative"
+      ],
+      "cases": [
+        {
+          "input": {
+            "used": 1,
+            "free": 1,
+            "total": 1,
+            "upnl": 1,
+            "currencies": {},
+            "coins": {}
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": false,
+            "infoNative": null
+          }
+        },
+        {
+          "input": {
+            "used": 1,
+            "free": 1,
+            "total": 1,
+            "upnl": 1,
+            "currencies": {},
+            "coins": {},
+            "info": null
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": true,
+            "infoNative": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "input": {
+            "used": 1,
+            "free": 1,
+            "total": 1,
+            "upnl": 1,
+            "currencies": {},
+            "coins": {},
+            "info": {
+              "left": [
+                7,
+                19
+              ],
+              "right": false
+            }
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": true,
+            "infoNative": {
+              "kind": "object",
+              "entries": [
+                [
+                  [
+                    108,
+                    101,
+                    102,
+                    116
+                  ],
+                  {
+                    "kind": "array",
+                    "items": [
+                      {
+                        "kind": "lexeme",
+                        "value": "7"
+                      },
+                      {
+                        "kind": "lexeme",
+                        "value": "19"
+                      }
+                    ]
+                  }
+                ],
+                [
+                  [
+                    114,
+                    105,
+                    103,
+                    104,
+                    116
+                  ],
+                  {
+                    "kind": "bool",
+                    "value": false
+                  }
+                ]
+              ]
+            }
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::BothPositionSide": {
@@ -2471,6 +2579,177 @@
       "info": null,
       "takerFee": 1,
       "makerFee": 1
+    },
+    "nativeObservation": {
+      "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let decoded:Result<$type,_>=serde_json::from_value($value.clone());match decoded {Ok(decoded)=>serde_json::json!({\"ok\":true,\"infoPresent\":decoded.info.is_some(),\"infoNative\":decoded.info.as_ref().map(__native)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "nativeFields": [
+        "infoPresent",
+        "infoNative"
+      ],
+      "cases": [
+        {
+          "input": {
+            "id": "sample",
+            "symbol": "sample",
+            "prettySymbol": "sample",
+            "base": "sample",
+            "quote": "sample",
+            "active": false,
+            "precision": {
+              "amount": 1,
+              "price": 1
+            },
+            "limits": {
+              "amount": {
+                "min": 1,
+                "max": 1
+              },
+              "leverage": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "contractSize": 1,
+            "isExpiring": false,
+            "isInverse": false,
+            "isSpot": false,
+            "isReadOnly": false,
+            "takerFee": 1,
+            "makerFee": 1
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": false,
+            "infoNative": null
+          }
+        },
+        {
+          "input": {
+            "id": "sample",
+            "symbol": "sample",
+            "prettySymbol": "sample",
+            "base": "sample",
+            "quote": "sample",
+            "active": false,
+            "precision": {
+              "amount": 1,
+              "price": 1
+            },
+            "limits": {
+              "amount": {
+                "min": 1,
+                "max": 1
+              },
+              "leverage": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "contractSize": 1,
+            "isExpiring": false,
+            "isInverse": false,
+            "isSpot": false,
+            "isReadOnly": false,
+            "takerFee": 1,
+            "makerFee": 1,
+            "info": null
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": true,
+            "infoNative": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "input": {
+            "id": "sample",
+            "symbol": "sample",
+            "prettySymbol": "sample",
+            "base": "sample",
+            "quote": "sample",
+            "active": false,
+            "precision": {
+              "amount": 1,
+              "price": 1
+            },
+            "limits": {
+              "amount": {
+                "min": 1,
+                "max": 1
+              },
+              "leverage": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "contractSize": 1,
+            "isExpiring": false,
+            "isInverse": false,
+            "isSpot": false,
+            "isReadOnly": false,
+            "takerFee": 1,
+            "makerFee": 1,
+            "info": {
+              "left": [
+                7,
+                19
+              ],
+              "right": false
+            }
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": true,
+            "infoNative": {
+              "kind": "object",
+              "entries": [
+                [
+                  [
+                    108,
+                    101,
+                    102,
+                    116
+                  ],
+                  {
+                    "kind": "array",
+                    "items": [
+                      {
+                        "kind": "lexeme",
+                        "value": "7"
+                      },
+                      {
+                        "kind": "lexeme",
+                        "value": "19"
+                      }
+                    ]
+                  }
+                ],
+                [
+                  [
+                    114,
+                    105,
+                    103,
+                    104,
+                    116
+                  ],
+                  {
+                    "kind": "bool",
+                    "value": false
+                  }
+                ]
+              ]
+            }
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::MarketLimits": {
@@ -3612,6 +3891,138 @@
       "volume": 1,
       "quoteVolume": 1,
       "info": null
+    },
+    "nativeObservation": {
+      "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let decoded:Result<$type,_>=serde_json::from_value($value.clone());match decoded {Ok(decoded)=>serde_json::json!({\"ok\":true,\"infoPresent\":decoded.info.is_some(),\"infoNative\":decoded.info.as_ref().map(__native)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "nativeFields": [
+        "infoPresent",
+        "infoNative"
+      ],
+      "cases": [
+        {
+          "input": {
+            "id": "sample",
+            "symbol": "sample",
+            "bid": 1,
+            "ask": 1,
+            "last": 1,
+            "mark": 1,
+            "index": 1,
+            "midPrice": 1,
+            "percentage": 1,
+            "openInterest": 1,
+            "fundingRate": 1,
+            "fundingTime": 1,
+            "volume": 1,
+            "quoteVolume": 1
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": false,
+            "infoNative": null
+          }
+        },
+        {
+          "input": {
+            "id": "sample",
+            "symbol": "sample",
+            "bid": 1,
+            "ask": 1,
+            "last": 1,
+            "mark": 1,
+            "index": 1,
+            "midPrice": 1,
+            "percentage": 1,
+            "openInterest": 1,
+            "fundingRate": 1,
+            "fundingTime": 1,
+            "volume": 1,
+            "quoteVolume": 1,
+            "info": null
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": true,
+            "infoNative": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "input": {
+            "id": "sample",
+            "symbol": "sample",
+            "bid": 1,
+            "ask": 1,
+            "last": 1,
+            "mark": 1,
+            "index": 1,
+            "midPrice": 1,
+            "percentage": 1,
+            "openInterest": 1,
+            "fundingRate": 1,
+            "fundingTime": 1,
+            "volume": 1,
+            "quoteVolume": 1,
+            "info": {
+              "left": [
+                7,
+                19
+              ],
+              "right": false
+            }
+          },
+          "output": {
+            "ok": true,
+            "infoPresent": true,
+            "infoNative": {
+              "kind": "object",
+              "entries": [
+                [
+                  [
+                    108,
+                    101,
+                    102,
+                    116
+                  ],
+                  {
+                    "kind": "array",
+                    "items": [
+                      {
+                        "kind": "lexeme",
+                        "value": "7"
+                      },
+                      {
+                        "kind": "lexeme",
+                        "value": "19"
+                      }
+                    ]
+                  }
+                ],
+                [
+                  [
+                    114,
+                    105,
+                    103,
+                    104,
+                    116
+                  ],
+                  {
+                    "kind": "bool",
+                    "value": false
+                  }
+                ]
+              ]
+            }
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::Timeframe": {
@@ -27308,6 +27719,95 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "into_native_payload",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "into_native_payload inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "json_stringify",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::js_coercion::JsCoercionError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "json_stringify inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "parse_json",
           "signature": {
             "inputs": [
@@ -27702,6 +28202,1034 @@
         "nativeFields": [
           "kind",
           "value"
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "generic": "Self"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute exact UTF16 property-key lookup on an existing canonical tree, observing presence and the selected native node.",
+        "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let decoded=$type::from($value.clone());let got=decoded.get(\"target\");serde_json::json!({\"ok\":true,\"present\":got.is_some(),\"native\":got.map(|node|__native(node))}) }",
+        "nativeFields": [
+          "present",
+          "native"
+        ],
+        "cases": [
+          {
+            "input": {
+              "target": [
+                7,
+                19
+              ],
+              "other": false
+            },
+            "output": {
+              "present": true,
+              "native": {
+                "kind": "array",
+                "items": [
+                  {
+                    "kind": "lexeme",
+                    "value": "7"
+                  },
+                  {
+                    "kind": "lexeme",
+                    "value": "19"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          },
+          {
+            "input": {
+              "other": 19
+            },
+            "output": {
+              "present": false,
+              "native": null,
+              "ok": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get_mut",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": true,
+                            "type": {
+                              "generic": "Self"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute exact UTF16 property-key lookup on an existing canonical tree, observing presence and the selected native node.",
+        "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let mut decoded=$type::from($value.clone());let got=decoded.get_mut(\"target\");serde_json::json!({\"ok\":true,\"present\":got.is_some(),\"native\":got.map(|node|__native(node))}) }",
+        "nativeFields": [
+          "present",
+          "native"
+        ],
+        "cases": [
+          {
+            "input": {
+              "target": [
+                7,
+                19
+              ],
+              "other": false
+            },
+            "output": {
+              "present": true,
+              "native": {
+                "kind": "array",
+                "items": [
+                  {
+                    "kind": "lexeme",
+                    "value": "7"
+                  },
+                  {
+                    "kind": "lexeme",
+                    "value": "19"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          },
+          {
+            "input": {
+              "other": 19
+            },
+            "output": {
+              "present": false,
+              "native": null,
+              "ok": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_object",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "tuple": [
+                                  {
+                                    "resolved_path": {
+                                      "path": "alloc::vec::Vec",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "primitive": "u16"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "generic": "Self"
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "as_object inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_object_mut",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": true,
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": [
+                                            {
+                                              "resolved_path": {
+                                                "path": "alloc::vec::Vec",
+                                                "args": {
+                                                  "angle_bracketed": {
+                                                    "args": [
+                                                      {
+                                                        "type": {
+                                                          "primitive": "u16"
+                                                        }
+                                                      }
+                                                    ],
+                                                    "constraints": []
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "generic": "Self"
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "as_object_mut inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_array",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "generic": "Self"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "as_array inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_array_mut",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": true,
+                            "type": {
+                              "slice": {
+                                "generic": "Self"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "as_array_mut inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_nullish",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "is_nullish inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "text_equals",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "expected",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute exact native UTF16 equality to a typed selector without converting stored text to UTF8.",
+        "call": "{ let decoded=$type::from($value.clone());serde_json::json!({\"ok\":true,\"equal\":decoded.text_equals(\"hello\"),\"textUnits\":decoded.as_text()}) }",
+        "cases": [
+          {
+            "input": "hello",
+            "output": {
+              "ok": true,
+              "equal": true,
+              "textUnits": [
+                104,
+                101,
+                108,
+                108,
+                111
+              ]
+            }
+          },
+          {
+            "input": "Hello",
+            "output": {
+              "ok": true,
+              "equal": false,
+              "textUnits": [
+                72,
+                101,
+                108,
+                108,
+                111
+              ]
+            }
+          }
+        ],
+        "nativeFields": [
+          "equal",
+          "textUnits"
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_f64",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "as_f64 inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_truthy",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "is_truthy inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_text",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "primitive": "u16"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "as_text inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_bool",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "as_bool inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_object",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "is_object inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_array",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "is_array inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_null",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "is_null inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::value::Value",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Capture a JSON-domain value directly as a canonical tree, preserving exact numeric lexemes and entries before native consumers.",
+        "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let decoded=$type::from($value.clone());let native=__native(&decoded);let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native}) }",
+        "nativeFields": [
+          "kind",
+          "native"
+        ],
+        "cases": [
+          {
+            "input": null,
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "null"
+              },
+              "kind": "null"
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "bool",
+                "value": false
+              },
+              "kind": "bool"
+            }
+          },
+          {
+            "input": "11",
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "text",
+                "value": [
+                  49,
+                  49
+                ]
+              },
+              "kind": "text"
+            }
+          },
+          {
+            "input": 11,
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "lexeme",
+                "value": "11"
+              },
+              "kind": "lexeme"
+            }
+          },
+          {
+            "input": [
+              11,
+              23
+            ],
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "array",
+                "items": [
+                  {
+                    "kind": "lexeme",
+                    "value": "11"
+                  },
+                  {
+                    "kind": "lexeme",
+                    "value": "23"
+                  }
+                ]
+              },
+              "kind": "array"
+            }
+          },
+          {
+            "input": {
+              "z": 11,
+              "a": 23
+            },
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "object",
+                "entries": [
+                  [
+                    [
+                      122
+                    ],
+                    {
+                      "kind": "lexeme",
+                      "value": "11"
+                    }
+                  ],
+                  [
+                    [
+                      97
+                    ],
+                    {
+                      "kind": "lexeme",
+                      "value": "23"
+                    }
+                  ]
+                ]
+              },
+              "kind": "object"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "core::cmp::PartialEq",
+          "name": "eq",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "other",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Native derived equality compares canonical retained variants without JSON projection.",
+        "call": "{ let left=$type::from($value[\"left\"].clone());let right=$type::from($value[\"right\"].clone());serde_json::json!({\"ok\":true,\"equal\":left==right,\"leftNull\":left.is_null()}) }",
+        "cases": [
+          {
+            "input": {
+              "left": {
+                "a": 7
+              },
+              "right": {
+                "a": 7
+              }
+            },
+            "output": {
+              "ok": true,
+              "equal": true,
+              "leftNull": false
+            }
+          },
+          {
+            "input": {
+              "left": [
+                7,
+                19
+              ],
+              "right": [
+                19,
+                7
+              ]
+            },
+            "output": {
+              "ok": true,
+              "equal": false,
+              "leftNull": false
+            }
+          }
+        ],
+        "nativeFields": [
+          "equal",
+          "leftNull"
         ]
       }
     ],
@@ -48439,7 +49967,7 @@
                               {
                                 "type": {
                                   "resolved_path": {
-                                    "path": "serde_json::value::Value",
+                                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                     "args": null
                                   }
                                 }
@@ -48606,7 +50134,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ let decoded=if $value[\"mode\"].as_str()==Some(\"unit\") { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded)=>serde_json::json!({\"ok\":true,\"absent\":decoded.is_absent(),\"undefined\":decoded.is_undefined(),\"payload\":decoded.value().cloned()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } let decoded=if $value[\"mode\"].as_str()==Some(\"unit\") { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded)=>serde_json::json!({\"ok\":true,\"absent\":decoded.is_absent(),\"undefined\":decoded.is_undefined(),\"payload\":decoded.value().map(__native)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "absent",
         "undefined",
@@ -48626,8 +50154,34 @@
             "absent": false,
             "undefined": false,
             "payload": {
-              "left": 7,
-              "right": 19
+              "kind": "object",
+              "entries": [
+                [
+                  [
+                    108,
+                    101,
+                    102,
+                    116
+                  ],
+                  {
+                    "kind": "lexeme",
+                    "value": "7"
+                  }
+                ],
+                [
+                  [
+                    114,
+                    105,
+                    103,
+                    104,
+                    116
+                  ],
+                  {
+                    "kind": "lexeme",
+                    "value": "19"
+                  }
+                ]
+              ]
             }
           }
         },
@@ -48643,10 +50197,19 @@
             "ok": true,
             "absent": false,
             "undefined": false,
-            "payload": [
-              11,
-              23
-            ]
+            "payload": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "lexeme",
+                  "value": "11"
+                },
+                {
+                  "kind": "lexeme",
+                  "value": "23"
+                }
+              ]
+            }
           }
         },
         {
@@ -48658,7 +50221,9 @@
             "ok": true,
             "absent": false,
             "undefined": false,
-            "payload": null
+            "payload": {
+              "kind": "null"
+            }
           }
         },
         {
@@ -48670,7 +50235,15 @@
             "ok": true,
             "absent": false,
             "undefined": false,
-            "payload": "kept"
+            "payload": {
+              "kind": "text",
+              "value": [
+                107,
+                101,
+                112,
+                116
+              ]
+            }
           }
         },
         {
@@ -48682,7 +50255,10 @@
             "ok": true,
             "absent": false,
             "undefined": false,
-            "payload": false
+            "payload": {
+              "kind": "bool",
+              "value": false
+            }
           }
         },
         {
@@ -49578,5 +51154,1920 @@
       "demo",
       "production"
     ]
+  },
+  "safe_cex_types::retained_json::codec::deserialize_native_payload": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_native_payload",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Closed internal native Serde payload: tags, cardinality, binary64 and UTF16 units are read directly. Actual Store/host corpus covers native nonfinite/own-undefined events.",
+    "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type($value.clone()){Ok(decoded)=>{let native=__native(&decoded);let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "cases": [
+      {
+        "input": [
+          "Null",
+          null
+        ],
+        "output": {
+          "ok": true,
+          "kind": "null",
+          "native": {
+            "kind": "null"
+          }
+        }
+      },
+      {
+        "input": [
+          "Bool",
+          true
+        ],
+        "output": {
+          "ok": true,
+          "kind": "bool",
+          "native": {
+            "kind": "bool",
+            "value": true
+          }
+        }
+      },
+      {
+        "input": [
+          "Text",
+          [
+            55296,
+            65
+          ]
+        ],
+        "output": {
+          "ok": true,
+          "kind": "text",
+          "native": {
+            "kind": "text",
+            "value": [
+              55296,
+              65
+            ]
+          }
+        }
+      },
+      {
+        "input": [
+          "Float",
+          0
+        ],
+        "output": {
+          "ok": true,
+          "kind": "float",
+          "native": {
+            "kind": "float",
+            "bits": "0000000000000000"
+          }
+        }
+      },
+      {
+        "input": [
+          "Array",
+          [
+            [
+              "Null",
+              null
+            ],
+            [
+              "Text",
+              [
+                57343
+              ]
+            ]
+          ]
+        ],
+        "output": {
+          "ok": true,
+          "kind": "array",
+          "native": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "null"
+              },
+              {
+                "kind": "text",
+                "value": [
+                  57343
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "input": [
+          "unknown",
+          null
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          "Text",
+          [
+            65536
+          ]
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          "Bool",
+          true,
+          "extra"
+        ],
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type($value.clone()){Ok(decoded)=>{let native=__native(&decoded);let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": [
+            "Null",
+            null
+          ],
+          "output": {
+            "ok": true,
+            "kind": "null",
+            "native": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "input": [
+            "Bool",
+            true
+          ],
+          "output": {
+            "ok": true,
+            "kind": "bool",
+            "native": {
+              "kind": "bool",
+              "value": true
+            }
+          }
+        },
+        {
+          "input": [
+            "Text",
+            [
+              55296,
+              65
+            ]
+          ],
+          "output": {
+            "ok": true,
+            "kind": "text",
+            "native": {
+              "kind": "text",
+              "value": [
+                55296,
+                65
+              ]
+            }
+          }
+        },
+        {
+          "input": [
+            "Float",
+            0
+          ],
+          "output": {
+            "ok": true,
+            "kind": "float",
+            "native": {
+              "kind": "float",
+              "bits": "0000000000000000"
+            }
+          }
+        },
+        {
+          "input": [
+            "Array",
+            [
+              [
+                "Null",
+                null
+              ],
+              [
+                "Text",
+                [
+                  57343
+                ]
+              ]
+            ]
+          ],
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "native": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "null"
+                },
+                {
+                  "kind": "text",
+                  "value": [
+                    57343
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": [
+            "unknown",
+            null
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "Text",
+            [
+              65536
+            ]
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "Bool",
+            true,
+            "extra"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ],
+      "nativeFields": [
+        "kind",
+        "native"
+      ]
+    }
+  },
+  "safe_cex_types::retained_json::deserialize_present_retained_info": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_present_retained_info",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Present opaque info retains null and complete native values without JSON projection; missing is handled by the owning model.",
+    "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type($value.clone()){Ok(decoded)=>{let native=decoded.as_ref().map(__native).unwrap();let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "ok": true,
+          "kind": "null",
+          "native": {
+            "kind": "null"
+          }
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": true,
+          "kind": "bool",
+          "native": {
+            "kind": "bool",
+            "value": false
+          }
+        }
+      },
+      {
+        "input": [
+          7,
+          19
+        ],
+        "output": {
+          "ok": true,
+          "kind": "array",
+          "native": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "lexeme",
+                "value": "7"
+              },
+              {
+                "kind": "lexeme",
+                "value": "19"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "left": 7,
+          "right": 19
+        },
+        "output": {
+          "ok": true,
+          "kind": "object",
+          "native": {
+            "kind": "object",
+            "entries": [
+              [
+                [
+                  108,
+                  101,
+                  102,
+                  116
+                ],
+                {
+                  "kind": "lexeme",
+                  "value": "7"
+                }
+              ],
+              [
+                [
+                  114,
+                  105,
+                  103,
+                  104,
+                  116
+                ],
+                {
+                  "kind": "lexeme",
+                  "value": "19"
+                }
+              ]
+            ]
+          }
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type($value.clone()){Ok(decoded)=>{let native=decoded.as_ref().map(__native).unwrap();let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": null,
+          "output": {
+            "ok": true,
+            "kind": "null",
+            "native": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "ok": true,
+            "kind": "bool",
+            "native": {
+              "kind": "bool",
+              "value": false
+            }
+          }
+        },
+        {
+          "input": [
+            7,
+            19
+          ],
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "native": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "lexeme",
+                  "value": "7"
+                },
+                {
+                  "kind": "lexeme",
+                  "value": "19"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": {
+            "left": 7,
+            "right": 19
+          },
+          "output": {
+            "ok": true,
+            "kind": "object",
+            "native": {
+              "kind": "object",
+              "entries": [
+                [
+                  [
+                    108,
+                    101,
+                    102,
+                    116
+                  ],
+                  {
+                    "kind": "lexeme",
+                    "value": "7"
+                  }
+                ],
+                [
+                  [
+                    114,
+                    105,
+                    103,
+                    104,
+                    116
+                  ],
+                  {
+                    "kind": "lexeme",
+                    "value": "19"
+                  }
+                ]
+              ]
+            }
+          }
+        }
+      ],
+      "nativeFields": [
+        "kind",
+        "native"
+      ]
+    }
+  },
+  "safe_cex_types::retained_json::codec::RetainedVisitor": {
+    "category": "decoder",
+    "shape": "observed",
+    "evidence": "Canonical native serde marker visitor. Each supplied arm is called directly with actual stock Serde inputs; no JSON projection of decoded owners.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_newtype_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "d",
+                {
+                  "generic": "D"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "D"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "D",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::Deserializer",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual retained native/JSON visitor arm and observe its returned enum fields directly.",
+        "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::RetainedVisitor; serde::de::Visitor::visit_newtype_struct(helper,$value.clone()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "cases": [
+          {
+            "input": "11",
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "text",
+                "value": [
+                  49,
+                  49
+                ]
+              }
+            }
+          },
+          {
+            "input": 11,
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "lexeme",
+                "value": "11"
+              }
+            }
+          },
+          {
+            "input": {
+              "z": [
+                11,
+                23
+              ]
+            },
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "object",
+                "entries": [
+                  [
+                    [
+                      122
+                    ],
+                    {
+                      "kind": "array",
+                      "items": [
+                        {
+                          "kind": "lexeme",
+                          "value": "11"
+                        },
+                        {
+                          "kind": "lexeme",
+                          "value": "23"
+                        }
+                      ]
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_f64",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "value",
+                {
+                  "primitive": "f64"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "generic": "E"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "E",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::Error",
+                            "args": null
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual retained native/JSON visitor arm and observe its returned enum fields directly.",
+        "call": "{ let number=f64::from_bits(u64::from_str_radix($value.as_str().unwrap(),16).unwrap()); let decoded=serde::de::Visitor::visit_f64::<serde_json::Error>({ let capture: $type = super::RetainedVisitor; capture },number); match decoded { Ok(crate::retained_json::RetainedJsonInput::Float(value))=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),Ok(_)=>serde_json::json!({\"kind\":\"wrong\"}),Err(_)=>serde_json::json!({\"kind\":\"error\"}) } }",
+        "cases": [
+          {
+            "input": "0000000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "0000000000000000"
+            }
+          },
+          {
+            "input": "8000000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "8000000000000000"
+            }
+          },
+          {
+            "input": "3ff4000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "3ff4000000000000"
+            }
+          },
+          {
+            "input": "0000000000000001",
+            "output": {
+              "kind": "float",
+              "bits": "0000000000000001"
+            }
+          },
+          {
+            "input": "7fefffffffffffff",
+            "output": {
+              "kind": "float",
+              "bits": "7fefffffffffffff"
+            }
+          },
+          {
+            "input": "7ff0000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "7ff0000000000000"
+            }
+          },
+          {
+            "input": "fff0000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "fff0000000000000"
+            }
+          },
+          {
+            "input": "7ff800000000002a",
+            "output": {
+              "kind": "float",
+              "bits": "7ff800000000002a"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "map",
+                {
+                  "generic": "A"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "A"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "A",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::MapAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual retained native/JSON visitor arm and observe its returned enum fields directly.",
+        "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::RetainedVisitor; let entries=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].as_str().unwrap().to_owned())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "cases": [
+          {
+            "input": [
+              [
+                "$serde_json::private::RawValue",
+                "-0.0"
+              ]
+            ],
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "lexeme",
+                "value": "-0.0"
+              }
+            }
+          },
+          {
+            "input": [
+              [
+                "$serde_json::private::RawValue",
+                "{\"z\":11,\"a\":23}"
+              ]
+            ],
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "object",
+                "entries": [
+                  [
+                    [
+                      122
+                    ],
+                    {
+                      "kind": "lexeme",
+                      "value": "11"
+                    }
+                  ],
+                  [
+                    [
+                      97
+                    ],
+                    {
+                      "kind": "lexeme",
+                      "value": "23"
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          {
+            "input": [
+              [
+                "wrong",
+                "11"
+              ]
+            ],
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": [
+              [
+                "$serde_json::private::RawValue",
+                "11"
+              ],
+              [
+                "extra",
+                "23"
+              ]
+            ],
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": [],
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_seq",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "seq",
+                {
+                  "generic": "A"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "A"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "A",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::SeqAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual retained native/JSON visitor arm and observe its returned enum fields directly.",
+        "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::RetainedVisitor; serde::de::Visitor::visit_seq(helper,serde::de::value::SeqDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().clone().into_iter())) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "cases": [
+          {
+            "input": [
+              "Null",
+              null
+            ],
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "null"
+              }
+            }
+          },
+          {
+            "input": [
+              "Bool",
+              true
+            ],
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "bool",
+                "value": true
+              }
+            }
+          },
+          {
+            "input": [
+              "Text",
+              [
+                55296,
+                65
+              ]
+            ],
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "text",
+                "value": [
+                  55296,
+                  65
+                ]
+              }
+            }
+          },
+          {
+            "input": [
+              "Float",
+              0
+            ],
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "float",
+                "bits": "0000000000000000"
+              }
+            }
+          },
+          {
+            "input": [
+              "Array",
+              [
+                [
+                  "Null",
+                  null
+                ],
+                [
+                  "Text",
+                  [
+                    57343
+                  ]
+                ]
+              ]
+            ],
+            "output": {
+              "ok": true,
+              "native": {
+                "kind": "array",
+                "items": [
+                  {
+                    "kind": "null"
+                  },
+                  {
+                    "kind": "text",
+                    "value": [
+                      57343
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "input": [
+              "unknown",
+              null
+            ],
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": [
+              "Text",
+              [
+                65536
+              ]
+            ],
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": [
+              "Bool",
+              true,
+              "extra"
+            ],
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_types::retained_json::codec::Payload": {
+    "shape": "union",
+    "evidence": "Private recursive native payload wrapper executes the same closed two-element tag decoder; shape and direct enum fields are tested independently.",
+    "sample": [
+      "Null",
+      null
+    ],
+    "entrypoints": [],
+    "positive": [
+      [
+        "Null",
+        null
+      ],
+      [
+        "Bool",
+        true
+      ],
+      [
+        "Text",
+        [
+          55296,
+          65
+        ]
+      ],
+      [
+        "Float",
+        0
+      ],
+      [
+        "Array",
+        [
+          [
+            "Null",
+            null
+          ],
+          [
+            "Text",
+            [
+              57343
+            ]
+          ]
+        ]
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      {},
+      [],
+      [
+        "Null"
+      ],
+      [
+        "unknown",
+        null
+      ],
+      [
+        "Text",
+        [
+          65536
+        ]
+      ],
+      [
+        "Bool",
+        true,
+        "extra"
+      ]
+    ],
+    "nativeObservation": {
+      "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>{let native=__native(&decoded.0);let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "nativeFields": [
+        "kind",
+        "native"
+      ],
+      "cases": [
+        {
+          "input": [
+            "Null",
+            null
+          ],
+          "output": {
+            "ok": true,
+            "kind": "null",
+            "native": {
+              "kind": "null"
+            }
+          }
+        },
+        {
+          "input": [
+            "Bool",
+            true
+          ],
+          "output": {
+            "ok": true,
+            "kind": "bool",
+            "native": {
+              "kind": "bool",
+              "value": true
+            }
+          }
+        },
+        {
+          "input": [
+            "Text",
+            [
+              55296,
+              65
+            ]
+          ],
+          "output": {
+            "ok": true,
+            "kind": "text",
+            "native": {
+              "kind": "text",
+              "value": [
+                55296,
+                65
+              ]
+            }
+          }
+        },
+        {
+          "input": [
+            "Float",
+            0
+          ],
+          "output": {
+            "ok": true,
+            "kind": "float",
+            "native": {
+              "kind": "float",
+              "bits": "0000000000000000"
+            }
+          }
+        },
+        {
+          "input": [
+            "Array",
+            [
+              [
+                "Null",
+                null
+              ],
+              [
+                "Text",
+                [
+                  57343
+                ]
+              ]
+            ]
+          ],
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "native": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "null"
+                },
+                {
+                  "kind": "text",
+                  "value": [
+                    57343
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "input": [
+            "unknown",
+            null
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "Text",
+            [
+              65536
+            ]
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "Bool",
+            true,
+            "extra"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::js_coercion::js_retained_string_utf16": {
+    "api": {
+      "kind": "function",
+      "name": "js_retained_string_utf16",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Canonical String(any) reads retained nodes directly and returns exact UTF16 units. Actual native Store coercion corpus independently compares to Node.",
+    "call": "{ let value:crate::retained_json::RetainedJsonInput=if let Some(units)=$value.get(\"units\"){crate::retained_json::RetainedJsonInput::Text(units.as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect())}else{crate::retained_json::RetainedJsonInput::from($value[\"value\"].clone())};match $type(&value){Ok(units)=>serde_json::json!({\"ok\":true,\"units\":units}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})} }",
+    "cases": [
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            110,
+            117,
+            108,
+            108
+          ]
+        }
+      },
+      {
+        "input": {
+          "units": [
+            55296,
+            65,
+            57343
+          ]
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            55296,
+            65,
+            57343
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null,
+            7
+          ]
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            44,
+            55
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": null
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let value:crate::retained_json::RetainedJsonInput=if let Some(units)=$value.get(\"units\"){crate::retained_json::RetainedJsonInput::Text(units.as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect())}else{crate::retained_json::RetainedJsonInput::from($value[\"value\"].clone())};match $type(&value){Ok(units)=>serde_json::json!({\"ok\":true,\"units\":units}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})} }",
+      "cases": [
+        {
+          "input": {
+            "value": null
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              110,
+              117,
+              108,
+              108
+            ]
+          }
+        },
+        {
+          "input": {
+            "units": [
+              55296,
+              65,
+              57343
+            ]
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              55296,
+              65,
+              57343
+            ]
+          }
+        },
+        {
+          "input": {
+            "value": [
+              null,
+              7
+            ]
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              44,
+              55
+            ]
+          }
+        },
+        {
+          "input": {
+            "value": {
+              "toString": null
+            }
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      ],
+      "nativeFields": [
+        "ok",
+        "units"
+      ]
+    }
+  },
+  "safe_cex_types::retained_json::writer::number": {
+    "api": {
+      "kind": "function",
+      "name": "number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Single canonical retained JSON writer moved unchanged below Num; actual Node writer corpus verifies numeric spelling, key order and every UTF16 unit.",
+    "reason": "Outbound-only rendering of an already captured node or native scalar into a mutable output string. It neither admits nor decodes input data."
+  },
+  "safe_cex_types::retained_json::writer::quoted_utf16": {
+    "api": {
+      "kind": "function",
+      "name": "quoted_utf16",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Single canonical retained JSON writer moved unchanged below Num; actual Node writer corpus verifies numeric spelling, key order and every UTF16 unit.",
+    "reason": "Outbound-only rendering of an already captured node or native scalar into a mutable output string. It neither admits nor decodes input data."
+  },
+  "safe_cex_types::retained_json::writer::write_retained": {
+    "api": {
+      "kind": "function",
+      "name": "write_retained",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Single canonical retained JSON writer moved unchanged below Num; actual Node writer corpus verifies numeric spelling, key order and every UTF16 unit.",
+    "reason": "Outbound-only rendering of an already captured node or native scalar into a mutable output string. It neither admits nor decodes input data."
   }
 }

@@ -270,3 +270,10 @@ to index and requires a compiled native assertion failure and exact restored pas
 Held HTTP fixtures use the shared wake-aware Release gate. The registry native
 listen-key witness holds a real reqwest response across the old socket Close
 acknowledgement and verifies one replacement dial after release.
+
+Opaque info uses RetainedJsonInput from HTTP/private-frame ingestion through
+mapping and Store. Data reads, amendment, placement and order-history responses
+share this retained carrier; only consumed typed fields perform native coercion.
+The real NativeRuntime WebSocket regression compares the stored raw order with
+maintained TypeScript using numeric bits and UTF-16 units. Per-row asset/leverage
+admission and visible refusal remain unchanged.

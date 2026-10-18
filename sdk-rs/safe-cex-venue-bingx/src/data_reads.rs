@@ -4,18 +4,17 @@ use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_num::numeric_ingress::{
-    JsNumberInput, JsNumberOutput, js_deserialize_passthrough, js_value_as_f64,
-};
+use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_num::{JsPrimitive, js_string, js_truthy, parse_float};
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::RestRequest;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Balance, FetchedLeverage, MarginType, Market, MarketLimits, MarketLimitsAmount,
     MarketLimitsLeverage, MarketPrecision, Order, OrderStatus, Position, PositionMode,
     PositionSide, Ticker,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{cell::Cell, rc::Rc};
 
@@ -36,25 +35,15 @@ pub trait ReadTransport {
 #[derive(Clone, Debug, Serialize)]
 pub struct RawTickers {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub dailys: Option<Value>,
+    pub dailys: Option<Input>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub prices: Option<Value>,
+    pub prices: Option<Input>,
 }
 #[derive(Debug, Serialize)]
 pub struct Validation {
     pub error: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub balance: Option<Balance>,
-}
-#[derive(Serialize)]
-#[serde(transparent)]
-struct Response {
-    value: Value,
-}
-impl JsNumberOutput for Response {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self, struct {} passthrough {value});
-    }
 }
 pub struct BingxDataReads {
     pub base: Rc<BaseExchange>,
@@ -66,42 +55,50 @@ fn type_error(message: impl Into<String>) -> ExchangeError {
     error.name = "TypeError".into();
     error
 }
-fn field<'a>(value: Option<&'a Value>, key: &str) -> Result<Option<&'a Value>, ExchangeError> {
+fn field<'a>(value: Option<&'a Input>, key: &str) -> Result<Option<&'a Input>, ExchangeError> {
     match value {
         None => Err(type_error(format!(
             "Cannot read properties of undefined (reading '{key}')"
         ))),
-        Some(Value::Null) => Err(type_error(format!(
+        Some(Input::Null | Input::Undefined) => Err(type_error(format!(
             "Cannot read properties of null (reading '{key}')"
         ))),
         Some(value) => Ok(value.get(key)),
     }
 }
-fn text(value: Option<&Value>) -> Result<String, ExchangeError> {
-    js_string(value).map_err(|error| type_error(error.message))
+fn text(value: Option<&Input>) -> Result<String, ExchangeError> {
+    safe_cex_num::js_retained_string(value).map_err(|error| type_error(error.message))
 }
-fn float(value: Option<&Value>) -> Result<f64, ExchangeError> {
-    Ok(parse_float(&text(value)?))
+fn float(value: Option<&Input>) -> Result<f64, ExchangeError> {
+    safe_cex_num::js_retained_parse_float(value).map_err(|e| type_error(e.message))
 }
-fn alias<'a>(value: &'a Value, key: &str) -> Result<Option<&'a Value>, ExchangeError> {
-    use safe_cex_num::get_key::GetKeyUnknownValue;
-    match safe_cex_num::get_key::v_unknown(Some(value), key)
-        .map_err(|error| type_error(error.to_string()))?
+fn alias<'a>(value: &'a Input, key: &str) -> Result<Option<&'a Input>, ExchangeError> {
+    let native = safe_cex_exchange::js_runtime::value::from_retained_input(value.clone());
+    if !safe_cex_exchange::js_runtime::library::in_operator(&native, key)
+        .map_err(|e| e.to_exchange_error())?
     {
-        GetKeyUnknownValue::Json(value) => Ok(Some(value)),
-        GetKeyUnknownValue::Undefined => Ok(None),
-        _ => Err(type_error("typed read field refuses inherited callable")),
+        return Ok(None);
     }
-}
-fn strict_string(value: Option<&Value>, field: &str) -> Result<String, ExchangeError> {
     value
-        .and_then(Value::as_str)
-        .map(str::to_owned)
+        .get(key)
+        .map(Some)
+        .ok_or_else(|| type_error("typed read field refuses inherited callable"))
+}
+fn describe(value: Option<&Input>) -> Result<String, ExchangeError> {
+    value
+        .map_or(Ok(None), Input::json_stringify)
+        .map(|value| value.unwrap_or_else(|| "undefined".into()))
+        .map_err(|error| type_error(error.message))
+}
+fn strict_string(value: Option<&Input>, field: &str) -> Result<String, ExchangeError> {
+    value
+        .and_then(Input::as_text)
+        .and_then(|v| String::from_utf16(v).ok())
         .ok_or_else(|| type_error(format!("typed {field} requires a string")))
 }
-fn strict_number(value: Option<&Value>, field: &str) -> Result<f64, ExchangeError> {
+fn strict_number(value: Option<&Input>, field: &str) -> Result<f64, ExchangeError> {
     value
-        .and_then(js_value_as_f64)
+        .and_then(Input::as_f64)
         .ok_or_else(|| type_error(format!("typed {field} requires a number")))
 }
 fn error_message(error: &ExchangeError) -> Result<String, ExchangeError> {
@@ -111,7 +108,7 @@ fn error_message(error: &ExchangeError) -> Result<String, ExchangeError> {
         .and_then(|r| r.get("data"))
         .and_then(|d| d.get("msg"));
     if js_truthy(msg) {
-        text(msg)
+        js_string(msg).map_err(|e| type_error(e.message))
     } else {
         Ok(error.message.clone())
     }
@@ -124,7 +121,7 @@ impl BingxDataReads {
             account_position_mode: Cell::new(None),
         }
     }
-    async fn configured_request(&self, request: RestRequest) -> Result<Value, ExchangeError> {
+    async fn configured_request(&self, request: RestRequest) -> Result<Input, ExchangeError> {
         let response = self.transport.send(request).await;
         let mut yielded = false;
         std::future::poll_fn(|cx| {
@@ -138,13 +135,10 @@ impl BingxDataReads {
         })
         .await;
         response?
-            .decode_with(|decoder| {
-                js_deserialize_passthrough(decoder).map(|value| Response { value })
-            })
-            .map(|response| response.value)
+            .decode_with(Input::deserialize)
             .map_err(|error| ExchangeError::new(error.to_string()))
     }
-    async fn request(&self, endpoint: &str, params: Option<Value>) -> Result<Value, ExchangeError> {
+    async fn request(&self, endpoint: &str, params: Option<Value>) -> Result<Input, ExchangeError> {
         self.configured_request(RestRequest {
             method: "GET".into(),
             url: endpoint.into(),
@@ -153,7 +147,7 @@ impl BingxDataReads {
         })
         .await
     }
-    async fn post(&self, endpoint: &str, body: Value) -> Result<Value, ExchangeError> {
+    async fn post(&self, endpoint: &str, body: Value) -> Result<Input, ExchangeError> {
         self.configured_request(RestRequest {
             method: "POST".into(),
             url: endpoint.into(),
@@ -165,8 +159,8 @@ impl BingxDataReads {
         })
         .await
     }
-    fn check_code(response: &Value) -> Result<(), ExchangeError> {
-        if field(Some(response), "code")?.and_then(js_value_as_f64) == Some(0.0) {
+    fn check_code(response: &Input) -> Result<(), ExchangeError> {
+        if field(Some(response), "code")?.and_then(Input::as_f64) == Some(0.0) {
             Ok(())
         } else {
             Err(ExchangeError::new(text(response.get("msg"))?))
@@ -176,7 +170,7 @@ impl BingxDataReads {
         self.base
             .emit_and_log_error(ExchangeErrorInput::Message(message), label, None)
     }
-    async fn primary_balance(&self) -> Result<Value, ExchangeError> {
+    async fn primary_balance(&self) -> Result<Input, ExchangeError> {
         crate::account_reads::fetch_primary_balance_data(|request| self.transport.send(request))
             .await
     }
@@ -253,7 +247,7 @@ impl BingxDataReads {
         let result = async {
             let response = self.request(crate::constants::ENDPOINTS[1].1, None).await?;
             let rows = field(Some(&response), "data")?
-                .and_then(Value::as_array)
+                .and_then(Input::as_array)
                 .ok_or_else(|| type_error("symbols.map is not a function"))?;
             let prepared = rows
                 .iter()
@@ -261,13 +255,13 @@ impl BingxDataReads {
                     let base = alias(row, "asset")?.cloned();
                     let quote = alias(row, "currency")?.cloned();
                     let id = match field(Some(row), "symbol")? {
-                        Some(Value::String(id)) => id.clone(),
+                        Some(v @ Input::Text(_)) => strict_string(Some(v), "symbol")?,
                         None => {
                             return Err(type_error(
                                 "Cannot read properties of undefined (reading 'replace')",
                             ));
                         }
-                        Some(Value::Null) => {
+                        Some(Input::Null | Input::Undefined) => {
                             return Err(type_error(
                                 "Cannot read properties of null (reading 'replace')",
                             ));
@@ -291,7 +285,7 @@ impl BingxDataReads {
                             id,
                             base: String::new(),
                             quote: String::new(),
-                            active: row.get("status").and_then(js_value_as_f64) == Some(1.0),
+                            active: row.get("status").and_then(Input::as_f64) == Some(1.0),
                             precision: MarketPrecision { amount, price },
                             limits: MarketLimits {
                                 amount: MarketLimitsAmount {
@@ -327,14 +321,11 @@ impl BingxDataReads {
             for (index, (mut market, base, quote, leverage)) in prepared.into_iter().enumerate() {
                 let invalid = [("base", base.as_ref()), ("quote", quote.as_ref())]
                     .into_iter()
-                    .filter(|(_, value)| value.and_then(Value::as_str).is_none())
+                    .filter(|(_, value)| value.and_then(Input::as_text).and_then(|v| String::from_utf16(v).ok()).as_deref().is_none())
                     .map(|(field, value)| {
-                        format!(
-                            "{field}={}",
-                            value.map_or_else(|| "undefined".into(), Value::to_string)
-                        )
+                        Ok(format!("{field}={}", describe(value)?))
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<Result<Vec<_>, ExchangeError>>()?;
                 if !invalid.is_empty() {
                     refusals.push(format!(
                         "Refused BingX market row {index} symbol={}: {}: expected string",
@@ -345,11 +336,11 @@ impl BingxDataReads {
                 }
                 market.base = strict_string(base.as_ref(), "base")?;
                 market.quote = strict_string(quote.as_ref(), "quote")?;
-                if js_truthy(leverage.as_ref()) {
+                if leverage.as_ref().is_some_and(Input::is_truthy) {
                     market.limits.leverage.max = match strict_number(leverage.as_ref(), "max leverage") {
                         Ok(value) => value,
                         Err(cause) => {
-                            let value = leverage.as_ref().map_or_else(|| "undefined".into(), Value::to_string);
+                            let value = describe(leverage.as_ref())?;
                             refusals.push(format!("Refused BingX market row {index} symbol={}: limits.leverage.max={value}: {}", market.id, cause.message));
                             continue;
                         }
@@ -389,8 +380,8 @@ impl BingxDataReads {
             Err(error) => {
                 self.report(error_message(&error)?, None)?;
                 Ok(RawTickers {
-                    dailys: Some(json!([])),
-                    prices: Some(json!([])),
+                    dailys: Some(Input::Array(vec![])),
+                    prices: Some(Input::Array(vec![])),
                 })
             }
         }
@@ -399,7 +390,7 @@ impl BingxDataReads {
         let rows = raw
             .dailys
             .as_ref()
-            .and_then(Value::as_array)
+            .and_then(Input::as_array)
             .ok_or_else(|| type_error("dailys.reduce is not a function"))?;
         let mut tickers = Vec::new();
         for daily in rows {
@@ -409,7 +400,7 @@ impl BingxDataReads {
             let prices = raw
                 .prices
                 .as_ref()
-                .and_then(Value::as_array)
+                .and_then(Input::as_array)
                 .ok_or_else(|| type_error("prices.find is not a function"))?;
             let mut price = None;
             for candidate in prices {
@@ -490,7 +481,7 @@ impl BingxDataReads {
                     Some(json!({"symbol": self.venue_symbol(symbol)})),
                 )
                 .await?;
-            if field(Some(&response), "code")?.and_then(js_value_as_f64) != Some(0.0) {
+            if field(Some(&response), "code")?.and_then(Input::as_f64) != Some(0.0) {
                 return Err(ExchangeError::new(text(response.get("msg"))?));
             }
             let data = field(Some(&response), "data")?;
@@ -535,11 +526,14 @@ impl BingxDataReads {
                     Some(json!({"symbol": self.venue_symbol(symbol)})),
                 )
                 .await?;
-            if field(Some(&response), "code")?.and_then(js_value_as_f64) != Some(0.0) {
+            if field(Some(&response), "code")?.and_then(Input::as_f64) != Some(0.0) {
                 return Err(ExchangeError::new(text(response.get("msg"))?));
             }
             Ok(
-                if field(field(Some(&response), "data")?, "marginType")?.and_then(Value::as_str)
+                if field(field(Some(&response), "data")?, "marginType")?
+                    .and_then(Input::as_text)
+                    .and_then(|v| String::from_utf16(v).ok())
+                    .as_deref()
                     == Some("ISOLATED")
                 {
                     MarginType::Isolated
@@ -567,13 +561,15 @@ impl BingxDataReads {
             return Ok(mode);
         }
         let response = self.request(crate::constants::ENDPOINTS[6].1, None).await?;
-        if field(Some(&response), "code")?.and_then(js_value_as_f64) != Some(0.0) {
+        if field(Some(&response), "code")?.and_then(Input::as_f64) != Some(0.0) {
             let message = text(response.get("msg"))?;
             self.report(message.clone(), None)?;
             return Err(ExchangeError::new(message));
         }
         let mode = if field(field(Some(&response), "data")?, "dualSidePosition")?
-            .and_then(Value::as_str)
+            .and_then(Input::as_text)
+            .and_then(|v| String::from_utf16(v).ok())
+            .as_deref()
             == Some("true")
         {
             PositionMode::Hedged
@@ -623,12 +619,12 @@ impl BingxDataReads {
     pub async fn fetch_open_positions(&self) -> Result<Vec<Position>, ExchangeError> {
         let result = async {
             let response = self.request(crate::constants::ENDPOINTS[2].1, None).await?;
-            if field(Some(&response), "code")?.and_then(js_value_as_f64) != Some(0.0) {
+            if field(Some(&response), "code")?.and_then(Input::as_f64) != Some(0.0) {
                 self.report(text(response.get("msg"))?, None)?;
                 return Ok(self.base.store.positions().to_vec());
             }
             let rows = field(Some(&response), "data")?
-                .and_then(Value::as_array)
+                .and_then(Input::as_array)
                 .ok_or_else(|| type_error("data.data.filter is not a function"))?;
             let mut supported = Vec::new();
             for row in rows {
@@ -648,7 +644,7 @@ impl BingxDataReads {
                 let contracts = float(alias(row, "positionAmt")?)?;
                 let upnl = float(alias(row, "unrealizedProfit")?)?;
                 let raw_side = text(alias(row, "positionSide")?)?;
-                let margin_type = if js_truthy(alias(row, "isolated")?) {
+                let margin_type = if alias(row, "isolated")?.is_some_and(Input::is_truthy) {
                     MarginType::Isolated
                 } else {
                     MarginType::Cross
@@ -670,15 +666,15 @@ impl BingxDataReads {
                 let symbol =
                     strict_string(row.get("symbol"), "position symbol")?.replacen('-', "", 1);
                 let notional = contracts.abs() * entry_price + upnl;
-                let leverage = match row.get("leverage").and_then(js_value_as_f64) {
+                let leverage = match row.get("leverage").and_then(Input::as_f64) {
                     Some(number) => number,
                     None => float(row.get("leverage"))?,
                 };
                 let isolated = alias(row, "isolatedMargin")?;
                 let initial = alias(row, "initialMargin")?;
-                let isolated_margin = if js_truthy(isolated) {
+                let isolated_margin = if isolated.is_some_and(Input::is_truthy) {
                     float(isolated)?
-                } else if js_truthy(initial) {
+                } else if initial.is_some_and(Input::is_truthy) {
                     float(initial)?
                 } else {
                     0.0
@@ -1026,7 +1022,7 @@ impl BingxDataReads {
                                 ..Default::default()
                             })
                             .await?;
-                        let code = field(Some(&response), "code")?.and_then(js_value_as_f64);
+                        let code = field(Some(&response), "code")?.and_then(Input::as_f64);
                         if code == Some(0.0) || code == Some(80016.0) {
                             Ok::<_, ExchangeError>(true)
                         } else {

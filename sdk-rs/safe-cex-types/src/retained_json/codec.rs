@@ -43,33 +43,43 @@ pub fn deserialize_native_payload<'de, D: Deserializer<'de>>(d: D) -> Result<Inp
             let tag: String = seq
                 .next_element()?
                 .ok_or_else(|| de::Error::custom("missing retained tag"))?;
-            macro_rules! next {
-                ($ty:ty) => {
-                    seq.next_element::<$ty>()?
-                        .ok_or_else(|| de::Error::custom("missing retained payload"))?
-                };
-            }
             let value = match tag.as_str() {
                 "Undefined" => {
-                    next!(());
+                    seq.next_element::<()>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?;
                     Input::Undefined
                 }
                 "Null" => {
-                    next!(());
+                    seq.next_element::<()>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?;
                     Input::Null
                 }
-                "Bool" => Input::Bool(next!(bool)),
-                "Text" => Input::Text(units(next!(Vec<f64>))?),
-                "Lexeme" => Input::Lexeme(next!(String)),
-                "Float" => Input::Float(next!(f64)),
+                "Bool" => Input::Bool(
+                    seq.next_element::<bool>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?,
+                ),
+                "Text" => Input::Text(units(
+                    seq.next_element::<Vec<f64>>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?,
+                )?),
+                "Lexeme" => Input::Lexeme(
+                    seq.next_element::<String>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?,
+                ),
+                "Float" => Input::Float(
+                    seq.next_element::<f64>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?,
+                ),
                 "Array" => Input::Array(
-                    next!(Vec<Payload>)
+                    seq.next_element::<Vec<Payload>>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?
                         .into_iter()
                         .map(|value| value.0)
                         .collect(),
                 ),
                 "Object" => Input::Object(
-                    next!(Vec<(Vec<f64>, Payload)>)
+                    seq.next_element::<Vec<(Vec<f64>, Payload)>>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?
                         .into_iter()
                         .map(|(key, value)| Ok((units(key)?, value.0)))
                         .collect::<Result<_, A::Error>>()?,
@@ -101,30 +111,32 @@ struct NativePayload<'a>(&'a Input);
 impl Serialize for NativePayload<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut seq = s.serialize_seq(Some(2))?;
-        macro_rules! payload {
-            ($tag:literal, $value:expr) => {{
-                seq.serialize_element($tag)?;
-                seq.serialize_element($value)?;
-            }};
-        }
+        let tag = match self.0 {
+            Input::Undefined => "Undefined",
+            Input::Null => "Null",
+            Input::Bool(_) => "Bool",
+            Input::Text(_) => "Text",
+            Input::Lexeme(_) => "Lexeme",
+            Input::Float(_) => "Float",
+            Input::Array(_) => "Array",
+            Input::Object(_) => "Object",
+        };
+        seq.serialize_element(tag)?;
         match self.0 {
-            Input::Undefined => payload!("Undefined", &()),
-            Input::Null => payload!("Null", &()),
-            Input::Bool(value) => payload!("Bool", value),
-            Input::Text(value) => payload!("Text", value),
-            Input::Lexeme(value) => payload!("Lexeme", value),
-            Input::Float(value) => payload!("Float", value),
-            Input::Array(values) => payload!(
-                "Array",
-                &values.iter().map(NativePayload).collect::<Vec<_>>()
-            ),
-            Input::Object(values) => payload!(
-                "Object",
+            Input::Undefined | Input::Null => seq.serialize_element(&())?,
+            Input::Bool(value) => seq.serialize_element(value)?,
+            Input::Text(value) => seq.serialize_element(value)?,
+            Input::Lexeme(value) => seq.serialize_element(value)?,
+            Input::Float(value) => seq.serialize_element(value)?,
+            Input::Array(values) => {
+                seq.serialize_element(&values.iter().map(NativePayload).collect::<Vec<_>>())?
+            }
+            Input::Object(values) => seq.serialize_element(
                 &values
                     .iter()
                     .map(|(key, value)| (key, NativePayload(value)))
-                    .collect::<Vec<_>>()
-            ),
+                    .collect::<Vec<_>>(),
+            )?,
         }
         seq.end()
     }

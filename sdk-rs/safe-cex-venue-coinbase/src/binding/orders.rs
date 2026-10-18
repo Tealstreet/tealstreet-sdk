@@ -18,6 +18,7 @@ use crate::{
 };
 use indexmap::IndexMap;
 use safe_cex_exchange::js_runtime::value::{from_typed, to_typed};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Market, Order, OrderStatus, PreparedOrderOpts};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
@@ -66,7 +67,10 @@ impl Host {
     }
     pub(super) fn synced_order(order: Order) -> SyncedOrderRoot {
         let mut fields = order;
-        let info = Rc::new(RefCell::new(fields.info.take().unwrap_or(Value::Null)));
+        let info =
+            Rc::new(RefCell::new(fields.info.take().unwrap_or(
+                safe_cex_types::retained_json::RetainedJsonInput::Null,
+            )));
         Rc::new(RefCell::new(SyncedOrder { fields, info }))
     }
     pub(super) fn native_orders(orders: &SyncedOrders) -> Vec<Order> {
@@ -191,10 +195,14 @@ impl CoinbaseOrderHost for OrderHost {
         let request = self.host.request(
             "post",
             endpoint,
-            Some(serde_json::to_value(payload).expect("outbound create DTO")),
+            Some(
+                serde_json::to_value(payload)
+                    .expect("outbound create DTO")
+                    .into(),
+            ),
         );
         let (promise, resolve) = Promise::pending();
-        request.observe(&self.host.shared.extra.spawn, move |result| { resolve.resolve(result.map_err(order_error).and_then(|data| data.as_object().cloned().map(CoinbaseOrderResponse::from_json).ok_or_else(|| CoinbaseOrderFailure { value: Some(json!({"name":"TypeError","message":"Coinbase create response is not a record"})) }))); });
+        request.observe(&self.host.shared.extra.spawn, move |result| { resolve.resolve(result.map_err(order_error).and_then(|data| data.as_object().map(|fields| CoinbaseOrderResponse::from_retained(fields.to_vec())).ok_or_else(|| CoinbaseOrderFailure { value: Some(json!({"name":"TypeError","message":"Coinbase create response is not a record"})) }))); });
         promise
     }
     fn post_cancel_orders(
@@ -202,9 +210,11 @@ impl CoinbaseOrderHost for OrderHost {
         endpoint: &'static str,
         ids: &[String],
     ) -> Promise<Result<(), CoinbaseOrderFailure>> {
-        let request = self
-            .host
-            .request("post", endpoint, Some(json!({"order_ids":ids})));
+        let request = self.host.request(
+            "post",
+            endpoint,
+            Some(Input::from(json!({"order_ids":ids}))),
+        );
         let (promise, resolve) = Promise::pending();
         request.observe(&self.host.shared.extra.spawn, move |result| {
             resolve.resolve(result.map(|_| ()).map_err(order_error));
@@ -215,7 +225,7 @@ impl CoinbaseOrderHost for OrderHost {
         &mut self,
         order: Rc<CoinbaseOptimisticOrder>,
     ) -> Result<(), CoinbaseOrderFailure> {
-        let info = Value::Object(
+        let info = safe_cex_types::retained_json::RetainedJsonInput::Object(
             order
                 .info
                 .fields
@@ -297,23 +307,31 @@ impl OrderSnapshotHost for Host {
         endpoint: &'static str,
         query: OrderPageQuery,
     ) -> OrderSyncAsync<OrderPage> {
-        let mut params = serde_json::Map::from_iter([
-            ("order_status".into(), json!(query.order_status)),
-            ("limit".into(), json!(query.limit)),
+        let mut params = Vec::from_iter([
+            (
+                "order_status".encode_utf16().collect(),
+                Input::from(json!(query.order_status)),
+            ),
+            ("limit".encode_utf16().collect(), Input::Float(query.limit)),
         ]);
         for (key, value) in [
-            ("product_type", query.product_type.map(Value::from)),
+            (
+                "product_type",
+                query.product_type.map(|v| Input::from(Value::from(v))),
+            ),
             (
                 "contract_expiry_type",
-                query.contract_expiry_type.map(Value::from),
+                query
+                    .contract_expiry_type
+                    .map(|v| Input::from(Value::from(v))),
             ),
             ("cursor", query.cursor),
         ] {
             if let Some(value) = value {
-                params.insert(key.into(), value);
+                params.push((key.encode_utf16().collect(), value));
             }
         }
-        let result = self.request("get", endpoint, Some(Value::Object(params)));
+        let result = self.request("get", endpoint, Some(Input::Object(params)));
         Ok(self.promise(async move {
             let data = result.await?;
             Ok(OrderPage {
@@ -340,7 +358,7 @@ impl OrderSnapshotHost for Host {
         now: f64,
     ) -> Result<Option<SyncedOrderRoot>, PortfolioFailure> {
         Ok(
-            crate::orders::map_coinbase_rest_order(&raw.borrow(), &market.borrow(), now).map(
+            crate::orders::map_coinbase_rest_order(&*raw.borrow(), &market.borrow(), now).map(
                 |mut fields| {
                     fields.info = (None).into();
                     Rc::new(RefCell::new(SyncedOrder {
@@ -418,11 +436,15 @@ impl OrderEditHost for Host {
         &self,
         endpoint: &'static str,
         payload: crate::types::EditOrderRequest,
-    ) -> EditAsync<Value> {
+    ) -> EditAsync<safe_cex_types::retained_json::RetainedJsonInput> {
         Ok(self.request(
             "post",
             endpoint,
-            Some(serde_json::to_value(payload).expect("outbound edit DTO")),
+            Some(
+                serde_json::to_value(payload)
+                    .expect("outbound edit DTO")
+                    .into(),
+            ),
         ))
     }
     fn schedule_reconciliation(&self, reason: &'static str) -> Result<(), PortfolioFailure> {
