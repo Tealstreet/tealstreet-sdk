@@ -1247,16 +1247,37 @@ fn native_rest_boundaries() {
             let actual = ready(fetch_markets(&s, &adapter, &h, || "cache-id".into())).unwrap();
             assert_eq!(actual.len(), 1);
             assert_eq!(actual[0].id, models["market"]["id"]);
-            assert!(
-                actual[0]
-                    .info
-                    .as_ref()
-                    .unwrap()
-                    .get("stored")
-                    .unwrap()
-                    .as_bool()
-                    .unwrap()
-            );
+            if index == 0 {
+                // The source parseFloat("bad") result is a usable native NaN.
+                assert!(actual[0].contract_size.unwrap().is_nan());
+                let info = actual[0].info.as_ref().unwrap();
+                assert!(
+                    info.get("contractValue")
+                        .unwrap()
+                        .as_f64()
+                        .unwrap()
+                        .is_nan()
+                );
+                assert!(
+                    info.get("stored").is_none(),
+                    "fresh row, no cached fallback"
+                );
+                assert!(
+                    logs.borrow().is_empty(),
+                    "no error for retained native info"
+                );
+            } else {
+                assert!(
+                    actual[0]
+                        .info
+                        .as_ref()
+                        .unwrap()
+                        .get("stored")
+                        .unwrap()
+                        .as_bool()
+                        .unwrap()
+                );
+            }
         } else {
             let opts: OHLCVOptions =
                 serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m","to":9e15}))
@@ -1268,8 +1289,8 @@ fn native_rest_boundaries() {
     }
     assert_eq!(
         logs.borrow().len(),
-        3,
-        "each boundary is explicit, not silently normalized"
+        2,
+        "strict base field and invalid time report; native NaN info remains usable"
     );
     let sort_input = json!({"body":{"data":[["3000","1","2","0","1","x","y","3"],["2000","1","2","0","1","x","y","3"],["bad","1","2","0","1","x","y","3"],["1000","1","2","0","1","x","y","3"]]}});
     let adapter = ReadAdapter {
