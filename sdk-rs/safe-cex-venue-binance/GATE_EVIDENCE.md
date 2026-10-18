@@ -1850,6 +1850,11 @@ Merged extractor text explicitly reports `Would update 0 manifests; 0 added, 0 o
 
 ## Futures and PM order throttle/refresh slice (2026-10-14)
 
+> Historical helper-only evidence: the duplicate generic module, oracle and tests
+> were retired on 2026-10-18 after confirming no production caller. The surviving
+> assembled class now has the independent native `order_throttle_binding` witness
+> and `live-order-throttle-controls.py`; the figures below describe the old helper.
+
 Moved **4 pending -> ported, 0 -> divergent**, keyed tomllib census over the
 Binance manifest directory: **133/22/131 -> 137/22/127**. Immediate reviewed
 integration parent actually built on: `cc3d25150b320656935009943f72d17b27e380a0` (PR7508).
