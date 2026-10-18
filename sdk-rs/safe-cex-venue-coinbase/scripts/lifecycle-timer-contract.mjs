@@ -28,11 +28,11 @@ assert.deepEqual(results.map(row => row.name).sort(), names);
 if (args.includes('--expect-unclassified')) {
   assert.ok(results.every(row => row.failures.length === 1 && row.failures.every(failure =>
     failure.includes('public alias needs an accepted-set contract'))));
-  console.log('LifecycleTimer fail their missing native contracts by name.');
+  console.log('LifecycleTimer fails its missing native contract by name.');
 } else {
   for (const result of results) {
     assert.deepEqual(result.failures, [], result.name);
     assert.equal(result.classificationOnly, true, `${result.name}: native timer handle capability`);
   }
-  console.log('LifecycleTimer pass their native compiler classifications.');
+  console.log('LifecycleTimer passes its native compiler classification.');
 }

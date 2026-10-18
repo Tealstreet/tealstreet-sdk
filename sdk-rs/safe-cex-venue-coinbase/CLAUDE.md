@@ -334,3 +334,11 @@ it observes callback/frame/book roots, live iteration, errors and numeric bits.
 price projection independently, requires named compiled failures, restores exact
 source bytes and reruns the corresponding witness. This is a finite capability
 census, not full transport or all-callback coverage.
+
+Lifecycle timer roots retain the original shared-runtime Js Timeout handle.
+The native host passes that exact value from setTimeout to clearTimeout; JSON
+views cannot preserve its cancellation identity. Both Advanced and Spot native
+class witnesses cancel a real timer and retain an independent uncancelled timer.
+`lifecycle-timer-controls.py` restores the JSON-roundtrip defect, requires both
+named native failures, restores exact source bytes and reruns both witnesses.
+The fixed timer alias has a specific non-decoder capability receipt.

@@ -33161,5 +33161,44 @@
     },
     "reason": "Shared ordered array of native function callbacks; the production TickHost adapter captures actual public class callbacks and invokes them with native frames.",
     "evidence": "Fresh canonical compiler/artifact/declaration discovery authenticates the exact alias and native trait detection must reject this classification if Deserialize becomes available. tests/support/public_stream_alias_native.rs executes actual Advanced/Spot construction with NativeRuntime and production HTTP dependency, public frame dispatcher, production TickHost adapter, and native_book Store projection without host stubs. It inspects shared callback/frame/book roots, live callback iteration, error Rc identity, UTF16, undefined and numeric bits before reporting. Scope is these seven capability roles, not transport integration or every source callback. public-stream-alias-controls.py independently changes actual dispatcher iteration and book price projection, requires named compiled assertion failures, restores exact bytes and reruns the same witnesses."
+  },
+  "safe_cex_venue_coinbase::exchange_lifecycle::LifecycleTimer": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Mutable root for the original shared-runtime Js Timeout object. Cancellation must preserve that native handle identity; serialized JSON is not a timer token or decoder.",
+    "evidence": "The fresh canonical compiler/artifact/declaration probe authenticates the exact Js-backed alias and native trait detection refuses unreviewed decoder capabilities. tests/support/lifecycle_timer_native.rs constructs both real Coinbase variants with NativeRuntime and the production HTTP dependency, creates/cancels actual host timers, verifies no cancelled callback, and observes one uncancelled callback. The same expectation compiled RED on the old production JSON boundary. lifecycle-timer-controls.py independently reintroduces the real JSON roundtrip, requires both named compiled variant failures, restores exact source bytes and requires both GREEN. Scope is the actual Coinbase host timer capability, not arbitrary JSON timer records or other venue implementations."
   }
 }
