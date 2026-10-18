@@ -103,12 +103,20 @@ fn inherited<T: 'static>() -> ExchangeFuture<'static, T> {
     // 1138-1140 each reject with this exact Error.
     Box::pin(async { Err(ExchangeError::new("Not implemented")) })
 }
-fn ids(values: Vec<Option<serde_json::Value>>) -> Result<Vec<String>, ExchangeError> {
+fn ids(
+    values: Vec<Option<safe_cex_types::retained_json::RetainedJsonInput>>,
+) -> Result<Vec<String>, ExchangeError> {
     values
         .into_iter()
         .map(|id| match id {
-            Some(serde_json::Value::String(id)) => Ok(id),
-            Some(serde_json::Value::Number(id)) => Ok(id.to_string()),
+            Some(safe_cex_types::retained_json::RetainedJsonInput::Text(units)) => {
+                String::from_utf16(&units)
+                    .map_err(|_| ExchangeError::new("BingX typed order id requires UTF8"))
+            }
+            Some(
+                value @ (safe_cex_types::retained_json::RetainedJsonInput::Float(_)
+                | safe_cex_types::retained_json::RetainedJsonInput::Lexeme(_)),
+            ) => Ok(safe_cex_num::js_number_string(value.as_f64().unwrap())),
             _ => Err(ExchangeError::new(
                 "BingX typed order result requires an order id",
             )),
@@ -273,3 +281,8 @@ impl Exchange for BingxExchange {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/retained_info_native.rs"]
+mod retained_info_native;

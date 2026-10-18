@@ -7,18 +7,18 @@ use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
     runtime::{ExchangeError, ExchangeFuture, LogSeverity},
 };
-use safe_cex_num::numeric_ingress::{JsNumberOutput, js_deserialize_passthrough, js_value_as_f64};
 use safe_cex_num::{
-    JsJsonValue, js_date_parse, js_json_stringify, js_number, js_string, js_time_clip, js_truthy,
-    math_min, parse_float, parse_int,
+    JsJsonValue, js_date_parse, js_json_stringify, js_retained_number, js_retained_string,
+    js_time_clip, js_truthy, math_min, parse_float, parse_int,
 };
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::RestRequest;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Candle, Execution, ExecutionsOptions, OHLCVOptions, Order, OrderSide, OrderType,
     retained_json::RetainedJsonInput,
 };
-use serde::Serialize;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{rc::Rc, task::Poll};
 pub trait HistoryHost {
@@ -37,29 +37,25 @@ pub struct BingxReadHistory {
     pub reads: Rc<BingxDataReads>,
     pub host: Rc<dyn HistoryHost>,
 }
-#[derive(Serialize)]
-#[serde(transparent)]
-struct Response {
-    value: Value,
-}
-impl JsNumberOutput for Response {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self,struct{} passthrough{value});
-    }
-}
 fn error(message: impl Into<String>) -> ExchangeError {
     let mut e = ExchangeError::new(message);
     e.name = "TypeError".into();
     e
 }
-fn text(v: Option<&Value>) -> Result<String, ExchangeError> {
-    js_string(v).map_err(|e| error(e.message))
+fn text(v: Option<&Input>) -> Result<String, ExchangeError> {
+    js_retained_string(v).map_err(|e| error(e.message))
 }
-fn float(v: Option<&Value>) -> Result<f64, ExchangeError> {
+fn float(v: Option<&Input>) -> Result<f64, ExchangeError> {
     Ok(parse_float(&text(v)?))
 }
-fn number(v: Option<&Value>) -> Result<f64, ExchangeError> {
-    js_number(v).map_err(|e| error(e.message))
+fn number(v: Option<&Input>) -> Result<f64, ExchangeError> {
+    js_retained_number(v).map_err(|e| error(e.message))
+}
+fn input_text(value: &Input) -> Option<String> {
+    match value {
+        Input::Text(units) => String::from_utf16(units).ok(),
+        _ => None,
+    }
 }
 fn truthy(n: f64) -> bool {
     n != 0.0 && !n.is_nan()
@@ -69,12 +65,12 @@ fn json_number(n: f64) -> Result<Value, ExchangeError> {
         .into_value()
         .map_err(|_| error("BingX typed history query refuses NaN"))
 }
-fn pick<'a>(row: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+fn pick<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
-        .find_map(|k| row.get(*k).filter(|v| js_truthy(Some(v))))
+        .find_map(|k| row.get(k).filter(|v| v.is_truthy()))
 }
-fn stringify(v: &Value) -> Result<String, ExchangeError> {
-    js_json_stringify(&JsJsonValue::from(v.clone()))
+fn stringify(v: &Input) -> Result<String, ExchangeError> {
+    v.json_stringify()
         .map_err(|e| error(e.message))?
         .ok_or_else(|| error("undefined history log"))
 }
@@ -110,7 +106,7 @@ pub fn timeframe_name(t: safe_cex_types::AnyTimeframe) -> &'static str {
     }
 }
 
-pub fn candle(row: &Value) -> Result<Candle, ExchangeError> {
+pub fn candle(row: &Input) -> Result<Candle, ExchangeError> {
     if row.is_null() {
         return Err(error("Cannot read properties of null (reading 'time')"));
     }
@@ -144,7 +140,7 @@ impl BingxReadHistory {
     fn log(&self, message: String, severity: LogSeverity) -> Result<(), ExchangeError> {
         self.reads.base.log(&message, severity.as_str())
     }
-    async fn request(&self, url: &str, params: Option<Value>) -> Result<Value, ExchangeError> {
+    async fn request(&self, url: &str, params: Option<Value>) -> Result<Input, ExchangeError> {
         let result = self
             .transport
             .send(RestRequest {
@@ -166,8 +162,7 @@ impl BingxReadHistory {
         })
         .await;
         result?
-            .decode_with(|d| js_deserialize_passthrough(d).map(|value| Response { value }))
-            .map(|r| r.value)
+            .decode_with(Input::deserialize)
             .map_err(|e| error(e.to_string()))
     }
     pub async fn fetch_orders(&self) -> Result<Vec<Order>, ExchangeError> {
@@ -175,15 +170,15 @@ impl BingxReadHistory {
         if data.is_null() {
             return Err(error("Cannot read properties of null (reading 'code')"));
         }
-        if js_truthy(data.get("code")) {
+        if data.get("code").is_some_and(Input::is_truthy) {
             self.report(text(data.get("msg"))?)?;
             return Ok(self.reads.base.store.orders().to_vec());
         }
         let content = data.get("data");
         let rows = content
             .and_then(|v| v.get("orders"))
-            .and_then(Value::as_array)
-            .or_else(|| content.and_then(Value::as_array));
+            .and_then(Input::as_array)
+            .or_else(|| content.and_then(Input::as_array));
         let mut orders = Vec::new();
         for raw in rows.into_iter().flatten() {
             if let Some(mut order) = map_order(
@@ -255,13 +250,13 @@ impl BingxReadHistory {
             if response.is_null() {
                 return Err(error("Cannot read properties of null (reading 'code')"));
             }
-            let field = |key| response.as_object().and_then(|object| object.get(key));
+            let field = |key| response.get(key);
             // Strict `code !== undefined && code !== 0`: "0" and null are failures.
-            if let Some(code) = field("code")
+            if let Some(code) = field("code").filter(|value| !matches!(value, Input::Undefined))
                 && code.as_f64() != Some(0.0)
             {
                 let msg = field("msg");
-                let reason = if js_truthy(msg) {
+                let reason = if msg.is_some_and(Input::is_truthy) {
                     text(msg)?
                 } else {
                     format!("code {}", text(Some(code))?)
@@ -272,7 +267,7 @@ impl BingxReadHistory {
                 )?;
                 return Ok(vec![]);
             }
-            let Some(rows) = field("data").and_then(Value::as_array) else {
+            let Some(rows) = field("data").and_then(Input::as_array) else {
                 self.log(
                     format!("BingX kline response did not include candles for {}", opts.symbol),
                     LogSeverity::Warning,
@@ -308,7 +303,7 @@ impl BingxReadHistory {
                     .and_then(|v| v.get("data"))
                     .and_then(|v| v.get("msg"));
                 self.report(if js_truthy(msg) {
-                    text(msg)?
+                    safe_cex_num::js_string(msg).map_err(|e| error(e.message))?
                 } else {
                     e.message
                 })?;
@@ -378,7 +373,7 @@ impl BingxReadHistory {
             if response.is_null() {
                 return Err(error("Cannot read properties of null (reading 'code')"));
             }
-            if response.get("code").and_then(js_value_as_f64) != Some(0.0) {
+            if response.get("code").and_then(Input::as_f64) != Some(0.0) {
                 self.log(
                     format!("Failed to fetch executions: {}", text(response.get("msg"))?),
                     LogSeverity::Warning,
@@ -388,13 +383,13 @@ impl BingxReadHistory {
             let data = response.get("data");
             let rows = data
                 .and_then(|v| v.get("fill_history_orders"))
-                .and_then(Value::as_array)
+                .and_then(Input::as_array)
                 .or_else(|| {
                     data.and_then(|v| v.get("fill_orders"))
-                        .and_then(Value::as_array)
+                        .and_then(Input::as_array)
                 })
-                .or_else(|| data.and_then(Value::as_array));
-            let rows = rows.map_or(&[][..], Vec::as_slice);
+                .or_else(|| data.and_then(Input::as_array));
+            let rows = rows.unwrap_or(&[]);
             self.log(
                 format!("fetchHistoricalFills found {} fills", rows.len()),
                 LogSeverity::Debug,
@@ -406,41 +401,42 @@ impl BingxReadHistory {
                     ));
                 }
                 let time = pick(fill, &["filledTime", "filledTm", "time"]);
-                let timestamp =
-                    if let Some(t) = time.and_then(Value::as_str).filter(|s| s.contains('T')) {
-                        (js_date_parse(t, |ms| self.host.local_to_utc(ms)) / 1000.0).floor()
-                    } else {
-                        (parse_int(
-                            &time.map_or_else(
-                                || Ok(safe_cex_num::js_number_string(self.host.now_ms())),
-                                |v| text(Some(v)),
-                            )?,
-                            None,
-                        ) / 1000.0)
-                            .floor()
-                    };
+                let timestamp = if let Some(t) = time
+                    .and_then(input_text)
+                    .as_deref()
+                    .filter(|s| s.contains('T'))
+                {
+                    (js_date_parse(t, |ms| self.host.local_to_utc(ms)) / 1000.0).floor()
+                } else {
+                    (parse_int(
+                        &time.map_or_else(
+                            || Ok(safe_cex_num::js_number_string(self.host.now_ms())),
+                            |v| text(Some(v)),
+                        )?,
+                        None,
+                    ) / 1000.0)
+                        .floor()
+                };
                 let fill_symbol = match fill.get("symbol") {
-                    None | Some(Value::Null) => symbol.clone(),
-                    Some(Value::String(s)) => {
-                        let s = s.replace('-', "");
+                    None | Some(Input::Null | Input::Undefined) => symbol.clone(),
+                    Some(Input::Text(s)) => {
+                        let s = String::from_utf16(s)
+                            .map_err(|_| error("BingX typed Execution symbol requires UTF8"))?
+                            .replace('-', "");
                         if s.is_empty() { symbol.clone() } else { s }
                     }
                     _ => return Err(error("fill.symbol?.replace is not a function")),
                 };
                 let id = fill
                     .get("orderId")
-                    .filter(|v| js_truthy(Some(v)))
+                    .filter(|v| v.is_truthy())
                     .or_else(|| fill.get("order_id"));
-                let zero = json!("0");
+                let zero = Input::from(json!("0"));
                 let price = float(pick(fill, &["price", "filledPrice"]).or(Some(&zero)))?;
                 let qty = float(pick(fill, &["volume", "qty", "filledQty"]).or(Some(&zero)))?;
-                let empty = json!("");
-                let side = if text(
-                    fill.get("side")
-                        .filter(|v| js_truthy(Some(v)))
-                        .or(Some(&empty)),
-                )?
-                .to_uppercase()
+                let empty = Input::from(json!(""));
+                let side = if text(fill.get("side").filter(|v| v.is_truthy()).or(Some(&empty)))?
+                    .to_uppercase()
                     == "BUY"
                 {
                     OrderSide::Buy
@@ -450,14 +446,13 @@ impl BingxReadHistory {
                 let commission = float(pick(fill, &["commission", "fee"]).or(Some(&zero)))?.abs();
                 let id = id
                     .map(|v| {
-                        v.as_str()
-                            .map(str::to_owned)
+                        input_text(v)
                             .ok_or_else(|| error("BingX typed Execution orderId requires a string"))
                     })
                     .transpose()?;
                 let asset = pick(fill, &["commissionAsset", "currency"])
                     .map(|v| {
-                        v.as_str().map(str::to_owned).ok_or_else(|| {
+                        input_text(v).ok_or_else(|| {
                             error("BingX typed Execution commissionAsset requires a string")
                         })
                     })
@@ -490,7 +485,7 @@ impl BingxReadHistory {
                 .and_then(|v| v.get("data"))
                 .and_then(|v| v.get("msg"));
             let message = if js_truthy(msg) {
-                text(msg)?
+                safe_cex_num::js_string(msg).map_err(|e| error(e.message))?
             } else if !e.message.is_empty() {
                 e.message
             } else {

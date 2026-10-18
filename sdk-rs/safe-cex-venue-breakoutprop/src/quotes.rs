@@ -1,36 +1,23 @@
 //! Market and quote reads over shared Store, transport requests and numeric ingress.
 use safe_cex_exchange::{
-    js_runtime::value::{Js, Thrown, from_json, to_typed},
+    js_runtime::value::{Js, Thrown, from_retained_input, to_retained_input, to_typed},
     runtime::ExchangeError,
 };
-use safe_cex_num::{
-    js_number_output, js_truthy,
-    numeric_ingress::{JsNumberInput, JsNumberOutput, js_deserialize_passthrough},
-};
+use safe_cex_num::{js_truthy, numeric_ingress::JsNumberInput};
 use safe_cex_store::Store;
 use safe_cex_transport::provider::{RestBody, RestRequest};
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision, Ticker,
 };
-use serde::Serialize;
 use serde_json::{Value, json};
 use std::future::Future;
-#[derive(Serialize)]
-#[serde(transparent)]
-struct Raw {
-    value: Value,
-}
-impl JsNumberOutput for Raw {
-    fn check_number_output(&self) {
-        js_number_output!(self,struct {} passthrough {value});
-    }
-}
-fn raw(input: &JsNumberInput) -> Result<Value, ExchangeError> {
+fn raw(
+    input: &JsNumberInput,
+) -> Result<safe_cex_types::retained_json::RetainedJsonInput, ExchangeError> {
     input
         .clone()
-        .decode_with(|d| js_deserialize_passthrough(d).map(|value| Raw { value }))
-        .map(|r| r.value)
-        .map_err(|e| ExchangeError::new(e.to_string()))
+        .decode()
+        .map_err(|error| ExchangeError::new(error.to_string()))
 }
 fn market_property<T: serde::de::DeserializeOwned>(source: &Js, key: &str) -> Result<T, Thrown> {
     to_typed(&source.get(key)?)
@@ -63,7 +50,7 @@ where
         // Source await is outside the catch: raw rejection must propagate unchanged.
         let input = pending.await?;
         let raw = raw(&input)?;
-        if !js_truthy(Some(&raw)) || raw.as_array().is_some_and(Vec::is_empty) {
+        if !raw.is_truthy() || raw.as_array().is_some_and(<[_]>::is_empty) {
             return Ok(store.markets().to_vec());
         }
         let mapped = (|| -> Result<Vec<Market>, Thrown> {
@@ -72,7 +59,7 @@ where
                 .ok_or_else(|| Thrown::type_error("data.map is not a function"))?;
             let mut markets = Vec::with_capacity(rows.len());
             for row in rows {
-                let row_value = from_json(row);
+                let row_value = from_retained_input(row.clone());
                 let instrument = row_value.get("instrument")?;
                 let details = row_value.get("instrumentDetails")?;
                 let raw_symbol = instrument.get("symbol")?;
@@ -171,7 +158,7 @@ where
         };
         let data = raw(&input)?;
         let mapped: Result<_, Thrown> = (|| {
-            let events = from_json(&data).get("events")?;
+            let events = from_retained_input(data).get("events")?;
             if events.is_nullish() {
                 return Ok(None);
             }
@@ -179,12 +166,12 @@ where
                 .array_values()
                 .ok_or_else(|| Thrown::type_error("data.events?.map is not a function"))?;
             let mut fields = Vec::with_capacity(events.len());
-            for (index, event) in events.iter().enumerate() {
+            for event in &events {
                 fields.push((
                     event.get("symbol")?,
                     event.get("bid")?,
                     event.get("ask")?,
-                    index,
+                    to_retained_input(event)?,
                 ));
             }
             Ok(Some(fields))
@@ -198,7 +185,7 @@ where
             }
         };
         let mut tickers = Vec::with_capacity(fields.len());
-        for (symbol, bid, ask, index) in fields {
+        for (symbol, bid, ask, info) in fields {
             let symbol: String = to_typed(&symbol)?;
             let bid = to_typed(&bid)?;
             let ask = to_typed(&ask)?;
@@ -218,7 +205,7 @@ where
                 volume: 0.0,
                 quote_volume: 0.0,
                 timestamp: None,
-                info: Some(data["events"][index].clone()),
+                info: Some(info),
             });
         }
         Ok(Some(tickers))

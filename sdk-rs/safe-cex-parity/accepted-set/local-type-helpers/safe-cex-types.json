@@ -19,7 +19,7 @@
     "category": "private-generic-decoder",
     "runtimeOwner": "safe_cex_types::model_field::ModelField",
     "declarationEnd": [
-      183,
+      184,
       60
     ],
     "nativeFields": [
@@ -27,7 +27,7 @@
       "undefined",
       "numberBits"
     ],
-    "sourceSha256": "cce557450ce4a4fbc9bd224323f007d30635af4bf1314301052f023172a17e70",
+    "sourceSha256": "31688fd2d66b09acb4ffee3dc2d8de1b1624d9414995642f867de1397e4cba34",
     "reason": "Reviewed nested PhantomData visitor belongs only to ModelField::deserialize and returns ModelField<T>. Execute the actual owner at fixed f64 via production JSON/newtype and native-unit Serde paths; observe Absent/Undefined/Value and native bits. No standalone generic visitor admission claim."
   }
 }

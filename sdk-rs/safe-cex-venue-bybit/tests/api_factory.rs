@@ -880,37 +880,16 @@ fn transform_cases() -> Vec<Value> {
             "factory_transform_native_hmac {id}"
         );
         let observation = if id == "native-lone-surrogate" {
-            let error = result.unwrap_err();
-            let response = error
-                .response
-                .as_ref()
-                .expect("factory_transform_native_representation_response");
+            let execution = result.unwrap();
+            let input = execution.response.body.into_data();
+            assert_eq!(input.as_text(), Some([0xd800].as_slice()));
             assert_eq!(
-                response.body.clone().into_data(),
-                safe_cex_types::retained_json::RetainedJsonInput::Text(vec![0xd800]),
-                "factory_transform_native_representation_response_units",
+                f.host.responses.borrow()[0].as_text(),
+                Some([0xd800].as_slice())
             );
-            assert_eq!(
-                f.host.responses.borrow()[0],
-                response.body.clone().into_data()
-            );
-            assert!(
-                error
-                    .message
-                    .contains("Bybit response representation refused"),
-                "factory_transform_native_representation_refusal"
-            );
-            assert_eq!(
-                f.host.responses.borrow().len(),
-                1,
-                "factory_transform_native_refusal_after_native_response_hook"
-            );
-            assert_eq!(
-                f.host.failures.get(),
-                0,
-                "factory_transform_native_consumer_refusal_is_not_a_transport_failure"
-            );
-            json!({"kind":"representation-refusal"})
+            assert_eq!(f.host.responses.borrow().len(), 1);
+            assert_eq!(f.host.failures.get(), 0);
+            json!({"kind":"string","units":[0xd800]})
         } else if id == "raw-own-number-includes-throws" {
             let error = result.unwrap_err();
             assert!(
@@ -1147,21 +1126,10 @@ fn compare_response_transform_boundaries(native: &[Value]) {
     let source = source("create-api-response-transform-boundaries.cjs", 20);
     for i in 0..20 {
         assert_eq!(native[i]["id"], source["cases"][i]["id"]);
-        if i == 11 {
-            assert_eq!(
-                native[i]["result"]["kind"], "representation-refusal",
-                "CHOSEN shared UTF8 string boundary"
-            );
-            assert_eq!(
-                source["cases"][i]["source"]["result"]["units"],
-                json!([0xd800])
-            );
-        } else {
-            assert_eq!(
-                native[i]["result"], source["cases"][i]["source"]["result"],
-                "factory_transform_source_comparison {i}"
-            );
-        }
+        assert_eq!(
+            native[i]["result"], source["cases"][i]["source"]["result"],
+            "factory_transform_source_comparison {i}"
+        );
         for field in [
             "authFailures",
             "authSuccesses",
@@ -1719,4 +1687,42 @@ fn native_request_retry_override_retains_source_budget() {
         );
         assert_eq!(f.clock_fetches.load(Ordering::SeqCst), 1);
     }
+}
+
+#[test]
+fn retained_response_factory_keeps_opaque_payload_and_refuses_only_message_boundary() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let opaque = Input::Object(vec![
+        ("text".encode_utf16().collect(), Input::Text(vec![0xd800])),
+        ("missing".encode_utf16().collect(), Input::Undefined),
+        ("number".encode_utf16().collect(), Input::Float(f64::NAN)),
+    ]);
+    let payload = Input::Object(vec![
+        ("retCode".encode_utf16().collect(), Input::Float(0.)),
+        (
+            "retMsg".encode_utf16().collect(),
+            Input::Text("OK".encode_utf16().collect()),
+        ),
+        ("opaque".encode_utf16().collect(), opaque),
+    ]);
+    let f = fixture(vec![Reply::Response(RestResponseBody::Untransformed(
+        payload,
+    ))]);
+    let answer = ready(f.api.execute(get("/v5/position/list"))).unwrap();
+    let data = answer.body.into_data();
+    let opaque = data.get("opaque").unwrap();
+    assert_eq!(
+        opaque.get("text").unwrap().as_text(),
+        Some([0xd800].as_slice())
+    );
+    assert!(matches!(opaque.get("missing"), Some(Input::Undefined)));
+    assert!(opaque.get("number").unwrap().as_f64().unwrap().is_nan());
+    assert_eq!(f.wire.requests.borrow().len(), 1);
+    let f = fixture(vec![response(r#"{"retCode":0,"retMsg":"\ud800"}"#)]);
+    let failure = ready(f.api.execute(get("/v5/position/list"))).unwrap_err();
+    assert_eq!(
+        failure.message,
+        "Bybit ret_msg cannot be represented as a Rust string"
+    );
+    assert_eq!(f.wire.requests.borrow().len(), 1);
 }

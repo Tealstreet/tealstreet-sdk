@@ -334,7 +334,7 @@ fn decoded_response_and_execution_fields_have_native_identity() {
         );
         assert_eq!(
             decoded.raw_response,
-            Some(json!({"retCode":29})),
+            Some(json!({"retCode":29}).into()),
             "native response raw_response identity"
         );
     }

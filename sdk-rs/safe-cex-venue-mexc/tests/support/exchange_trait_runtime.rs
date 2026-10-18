@@ -208,7 +208,7 @@ impl WsRuntime for Runtime {
 #[derive(Default)]
 pub struct Wire {
     pub requests: RefCell<Vec<(String, String, Value)>>,
-    pub bodies: RefCell<BTreeMap<String, Value>>,
+    pub bodies: RefCell<BTreeMap<String, safe_cex_types::retained_json::RetainedJsonInput>>,
 }
 impl RestAdapter for Wire {
     fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
@@ -230,15 +230,13 @@ impl RestAdapter for Wire {
             .borrow()
             .get(&r.url)
             .cloned()
-            .unwrap_or(json!({"success":true,"code":0,"data":[]}));
+            .unwrap_or_else(|| json!({"success":true,"code":0,"data":[]}).into());
         Box::pin(async move {
             Ok(RestResponse {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(
-                    safe_cex_types::retained_json::RetainedJsonInput::from_value(response).unwrap(),
-                ),
+                body: RestResponseBody::Untransformed(response),
             })
         })
     }

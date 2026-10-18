@@ -15,10 +15,10 @@ receipt = {'sha':sha,'attempts':[],'survivors':[],'invalid_controls':[]}
 
 def run(name, expected, marker=None, extra=None):
     command=[os.environ.get('CARGO','cargo'),'test','--manifest-path',str(root/'sdk-rs/Cargo.toml'),
-             '--locked','--jobs','2','-p','safe-cex-venue-apexomni','--test','exchange',
+             '--locked','--jobs','1','-p','safe-cex-venue-apexomni','--test','exchange',
              'websocket_tests::socket_frame_units_are_observed_before_wire','--','--exact','--nocapture']
     start=time.monotonic()
-    result=subprocess.run(command,cwd=root,env={**os.environ,**(extra or {})},capture_output=True,text=True)
+    result=subprocess.run(command,cwd=root/'sdk-rs',env={**os.environ,**(extra or {})},capture_output=True,text=True)
     text=result.stdout+result.stderr
     (out/(name+'.log')).write_text(text)
     valid=result.returncode == expected and (('test result: FAILED.' in text and marker in text)
@@ -35,9 +35,9 @@ def run(name, expected, marker=None, extra=None):
 
 
 cases=[
-    ('private-ping-gate','ws_private.rs','if get(&json, "op") == &J::String("ping".into())',
-     'if get(&json, "op") == &J::String("ignored".into())',
-     'APEX-WS-FRAME private/pair native transmission count'),
+    ('private-ping-gate','ws_private.rs','if get(&json, "op") == &retained_text("ping")',
+     'if get(&json, "op") == &retained_text("ignored")',
+     'APEX-WS-FRAME private/high native transmission count'),
     ('public-handler-gate','ws_public.rs','handler(&json)?;',
      'if topic != "instrumentInfo.all" { handler(&json)?; }',
      'APEX-WS-FRAME public/pair native ticker last'),

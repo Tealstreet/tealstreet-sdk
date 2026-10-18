@@ -197,11 +197,13 @@ impl AccountHost for Host {
         )
     }
     fn trigger_metadata(&self, order: Js) -> JsResult<Js> {
-        let json = value(to_json(&order))?;
-        let object = json
-            .as_object()
-            .ok_or_else(|| Thrown::type_error("order must be an object").value)?;
-        match crate::order_semantics::get_grvt_trigger_metadata(object)
+        let input = value(safe_cex_exchange::js_runtime::value::to_retained_input(
+            &order,
+        ))?;
+        if !input.is_object() {
+            return Err(Thrown::type_error("order must be an object").value);
+        }
+        match crate::order_semantics::get_grvt_trigger_metadata(&input)
             .map_err(|e| failure(e.message))?
         {
             Some(metadata) => value(from_typed(&metadata)),

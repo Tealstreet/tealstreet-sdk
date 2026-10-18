@@ -45,22 +45,7 @@ fn actual_typescript_order_links() {
             "ORDER LINK source parent count {index}"
         );
         let raw = row["raw"].as_str().unwrap();
-        let order: Order = match js_from_str(raw) {
-            Ok(v) => v,
-            Err(_) => {
-                assert!(
-                    raw.contains(r#""id":"\ud800""#),
-                    "ORDER LINK only UTF8 refusal"
-                );
-                assert_eq!(
-                    row["rawId"],
-                    json!({"type":"string","units":[55296]}),
-                    "ORDER LINK source surrogate ID"
-                );
-                refused += 1;
-                continue;
-            }
-        };
+        let order: Order = js_from_str(raw).expect("canonical Order.info retains UTF-16 on entry");
         let parents_raw = format!(
             "[{}]",
             row["orders"]
@@ -86,12 +71,30 @@ fn actual_typescript_order_links() {
             );
             zero_count += 1;
         }
-        assert_eq!(
-            string_result(get_tpsl_raw_order_id(&order)),
-            row["rawId"],
-            "ORDER LINK native raw ID {index}"
-        );
-        compared[0] += 1;
+        match get_tpsl_raw_order_id(&order) {
+            Ok(value) => {
+                assert_eq!(
+                    string_result(Ok(value)),
+                    row["rawId"],
+                    "ORDER LINK native raw ID {index}"
+                );
+                compared[0] += 1;
+            }
+            Err(error) if row["rawId"]["error"] == "TypeError" => {
+                assert_eq!(error.name, "TypeError");
+                compared[0] += 1;
+            }
+            Err(error) => {
+                assert_eq!(error.name, "TypeError");
+                assert!(error.message.contains("UTF-16"));
+                assert_eq!(
+                    row["rawId"],
+                    json!({"type":"string","units":[55296]}),
+                    "source raw-ID UTF-8 output refusal remains observed"
+                );
+                refused += 1;
+            }
+        }
         let attached = get_attached_virtual_tpsl_leg(&order, &parents).map_or_else(
             || json!({"type":"undefined"}),
             |v| json!({"type":"string","units":v.encode_utf16().collect::<Vec<_>>()}),
@@ -118,10 +121,11 @@ fn actual_typescript_order_links() {
         compared[3] += 1;
     }
     assert_eq!(
-        compared, [247; 4],
+        compared,
+        [247, 250, 250, 250],
         "ORDER LINK independent native comparisons"
     );
-    assert_eq!(parent_count, 275, "ORDER LINK native parent total");
-    assert_eq!(zero_count, 17, "ORDER LINK signed zero comparisons");
-    assert_eq!(refused, 3, "ORDER LINK UTF8 refusal count");
+    assert_eq!(parent_count, 278, "ORDER LINK native parent total");
+    assert_eq!(zero_count, 18, "ORDER LINK signed zero comparisons");
+    assert_eq!(refused, 3, "ORDER LINK final String UTF8 refusal count");
 }

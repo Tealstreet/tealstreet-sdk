@@ -123,9 +123,12 @@ pub(crate) fn fetch_trading_markets_response(rt: &Rt, category: Js) -> Result<Js
                 Ok::<_, Thrown>(async move {
                     let response = response.await?;
                     Ok(DataValue::Object(Rc::new(std::cell::RefCell::new(
-                        [("data".to_owned(), to_data(&response.get("data")?))]
-                            .into_iter()
-                            .collect(),
+                        [(
+                            "data".encode_utf16().collect(),
+                            to_data(&response.get("data")?),
+                        )]
+                        .into_iter()
+                        .collect(),
                     ))))
                 })
             },
@@ -247,13 +250,13 @@ pub(crate) fn fetch_markets_helper(rt: &Rt, category: Js) -> Result<Js, Thrown> 
                 .array_values()
                 .ok_or_else(|| type_error("preLaunchMarkets is not iterable"))?,
         );
-        let fees = to_json(&fees)?;
-        let fees = fees.as_array().cloned().unwrap_or_default();
+        let fees = super::super::value::to_retained_input(&fees)?;
+        let fees = fees.as_array().unwrap_or_default();
         let mut mapped = Vec::with_capacity(rows.len());
         for row in rows {
             let market = crate::market_mapping::map_market(
-                &to_json(&row)?,
-                &fees,
+                &super::super::value::to_retained_input(&row)?,
+                fees,
                 &category_text,
                 crate::market_mapping::Family::Linear,
             )
@@ -309,7 +312,7 @@ pub(crate) fn fetch_option_markets(rt: &Rt) -> Result<Js, Thrown> {
             )
         },
         |row| {
-            let row = to_json(&from_data(&row))?;
+            let row = super::super::value::to_retained_input(&from_data(&row))?;
             match crate::options::map_bybit_option_instrument(&row)
                 .map_err(|m| Thrown::error("TypeError", &m))?
             {

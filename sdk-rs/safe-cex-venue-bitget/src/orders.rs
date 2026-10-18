@@ -1,15 +1,12 @@
 //! Classic v2 and Unified v3 order aliases, evaluated before typed projection.
-use crate::{
-    numeric::{FiniteNumberInput, to_finite_number},
-    protocol::{ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, TIME_IN_FORCE},
-};
+use crate::protocol::{ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, TIME_IN_FORCE};
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::{JsCoercionError, TableHit, js_string, js_table_lookup, js_truthy, parse_float};
+use safe_cex_num::{JsCoercionError, TableHit, js_retained_string as js_string, js_table_lookup};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     ModelField, Order, OrderExtra, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
     OrderType,
 };
-use serde_json::Value;
 
 fn failure(name: &str, message: &str) -> ExchangeError {
     ExchangeError {
@@ -21,37 +18,41 @@ fn failure(name: &str, message: &str) -> ExchangeError {
 fn coercion(error: JsCoercionError) -> ExchangeError {
     failure(error.name, error.message)
 }
-fn aliases<'a>(input: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+fn aliases<'a>(input: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
         .map(|key| input.get(key))
-        .find(|v| js_truthy(*v))
+        .find(|v| truthy(*v))
         .flatten()
         .or_else(|| keys.last().and_then(|key| input.get(key)))
 }
-fn float(value: Option<&Value>) -> Result<f64, ExchangeError> {
-    Ok(parse_float(&js_string(value).map_err(coercion)?))
+fn truthy(value: Option<&Input>) -> bool {
+    value.is_some_and(Input::is_truthy)
 }
-fn lookup<T: Copy>(table: &[(&str, T)], key: Option<&Value>) -> Result<TableHit<T>, ExchangeError> {
-    Ok(
-        match js_table_lookup(table, &js_string(key).map_err(coercion)?) {
-            TableHit::Mapped(value) => TableHit::Mapped(*value),
-            TableHit::Inherited(member) => TableHit::Inherited(member),
-            TableHit::Missing => TableHit::Missing,
-        },
-    )
+fn float(value: Option<&Input>) -> Result<f64, ExchangeError> {
+    safe_cex_num::js_retained_parse_float(value).map_err(coercion)
 }
-fn finite(value: Option<&Value>) -> f64 {
-    to_finite_number(
-        match value {
-            Some(Value::String(s)) => FiniteNumberInput::String(s),
-            Some(Value::Number(n)) => n
-                .as_f64()
-                .map(FiniteNumberInput::Number)
-                .unwrap_or(FiniteNumberInput::Other),
-            _ => FiniteNumberInput::Other,
-        },
-        0.0,
-    )
+fn lookup<T: Copy>(table: &[(&str, T)], key: Option<&Input>) -> Result<TableHit<T>, ExchangeError> {
+    let units =
+        safe_cex_types::js_coercion::js_retained_string_utf16(key.unwrap_or(&Input::Undefined))
+            .map_err(coercion)?;
+    let Ok(key) = String::from_utf16(&units) else {
+        return Ok(TableHit::Missing);
+    };
+    Ok(match js_table_lookup(table, &key) {
+        TableHit::Mapped(value) => TableHit::Mapped(*value),
+        TableHit::Inherited(member) => TableHit::Inherited(member),
+        TableHit::Missing => TableHit::Missing,
+    })
+}
+fn finite(value: Option<&Input>) -> Result<f64, ExchangeError> {
+    let number = match value {
+        Some(Input::Float(_) | Input::Lexeme(_)) => {
+            safe_cex_num::js_retained_number(value).map_err(coercion)?
+        }
+        Some(Input::Text(_)) => float(value)?,
+        _ => return Ok(0.0),
+    };
+    Ok(if number.is_finite() { number } else { 0.0 })
 }
 // A missed table lookup assigned in the source object literal is an own undefined.
 fn typed<T>(hit: TableHit<T>, field: &str) -> Result<ModelField<T>, ExchangeError> {
@@ -65,11 +66,11 @@ fn typed<T>(hit: TableHit<T>, field: &str) -> Result<ModelField<T>, ExchangeErro
     }
 }
 
-fn raw_side_fallback(raw: Option<&Value>) -> (TableHit<OrderSide>, bool) {
+fn raw_side_fallback(raw: Option<&Input>) -> (TableHit<OrderSide>, bool) {
     match raw {
-        Some(Value::String(raw)) if raw == "buy" => (TableHit::Mapped(OrderSide::Buy), false),
-        Some(Value::String(raw)) if raw == "sell" => (TableHit::Mapped(OrderSide::Sell), false),
-        None => (TableHit::Missing, false),
+        Some(raw) if raw.text_equals("buy") => (TableHit::Mapped(OrderSide::Buy), false),
+        Some(raw) if raw.text_equals("sell") => (TableHit::Mapped(OrderSide::Sell), false),
+        None | Some(Input::Undefined) => (TableHit::Missing, false),
         Some(_) => (TableHit::Missing, true),
     }
 }
@@ -78,7 +79,7 @@ fn raw_side_fallback(raw: Option<&Value>) -> (TableHit<OrderSide>, bool) {
 // values must survive until all source branches have had a chance to replace them.
 #[derive(Clone)]
 struct PendingOrder {
-    id: Option<Value>,
+    id: Option<Input>,
     status: TableHit<OrderStatus>,
     symbol: String,
     kind: TableHit<OrderType>,
@@ -96,20 +97,20 @@ struct PendingOrder {
     sl: Option<OrderStopTriggerType>,
     remaining_native: Option<f64>,
 }
-fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
+fn project(order: PendingOrder, info: &Input) -> Result<Order, ExchangeError> {
     Ok(Order {
         client_order_id: (None).into(),
         id: order
             .id
             .as_ref()
-            .and_then(Value::as_str)
+            .and_then(Input::as_text)
+            .and_then(|units| String::from_utf16(units).ok())
             .ok_or_else(|| {
                 failure(
                     "RepresentationError",
                     "mapOrder cannot represent id in shared Order",
                 )
-            })?
-            .into(),
+            })?,
         parent_id: (None).into(),
         status: typed(order.status, "status")?,
         symbol: order.symbol,
@@ -153,39 +154,48 @@ fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
 
 // ts: BitgetExchange.mapOrder
 pub fn map_order(
-    input: Option<&Value>,
+    input: Option<&Input>,
     api_product_type: &str,
     mut now: impl FnMut() -> f64,
 ) -> Result<Vec<Order>, ExchangeError> {
-    let o = input.filter(|v| !v.is_null()).ok_or_else(|| {
+    let o = input.filter(|v| !v.is_nullish()).ok_or_else(|| {
         failure(
             "TypeError",
-            if input.is_none() {
+            if input.is_none_or(|value| matches!(value, Input::Undefined)) {
                 "Cannot read properties of undefined (reading 'size')"
             } else {
                 "Cannot read properties of null (reading 'size')"
             },
         )
     })?;
-    let zero = Value::String("0".into());
+    let zero = Input::Text(vec![48]);
     let raw_amount = aliases(o, &["size", "sz", "qty", "amount"])
-        .filter(|v| js_truthy(Some(v)))
+        .filter(|v| truthy(Some(v)))
         .unwrap_or(&zero);
     let raw_filled = aliases(o, &["baseVolume", "filledQty", "accFillSz", "cumExecQty"])
-        .filter(|v| js_truthy(Some(v)))
+        .filter(|v| truthy(Some(v)))
         .unwrap_or(&zero);
-    let empty = Value::String(String::new());
+    let empty = Input::Text(Vec::new());
     let symbol = aliases(o, &["symbol", "instId"])
-        .filter(|v| js_truthy(Some(v)))
+        .filter(|v| truthy(Some(v)))
         .unwrap_or(&empty);
-    let symbol = symbol.as_str().ok_or_else(|| {
+    let symbol = symbol.as_text().ok_or_else(|| {
         failure(
             "TypeError",
             "(o.symbol || o.instId || \"\").replace is not a function",
         )
     })?;
-    let symbol =
-        safe_cex_num::js_replace(symbol, &format!("_{}", api_product_type.to_uppercase()), "");
+    let symbol = String::from_utf16(symbol).map_err(|_| {
+        failure(
+            "RepresentationError",
+            "mapOrder cannot represent symbol in shared Order",
+        )
+    })?;
+    let symbol = safe_cex_num::js_replace(
+        &symbol,
+        &format!("_{}", api_product_type.to_uppercase()),
+        "",
+    );
     let id = aliases(o, &["orderId", "clientOid", "ordId", "id"]).cloned();
     let status = lookup(
         ORDER_STATUS,
@@ -204,16 +214,19 @@ pub fn map_order(
     };
     let price = float(Some(
         aliases(o, &["price", "px"])
-            .filter(|v| js_truthy(Some(v)))
+            .filter(|v| truthy(Some(v)))
             .unwrap_or(&zero),
     ))?;
     let amount = float(Some(raw_amount))?;
     let filled = float(Some(raw_filled))?;
     let last_update = now();
-    let reduce_only = matches!(
-        js_string(o.get("reduceOnly")).map_err(coercion)?.as_str(),
-        "YES" | "yes" | "true"
-    );
+    let reduce_text = safe_cex_types::js_coercion::js_retained_string_utf16(
+        o.get("reduceOnly").unwrap_or(&Input::Undefined),
+    )
+    .map_err(coercion)?;
+    let reduce_only = ["YES", "yes", "true"]
+        .iter()
+        .any(|text| reduce_text.iter().copied().eq(text.encode_utf16()));
     let remaining = safe_cex_num::subtract(float(Some(raw_amount))?, float(Some(raw_filled))?);
     let time_in_force = lookup(TIME_IN_FORCE, aliases(o, &["force", "timeInForce", "tiF"]))?;
     let time_in_force = if time_in_force.is_truthy_by(|_| true) {
@@ -239,7 +252,7 @@ pub fn map_order(
         sl: None,
         remaining_native: None,
     };
-    let is = |key: &str, value: &str| o.get(key).and_then(Value::as_str) == Some(value);
+    let is = |key: &str, value: &str| o.get(key).is_some_and(|input| input.text_equals(value));
     let trigger = |last: bool| {
         if last {
             OrderStopTriggerType::LastPrice
@@ -254,7 +267,7 @@ pub fn map_order(
             OrderSide::Buy
         }
     };
-    if js_truthy(o.get("planType")) {
+    if truthy(o.get("planType")) {
         order.kind = lookup(ORDER_TYPE, o.get("planType"))?;
         order.price = float(o.get("triggerPrice"))?;
         if order.price == 0.0 || order.price.is_nan() {
@@ -271,7 +284,7 @@ pub fn map_order(
             order.side = TableHit::Mapped(opposite_raw_side());
         }
     } else if !order.kind.is_truthy_by(|_| true)
-        && (finite(o.get("stopLoss")) > 0.0 || finite(o.get("takeProfit")) > 0.0)
+        && (finite(o.get("stopLoss"))? > 0.0 || finite(o.get("takeProfit"))? > 0.0)
     {
         let strategy_side = lookup(ORDER_SIDE, o.get("side"))?;
         order.side = if strategy_side.is_truthy_by(|_| true) {
@@ -288,7 +301,7 @@ pub fn map_order(
             ("stopLoss", OrderType::StopLoss, "slTriggerBy"),
             ("takeProfit", OrderType::TakeProfit, "tpTriggerBy"),
         ] {
-            let price = finite(o.get(key));
+            let price = finite(o.get(key))?;
             if price > 0.0 {
                 let mut leg = order.clone();
                 leg.kind = TableHit::Mapped(kind);
@@ -326,12 +339,16 @@ pub fn map_order(
             ),
         ] {
             let price = aliases(o, keys);
-            if js_truthy(price) {
+            if truthy(price) {
                 let mut leg = order.clone();
-                leg.id = Some(Value::String(format!(
-                    "{}{suffix}",
-                    js_string(order.id.as_ref()).map_err(coercion)?
-                )));
+                leg.id = Some(Input::Text(
+                    format!(
+                        "{}{suffix}",
+                        js_string(order.id.as_ref()).map_err(coercion)?
+                    )
+                    .encode_utf16()
+                    .collect(),
+                ));
                 leg.side = TableHit::Mapped(if order.side == TableHit::Mapped(OrderSide::Buy) {
                     OrderSide::Sell
                 } else {
@@ -349,15 +366,15 @@ pub fn map_order(
 // ts: BitgetInverseExchange.mapOrder
 /// The lookup projects the shared Market.is_inverse field without copying Store state.
 pub fn map_inverse_order(
-    input: Option<&Value>,
+    input: Option<&Input>,
     api_product_type: &str,
     mut market_is_inverse: impl FnMut(&str) -> Option<bool>,
     mut now: impl FnMut() -> f64,
 ) -> Result<Vec<Order>, ExchangeError> {
-    let o = input.filter(|v| !v.is_null()).ok_or_else(|| {
+    let o = input.filter(|v| !v.is_nullish()).ok_or_else(|| {
         failure(
             "TypeError",
-            if input.is_none() {
+            if input.is_none_or(|value| matches!(value, Input::Undefined)) {
                 "Cannot read properties of undefined (reading 'symbol')"
             } else {
                 "Cannot read properties of null (reading 'symbol')"
@@ -366,14 +383,14 @@ pub fn map_inverse_order(
     })?;
     let raw_symbol = aliases(o, &["symbol", "instId"]);
     let symbol = match raw_symbol {
-        Some(Value::String(s)) => s,
-        None => {
+        Some(Input::Text(s)) => s,
+        None | Some(Input::Undefined) => {
             return Err(failure(
                 "TypeError",
                 "Cannot read properties of undefined (reading 'replace')",
             ));
         }
-        Some(Value::Null) => {
+        Some(Input::Null) => {
             return Err(failure(
                 "TypeError",
                 "Cannot read properties of null (reading 'replace')",
@@ -386,19 +403,28 @@ pub fn map_inverse_order(
             ));
         }
     };
-    let symbol =
-        safe_cex_num::js_replace(symbol, &format!("_{}", api_product_type.to_uppercase()), "");
-    let zero = Value::String("0".into());
+    let symbol = String::from_utf16(symbol).map_err(|_| {
+        failure(
+            "RepresentationError",
+            "mapOrder cannot represent symbol in shared Order",
+        )
+    })?;
+    let symbol = safe_cex_num::js_replace(
+        &symbol,
+        &format!("_{}", api_product_type.to_uppercase()),
+        "",
+    );
+    let zero = Input::Text(vec![48]);
     let price = float(Some(
         aliases(o, &["price", "px"])
-            .filter(|v| js_truthy(Some(v)))
+            .filter(|v| truthy(Some(v)))
             .unwrap_or(&zero),
     ))?;
     let raw_amount = aliases(o, &["size", "sz"])
-        .filter(|v| js_truthy(Some(v)))
+        .filter(|v| truthy(Some(v)))
         .unwrap_or(&zero);
     let raw_filled = aliases(o, &["baseVolume", "filledQty", "accFillSz"])
-        .filter(|v| js_truthy(Some(v)))
+        .filter(|v| truthy(Some(v)))
         .unwrap_or(&zero);
     let remaining_native =
         safe_cex_num::subtract(float(Some(raw_amount))?, float(Some(raw_filled))?);
@@ -427,8 +453,20 @@ pub fn map_inverse_order(
     let last_update = now();
     // Source calls an optional method; it does NOT call String(reduceOnly).
     let reduce_only = match o.get("reduceOnly") {
-        Some(Value::String(s)) => s.to_uppercase() == "YES",
-        Some(Value::Object(fields)) if fields.get("toUpperCase").is_some_and(|v| !v.is_null()) => {
+        Some(Input::Text(s)) => s
+            .iter()
+            .copied()
+            .map(|unit| {
+                if (97..=122).contains(&unit) {
+                    unit - 32
+                } else {
+                    unit
+                }
+            })
+            .eq("YES".encode_utf16()),
+        Some(value @ Input::Object(_))
+            if value.get("toUpperCase").is_some_and(|v| !v.is_nullish()) =>
+        {
             return Err(failure(
                 "TypeError",
                 "o.reduceOnly?.toUpperCase is not a function",
@@ -460,8 +498,8 @@ pub fn map_inverse_order(
         sl: None,
         remaining_native: Some(remaining_native),
     };
-    let is = |key: &str, value: &str| o.get(key).and_then(Value::as_str) == Some(value);
-    if js_truthy(o.get("planType")) {
+    let is = |key: &str, value: &str| o.get(key).is_some_and(|input| input.text_equals(value));
+    if truthy(o.get("planType")) {
         order.kind = lookup(ORDER_TYPE, o.get("planType"))?;
         order.price = float(o.get("triggerPrice"))?;
         if order.price == 0.0 || order.price.is_nan() {
@@ -497,12 +535,16 @@ pub fn map_inverse_order(
             ),
         ] {
             let price = aliases(o, keys);
-            if js_truthy(price) {
+            if truthy(price) {
                 let mut leg = order.clone();
-                leg.id = Some(Value::String(format!(
-                    "{}{suffix}",
-                    js_string(order.id.as_ref()).map_err(coercion)?
-                )));
+                leg.id = Some(Input::Text(
+                    format!(
+                        "{}{suffix}",
+                        js_string(order.id.as_ref()).map_err(coercion)?
+                    )
+                    .encode_utf16()
+                    .collect(),
+                ));
                 leg.side = TableHit::Mapped(if order.side == TableHit::Mapped(OrderSide::Buy) {
                     OrderSide::Sell
                 } else {

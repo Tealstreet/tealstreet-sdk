@@ -365,8 +365,9 @@ fn account_frame_converts_inverse_contracts_and_preserves_existing_fields() {
     assert_eq!(p.side.value(), Some(&safe_cex_types::PositionSide::Short));
     assert_eq!(p.leverage, 17.);
     assert_eq!(p.liquidation_price, 20000.);
-    assert_eq!(p.info.value().unwrap()["contractsNative"], 2.);
-    assert_eq!(p.info.value().unwrap()["old"], true);
+    let info = p.info.value().unwrap();
+    assert_eq!(info.get("contractsNative").unwrap().as_f64(), Some(2.));
+    assert_eq!(info.get("old").unwrap().as_bool(), Some(true));
     assert_eq!(
         h.http.requests.borrow().len(),
         1,

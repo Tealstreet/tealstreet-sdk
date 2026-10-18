@@ -3656,14 +3656,18 @@ fn production_native_pm_position_info_is_the_current_position_without_info() {
         for (field, value) in expected {
             if let Some(number) = value.as_f64() {
                 assert_eq!(
-                    info.get(field).and_then(Value::as_f64).map(f64::to_bits),
+                    info.get(field)
+                        .and_then(|value| value.as_f64())
+                        .map(f64::to_bits),
                     Some(number.to_bits()),
                     "frame {index}: info numeric field {field} uses the current position"
                 );
             } else {
                 assert_eq!(
                     info.get(field),
-                    Some(value),
+                    Some(&safe_cex_types::retained_json::RetainedJsonInput::from(
+                        value.clone()
+                    )),
                     "frame {index}: info field {field}"
                 );
             }

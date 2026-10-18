@@ -1,5 +1,7 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+#[path = "support/retained_input.rs"]
+mod retained_input;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_types::OrderBookOrders;
 use safe_cex_venue_weex::utils::*;
@@ -105,14 +107,24 @@ fn books_match_actual_typescript() {
     for kind in ["depth", "refusals"] {
         for case in corpus[kind].as_array().unwrap() {
             let raw = case["raw"].as_str().unwrap();
-            assert!(
-                serde_json::from_str::<WeexUtilityInput>(raw).is_err(),
-                "book_{kind}_refusal"
-            );
-            assert!(
-                js_from_str::<WeexUtilityInput>(raw).is_err(),
-                "book_{kind}_refusal"
-            );
+            if kind == "refusals" {
+                let native = retained_input::admit_utf16(raw);
+                if case["fn"] == "normalizeOrderBookSide" {
+                    assert!(normalize_order_book_side(Some(&native)).unwrap().is_empty());
+                } else {
+                    let book = normalize_order_book(Some(&native)).unwrap();
+                    assert!(book.bids.is_empty() && book.asks.is_empty());
+                }
+            } else {
+                assert!(
+                    serde_json::from_str::<WeexUtilityInput>(raw).is_err(),
+                    "retained depth direct refusal"
+                );
+                assert!(
+                    js_from_str::<WeexUtilityInput>(raw).is_err(),
+                    "retained depth numeric refusal"
+                );
+            }
         }
     }
     let mut deep = serde_json::json!("7");

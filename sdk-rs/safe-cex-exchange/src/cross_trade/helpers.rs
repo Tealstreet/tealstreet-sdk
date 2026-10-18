@@ -101,9 +101,12 @@ pub fn get_copier_weight_ratio(
             ratio *= copier_margin / master_margin;
         } else {
             let quote = |amount, market: &Market, store: &CrossTradeStore| {
-                let btc = if safe_cex_num::js_truthy(
-                    market.info.as_ref().and_then(|v| v.get("isQuanto")),
-                ) {
+                let btc = if market
+                    .info
+                    .as_ref()
+                    .and_then(|value| value.get("isQuanto"))
+                    .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
+                {
                     store
                         .tickers
                         .iter()

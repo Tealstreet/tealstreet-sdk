@@ -1,15 +1,15 @@
 //! Observable property lookup for the source ticker-symbol dictionary.
 //! The borrowed typed map remains an own-entry view. This operation also models
 //! the ticker object installed by the source dictionary's __proto__ setter.
-use safe_cex_num::{JsCoercionError, ProtoMember, TableHit, js_string, js_table_lookup, js_truthy};
+use safe_cex_num::{JsCoercionError, ProtoMember, TableHit, js_string, js_table_lookup};
 use safe_cex_types::Ticker;
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TickerSymbolLookup {
     OwnTicker(String),
     PrototypeTicker(String),
-    PrototypeField { truthy: bool, id: Option<Value> },
+    PrototypeField { truthy: bool, id: Option<Input> },
     StockInherited(ProtoMember),
     Missing,
 }
@@ -26,7 +26,17 @@ impl TickerSymbolLookup {
     pub fn update_id(self) -> Result<Option<String>, JsCoercionError> {
         match self {
             Self::OwnTicker(id) | Self::PrototypeTicker(id) => Ok(Some(id)),
-            Self::PrototypeField { truthy: true, id } => js_string(id.as_ref()).map(Some),
+            Self::PrototypeField { truthy: true, id } => {
+                let units = safe_cex_types::js_coercion::js_retained_string_utf16(
+                    id.as_ref().unwrap_or(&Input::Undefined),
+                )?;
+                String::from_utf16(&units)
+                    .map(Some)
+                    .map_err(|_| JsCoercionError {
+                        name: "TypeError",
+                        message: "Ticker id is outside the UTF-8 identifier boundary",
+                    })
+            }
             Self::StockInherited(_) => js_string(None).map(Some),
             Self::PrototypeField { truthy: false, .. } | Self::Missing => Ok(None),
         }
@@ -60,7 +70,7 @@ pub(crate) fn prototype_field(ticker: &Ticker, key: &str) -> TickerSymbolLookup 
     if key == "info" {
         if let Some(value) = &ticker.info {
             return TickerSymbolLookup::PrototypeField {
-                truthy: js_truthy(Some(value)),
+                truthy: value.is_truthy(),
                 id: value.get("id").cloned(),
             };
         }

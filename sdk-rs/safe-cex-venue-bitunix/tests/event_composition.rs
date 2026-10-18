@@ -1,4 +1,5 @@
 use safe_cex_num::{JsCoercionError, JsJsonValue as J};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_venue_bitunix::{
     composition::*, event_models::*, order_cancellation::*, orderbook_subscription::*,
 };
@@ -34,6 +35,23 @@ fn obs(v: &J) -> Value {
         J::Array(v) => json!(v.iter().map(obs).collect::<Vec<_>>()),
         J::Object(v) => Value::Object(v.iter().map(|(k, v)| (k.clone(), obs(v))).collect()),
         J::BigInt(_) => panic!("Unexpected BigInt"),
+    }
+}
+fn retained_obs(v: &Input) -> Value {
+    match v {
+        Input::Undefined => undefined(),
+        Input::Null => Value::Null,
+        Input::Bool(v) => json!(v),
+        Input::Float(v) => bits(*v),
+        Input::Lexeme(v) => bits(v.parse().unwrap()),
+        Input::Text(v) => units(v),
+        Input::Array(values) => json!(values.iter().map(retained_obs).collect::<Vec<_>>()),
+        Input::Object(values) => Value::Object(
+            values
+                .iter()
+                .map(|(key, value)| (String::from_utf16(key).unwrap(), retained_obs(value)))
+                .collect(),
+        ),
     }
 }
 fn vo(v: &Value) -> Value {
@@ -89,8 +107,8 @@ struct Host {
     row: Value,
     events: Rc<RefCell<Vec<Value>>>,
     pending: Option<Pin<Box<dyn Future<Output = Result<(), Error>>>>>,
-    orders: Vec<Value>,
-    positions: Vec<Value>,
+    orders: Vec<Input>,
+    positions: Vec<Input>,
     count: f64,
     handled: bool,
     last: f64,
@@ -105,12 +123,12 @@ impl Host {
             orders: row
                 .get("orders")
                 .and_then(Value::as_array)
-                .cloned()
+                .map(|values| values.iter().cloned().map(Into::into).collect())
                 .unwrap_or_default(),
             positions: row
                 .get("positions")
                 .and_then(Value::as_array)
-                .cloned()
+                .map(|values| values.iter().cloned().map(Into::into).collect())
                 .unwrap_or_default(),
             count: 0.0,
             handled: row["fixture"]["handled"] == true,
@@ -144,15 +162,20 @@ impl FillHistoryHost for Host {
     fn public_only(&mut self) -> Result<bool, Error> {
         Ok(self.row["fixture"]["public"] == true)
     }
-    fn market(&mut self, _: &Value) -> Result<Option<Value>, Error> {
-        Ok(self.row.get("market").filter(|v| !v.is_null()).cloned())
+    fn market(&mut self, _: &Input) -> Result<Option<Input>, Error> {
+        Ok(self
+            .row
+            .get("market")
+            .filter(|v| !v.is_null())
+            .cloned()
+            .map(Into::into))
     }
-    async fn get(&mut self, endpoint: &'static str, config: J) -> Result<Value, Error> {
-        self.note("get", vec![text(endpoint), obs(&config)]);
+    async fn get(&mut self, endpoint: &'static str, config: Input) -> Result<Input, Error> {
+        self.note("get", vec![text(endpoint), retained_obs(&config)]);
         if self.row["fixture"]["error"] == true {
             return Err(self.failure.clone());
         }
-        Ok(self.row["payload"].clone())
+        Ok(self.row["payload"].clone().into())
     }
     fn local_to_utc(&mut self, value: f64) -> f64 {
         value
@@ -182,9 +205,13 @@ fn actual_typescript_fill_history() {
             continue;
         }
         let mut host = Host::new(&row);
-        let output = ready(fetch_historical_fills(&mut host, &row["options"])).unwrap();
+        let output = ready(fetch_historical_fills(
+            &mut host,
+            &row["options"].clone().into(),
+        ))
+        .unwrap();
         assert_eq!(
-            obs(&J::Array(output)),
+            retained_obs(&Input::Array(output)),
             row["result"],
             "HISTORY native result; fixture {}",
             row["fixture"]
@@ -194,17 +221,10 @@ fn actual_typescript_fill_history() {
     }
     assert_eq!((compared, refusals), (23, 1));
 }
-fn key(row: &Value, name: &str) -> Option<Value> {
-    let mut snake = String::new();
-    for c in name.chars() {
-        if c.is_ascii_uppercase() {
-            snake.push('_');
-            snake.push(c.to_ascii_lowercase());
-        } else {
-            snake.push(c);
-        }
-    }
-    row.get(name).or_else(|| row.get(&snake)).cloned()
+fn key(row: &Input, name: &str) -> Option<Input> {
+    row.get(name)
+        .or_else(|| row.get(&safe_cex_num::lodash_snake_case(name)))
+        .cloned()
 }
 impl PrivateMessageHost for Host {
     type Raw = String;
@@ -227,64 +247,70 @@ impl PrivateMessageHost for Host {
         self.note("diagnostic", vec![text(raw)]);
         Ok(())
     }
-    fn parse(&mut self, raw: String) -> Result<Value, Error> {
-        Ok(serde_json::from_str(&raw).unwrap_or(Value::Null))
+    fn parse(&mut self, raw: String) -> Result<Input, Error> {
+        Ok(Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap_or(Input::Null))
     }
-    fn balance_notice(&mut self, json: &Value) -> Result<(), Error> {
-        self.note("balanceNotice", vec![vo(json)]);
+    fn balance_notice(&mut self, json: &Input) -> Result<(), Error> {
+        self.note("balanceNotice", vec![retained_obs(json)]);
         Ok(())
     }
     fn refresh(&mut self, kind: &'static str) -> Result<(), Error> {
         self.note("refresh", vec![text(kind)]);
         Ok(())
     }
-    fn orders(&mut self) -> Result<Vec<Value>, Error> {
+    fn orders(&mut self) -> Result<Vec<Input>, Error> {
         Ok(self.orders.clone())
     }
-    fn positions(&mut self) -> Result<Vec<Value>, Error> {
+    fn positions(&mut self) -> Result<Vec<Input>, Error> {
         Ok(self.positions.clone())
     }
-    fn add_orders(&mut self, orders: Vec<J>) -> Result<(), Error> {
-        self.note("add", vec![obs(&J::Array(orders))]);
+    fn add_orders(&mut self, orders: Vec<Input>) -> Result<(), Error> {
+        self.note("add", vec![retained_obs(&Input::Array(orders))]);
         Ok(())
     }
-    fn key(&mut self, row: &Value, name: &'static str) -> Result<Option<Value>, Error> {
+    fn key(&mut self, row: &Input, name: &'static str) -> Result<Option<Input>, Error> {
         Ok(key(row, name))
     }
     fn reduce_only(
         &mut self,
-        raw: Option<&Value>,
-        client: Option<&Value>,
-        fallback: Option<&Value>,
+        raw: Option<&Input>,
+        client: Option<&Input>,
+        fallback: Option<&Input>,
     ) -> Result<bool, Error> {
         let cache = HashMap::from([("c".into(), true)]);
         let result = safe_cex_venue_bitunix::tpsl_helpers::get_bitunix_reduce_only(
             raw,
             client,
-            fallback.and_then(Value::as_bool).unwrap_or(false),
+            fallback.and_then(Input::as_bool).unwrap_or(false),
             &cache,
         )?;
         Ok(result)
     }
-    fn cache_tif(&mut self, client: &Value, tif: J) -> Result<(), Error> {
-        self.note("cacheTif", vec![vo(client), obs(&tif)]);
+    fn cache_tif(&mut self, client: &Input, tif: Input) -> Result<(), Error> {
+        self.note("cacheTif", vec![retained_obs(client), retained_obs(&tif)]);
         Ok(())
     }
-    fn cache_position(&mut self, key: String, id: Option<&Value>) -> Result<(), Error> {
+    fn cache_position(&mut self, key: String, id: Option<&Input>) -> Result<(), Error> {
         self.note(
             "cachePosition",
-            vec![text(&key), id.map_or_else(undefined, vo)],
+            vec![text(&key), id.map_or_else(undefined, retained_obs)],
         );
         Ok(())
     }
-    fn update_position_info(&mut self, position: &Value, info: J) -> Result<(), Error> {
+    fn update_position_info(&mut self, position: &Input, info: Input) -> Result<(), Error> {
         let found = self
             .positions
             .iter_mut()
             .find(|p| **p == *position)
             .unwrap();
-        found["info"] =
-            serde_json::from_str(&safe_cex_num::js_json_stringify(&info)?.unwrap()).unwrap();
+        if let Some(value) = found.get_mut("info") {
+            *value = info;
+        } else {
+            found
+                .as_object_mut()
+                .unwrap()
+                .push(("info".encode_utf16().collect(), info));
+        }
         Ok(())
     }
     fn fake_full(&mut self) -> Result<bool, Error> {
@@ -292,8 +318,8 @@ impl PrivateMessageHost for Host {
     }
     fn leg_id(
         &mut self,
-        raw: Option<&Value>,
-        position: Option<&Value>,
+        raw: Option<&Input>,
+        position: Option<&Input>,
         leg: &'static str,
         disambiguate: bool,
     ) -> Result<String, Error> {
@@ -422,14 +448,20 @@ fn actual_typescript_private_message() {
             ready(task).unwrap();
         }
         host.end();
-        let state = jo(vec![
-            ("count", J::Number(host.count)),
-            ("handled", J::Bool(host.handled)),
-            ("last", J::Number(host.last)),
-            ("positions", J::from(json!(host.positions))),
+        let state = Input::Object(vec![
+            ("count".encode_utf16().collect(), Input::Float(host.count)),
+            (
+                "handled".encode_utf16().collect(),
+                Input::Bool(host.handled),
+            ),
+            ("last".encode_utf16().collect(), Input::Float(host.last)),
+            (
+                "positions".encode_utf16().collect(),
+                Input::Array(host.positions),
+            ),
         ]);
         assert_eq!(
-            obs(&state),
+            retained_obs(&state),
             row["state"],
             "PRIVATE native state; fixture {}",
             row["fixture"]

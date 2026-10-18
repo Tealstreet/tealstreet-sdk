@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_num::numeric_ingress::js_from_value;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
@@ -177,7 +179,10 @@ fn assert_forwarded_order(native: &Order, raw: &Value) {
     assert_eq!(native.remaining, raw["amount"].as_f64().unwrap());
     assert_eq!(native.reduce_only, false);
     assert_eq!(native.last_update, 123.0);
-    assert_eq!(native.info.as_ref().unwrap()["witness"], raw["id"]);
+    retained_assert::assert_value(
+        native.info.as_ref().unwrap().get("witness").unwrap(),
+        &raw["id"],
+    );
 }
 fn run_formatter(case: &Value) {
     let input = input(case);
@@ -251,7 +256,10 @@ fn run_formatter(case: &Value) {
     let result = match name {
         "formatTriggerOrder" => ready(format_trigger_order(
             &safe_cex_types::PreparedOrderOpts::from(&opts),
-            source.as_ref(),
+            source
+                .as_ref()
+                .map(|s: &UtilityInput| s.json().clone().into())
+                .as_ref(),
             &store,
             &host,
         ))

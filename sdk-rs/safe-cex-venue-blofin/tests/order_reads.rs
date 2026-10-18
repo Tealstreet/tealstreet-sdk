@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 use safe_cex_num::numeric_ingress::js_from_value;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{
@@ -270,7 +272,11 @@ fn native_orders(actual: &[Order], expected: &Value) {
                 _ => panic!("source tif floor"),
             })
         );
-        assert_eq!(o.info.as_ref(), e.get("info"), "native retained info");
+        match (o.info.as_ref(), e.get("info")) {
+            (Some(a), Some(e)) => retained_assert::assert_value(a, e),
+            (None, None) => (),
+            _ => panic!("native retained info presence"),
+        };
     }
 }
 fn native_history(actual: &[HistoricalOrder], expected: &Value) {

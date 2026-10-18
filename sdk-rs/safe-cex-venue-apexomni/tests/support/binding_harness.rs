@@ -258,13 +258,21 @@ pub struct Request {
 #[derive(Default)]
 pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
-    pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
+    pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Js)>)>>,
     pub requests: RefCell<Vec<Request>>,
     pub advance_ms: Cell<f64>,
     pub after_send: RefCell<Option<Box<dyn FnOnce()>>>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
+        self.route_native(
+            method,
+            path,
+            status,
+            safe_cex_exchange::js_runtime::value::from_json(&body),
+        );
+    }
+    pub fn route_native(&self, method: &str, path: &str, status: f64, body: Js) {
         let mut routes = self.routes.borrow_mut();
         match routes.iter_mut().find(|(m, p, _)| m == method && p == path) {
             Some((_, _, queue)) => queue.push_back((status, body)),
@@ -364,10 +372,7 @@ impl JsHttpHost for Http {
         let result = match response {
             Some((status, body)) => Ok(Js::object(vec![
                 ("status", Js::Number(status)),
-                (
-                    "data",
-                    safe_cex_exchange::js_runtime::value::from_json(&body),
-                ),
+                ("data", body),
                 ("headers", Js::object(vec![])),
             ])),
             None => Err(Thrown::error(

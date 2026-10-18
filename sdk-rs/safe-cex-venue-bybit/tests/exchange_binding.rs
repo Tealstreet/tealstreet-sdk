@@ -1788,3 +1788,320 @@ fn margin_control_switch_publishes_native_position_numbers() {
 fn position_control_switch_publishes_native_position_numbers() {
     control_switch_keeps_native_position_numbers(false);
 }
+
+#[test]
+fn retained_info_position_selection_keeps_nonempty_utf16_price() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-position-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    let h = harness(options(), |wire| {
+        let first = json!({"symbol":"BTCUSDT","side":"Buy","size":"2","avgPrice":" ","positionValue":"0","leverage":"5","unrealisedPnl":"0","curRealisedPnl":"0","liqPrice":"0","positionIdx":0,"positionIM":"0","updatedTime":"1700000000000","seq":7,"positionStatus":"Normal"});
+        let mut second = first.clone();
+        second["avgPrice"] = json!("@@PRICE@@");
+        let body = json!({"retCode":0,"retMsg":"OK","result":{"list":[first,second],"nextPageCursor":""},"time":1})
+            .to_string().replace("\"@@PRICE@@\"", "\"\\ud800\"");
+        wire.ok("GET", "/v5/position/list", json!({"list":[]}));
+        wire.encoded_routes
+            .borrow_mut()
+            .push(("/v5/position/list".into(), body.into_bytes()));
+    });
+    let positions = h
+        .drive(h.venue().fetch_positions(None))
+        .expect("native dedupe admits retained UTF16 metadata");
+    assert_eq!(positions.len(), 2, "one selected row per settle coin");
+    for position in positions {
+        let info = position.info.as_ref().unwrap();
+        let units = info.get("avgPrice").unwrap().as_text().unwrap();
+        assert_eq!(serde_json::json!(units), expected["units"]);
+    }
+}
+
+#[test]
+fn retained_info_markets_keep_opaque_utf16_and_overflow() {
+    let h = harness(options(), |wire| {
+        wire.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+        wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+        let mut row = instrument("BTCUSDT", "Trading");
+        row["opaque"] = json!({"text":"@@TEXT@@","number":"@@NUMBER@@"});
+        let body = json!({"retCode":0,"retMsg":"OK","result":{"list":[row],"nextPageCursor":""}})
+            .to_string()
+            .replace("\"@@TEXT@@\"", "\"\\ud800\"")
+            .replace("\"@@NUMBER@@\"", "1e400");
+        wire.encoded_routes
+            .borrow_mut()
+            .push(("/v5/market/instruments-info".into(), body.into_bytes()));
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert!(
+        !markets.is_empty(),
+        "opaque fields cannot hide a valid instrument"
+    );
+    for market in markets {
+        let opaque = market.info.as_ref().unwrap().get("opaque").unwrap();
+        assert_eq!(
+            opaque.get("text").unwrap().as_text(),
+            Some([0xd800].as_slice())
+        );
+        assert_eq!(opaque.get("number").unwrap().as_f64(), Some(f64::INFINITY));
+    }
+}
+
+#[test]
+fn retained_info_markets_keep_own_undefined_and_utf16_keys() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let h = harness(options(), |wire| {
+        wire.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+        wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+        let mut row: Input = instrument("BTCUSDT", "Trading").into();
+        row.as_object_mut().unwrap().extend([
+            (vec![0xd801], Input::Text(vec![0xd800])),
+            ("missing".encode_utf16().collect(), Input::Undefined),
+            ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
+            ("zero".encode_utf16().collect(), Input::Float(-0.)),
+        ]);
+        wire.retained_routes.borrow_mut().push((
+            "/v5/market/instruments-info".into(),
+            Input::Object(vec![
+                ("retCode".encode_utf16().collect(), Input::Float(0.)),
+                (
+                    "retMsg".encode_utf16().collect(),
+                    Input::Text("OK".encode_utf16().collect()),
+                ),
+                (
+                    "result".encode_utf16().collect(),
+                    Input::Object(vec![(
+                        "list".encode_utf16().collect(),
+                        Input::Array(vec![row]),
+                    )]),
+                ),
+            ]),
+        ));
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert!(!markets.is_empty());
+    for market in markets {
+        let info = market.info.as_ref().unwrap();
+        assert!(matches!(info.get("missing"), Some(Input::Undefined)));
+        assert!(info.get("nan").unwrap().as_f64().unwrap().is_nan());
+        assert_eq!(
+            info.get("zero").unwrap().as_f64().unwrap().to_bits(),
+            (-0f64).to_bits()
+        );
+        let field = info
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(key, _)| key == &[0xd801])
+            .unwrap();
+        assert_eq!(field.1.as_text(), Some([0xd800].as_slice()));
+    }
+}
+
+fn retained_instrument_packet(
+    rows: Vec<safe_cex_types::retained_json::RetainedJsonInput>,
+) -> safe_cex_types::retained_json::RetainedJsonInput {
+    use safe_cex_types::retained_json::RetainedJsonInput as I;
+    I::Object(vec![
+        ("retCode".encode_utf16().collect(), I::Float(0.)),
+        (
+            "retMsg".encode_utf16().collect(),
+            I::Text("OK".encode_utf16().collect()),
+        ),
+        (
+            "result".encode_utf16().collect(),
+            I::Object(vec![("list".encode_utf16().collect(), I::Array(rows))]),
+        ),
+    ])
+}
+#[test]
+fn retained_info_market_undefined_parents_follow_source_failure() {
+    use safe_cex_types::retained_json::RetainedJsonInput as I;
+    let h = harness(options(), |wire| {
+        wire.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+        wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+        let mut row: I = instrument("BTCUSDT", "Trading").into();
+        *row.get_mut("lotSizeFilter").unwrap() = I::Undefined;
+        wire.retained_routes.borrow_mut().push((
+            "/v5/market/instruments-info".into(),
+            retained_instrument_packet(vec![row]),
+        ));
+    });
+    let error = h.drive(h.venue().fetch_markets()).unwrap_err();
+    assert_eq!(error.name, "TypeError");
+    assert_eq!(
+        error.message,
+        "Cannot read properties of undefined (reading 'qtyStep')"
+    );
+}
+#[test]
+fn retained_info_market_coercion_keeps_source_error_name_and_message() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-position-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    let expected = &expected["coercionErrors"][0];
+    assert_eq!(expected["variant"], "bybit");
+    for name in [
+        safe_cex_types::ExchangeName::Bybit,
+        safe_cex_types::ExchangeName::Bybitdemo,
+    ] {
+        let h = support::harness_as(name.clone(), options(), |wire| {
+            wire.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+            wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+            let mut row = instrument("BTCUSDT", "Trading");
+            row["lotSizeFilter"]["qtyStep"] = json!({"toString":null});
+            wire.retained_routes.borrow_mut().push((
+                "/v5/market/instruments-info".into(),
+                retained_instrument_packet(vec![row.into()]),
+            ));
+        });
+        let error = h.drive(h.venue().fetch_markets()).unwrap_err();
+        assert_eq!(
+            json!({"name":error.name,"message":error.message}),
+            json!({"name":expected["name"],"message":expected["message"]}),
+            "BYBIT_RETAINED source error through constructed {name:?} binding"
+        );
+    }
+}
+
+#[test]
+fn retained_info_option_coercion_keeps_source_warning_message() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retained-position-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    let mut opts = options();
+    opts.enable_option_markets = Some(true);
+    opts.public_data_only = Some(true);
+    let h = harness(opts, |wire| {
+        wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+        wire.ok(
+            "GET",
+            "/v5/market/option-base-coins",
+            json!({"list":[{"baseCoin":"SOL"}]}),
+        );
+        let mut row = instrument("SOL-6NOV26-112d5-P", "Trading");
+        row["optionsType"] = json!("Put");
+        row["lotSizeFilter"]["qtyStep"] = json!({"toString":null});
+        wire.route_when(
+            "GET",
+            "/v5/market/instruments-info",
+            "category",
+            "option",
+            json!({"retCode":0,"retMsg":"OK","result":{"list":[row],"nextPageCursor":""}}),
+        );
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert!(
+        markets.is_empty(),
+        "source keeps the previously empty option Store on failure"
+    );
+    let prefix = "Failed to load Bybit option markets, keeping the last ones: ";
+    let logs = h.runtime.logs.borrow();
+    let warnings: Vec<_> = logs
+        .iter()
+        .filter_map(|line| line.find(prefix).map(|at| &line[at..]))
+        .collect();
+    assert_eq!(
+        warnings,
+        [format!(
+            "{prefix}{}",
+            expected["optionCoercionError"]["message"].as_str().unwrap()
+        )],
+        "BYBIT_RETAINED actual option receiver warning preserves maintained message"
+    );
+}
+
+#[test]
+fn retained_info_market_missing_and_undefined_fee_symbols_match() {
+    use safe_cex_types::retained_json::RetainedJsonInput as I;
+    let h = harness(options(), |wire| {
+        wire.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+        wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+        let mut row: I = instrument("BTCUSDT", "Trading").into();
+        *row.get_mut("symbol").unwrap() = I::Undefined;
+        wire.retained_routes.borrow_mut().push((
+            "/v5/market/instruments-info".into(),
+            retained_instrument_packet(vec![row]),
+        ));
+        let fee: I = json!({"takerFeeRate":{"toString":null},"makerFeeRate":"0"}).into();
+        wire.retained_routes.borrow_mut().push((
+            "/v5/account/fee-rate".into(),
+            retained_instrument_packet(vec![fee]),
+        ));
+    });
+    let error = h.drive(h.venue().fetch_markets()).unwrap_err();
+    assert_eq!(error.name, "TypeError");
+    assert!(
+        error
+            .message
+            .contains("Cannot convert object to primitive value"),
+        "fee coercion precedes strict symbol refusal: {error:?}"
+    );
+}
+#[test]
+fn retained_info_option_filters_precede_utf8_admission() {
+    use safe_cex_types::retained_json::RetainedJsonInput as I;
+    let mut opts = options();
+    opts.enable_option_markets = Some(true);
+    opts.public_data_only = Some(true);
+    let h = harness(opts, |wire| {
+        wire.ok("GET", "/v5/market/instruments-info", json!({"list":[]}));
+        wire.ok(
+            "GET",
+            "/v5/market/option-base-coins",
+            json!({"list":[{"baseCoin":"SOL"}]}),
+        );
+        let mut good = instrument("SOL-6NOV26-112d5-P", "Trading");
+        good["optionsType"] = json!("Put");
+        good["baseCoin"] = json!("SOL");
+        good["settleCoin"] = json!("USDT");
+        let mut bad: I = good.clone().into();
+        *bad.get_mut("symbol").unwrap() = I::Text(
+            "SOL"
+                .encode_utf16()
+                .chain([0xd800])
+                .chain("-6NOV26-0-P".encode_utf16())
+                .collect(),
+        );
+        wire.retained_routes.borrow_mut().push((
+            "/v5/market/instruments-info".into(),
+            retained_instrument_packet(vec![bad, good.into()]),
+        ));
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert!(
+        markets
+            .iter()
+            .any(|market| market.symbol == "SOL-6NOV26-112d5-P" && market.option.is_some()),
+        "filtered UTF16 row cannot hide tradable option siblings"
+    );
+}

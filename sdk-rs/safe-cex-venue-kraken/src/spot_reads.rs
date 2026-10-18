@@ -2,7 +2,7 @@
 use crate::{spot_types, wire};
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
-    JsJsonValue, TableHit, js_own_keys, js_string, js_table_lookup, js_truthy,
+    TableHit, js_own_keys, js_string, js_table_lookup, js_truthy,
     numeric_ingress::{JsNumberInput, JsNumberOutput, js_value_as_f64},
     parse_float,
 };
@@ -54,7 +54,12 @@ fn field(value: &Value, index: usize) -> Option<&Value> {
 pub async fn fetch_ohlcv<F>(
     options: JsNumberInput,
     store: &dyn Store,
-    read: impl FnOnce(&'static str, JsJsonValue, TableHit<f64>, Option<f64>) -> Result<F, ExchangeError>,
+    read: impl FnOnce(
+        &'static str,
+        safe_cex_types::retained_json::RetainedJsonInput,
+        TableHit<f64>,
+        Option<f64>,
+    ) -> Result<F, ExchangeError>,
     console_error: impl FnOnce(&'static str, &str) -> Result<(), ExchangeError>,
 ) -> Result<Vec<Candle>, ExchangeError>
 where
@@ -69,9 +74,13 @@ where
             .get(&options.symbol)
             .and_then(|market| market.info.as_ref())
             .and_then(|info| info.get("pairName"))
-            .filter(|pair| js_truthy(Some(pair)))
+            .filter(|pair| pair.is_truthy())
             .cloned()
-            .unwrap_or_else(|| Value::String(options.symbol.clone()));
+            .unwrap_or_else(|| {
+                safe_cex_types::retained_json::RetainedJsonInput::Text(
+                    options.symbol.encode_utf16().collect(),
+                )
+            });
         let interval = match js_table_lookup(spot_types::INTERVAL, &options.interval) {
             TableHit::Mapped(value) => TableHit::Mapped(*value),
             TableHit::Inherited(member) => TableHit::Inherited(member),
@@ -86,7 +95,7 @@ where
             .find(|(key, _)| *key == "OHLC")
             .expect("OHLC endpoint")
             .1;
-        let data = read(endpoint, pair.into(), interval, since)?
+        let data = read(endpoint, pair, interval, since)?
             .await?
             .map(wire::decode)
             .transpose()

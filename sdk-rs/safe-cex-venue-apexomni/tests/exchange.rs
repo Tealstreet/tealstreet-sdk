@@ -103,7 +103,7 @@ fn position(value: &Position) -> J {
         fields.push(("marginType", s("cross")));
     }
     if let Some(v) = value.info.as_ref() {
-        fields.push(("info", J::from(v.clone())));
+        fields.push(("info", native::retained(v)));
     }
     if let Some(v) = value.last_update.into_value() {
         fields.push(("lastUpdate", source_clock_stamp(v)));
@@ -140,7 +140,7 @@ fn order(value: &Order) -> J {
         ("amount", n(value.amount)),
         ("filled", n(value.filled)),
         ("remaining", n(value.remaining)),
-        ("info", J::from(value.info.clone().unwrap())),
+        ("info", native::retained(value.info.as_ref().unwrap())),
         ("lastUpdate", source_clock_stamp(value.last_update)),
     ];
     match value.reduce_only {
@@ -183,7 +183,7 @@ fn balance(value: &Balance) -> J {
         ("free", n(value.free)),
     ];
     if let Some(v) = &value.info {
-        fields.push(("info", J::from(v.clone())));
+        fields.push(("info", native::retained(v)));
     }
     obj(fields)
 }
@@ -221,7 +221,7 @@ fn market(value: &Market) -> J {
                 ),
             ]),
         ),
-        ("info", J::from(value.info.clone().unwrap())),
+        ("info", native::retained(value.info.as_ref().unwrap())),
     ];
     if let Some(expiring) = value.is_expiring {
         fields.push(("isExpiring", J::Bool(expiring)));
@@ -352,7 +352,10 @@ impl ApexHost for Host {
         self.record("socket:dispose", vec![J::Bool(private)]);
         Ok(())
     }
-    fn request(&self, r: ApexRequest) -> ExchangeFuture<'_, J> {
+    fn request(
+        &self,
+        r: ApexRequest,
+    ) -> ExchangeFuture<'_, safe_cex_types::retained_json::RetainedJsonInput> {
         let mut args = vec![
             s(r.method),
             s(r.path),
@@ -371,10 +374,10 @@ impl ApexHost for Host {
             let id = self.sequence_orders.get() + 1;
             self.sequence_orders.set(id);
             return Box::pin(async move {
-                Ok(obj(vec![(
+                Ok(native::capture(&obj(vec![(
                     "data",
                     obj(vec![("id", s(format!("placed-{id}")))]),
-                )]))
+                )])))
             });
         }
         if let Some(error) = self.request_errors.borrow().get(r.path).cloned() {
@@ -401,7 +404,7 @@ impl ApexHost for Host {
                 })
                 .await;
             }
-            Ok(value)
+            Ok(native::capture(&value))
         })
     }
     fn date_parse(&self, text: &str) -> Result<f64, ExchangeError> {
@@ -411,13 +414,18 @@ impl ApexHost for Host {
             f64::NAN
         })
     }
-    fn console(&self, level: &str, message: &str, detail: Option<&J>) -> Result<(), ExchangeError> {
+    fn console(
+        &self,
+        level: &str,
+        message: &str,
+        detail: Option<&safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> Result<(), ExchangeError> {
         self.record(
             "console",
             vec![
                 s(level),
                 s(message),
-                detail.cloned().unwrap_or(J::Undefined),
+                detail.map_or(J::Undefined, native::retained),
             ],
         );
         Ok(())
@@ -435,7 +443,7 @@ fn fixture(host: &Rc<Host>) -> Rc<DefaultStore> {
             tickers: Some(vec![js_from_value(c["ticker"].clone()).unwrap()]),
             positions: Some(vec![js_from_value(c["position"].clone()).unwrap()]),
             balance: Some(js_from_value(c["balance"].clone()).unwrap()),
-            zk_link_config: Some(json!({"id":"old","l2Key":"old-key"})),
+            zk_link_config: Some(json!({"id":"old","l2Key":"old-key"}).into()),
             ..Default::default()
         },
         false,
@@ -524,7 +532,7 @@ fn run(name: &str) {
                         .set([1.0, 2.0, f64::NAN][variant as usize]);
                     s(exchange.account_type())
                 }
-                "getAccount" => exchange.get_account().await.unwrap(),
+                "getAccount" => native::retained(&exchange.get_account().await.unwrap()),
                 "fetchRawBalance" | "fetchBalance" => {
                     if variant == 1 {
                         host.responses
@@ -546,7 +554,7 @@ fn run(name: &str) {
                                     js_from_value(corpus()["fixtures"]["position"].clone())
                                         .unwrap(),
                                 ]),
-                                zk_link_config: Some(json!({"id":"old","l2Key":"old-key"})),
+                                zk_link_config: Some(json!({"id":"old","l2Key":"old-key"}).into()),
                                 balance: Some(
                                     js_from_value(corpus()["fixtures"]["balance"].clone()).unwrap(),
                                 ),
@@ -563,13 +571,13 @@ fn run(name: &str) {
                     })
                 }
                 "mapPosition" => exchange
-                    .map_position(&args[0])
+                    .map_position(&native::capture(&args[0]))
                     .unwrap()
                     .as_ref()
                     .map_or(J::Null, position),
                 "mapOrder" => J::Array(
                     exchange
-                        .map_order(&args[0])
+                        .map_order(&native::capture(&args[0]))
                         .unwrap()
                         .iter()
                         .map(order)
@@ -595,7 +603,7 @@ fn run(name: &str) {
                 "fetchPositions" => {
                     if variant == 1 {
                         store
-                            .update_zk_link_config(Some(json!({"id":"old"})))
+                            .update_zk_link_config(Some(json!({"id":"old"}).into()))
                             .unwrap();
                     }
                     if variant == 2 {
@@ -629,15 +637,17 @@ fn run(name: &str) {
                     .map(market)
                     .collect(),
                 ),
-                "normalizeApexSymbolKey" => {
-                    s(exchange.normalize_apex_symbol_key(&args[0]).unwrap())
-                }
+                "normalizeApexSymbolKey" => s(exchange
+                    .normalize_apex_symbol_key(&native::capture(&args[0]))
+                    .unwrap()),
                 "normalizeExecutionTimestampToSeconds" => exchange
-                    .normalize_execution_timestamp_to_seconds(&args[0])
+                    .normalize_execution_timestamp_to_seconds(&native::capture(&args[0]))
                     .unwrap()
                     .map_or(J::Undefined, n),
                 "recordWsExecution" => {
-                    exchange.record_ws_execution(&args[0]).unwrap();
+                    exchange
+                        .record_ws_execution(&native::capture(&args[0]))
+                        .unwrap();
                     if variant == 0 {
                         assert_eq!(
                             exchange.recent_ws_executions.borrow()[0].qty.to_bits(),
@@ -655,7 +665,7 @@ fn run(name: &str) {
                     )
                 }
                 "getWsExecutionFallback" => {
-                    exchange.record_ws_execution(&J::from(json!({"symbol":"BTC-USDC","side":"BUY","createdAt":1700000000123.0,"price":"83.25","size":"2.25","fee":"-0.75","orderId":"row-1"}))).unwrap();
+                    exchange.record_ws_execution(&native::capture(&J::from(json!({"symbol":"BTC-USDC","side":"BUY","createdAt":1700000000123.0,"price":"83.25","size":"2.25","fee":"-0.75","orderId":"row-1"})))).unwrap();
                     J::Array(
                         exchange
                             .get_ws_execution_fallback(
@@ -741,7 +751,7 @@ fn run(name: &str) {
                 .zk_link_config()
                 .as_deref()
                 .cloned()
-                .map_or(J::Undefined, J::from);
+                .map_or(J::Undefined, |v| native::retained(&v));
             native::check_fields(&zk, &row["zk"], &format!("{name} config state"));
         }
         count += 1;
@@ -917,7 +927,7 @@ fn continuation_position_short_circuit_matches_source() {
         let exchange = ApexOmniExchange::new(base, host.clone()).unwrap();
         host.now_calls.set(0);
         let actual = exchange
-            .map_position(&J::from(row["input"].clone()))
+            .map_position(&native::capture(&J::from(row["input"].clone())))
             .unwrap_or_else(|error| {
                 panic!(
                     "APEX-CONT {} native unexpected rejection: {error:?}",
@@ -956,7 +966,7 @@ fn continuation_position_short_circuit_matches_source() {
     host.operations.borrow_mut().clear();
     host.now_calls.set(0);
     let error = exchange
-        .map_position(&J::from(row["input"].clone()))
+        .map_position(&native::capture(&J::from(row["input"].clone())))
         .expect_err("APEX-CONT missing-market unrealisedPnl must fail before lookup");
     assert_eq!(
         error.name,

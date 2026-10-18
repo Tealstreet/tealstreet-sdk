@@ -1,9 +1,6 @@
 //! Stateless helpers used by MEXC exchange orchestration.
-use crate::{
-    types::ENDPOINTS,
-    utils::{to_integer_string, to_number},
-};
-use safe_cex_num::{JsCoercionError, js_object_or_array_entry, js_string, js_truthy, math_max};
+use crate::{types::ENDPOINTS, utils::to_number};
+use safe_cex_num::{JsCoercionError, js_object_or_array_entry, js_string, math_max};
 use safe_cex_types::{
     Order, OrderSide, OrderStopTriggerType, OrderType, PlaceOrderOpts, Position, PositionSide,
 };
@@ -102,11 +99,14 @@ pub fn extract_rows<'a>(payload: Option<&'a Value>, keys: &[String]) -> &'a [Val
 // ts: MexcExchange.nativePositionId
 pub fn native_position_id(position: &Position) -> Result<String, JsCoercionError> {
     let info = position.info.as_ref();
-    to_integer_string(
-        info.and_then(|v| v.get("positionId"))
-            .filter(|v| !v.is_null())
-            .or_else(|| info.and_then(|v| v.get("id"))),
-    )
+    let value = info
+        .and_then(|value| value.get("positionId"))
+        .filter(|value| !value.is_nullish())
+        .or_else(|| info.and_then(|value| value.get("id")));
+    value
+        .filter(|value| !value.is_nullish())
+        .map(|value| safe_cex_num::js_retained_string(Some(value)))
+        .unwrap_or_else(|| Ok(String::new()))
 }
 
 // ts: MexcExchange.findOpenPosition
@@ -163,8 +163,12 @@ pub fn get_replacement_order_amount(order: &Order) -> Result<f64, JsCoercionErro
     let info = order.info.as_ref();
     let raw = ["vol", "quantity", "origQty"]
         .iter()
-        .find_map(|key| info.and_then(|v| v.get(*key)).filter(|v| !v.is_null()));
-    let native = to_number(raw, Some(f64::NAN))?;
+        .find_map(|key| info.and_then(|v| v.get(key)).filter(|v| !v.is_nullish()));
+    let native = if raw.is_none_or(|value| value.is_nullish() || value.text_equals("")) {
+        f64::NAN
+    } else {
+        safe_cex_num::js_retained_parse_float(raw)?
+    };
     Ok(if native.is_finite() && native > 0.0 {
         native
     } else {
@@ -177,12 +181,24 @@ pub fn is_stop_like_order(order: &Order) -> bool {
         order.r#type,
         safe_cex_types::ModelField::Value(OrderType::StopLoss)
             | safe_cex_types::ModelField::Value(OrderType::TakeProfit)
-    ) || js_truthy(order.info.as_ref().and_then(|v| v.get("__mexcPlanOrder")))
-        || js_truthy(order.info.as_ref().and_then(|v| v.get("__mexcStopOrder")))
+    ) || order
+        .info
+        .as_ref()
+        .and_then(|v| v.get("__mexcPlanOrder"))
+        .is_some_and(|value| value.is_truthy())
+        || order
+            .info
+            .as_ref()
+            .and_then(|v| v.get("__mexcStopOrder"))
+            .is_some_and(|value| value.is_truthy())
 }
 // ts: MexcExchange.isStopOrder
 pub fn is_stop_order(order: &Order) -> bool {
-    js_truthy(order.info.as_ref().and_then(|v| v.get("__mexcStopOrder")))
+    order
+        .info
+        .as_ref()
+        .and_then(|v| v.get("__mexcStopOrder"))
+        .is_some_and(|value| value.is_truthy())
         || (matches!(
             order.r#type,
             safe_cex_types::ModelField::Value(OrderType::StopLoss)

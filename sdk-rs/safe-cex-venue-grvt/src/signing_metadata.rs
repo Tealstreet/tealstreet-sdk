@@ -1,18 +1,19 @@
 //! GRVT market metadata validation before order signing.
-use safe_cex_num::numeric_ingress::js_value_as_f64;
-use serde_json::Value;
+
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 
 /// The source returns decimal exponents unchanged, including negative zero.
-pub fn get_instrument_signing_metadata<'a>(
+pub fn get_instrument_signing_metadata(
     market_id: &str,
-    info: Option<&'a Value>,
-) -> Result<(&'a str, f64, f64), String> {
+    info: Option<&Input>,
+) -> Result<(String, f64, f64), String> {
     let hash = info
         .and_then(|value| value.get("ih"))
-        .and_then(Value::as_str);
+        .and_then(Input::as_text)
+        .and_then(|units| String::from_utf16(units).ok());
     let decimals = |key| {
         info.and_then(|value| value.get(key))
-            .and_then(js_value_as_f64)
+            .and_then(Input::as_f64)
             .filter(|value| {
                 value.is_finite() && value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_991.0
             })
