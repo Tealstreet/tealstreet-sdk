@@ -1021,9 +1021,9 @@ impl ConstructorHost for Rt {
         store: Handle<Self>,
     ) -> ReadResult<Self, Handle<Self>> {
         let base = self.global("BaseExchange")?;
-        Ok(h(base.call(
-            Js::Undefined,
+        Ok(h(base.construct(
             vec![(*name).clone(), (*options).clone(), (*store).clone()],
+            None,
         )?))
     }
     fn secondary_client<'a>(

@@ -535,7 +535,23 @@ mod strict_codecs {
 
     impl<'de> serde::Deserialize<'de> for super::StoreUpdate {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireStoreUpdate::deserialize(safe_cex_types::strict_decode::object(deserializer))
+            struct StoreRecordVisitor;
+            impl<'de> serde::de::Visitor<'de> for StoreRecordVisitor {
+                type Value = super::StoreUpdate;
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    formatter.write_str("a Store update record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    deserializer: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireStoreUpdate::deserialize(safe_cex_types::strict_decode::object(
+                        deserializer,
+                    ))
+                }
+            }
+            deserializer
+                .deserialize_newtype_struct(safe_cex_types::STORE_RECORD, StoreRecordVisitor)
         }
     }
 }

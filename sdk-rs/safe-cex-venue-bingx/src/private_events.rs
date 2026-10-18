@@ -7,7 +7,6 @@ use safe_cex_types::{
     MarginType, Order, OrderStatus, OrderTimeInForce, OrderType, Position, PositionMode,
     PositionSide, model_utils::create_position_id,
 };
-use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -23,7 +22,7 @@ fn text(value: Option<&Input>) -> Result<String, ExchangeError> {
 }
 fn first<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     for (i, key) in keys.iter().enumerate() {
-        let v = row.get(*key);
+        let v = row.get(key);
         if v.is_some_and(|v| !v.is_nullish()) || i + 1 == keys.len() {
             return v;
         }
@@ -53,13 +52,7 @@ fn number(value: Option<&Input>) -> Result<f64, ExchangeError> {
 fn strict_true(value: Option<&Input>) -> bool {
     value.is_some_and(|v| matches!(v, Input::Bool(true)) || v.text_equals("true"))
 }
-pub fn map_order<I: Clone + Into<Input>>(
-    o: &I,
-    orders: &[Order],
-    now: f64,
-) -> Result<Option<Order>, ExchangeError> {
-    let retained: Input = o.clone().into();
-    let o = &retained;
+pub fn map_order(o: &Input, orders: &[Order], now: f64) -> Result<Option<Order>, ExchangeError> {
     let id = first(o, &["orderId", "orderID", "i"]);
     let symbol = first(o, &["symbol", "s"])
         .and_then(Input::as_text)
@@ -147,7 +140,7 @@ pub fn map_order<I: Clone + Into<Input>>(
         remaining: subtract(amount, filled),
         reduce_only: strict_true(first(o, &["reduceOnly", "ro", "R"])).into(),
         close: (Some(close)).into(),
-        info: (Some(o.clone().into())).into(),
+        info: (Some(o.clone())).into(),
         time_in_force: (tif).into(),
         last_update: now,
         trigger_type: (None).into(),
@@ -250,7 +243,7 @@ impl BingxPrivateEvents {
                             "unrealizedProfit",
                         ]
                         .iter()
-                        .any(|key| row.get(*key).is_some())
+                        .any(|key| row.get(key).is_some())
                 })
                 .cloned()
                 .collect::<Vec<_>>();
@@ -380,9 +373,17 @@ impl BingxPrivateEvents {
                             .ok_or_else(|| type_error("fill symbol has no replace method"))?
                             .replace('-', "");
                         let side = table(&constants::ORDER_SIDE, &text(data.get("S"))?)?;
-                        let mut payload = Input::from(
-                            json!({"symbol":symbol,"price":finite_or_zero(price),"amount":amount}),
-                        );
+                        let mut payload = Input::Object(vec![
+                            (
+                                "symbol".encode_utf16().collect(),
+                                Input::Text(symbol.encode_utf16().collect()),
+                            ),
+                            (
+                                "price".encode_utf16().collect(),
+                                Input::Float(finite_or_zero(price)),
+                            ),
+                            ("amount".encode_utf16().collect(), Input::Float(amount)),
+                        ]);
                         if let Some(id) = data.get("i") {
                             payload
                                 .as_object_mut()
@@ -600,7 +601,7 @@ impl BingxPrivateEvents {
                     contracts,
                     liquidation_price: liq,
                     margin_size: (None).into(),
-                    info: (Some(update.into())).into(),
+                    info: (Some(update)).into(),
                     extra: (None).into(),
                     last_update: (None).into(),
                     option: (None).into(),

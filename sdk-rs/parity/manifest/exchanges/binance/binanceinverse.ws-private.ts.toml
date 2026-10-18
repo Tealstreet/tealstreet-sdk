@@ -1,0 +1,138 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/binance/binanceinverse.ws-private.ts"
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket.dispose"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket.connectAndSubscribe"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket.onOpen"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#detachSocket"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket.onMessage"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket.ping"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#getOrderRejectReason"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket.handleOrderEvents"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket.handleAccountEvents"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#throttledFetchPositions"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#executePositionFetch"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#fetchListenKey"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#scheduleListenKeyRefresh"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#updateListenKey"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#throttledFetchOrders"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BinanceInversePrivateWebsocket#fetchThrottledOrders"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

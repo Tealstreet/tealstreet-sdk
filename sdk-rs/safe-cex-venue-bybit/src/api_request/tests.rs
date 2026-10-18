@@ -127,7 +127,7 @@ fn request_signing_matches_live_interceptor() {
     assert_eq!(fixtures["statuses"].as_array().unwrap().len(), 27);
     let mut blocked = 0;
     for case in fixtures["statuses"].as_array().unwrap() {
-        let cdn = blocked_by_cdn(&case["body"]);
+        let cdn = blocked_by_cdn(&case["body"].clone().into());
         blocked += usize::from(cdn);
         assert_eq!(
             http_failure_message(

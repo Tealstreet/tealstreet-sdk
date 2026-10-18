@@ -57,10 +57,10 @@ fn type_error(message: impl Into<String>) -> ExchangeError {
 }
 fn field<'a>(value: Option<&'a Input>, key: &str) -> Result<Option<&'a Input>, ExchangeError> {
     match value {
-        None => Err(type_error(format!(
+        None | Some(Input::Undefined) => Err(type_error(format!(
             "Cannot read properties of undefined (reading '{key}')"
         ))),
-        Some(Input::Null | Input::Undefined) => Err(type_error(format!(
+        Some(Input::Null) => Err(type_error(format!(
             "Cannot read properties of null (reading '{key}')"
         ))),
         Some(value) => Ok(value.get(key)),
@@ -73,16 +73,25 @@ fn float(value: Option<&Input>) -> Result<f64, ExchangeError> {
     safe_cex_num::js_retained_parse_float(value).map_err(|e| type_error(e.message))
 }
 fn alias<'a>(value: &'a Input, key: &str) -> Result<Option<&'a Input>, ExchangeError> {
-    let native = safe_cex_exchange::js_runtime::value::from_retained_input(value.clone());
-    if !safe_cex_exchange::js_runtime::library::in_operator(&native, key)
-        .map_err(|e| e.to_exchange_error())?
-    {
+    if value.is_nullish() {
         return Ok(None);
     }
-    value
-        .get(key)
-        .map(Some)
-        .ok_or_else(|| type_error("typed read field refuses inherited callable"))
+    let native = safe_cex_exchange::js_runtime::value::from_retained_input(value.clone());
+    for key in [
+        key.to_owned(),
+        safe_cex_num::lodash_snake_case(key),
+        safe_cex_num::lodash_camel_case(key),
+    ] {
+        if safe_cex_exchange::js_runtime::library::in_operator(&native, &key)
+            .map_err(|e| e.to_exchange_error())?
+        {
+            return value
+                .get(&key)
+                .map(Some)
+                .ok_or_else(|| type_error("typed read field refuses inherited callable"));
+        }
+    }
+    Ok(None)
 }
 fn describe(value: Option<&Input>) -> Result<String, ExchangeError> {
     value
@@ -229,7 +238,7 @@ impl BingxDataReads {
                 free: float(data.get("availableMargin"))?,
                 used: float(data.get("usedMargin"))?,
                 upnl: float(data.get("unrealizedProfit"))?,
-                info: Some(data.into()),
+                info: Some(data),
                 currencies: None,
                 coins: None,
             })
@@ -704,7 +713,7 @@ impl BingxDataReads {
                         contracts: contracts.abs(),
                         liquidation_price: float(alias(row, "liquidationPrice")?)?,
                         margin_size: margin_size.into(),
-                        info: (Some(row.clone().into())).into(),
+                        info: (Some(row.clone())).into(),
                         realized_pnl: (None).into(),
                         extra: (None).into(),
                         last_update: (None).into(),

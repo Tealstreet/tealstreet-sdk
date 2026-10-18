@@ -61,7 +61,7 @@ impl AssemblyHost for Rt {
         f.call(Js::Undefined, args)
     }
     fn construct(&self, f: Js, args: Vec<Js>) -> Result<Js, Thrown> {
-        f.call(Js::Undefined, args)
+        f.construct(args, None)
     }
     fn function(&self, body: NativeCallback<Js, Thrown>) -> Js {
         Js::function("", move |_, a| body(a))
@@ -339,14 +339,14 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     let w = weak.clone();
     def(
         "BaseExchange",
-        Js::constructor("BaseExchange", move |_, a| {
+        Js::constructor("BaseExchange", None, move |_, a| {
             base_exchange(&shared(&w)?, arg(&a, 0), arg(&a, 1), arg(&a, 2))
         }),
     );
     let w = weak.clone();
     def(
         "BaseWebSocket",
-        Js::constructor("BaseWebSocket", move |_, a| {
+        Js::constructor("BaseWebSocket", None, move |_, a| {
             Ok(sockets::base_websocket(
                 &shared(&w)?.shared.sockets,
                 arg(&a, 0),
@@ -356,7 +356,7 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     let w = weak.clone();
     def(
         "BitgetSecondaryPublicWebsocket",
-        Js::constructor("BitgetSecondaryPublicWebsocket", move |_, a| {
+        Js::constructor("BitgetSecondaryPublicWebsocket", None, move |_, a| {
             Ok(secondary_socket(&shared(&w)?, arg(&a, 1).to_number()?))
         }),
     );
@@ -574,7 +574,7 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     );
     def(
         "AxiosHeaders",
-        Js::constructor("AxiosHeaders", |_, a| arg(&a, 0).spread_object()),
+        Js::constructor("AxiosHeaders", None, |_, a| arg(&a, 0).spread_object()),
     );
     def(
         "v",
@@ -660,7 +660,7 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     );
     def(
         "WeakSet",
-        Js::constructor("WeakSet", |_, _| Ok(Js::new_set())),
+        Js::constructor("WeakSet", None, |_, _| Ok(Js::new_set())),
     );
     let _ = (error_object, utf16);
 }

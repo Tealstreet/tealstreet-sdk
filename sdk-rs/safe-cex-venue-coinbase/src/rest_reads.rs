@@ -2,9 +2,7 @@ use safe_cex_types::Ticker;
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 
 // ts: CoinbaseExchange.formatSpotCfmTicker
-pub fn format_spot_cfm_tickers<I: Clone + Into<Input>>(data: &I) -> Result<Vec<Ticker>, String> {
-    let retained: Input = data.clone().into();
-    let data = &retained;
+pub fn format_spot_cfm_tickers(data: &Input) -> Result<Vec<Ticker>, String> {
     let products = data
         .get("products")
         .and_then(Input::as_array)

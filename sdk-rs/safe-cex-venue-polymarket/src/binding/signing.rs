@@ -42,7 +42,7 @@ pub(crate) fn install(g: &Js, weak: Weak<Shared>) {
     let def = |k: &str, v: Js| ethers.define(k, v).expect("fresh ethers bindings");
     def(
         "Wallet",
-        Js::constructor("Wallet", |_, a| wallet(arg(&a, 0))),
+        Js::constructor("Wallet", None, |_, a| wallet(arg(&a, 0))),
     );
     def(
         "decodeBase64",
@@ -90,7 +90,7 @@ pub(crate) fn install(g: &Js, weak: Weak<Shared>) {
     let sdk = Js::object(vec![]);
     sdk.define(
         "OrderBuilder",
-        Js::constructor("OrderBuilder", move |_, a| {
+        Js::constructor("OrderBuilder", None, move |_, a| {
             let weak = weak.clone();
             let signer = arg(&a, 0);
             let chain = arg(&a, 1);

@@ -62,4 +62,19 @@ const configurations=profiles.map(([profile,value])=>{
  return {profile,input:native(input),stored:native(store.zkLinkConfig)};
 });
 assert.equal(configurations.length,13);
-process.stdout.write(JSON.stringify({cases,patches,coercions,configurations}));
+const replacements=profiles.map(([profile,value])=>{
+ const store=new Store();store.update({zkLinkConfig:{previous:true}});
+ const patch={};if(profile!=='absent')patch.zkLinkConfig=value;
+ store.update(patch);
+ return {profile,patch:native(patch),stored:native(store.zkLinkConfig)};
+});
+const wrappers=[];
+for(const kind of ['currency','displayed'])for(const [profile,value] of profiles){
+ const record={...base[kind==='currency'?'balance':'position']};
+ if(profile!=='absent')record.info=value;
+ const store=new Store();
+ if(kind==='currency')store.update({balance:{...base.balance,currencies:{USDT:record}}});
+ else store.update({displayedPositions:[{...record,key:'displayed',account:'account'}]});
+ wrappers.push({kind,profile,record:native(record),stored:info(kind==='currency'?store.balance.currencies.USDT:store.displayedPositions[0])});
+}
+process.stdout.write(JSON.stringify({cases,patches,coercions,configurations,replacements,wrappers}));

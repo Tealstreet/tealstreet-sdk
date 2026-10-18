@@ -1,3 +1,4 @@
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 #[path = "support/retained_observe.rs"]
 mod retained_observe;
 use safe_cex_exchange::{
@@ -153,6 +154,9 @@ impl ReadTransport for Transport {
                 error.response = Some(self.input["error"]["response"].clone());
                 error.store_subscriber_ids = vec![71, 83];
                 return Err(error);
+            }
+            if let Some(raw) = self.input.get("rawResponse").and_then(Value::as_str) {
+                return Ok(serde_json::from_str(raw).unwrap());
             }
             Ok(serde_json::from_value(self.input["responses"][index].clone()).unwrap())
         })
@@ -385,10 +389,20 @@ fn data_reads_match_actual_typescript() {
         json!([97, 55296, 98]),
         "BINGX-DATA source lone surrogate"
     );
-    assert!(
-        serde_json::from_str::<JsNumberInput>(corpus()["boundary"]["raw"].as_str().unwrap())
-            .is_err(),
-        "BINGX-DATA UTF8 refusal"
+    let (venue, _, _, _) = fixture(json!({"rawResponse":corpus()["boundary"]["raw"]}));
+    let balance = ready(venue.fetch_balance()).unwrap();
+    assert_eq!(
+        json!(
+            balance
+                .info
+                .as_ref()
+                .unwrap()
+                .get("userId")
+                .and_then(Input::as_text)
+                .unwrap()
+        ),
+        corpus()["boundary"]["units"],
+        "BINGX-DATA native balance info retains lone UTF16"
     );
 }
 #[test]

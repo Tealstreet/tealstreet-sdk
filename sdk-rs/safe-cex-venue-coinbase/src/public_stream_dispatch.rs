@@ -152,7 +152,7 @@ fn equals(value: Option<Frame>, expected: &str) -> bool {
 }
 fn key(value: Option<&Frame>) -> Result<Vec<u16>, Failure> {
     Ok(match value {
-        None => "undefined".encode_utf16().collect(),
+        None | Some(Frame::Undefined) => "undefined".encode_utf16().collect(),
         Some(Frame::Null) => "null".encode_utf16().collect(),
         Some(Frame::Bool(v)) => v.to_string().encode_utf16().collect(),
         Some(Frame::Number(v)) => safe_cex_num::js_number_string(*v).encode_utf16().collect(),
@@ -164,7 +164,7 @@ fn key(value: Option<&Frame>) -> Result<Vec<u16>, Failure> {
                 if i > 0 {
                     result.push(44);
                 }
-                if !matches!(v, Frame::Null) {
+                if !matches!(v, Frame::Null | Frame::Undefined) {
                     result.extend(key(Some(v))?);
                 }
             }

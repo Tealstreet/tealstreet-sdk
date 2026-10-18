@@ -5,6 +5,7 @@ pub mod base_exchange;
 pub mod builtins;
 pub mod client;
 pub mod globals;
+pub mod iterator;
 pub(crate) mod jobs;
 pub mod library;
 mod number_radix;
@@ -19,3 +20,6 @@ mod throttle;
 pub mod value;
 
 pub mod collections;
+
+#[cfg(test)]
+mod iterator_record_tests;

@@ -44,6 +44,7 @@ fn data(actual: &Native, expected: &Value) {
     fn visit(actual: &Native, tokens: &mut std::slice::Iter<'_, Value>) {
         let expected = tokens.next().expect("source payload token");
         match actual {
+            Native::Undefined => panic!("JSON.parse cannot produce undefined"),
             Native::Null => assert_eq!(expected["type"], "null", "decoded native null payload"),
             Native::Bool(value) => {
                 assert_eq!(expected["type"], "bool", "decoded native boolean kind");

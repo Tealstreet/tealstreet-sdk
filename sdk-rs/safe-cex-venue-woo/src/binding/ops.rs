@@ -176,18 +176,10 @@ pub(crate) fn construction(
     let supers = weak.clone();
     Rc::new(ConstructionOps {
         value: lifecycle(weak, runtime),
-        super_construct: Rc::new(move |active, _target, args| {
-            classes::super_construct(&rt(&supers)?, &active, args)
+        super_construct: Rc::new(move |active, target, args| {
+            classes::super_construct(&rt(&supers)?, &active, &target, args)
         }),
-        construct: Rc::new(|class, args| {
-            if !class.is_callable() {
-                return Err(Thrown::type_error(&format!(
-                    "{} is not a constructor",
-                    class.to_display()
-                )));
-            }
-            class.call(Js::Undefined, args)
-        }),
+        construct: Rc::new(|class, args| class.construct(args, None)),
         set: Rc::new(|o, k, v| o.set(k, v)),
     })
 }

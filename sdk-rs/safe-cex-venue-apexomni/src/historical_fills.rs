@@ -1,11 +1,12 @@
 //! REST pagination, history fallback and bounded execution-cache fallback.
 use crate::{
-    data::{get, truthy},
-    exchange::{ApexOmniExchange, ApexRequest, failure, field_string, float, text},
+    exchange::{ApexOmniExchange, ApexRequest, failure},
     executions,
+    response::{field_string, float, get, text, truthy},
 };
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::{JsJsonValue as J, js_number_string, math_max, math_min};
+use safe_cex_num::{JsJsonValue as Q, js_number_string, math_max, math_min};
+use safe_cex_types::retained_json::RetainedJsonInput as J;
 use safe_cex_types::{Execution, ExecutionsOptions, Market, OrderSide};
 fn first<'a>(row: &'a J, keys: &[&str]) -> &'a J {
     keys.iter()
@@ -19,11 +20,11 @@ fn defined(row: &J, keys: &[&str], extra: Option<J>) -> Result<J, ExchangeError>
             return Ok(if truthy(value) {
                 value.clone()
             } else {
-                J::String("0".into())
+                J::Text("0".encode_utf16().collect())
             });
         }
     }
-    Ok(J::String("0".into()))
+    Ok(J::Text("0".encode_utf16().collect()))
 }
 fn extract(payload: &J) -> Vec<J> {
     let body = [get(payload, "body"), get(payload, "data"), payload]
@@ -109,8 +110,10 @@ impl ApexOmniExchange {
         fallback: bool,
     ) -> Result<Vec<(Execution, J)>, ExchangeError> {
         let expected = [
-            self.normalize_apex_symbol_key(&J::String(market.id.clone()))?,
-            self.normalize_apex_symbol_key(&J::String(market.symbol.clone()))?,
+            self.normalize_apex_symbol_key(&J::Text((market.id.clone()).encode_utf16().collect()))?,
+            self.normalize_apex_symbol_key(&J::Text(
+                (market.symbol.clone()).encode_utf16().collect(),
+            ))?,
         ];
         let mut result = Vec::new();
         for row in rows {
@@ -143,7 +146,9 @@ impl ApexOmniExchange {
                         m.id.clone()
                     }
                 });
-                if !expected.contains(&self.normalize_apex_symbol_key(&J::String(symbol))?) {
+                if !expected.contains(
+                    &self.normalize_apex_symbol_key(&J::Text((symbol).encode_utf16().collect()))?,
+                ) {
                     continue;
                 }
             }
@@ -161,7 +166,7 @@ impl ApexOmniExchange {
                 0.
             };
             let derived = (value.is_finite() && size.is_finite() && size > 0.)
-                .then(|| J::Number(value / size));
+                .then(|| J::Float(value / size));
             let price = float(&defined(
                 row,
                 &[
@@ -181,7 +186,7 @@ impl ApexOmniExchange {
                     if truthy(value) {
                         value.clone()
                     } else {
-                        J::String("0".into())
+                        J::Text("0".encode_utf16().collect())
                     }
                 } else {
                     defined(
@@ -267,7 +272,7 @@ impl ApexOmniExchange {
                 ],
             );
             let asset = if matches!(asset, J::Undefined) {
-                J::String(market.quote.clone())
+                J::Text((market.quote.clone()).encode_utf16().collect())
             } else {
                 asset.clone()
             };
@@ -305,27 +310,27 @@ impl ApexOmniExchange {
         history: bool,
     ) -> Result<J, ExchangeError> {
         let mut params = vec![
-            ("limit".into(), J::Number(limit)),
-            ("symbol".into(), J::String(symbol.into())),
+            ("limit".into(), Q::Number(limit)),
+            ("symbol".into(), Q::String(symbol.into())),
         ];
         if let Some(page) = page {
-            params.insert(0, ("page".into(), J::Number(page as f64)));
+            params.insert(0, ("page".into(), Q::Number(page as f64)));
         }
         if history {
-            params.push(("orderType".into(), J::String("HISTORY".into())));
+            params.push(("orderType".into(), Q::String("HISTORY".into())));
         }
         if let Some(from) = from {
-            params.push(("beginTimeInclusive".into(), J::Number(from)));
+            params.push(("beginTimeInclusive".into(), Q::Number(from)));
         }
         if let Some(to) = to {
-            params.push(("endTimeExclusive".into(), J::Number(to)));
+            params.push(("endTimeExclusive".into(), Q::Number(to)));
         }
         self.host
             .request(ApexRequest {
                 method: "get",
                 path,
-                params: J::Object(params),
-                data: J::Undefined,
+                params: Q::Object(params),
+                data: Q::Undefined,
                 content_type: None,
                 timeout_ms: Some(timeout),
                 unlimited: false,
@@ -336,7 +341,7 @@ impl ApexOmniExchange {
     pub async fn fetch_historical_fills(
         &self,
         opts: &ExecutionsOptions,
-        configured_timeout: &J,
+        configured_timeout: &Q,
     ) -> Result<Vec<Execution>, ExchangeError> {
         if self.base.options().public_data_only == Some(true) || !self.base.can_sign() {
             return Ok(Vec::new());
@@ -475,7 +480,9 @@ impl ApexOmniExchange {
                         let asset = execution
                             .commission_asset
                             .as_ref()
-                            .map_or(J::Undefined, |asset| J::String(asset.clone()));
+                            .map_or(J::Undefined, |asset| {
+                                J::Text((asset.clone()).encode_utf16().collect())
+                            });
                         (execution, asset)
                     })
                     .collect();

@@ -17,7 +17,7 @@ fn from_json(v: &Value) -> TickerValue {
         Value::Null => TickerValue::Null,
         Value::Bool(v) => TickerValue::Bool(*v),
         Value::Number(v) => TickerValue::Number(v.as_f64().unwrap()),
-        Value::String(v) => TickerValue::String(v.clone()),
+        Value::String(v) => TickerValue::String(v.encode_utf16().collect()),
         Value::Array(rows) => {
             TickerValue::Array(Rc::new(RefCell::new(rows.iter().map(from_json).collect())))
         }
@@ -28,7 +28,7 @@ fn from_json(v: &Value) -> TickerValue {
                 TickerValue::Object(Rc::new(RefCell::new(
                     fields
                         .iter()
-                        .map(|(k, v)| (k.clone(), from_json(v)))
+                        .map(|(k, v)| (k.encode_utf16().collect(), from_json(v)))
                         .collect(),
                 )))
             }
@@ -39,7 +39,7 @@ fn property(v: &TickerValue, key: &str) -> TickerValue {
     match v {
         TickerValue::Object(f) => f
             .borrow()
-            .get(key)
+            .get(&key.encode_utf16().collect::<Vec<_>>())
             .cloned()
             .unwrap_or(TickerValue::Undefined),
         _ => TickerValue::Undefined,
@@ -64,12 +64,12 @@ fn leaves(v: &TickerValue) -> Value {
         TickerValue::Null => Value::Null,
         TickerValue::Bool(v) => Value::Bool(*v),
         TickerValue::Number(v) => json!(v),
-        TickerValue::String(v) => Value::String(v.clone()),
+        TickerValue::String(v) => Value::String(String::from_utf16(v).unwrap()),
         TickerValue::Array(v) => Value::Array(v.borrow().iter().map(leaves).collect()),
         TickerValue::Object(v) => Value::Object(
             v.borrow()
                 .iter()
-                .map(|(k, v)| (k.clone(), leaves(v)))
+                .map(|(k, v)| (String::from_utf16(k).unwrap(), leaves(v)))
                 .collect(),
         ),
     }
@@ -99,7 +99,7 @@ fn native_value(v: &TickerValue, e: &Value, label: &str) {
                 "{label}: native object key count"
             );
             for (key, v) in v.borrow().iter() {
-                native_value(v, &fields[key], label)
+                native_value(v, &fields[&String::from_utf16(key).unwrap()], label)
             }
         }
         _ => assert_eq!(&leaves(v), e, "{label}: native decoded scalar"),

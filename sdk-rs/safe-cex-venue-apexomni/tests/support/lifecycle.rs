@@ -23,6 +23,24 @@ fn lifecycle_corpus() -> &'static Value {
         serde_json::from_slice(&o.stdout).unwrap()
     })
 }
+// The source-started positions promise uses the real runtime job queue. Drive
+// that queue while awaiting the parent, rather than only after start returns.
+fn drive_lifecycle<T>(host: &Host, future: impl Future<Output = T>) -> T {
+    let mut future = Box::pin(future);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    for _ in 0..1024 {
+        if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut cx) {
+            return value;
+        }
+        let tasks = host.tasks.replace(Vec::new());
+        for mut task in tasks {
+            if task.as_mut().poll(&mut cx).is_pending() {
+                host.tasks.borrow_mut().push(task);
+            }
+        }
+    }
+    panic!("prepared lifecycle future did not settle while driving runtime jobs");
+}
 struct Services {
     host: Weak<Host>,
     variant: u64,
@@ -298,7 +316,7 @@ fn run_lifecycle(name: &str) {
                     tickers: Some(Store::tickers(old.as_ref()).to_vec()),
                     positions: Some(Store::positions(old.as_ref()).to_vec()),
                     balance: Some(Store::balance(old.as_ref()).clone()),
-                    zk_link_config: Some(json!({"id":"old","l2Key":"old-key"})),
+                    zk_link_config: Some(json!({"id":"old","l2Key":"old-key"}).into()),
                     ..Default::default()
                 },
                 false,
@@ -335,7 +353,7 @@ fn run_lifecycle(name: &str) {
         let J::Array(args) = native::input(&row["args"]) else {
             panic!()
         };
-        let actual = futures::executor::block_on(async {
+        let actual = drive_lifecycle(host.as_ref(), async {
             match name {
                 "validateAccount" => obj(vec![(
                     "error",

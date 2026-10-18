@@ -6,11 +6,9 @@ use std::{cell::RefCell, rc::Rc};
 pub(crate) type Constructor = Rc<dyn Fn(Js, Js, Vec<Js>) -> Result<Js, Thrown>>;
 pub(crate) type Initialize = Rc<dyn Fn(Js) -> Result<(), Thrown>>;
 
-/// A class produced by an ops `derive`: its superclass, constructor body, field
-/// initializer and prototype members (installed on each receiver it builds).
+/// A derived class, field initializer and prototype members installed per receiver.
 pub(crate) struct ClassRecord {
     pub class: Js,
-    pub superclass: Js,
     pub initialize: Initialize,
     pub prototype: RefCell<Vec<(&'static str, Js)>>,
 }

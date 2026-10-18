@@ -433,8 +433,8 @@ pub async fn venue_harness(
             safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         ),
     };
-    let constructor =
-        rust_constructor(&name, host).expect("a Rust-constructed venue in the registry table");
+    let constructor = rust_constructor(&name, host.clone())
+        .expect("a Rust-constructed venue in the registry table");
     let options = serde_json::from_value(options).unwrap();
     let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
     let exchange = constructor
@@ -445,6 +445,7 @@ pub async fn venue_harness(
                 e.message
             )
         });
+    safe_cex_registry::native_host::bind_http_events(&host, &exchange);
     Harness {
         exchange,
         store,

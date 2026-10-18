@@ -18,23 +18,29 @@ pub(crate) fn derive(
     constructor: Constructor,
     initialize: Initialize,
 ) -> Result<Js, Thrown> {
-    let me: Rc<OnceCell<Js>> = Rc::default();
+    let me: Rc<OnceCell<std::rc::Weak<safe_cex_exchange::js_runtime::value::FunctionData>>> =
+        Rc::default();
     let own = me.clone();
-    let class = Js::constructor(name, move |_, args| {
+    let class = Js::constructor(name, None, move |target, args| {
         let class = own
             .get()
-            .cloned()
+            .and_then(std::rc::Weak::upgrade)
+            .map(Js::Function)
             .ok_or_else(|| Thrown::type_error("class constructor used before definition"))?;
-        constructor(class.clone(), class, args)
+        constructor(class, target, args)
     });
-    let _ = me.set(class.clone());
+    let Js::Function(function) = &class else {
+        unreachable!()
+    };
+    me.set(Rc::downgrade(function))
+        .map_err(|_| Thrown::type_error("class already initialized"))?;
+    class.set("__proto__", superclass)?;
     rt.shared
         .extra
         .classes
         .borrow_mut()
         .push(Rc::new(ClassRecord {
             class: class.clone(),
-            superclass,
             initialize,
             prototype: RefCell::default(),
         }));
@@ -42,13 +48,18 @@ pub(crate) fn derive(
 }
 
 /// `super(...args)` inside `active`'s constructor.
-pub(crate) fn super_construct(rt: &Rt, active: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+pub(crate) fn super_construct(
+    rt: &Rt,
+    active: &Js,
+    target: &Js,
+    args: Vec<Js>,
+) -> Result<Js, Thrown> {
     let record = rt
         .shared
         .extra
         .class(active)
         .ok_or_else(|| Thrown::type_error("super() outside a derived class constructor"))?;
-    let receiver = record.superclass.call(Js::Undefined, args)?;
+    let receiver = active.super_constructor()?.construct(args, Some(target))?;
     for (name, member) in record.prototype.borrow().iter() {
         if !receiver.has_own(name) {
             receiver.define(name, member.clone())?;
@@ -81,9 +92,24 @@ pub(crate) fn derive_socket(
     superclass: Js,
     initialize: Initialize,
 ) -> Result<Js, Thrown> {
-    Ok(Js::constructor(name, move |_, args| {
-        let receiver = superclass.call(Js::Undefined, args)?;
+    let slot: Rc<OnceCell<std::rc::Weak<safe_cex_exchange::js_runtime::value::FunctionData>>> =
+        Rc::default();
+    let own = slot.clone();
+    let class = Js::constructor(name, None, move |target, args| {
+        let active = own
+            .get()
+            .and_then(std::rc::Weak::upgrade)
+            .map(Js::Function)
+            .ok_or_else(|| Thrown::type_error("class constructor used before definition"))?;
+        let receiver = active.super_constructor()?.construct(args, Some(&target))?;
         initialize(receiver.clone())?;
         Ok(receiver)
-    }))
+    });
+    let Js::Function(function) = &class else {
+        unreachable!()
+    };
+    slot.set(Rc::downgrade(function))
+        .map_err(|_| Thrown::type_error("class already initialized"))?;
+    class.set("__proto__", superclass)?;
+    Ok(class)
 }

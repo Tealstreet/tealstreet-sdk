@@ -102,3 +102,53 @@ impl serde::Serialize for crate::Ticker {
         state.end()
     }
 }
+
+pub const STORE_RECORD: &str = "$safe_cex::StoreRecord";
+
+impl serde::Serialize for crate::DisplayedPosition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct(crate::model_field::MODEL_RECORD, 33)?;
+        if let Some(value) = &self.key {
+            state.serialize_field("key", value)?;
+        }
+        crate::serialize_position_fields(&self.position, &mut state)?;
+        state.serialize_field("account", &self.account)?;
+        if let Some(value) = &self.ticker {
+            state.serialize_field("ticker", value)?;
+        }
+        if let Some(value) = &self.market {
+            state.serialize_field("market", value)?;
+        }
+        if let Some(value) = &self.balance {
+            state.serialize_field("balance", value)?;
+        }
+        if let Some(value) = &self.exchange_name {
+            state.serialize_field("exchangeName", value)?;
+        }
+        if let Some(value) = &self.one_min_upnl {
+            state.serialize_field("oneMinUpnl", value)?;
+        }
+        if let Some(value) = &self.five_min_upnl {
+            state.serialize_field("fiveMinUpnl", value)?;
+        }
+        if let Some(value) = &self.has_active_chaser {
+            state.serialize_field("hasActiveChaser", value)?;
+        }
+        if let Some(value) = &self.has_active_twap {
+            state.serialize_field("hasActiveTWAP", value)?;
+        }
+        if let Some(value) = &self.is_fake_position {
+            state.serialize_field("isFakePosition", value)?;
+        }
+        if let Some(value) = &self.chaser_size {
+            state.serialize_field("chaserSize", value)?;
+        }
+        if let Some(value) = &self.has_full_stop {
+            state.serialize_field("hasFullStop", value)?;
+        }
+        if let Some(value) = &self.has_full_tp {
+            state.serialize_field("hasFullTP", value)?;
+        }
+        state.end()
+    }
+}

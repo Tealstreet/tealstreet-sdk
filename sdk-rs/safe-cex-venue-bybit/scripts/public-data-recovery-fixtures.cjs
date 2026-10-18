@@ -7,8 +7,9 @@ const wa=ast('packages/safe-cex/src/exchanges/bybit/bybit.ws-public.ts'),ea=ast(
 const logAst=ast('packages/logging/src/LogSeverity.ts'); const enumText=logAst.statements.find(s=>ts.isEnumDeclaration(s)&&s.name.text==='LogSeverity').getText(logAst).replace(/^export\s+/,'');
 const wsNames=['onOpen','clearOhlcvNoDataTimeout','armOhlcvNoDataTimeout','armExistingOhlcvNoDataTimeouts','maybeRecoverOhlcvStream','maybeRecoverOhlcvStreamFromTopics','onMarketsChanged'];
 const exchangeNames=['fetchMarkets','fetchOptionMarkets','fetchFees','fetchTradingMarketsResponse'];
-const deps=path.dirname(process.env.SAFE_CEX_TYPESCRIPT_PATH),{mapSeries}=require(path.join(deps,'p-iteration'));
-const getKey={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root,'packages/safe-cex/src/utils/get-key.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:getKey.exports,require:spec=>require(path.join(deps,spec))});
+const dependencyRequire=require('node:module').createRequire(path.resolve(process.env.SAFE_CEX_TYPESCRIPT_PATH));
+const {mapSeries}=dependencyRequire('p-iteration');
+const getKey={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root,'packages/safe-cex/src/utils/get-key.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:getKey.exports,require:spec=>dependencyRequire(spec)});
 const code=ts.transpileModule(`${enumText}\n${declarations(ta,['ENDPOINTS','INTERVAL'])}\n${declarations(wa,['OHLCV_NO_DATA_TIMEOUT_MS','OHLCV_RECOVERY_COOLDOWN_MS'])}\n${declarations(ea,['BYBIT_TRADING_MARKETS_RETRY_DELAY_MS'])}\nclass Ws {${methods(wa,'BybitPublicWebsocket',wsNames)}}\nclass Exchange {${methods(ea,'BybitExchange',exchangeNames)}}\nglobalThis.classes={Ws,Exchange}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 const decode=v=>v&&v.fixtureUndefined?undefined:Array.isArray(v)?v.map(decode):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,v])=>[k,decode(v)])):v;
 const observe=v=>v===undefined?{undefined:true}:Array.isArray(v)?Array.from(v,observe):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,v])=>[k,observe(v)])):v;

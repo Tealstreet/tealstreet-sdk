@@ -12,6 +12,7 @@ include!("support/binding_streams.rs");
 include!("support/binding_failures.rs");
 include!("support/binding_factory.rs");
 include!("support/private_lifecycle.rs");
+include!("support/start_continuation.rs");
 include!("support/placement_parity.rs");
 
 fn raw_order() -> Value {
@@ -49,7 +50,7 @@ fn fixture_with_tick_interval(tick_interval: Option<f64>) -> Harness {
         http.ok("POST", "/v3/delete-open-orders", json!({}));
     });
     Store::update(h.store.as_ref(), serde_json::from_value(json!({"markets":[{"id":"BTC-USDC","symbol":"BTCUSDC","base":"BTC","quote":"USDC","active":true,"precision":{"amount":0.001,"price":0.01},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":50}},"info":contract()}]})).unwrap(), false).unwrap();
-    h.store.update_zk_link_config(Some(json!({"id":"16909060","l2Key":"fixture-l2","contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"},"contractConfig":{"perpetualContract":[contract()]}}))).unwrap();
+    h.store.update_zk_link_config(Some(json!({"id":"16909060","l2Key":"fixture-l2","contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"},"contractConfig":{"perpetualContract":[contract()]}}).into())).unwrap();
     h
 }
 fn placed() -> PlaceOrderOpts {
@@ -392,3 +393,5 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     );
     done(&h);
 }
+
+include!("support/retained_info.rs");

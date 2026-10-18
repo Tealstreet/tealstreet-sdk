@@ -81047,6 +81047,4431 @@
       ]
     }
   },
+  "safe_cex_venue_asterdex::api_runtime::option": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let key=\"apiKey\";\nlet o=match scenario {\n \"null-receiver\"=>Js::Null,\"undefined-receiver\"=>Js::Undefined,\"false-receiver\"=>Js::Bool(false),_=>Js::object(vec![])};\nmatch scenario {\n \"undefined\"=>{o.define(key,Js::Undefined).unwrap();},\"null\"=>{o.define(key,Js::Null).unwrap();},\n \"negative-zero\"=>{o.define(key,Js::Number(-0.0)).unwrap();},\"identity\"=>{o.define(key,sentinel.clone()).unwrap();},\n \"inherited\"=>{if let Js::Object(v)=&o{*v.proto.borrow_mut()=Some(Js::object(vec![(key,Js::Bool(true))]));}},\n \"getter-error\"=>{let e=thrown.clone();o.define_accessor(key,Some(Rc::new(move|_|Err(Thrown::new(e.clone())))),None);},_=>{}\n}\nlet r=$type(&h,&o,key);match r {Ok(v)=>{if scenario==\"identity\"{assert!(v.strict_equals(&sentinel),\"original object identity\");}describe(&v)},Err(e)=>{if scenario==\"getter-error\"{assert!(e.strict_equals(&thrown),\"original getter throw\");serde_json::json!({\"error\":\"original\"})}else{serde_json::json!({\"error\":e.get(\"name\").unwrap().to_display()})}}}\n }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "kind": "object"
+        }
+      },
+      {
+        "input": {
+          "case": "inherited"
+        },
+        "output": {
+          "kind": "boolean",
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "case": "getter-error"
+        },
+        "output": {
+          "error": "original"
+        }
+      },
+      {
+        "input": {
+          "case": "null-receiver"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined-receiver"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "case": "false-receiver"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ],
+    "evidence": "Own/missing/own-undefined, null, inherited properties, signed zero and raw object/error identities. Nullish optional access bypasses getters; ordinary option access keeps TypeError. Maintained-source apiKey and optional options expressions are independently executed. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "option",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::runtime_host::opt": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let key=\"options\";\nlet o=match scenario {\n \"null-receiver\"=>Js::Null,\"undefined-receiver\"=>Js::Undefined,\"false-receiver\"=>Js::Bool(false),_=>Js::object(vec![])};\nmatch scenario {\n \"undefined\"=>{o.define(key,Js::Undefined).unwrap();},\"null\"=>{o.define(key,Js::Null).unwrap();},\n \"negative-zero\"=>{o.define(key,Js::Number(-0.0)).unwrap();},\"identity\"=>{o.define(key,sentinel.clone()).unwrap();},\n \"inherited\"=>{if let Js::Object(v)=&o{*v.proto.borrow_mut()=Some(Js::object(vec![(key,Js::Bool(true))]));}},\n \"getter-error\"=>{let e=thrown.clone();o.define_accessor(key,Some(Rc::new(move|_|Err(Thrown::new(e.clone())))),None);},_=>{}\n}\nlet r=$type(&h,o,key);match r {Ok(v)=>{if scenario==\"identity\"{assert!(v.strict_equals(&sentinel),\"original object identity\");}describe(&v)},Err(e)=>{if scenario==\"getter-error\"{assert!(e.strict_equals(&thrown),\"original getter throw\");serde_json::json!({\"error\":\"original\"})}else{serde_json::json!({\"error\":e.get(\"name\").unwrap().to_display()})}}}\n }",
+    "cases": [
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "identity"
+        },
+        "output": {
+          "kind": "object"
+        }
+      },
+      {
+        "input": {
+          "case": "inherited"
+        },
+        "output": {
+          "kind": "boolean",
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "case": "getter-error"
+        },
+        "output": {
+          "error": "original"
+        }
+      },
+      {
+        "input": {
+          "case": "null-receiver"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "undefined-receiver"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "case": "false-receiver"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ],
+    "evidence": "Own/missing/own-undefined, null, inherited properties, signed zero and raw object/error identities. Nullish optional access bypasses getters; ordinary option access keeps TypeError. Maintained-source apiKey and optional options expressions are independently executed. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "opt",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::api_runtime::clock": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet clock=Js::object(vec![]);let receiver=clock.clone();let expected=sentinel.clone();let error=thrown.clone();let calls=Rc::new(Cell::new(0));let count=calls.clone();\nlet key=if scenario==\"sync\"{\"syncClientServerTime\"}else if scenario==\"needs\"{\"needsSync\"}else{\"getCurrentTimeMs\"};\nlet fail=scenario==\"throws\";let needs=scenario==\"needs\";let sync=scenario==\"sync\";\nif scenario!=\"missing\"{clock.define(key,Js::function(\"clock port\",move|this,args|{\n assert!(this.strict_equals(&receiver),\"clock method receiver\");count.set(count.get()+1);\n if sync{assert_eq!(args.len(),2);assert!(args[0].strict_equals(&expected));assert!(matches!(args[1],Js::Number(n)if n.to_bits()==(-0.0f64).to_bits()));}else{assert!(args.is_empty());}\n if fail{Err(Thrown::new(error.clone()))}else if needs{Ok(Js::Bool(true))}else if sync{Ok(expected.clone())}else{Ok(Js::Number(-0.0))}\n})).unwrap();}\nlet h=Host::new(clock);let args=if sync{vec![sentinel.clone(),Js::Number(-0.0)]}else{vec![]};\nlet r=$type(&h,key,args);let value=match r{Ok(v)=>{if sync{assert!(v.strict_equals(&sentinel));}describe(&v)},Err(e)=>{if fail{assert!(e.strict_equals(&thrown));serde_json::json!({\"error\":\"original\"})}else{serde_json::json!({\"error\":e.get(\"name\").unwrap().to_display()})}}};\nserde_json::json!({\"result\":value,\"calls\":calls.get()}) }",
+    "cases": [
+      {
+        "input": {
+          "case": "time"
+        },
+        "output": {
+          "result": {
+            "kind": "number",
+            "bits": "8000000000000000"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "needs"
+        },
+        "output": {
+          "result": {
+            "kind": "boolean",
+            "value": true
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "sync"
+        },
+        "output": {
+          "result": {
+            "kind": "object"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "throws"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "result": {
+            "error": "TypeError"
+          },
+          "calls": 0
+        }
+      }
+    ],
+    "evidence": "Actual virtual-clock method dispatch preserves this, empty/sync arguments, return identity/-0 and unmodified thrown values; missing methods refuse. Clock callback is only the dependency port, not a replacement clock helper. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "clock",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "H"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::api_runtime::detail": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let data=Js::object(vec![]);let trace=Rc::new(RefCell::new(Vec::new()));let reads=trace.clone();let error=thrown.clone();let fail=scenario==\"message-error\";\ndata.define_accessor(\"msg\",Some(Rc::new(move|_|{reads.borrow_mut().push(\"msg\");if fail{Err(Thrown::new(error.clone()))}else{Ok(Js::str(\"detail\"))}})),None);\nlet reads=trace.clone();let error=thrown.clone();let fail=scenario==\"code-error\";let special=scenario==\"builder\";\ndata.define_accessor(\"code\",Some(Rc::new(move|_|{reads.borrow_mut().push(\"code\");if fail{Err(Thrown::new(error.clone()))}else{Ok(Js::Number(if special{-5025.0}else{0.0}))}})),None);\nif scenario==\"false\"{data.define(\"msg\",Js::Bool(false)).unwrap();}if scenario==\"missing\"{data.delete(&\"msg\".encode_utf16().collect::<Vec<_>>());}\nlet r=$type(&h,&data,\"msg\");let result=match r{Ok(v)=>describe(&v),Err(e)=>{assert!(e.strict_equals(&thrown),\"original detail getter error\");serde_json::json!({\"error\":\"original\"})}};\nserde_json::json!({\"result\":result,\"reads\":trace.borrow().clone(),\"imports\":h.imports.borrow().clone()}) }",
+    "cases": [
+      {
+        "input": {
+          "case": "normal"
+        },
+        "output": {
+          "result": {
+            "kind": "string",
+            "value": "detail"
+          },
+          "reads": [
+            "msg",
+            "code"
+          ],
+          "imports": [
+            "getAsterDEXErrorDetail"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "builder"
+        },
+        "output": {
+          "result": {
+            "kind": "string",
+            "value": "Aster builder attribution is not synced for this API key. Open your Aster API key settings, sync or enable the Tealstreet builder authorization, then reconnect the account and try again."
+          },
+          "reads": [
+            "msg",
+            "code"
+          ],
+          "imports": [
+            "getAsterDEXErrorDetail"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "false"
+        },
+        "output": {
+          "result": {
+            "kind": "string",
+            "value": "Unknown error"
+          },
+          "reads": [
+            "code"
+          ],
+          "imports": [
+            "getAsterDEXErrorDetail"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "missing"
+        },
+        "output": {
+          "result": {
+            "kind": "string",
+            "value": "Unknown error"
+          },
+          "reads": [
+            "code"
+          ],
+          "imports": [
+            "getAsterDEXErrorDetail"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "message-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "reads": [
+            "msg"
+          ],
+          "imports": []
+        }
+      },
+      {
+        "input": {
+          "case": "code-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "reads": [
+            "msg",
+            "code"
+          ],
+          "imports": []
+        }
+      }
+    ],
+    "evidence": "Error detail wrapper forwards message then optional code once and invokes the actual api_helpers detail dependency. Both property failure positions preserve the original thrown object and prevent the dependency call; real maintained-source detail expression and function check finite output. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "detail",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::exchange_runtime::due": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let owner=Js::object(vec![]);let reads=Rc::new(Cell::new(0));let count=reads.clone();let error=thrown.clone();let name=scenario.to_owned();\nowner.define_accessor(\"lastBalanceReconciliationAt\",Some(Rc::new(move|_|{count.set(count.get()+1);if name==\"first-error\"||name==\"second-error\"&&count.get()==2{return Err(Thrown::new(error.clone()));}Ok(match name.as_str(){\"zero\"=>Js::Number(0.0),\"negative-zero\"=>Js::Number(-0.0),\"string\"=>Js::str(\"1000\"),\"nan\"=>Js::Number(f64::NAN),\"null\"=>Js::Null,_=>Js::Number(1000.0)})})),None);\nlet now=Js::Number(match scenario{\"before\"=>25999.0,\"after\"=>26001.0,\"null\"=>25000.0,_=>26000.0});\nlet result=match $type(&h,&owner,now,\"lastBalanceReconciliationAt\",25000.0){Ok(v)=>serde_json::json!(v),Err(e)=>{assert!(e.strict_equals(&thrown));serde_json::json!({\"error\":\"original\"})}};\nserde_json::json!({\"result\":result,\"reads\":reads.get()}) }",
+    "cases": [
+      {
+        "input": {
+          "case": "zero"
+        },
+        "output": {
+          "result": true,
+          "reads": 1
+        }
+      },
+      {
+        "input": {
+          "case": "negative-zero"
+        },
+        "output": {
+          "result": true,
+          "reads": 1
+        }
+      },
+      {
+        "input": {
+          "case": "before"
+        },
+        "output": {
+          "result": false,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "equal"
+        },
+        "output": {
+          "result": true,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "after"
+        },
+        "output": {
+          "result": true,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "string"
+        },
+        "output": {
+          "result": true,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "nan"
+        },
+        "output": {
+          "result": false,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "null"
+        },
+        "output": {
+          "result": true,
+          "reads": 2
+        }
+      },
+      {
+        "input": {
+          "case": "first-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "reads": 1
+        }
+      },
+      {
+        "input": {
+          "case": "second-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "reads": 2
+        }
+      }
+    ],
+    "evidence": "Tick reconciliation predicate uses strict zero then a second property read and JS subtraction/greater-equal. Witnesses cover signed zero, exact interval edges, numeric strings, null, NaN, and first/second getter throws against the actual source initializer. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "due",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "now",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "interval",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::exchange_runtime::update": {
+    "category": "decoder",
+    "call": "{ use safe_cex_exchange::js_runtime::{value::{Js,Thrown},ops};\nuse crate::runtime_host::{RuntimeHost,ResultValue,Function,Task};\n#[allow(unused_imports)] use std::{rc::Rc,cell::{RefCell,Cell}};\nstruct Host { clock: Js, imports: RefCell<Vec<String>> }\nimpl Host { fn new(clock:Js)->Self { Self{clock,imports:RefCell::new(vec![])} } }\nimpl RuntimeHost for Host {\n type Value=Js;\n fn get(&self,o:&Js,k:&str)->ResultValue<Js>{o.get(k).map_err(|e|e.value)}\n fn destructure(&self,_:Js,_:&[&str],_:&str)->ResultValue<Js,Vec<Js>>{panic!(\"unexpected destructure\")}\n fn set(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.set(k,v).map_err(|e|e.value)}\n fn define(&self,o:&Js,k:&str,v:Js)->ResultValue<Js,()>{o.define(k,v).map_err(|e|e.value)}\n fn delete(&self,_:&Js,_:&str)->ResultValue<Js,()>{panic!(\"unexpected delete\")}\n fn call(&self,f:Js,r:Js,a:Vec<Js>)->ResultValue<Js>{f.call(r,a).map_err(|e|e.value)}\n fn function(&self,f:Function<Js>)->Js { Js::function(\"port\",move|_,a|f(a).map_err(Thrown::new)) }\n fn object(&self,f:Vec<(&str,Js)>)->Js {Js::object(f)}\n fn spread(&self,t:&Js,s:Js)->ResultValue<Js,()>{for(k,v)in s.own_entries().map_err(|e|e.value)?{t.define_key(&k,v).map_err(|e|e.value)?;}Ok(())}\n fn array(&self,a:Vec<Js>)->Js {Js::array(a)}\n fn text(&self,s:&str)->Js {Js::str(s)}\n fn number(&self,n:f64)->Js {Js::Number(n)}\n fn boolean(&self,b:bool)->Js {Js::Bool(b)}\n fn undefined(&self)->Js {Js::Undefined}\n fn truthy(&self,v:&Js)->bool {v.truthy()}\n fn nullish(&self,v:&Js)->bool {v.is_nullish()}\n fn strict_equal(&self,a:&Js,b:&Js)->bool {a.strict_equals(b)}\n fn less(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::less_than(&a,&b).map_err(|e|e.value)}\n fn greater_equal(&self,a:Js,b:Js)->ResultValue<Js,bool>{ops::greater_equal(&a,&b).map_err(|e|e.value)}\n fn subtract(&self,a:Js,b:Js)->ResultValue<Js>{ops::subtract(&a,&b).map_err(|e|e.value)}\n fn template(&self,_:Vec<Js>)->ResultValue<Js>{panic!(\"unexpected template\")}\n fn error(&self,m:Js)->Js {m}\n fn import(&self,n:&str,a:Vec<Js>)->ResultValue<Js>{\n  self.imports.borrow_mut().push(n.to_owned());\n  assert_eq!(n,\"getAsterDEXErrorDetail\",\"only actual detail dependency is allowed\");\n  let convert=|v:&Js|safe_cex_exchange::js_runtime::value::to_json(v).map_err(|e|e.value);\n  let m=convert(&a[0])?; let c=convert(&a[1])?;\n  crate::api_helpers::get_aster_dex_error_detail(Some(&m),Some(&c)).map(|s|Js::str(&s)).map_err(|_|Js::str(\"coercion\"))\n }\n fn constant(&self,n:&str)->Js {assert_eq!(n,\"asterDEXVirtualClock\");self.clock.clone()}\n fn start(&self,_:Task<Js>)->Task<Js>{panic!(\"unexpected task\")}\n fn promise(&self,_:Task<Js>)->Js{panic!(\"unexpected promise\")}\n fn await_value(&self,_:Js)->Task<Js>{panic!(\"unexpected await\")}\n}\n#[allow(dead_code)] fn describe(v:&Js)->serde_json::Value {match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Number(n)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),Js::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),Js::String(_)=>serde_json::json!({\"kind\":\"string\",\"value\":String::from_utf16(&v.to_js_string().unwrap()).unwrap()}),_=>serde_json::json!({\"kind\":\"object\"})}}\nlet scenario=$value[\"case\"].as_str().unwrap();\nlet sentinel=Js::object(vec![(\"sentinel\",Js::Bool(true))]);\nlet thrown=Js::object(vec![(\"original\",Js::Bool(true))]);\nlet _ = (&sentinel,&thrown);\nlet h=Host::new(Js::Undefined);let rows=sentinel.clone();let loaded=Js::object(vec![(\"balance\",Js::Bool(false)),(\"opaque\",Js::Undefined)]);if let Js::Object(v)=&loaded{*v.proto.borrow_mut()=Some(Js::object(vec![(\"inherited\",Js::Bool(true))]));}\nlet store=Js::object(vec![]);let owner=Js::object(vec![(\"store\",store.clone())]);let trace=Rc::new(RefCell::new(Vec::new()));let reads=trace.clone();let old=loaded.clone();let error=thrown.clone();let fail=scenario==\"loaded-error\";\nstore.define_accessor(\"loaded\",Some(Rc::new(move|_|{reads.borrow_mut().push(\"loaded\");if fail{Err(Thrown::new(error.clone()))}else{Ok(old.clone())}})),None);\nlet receiver=store.clone();let expected=rows.clone();let old=loaded.clone();let reads=trace.clone();let error=thrown.clone();let fail=scenario==\"update-error\";\nlet update=Js::function(\"update\",move|this,args|{reads.borrow_mut().push(\"call\");assert!(this.strict_equals(&receiver));assert_eq!(args.len(),1);let patch=&args[0];assert!(patch.get(\"orders\")?.strict_equals(&expected),\"rows identity\");let flags=patch.get(\"loaded\")?;assert!(!flags.strict_equals(&old),\"loaded copied\");assert!(flags.get(\"orders\")?.strict_equals(&Js::Bool(true)));assert!(flags.get(\"balance\")?.strict_equals(&Js::Bool(false)));assert!(flags.get(\"opaque\")?.is_undefined());assert!(flags.own_entries()?.iter().any(|(k,_)|String::from_utf16(k).unwrap()==\"opaque\"),\"own undefined preserved\");assert!(flags.get(\"inherited\")?.is_undefined());if fail{Err(Thrown::new(error.clone()))}else{Ok(Js::Number(7.0))}});\nlet reads=trace.clone();let error=thrown.clone();let fail=scenario==\"method-error\";\nstore.define_accessor(\"update\",Some(Rc::new(move|_|{reads.borrow_mut().push(\"update\");if fail{Err(Thrown::new(error.clone()))}else{Ok(update.clone())}})),None);\nlet r=$type(&h,&owner,\"orders\",rows);let result=match r{Ok(())=>serde_json::json!(\"ok\"),Err(e)=>{assert!(e.strict_equals(&thrown));serde_json::json!({\"error\":\"original\"})}};\nassert!(loaded.get(\"orders\").unwrap().is_undefined(),\"original loaded untouched\");\nserde_json::json!({\"result\":result,\"trace\":trace.borrow().clone()}) }",
+    "cases": [
+      {
+        "input": {
+          "case": "normal"
+        },
+        "output": {
+          "result": "ok",
+          "trace": [
+            "update",
+            "loaded",
+            "call"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "update-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "trace": [
+            "update",
+            "loaded",
+            "call"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "loaded-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "trace": [
+            "update",
+            "loaded"
+          ]
+        }
+      },
+      {
+        "input": {
+          "case": "method-error"
+        },
+        "output": {
+          "result": {
+            "error": "original"
+          },
+          "trace": [
+            "update"
+          ]
+        }
+      }
+    ],
+    "evidence": "Real Store update call retains the Store receiver and rows identity; copied loaded flags keep own undefined/false values but omit inherited flags and leave old flags untouched. Method/loaded/call exceptions stop exactly at the source effect, preserving original thrown identity and evaluation order. The production generic function is compiled unchanged; the fixture supplies native Js property/call/coercion ports, retaining original receivers, arguments and thrown handles before any finite observation. This is a focused function contract, not a whole-venue integration receipt.",
+    "api": {
+      "kind": "function",
+      "name": "update",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "kind",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "rows",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_asterdex::runtime_host::RuntimeHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_asterdex::account_fetch::decode": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "decode",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let input=$value[\"value\"].clone(); let result=match $value[\"kind\"].as_str().unwrap() { \"order\"=>$type::<crate::types::AsterDEXOrderResponse>(input).map(observed::order), \"market\"=>$type::<crate::types::AsterDEXMarketResponse>(input).map(observed::market), \"tickers\"=>$type::<Vec<crate::types::AsterDEXTickerResponse>>(input).map(|rows|serde_json::Value::Array(rows.into_iter().map(observed::ticker).collect())), _=>unreachable!() }; match result {Ok(value)=>serde_json::json!({\"ok\":true,\"value\":observed::project(value)}),Err(e)=>{assert!(!e.message.is_empty(),\"representation error retains decoder reason\");serde_json::json!({\"ok\":false,\"name\":e.name})}} }",
+    "cases": [
+      {
+        "input": {
+          "kind": "order",
+          "value": {
+            "symbol": "left:symbol",
+            "orderId": 1.25,
+            "clientOrderId": "left:client_order_id",
+            "price": "left:price",
+            "origQty": "left:orig_qty",
+            "executedQty": "left:executed_qty",
+            "cummulativeQuoteQty": "left:cummulative_quote_qty",
+            "status": "left:status",
+            "timeInForce": "left:time_in_force",
+            "type": "left:type",
+            "side": "left:side",
+            "stopPrice": "left:stop_price",
+            "icebergQty": "left:iceberg_qty",
+            "time": 1.25,
+            "updateTime": 1.25,
+            "isWorking": true,
+            "workingTime": 1.25,
+            "origQuoteOrderQty": "left:orig_quote_order_qty",
+            "positionSide": "left:position_side",
+            "closePosition": true,
+            "reduceOnly": true,
+            "activatePrice": "left:activate_price",
+            "priceRate": "left:price_rate",
+            "priceProtect": true,
+            "extensionMarker": "left",
+            "extensionNested": {
+              "checked": true,
+              "value": 17
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "symbol": "left:symbol",
+            "orderId": {
+              "bits": "3ff4000000000000"
+            },
+            "clientOrderId": "left:client_order_id",
+            "price": "left:price",
+            "origQty": "left:orig_qty",
+            "executedQty": "left:executed_qty",
+            "cummulativeQuoteQty": "left:cummulative_quote_qty",
+            "status": "left:status",
+            "timeInForce": "left:time_in_force",
+            "type": "left:type",
+            "side": "left:side",
+            "stopPrice": "left:stop_price",
+            "icebergQty": "left:iceberg_qty",
+            "time": {
+              "bits": "3ff4000000000000"
+            },
+            "updateTime": {
+              "bits": "3ff4000000000000"
+            },
+            "isWorking": true,
+            "workingTime": {
+              "bits": "3ff4000000000000"
+            },
+            "origQuoteOrderQty": "left:orig_quote_order_qty",
+            "positionSide": "left:position_side",
+            "closePosition": true,
+            "reduceOnly": true,
+            "activatePrice": "left:activate_price",
+            "priceRate": "left:price_rate",
+            "priceProtect": true,
+            "extensionMarker": "left",
+            "extensionNested": {
+              "checked": true,
+              "value": {
+                "bits": "4031000000000000"
+              }
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "order",
+          "value": null
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "order",
+          "value": {}
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "order",
+          "value": []
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "order",
+          "value": {
+            "symbol": false
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "market",
+          "value": {
+            "extensionMarker": "left",
+            "extensionNested": {
+              "checked": true,
+              "value": 17
+            },
+            "symbol": "left:symbol",
+            "baseAsset": "left:base_asset",
+            "quoteAsset": "left:quote_asset",
+            "contractType": "left:contract_type",
+            "deliveryDate": 1.25,
+            "onboardDate": 1.25,
+            "status": "left:status",
+            "maintMarginPercent": "left:maint_margin_percent",
+            "requiredMarginPercent": "left:required_margin_percent",
+            "pricePrecision": 1.25,
+            "quantityPrecision": 1.25,
+            "baseAssetPrecision": 1.25,
+            "quotePrecision": 1.25,
+            "underlyingType": "left:underlying_type",
+            "underlyingSubType": [
+              "left:one",
+              "left:two"
+            ],
+            "settlePlan": 1.25,
+            "triggerProtect": "left:trigger_protect",
+            "filters": [
+              {
+                "extensionMarker": "left",
+                "extensionNested": {
+                  "checked": true,
+                  "value": 17
+                },
+                "filterType": "left:filter_type",
+                "maxPrice": "left:max_price",
+                "minPrice": "left:min_price",
+                "tickSize": "left:tick_size",
+                "maxQty": "left:max_qty",
+                "minQty": "left:min_qty",
+                "stepSize": "left:step_size",
+                "limit": 1.25,
+                "notional": "left:notional",
+                "multiplierUp": "left:multiplier_up",
+                "multiplierDown": "left:multiplier_down",
+                "multiplierDecimal": "left:multiplier_decimal"
+              }
+            ],
+            "orderTypes": [
+              "left:one",
+              "left:two"
+            ],
+            "timeInForce": [
+              "left:one",
+              "left:two"
+            ],
+            "liquidationFee": "left:liquidation_fee",
+            "marketTakeBound": "left:market_take_bound"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "extensionMarker": "left",
+            "extensionNested": {
+              "checked": true,
+              "value": {
+                "bits": "4031000000000000"
+              }
+            },
+            "symbol": "left:symbol",
+            "baseAsset": "left:base_asset",
+            "quoteAsset": "left:quote_asset",
+            "contractType": "left:contract_type",
+            "deliveryDate": {
+              "bits": "3ff4000000000000"
+            },
+            "onboardDate": {
+              "bits": "3ff4000000000000"
+            },
+            "status": "left:status",
+            "maintMarginPercent": "left:maint_margin_percent",
+            "requiredMarginPercent": "left:required_margin_percent",
+            "pricePrecision": {
+              "bits": "3ff4000000000000"
+            },
+            "quantityPrecision": {
+              "bits": "3ff4000000000000"
+            },
+            "baseAssetPrecision": {
+              "bits": "3ff4000000000000"
+            },
+            "quotePrecision": {
+              "bits": "3ff4000000000000"
+            },
+            "underlyingType": "left:underlying_type",
+            "underlyingSubType": [
+              "left:one",
+              "left:two"
+            ],
+            "settlePlan": {
+              "bits": "3ff4000000000000"
+            },
+            "triggerProtect": "left:trigger_protect",
+            "filters": [
+              {
+                "extensionMarker": "left",
+                "extensionNested": {
+                  "checked": true,
+                  "value": {
+                    "bits": "4031000000000000"
+                  }
+                },
+                "filterType": "left:filter_type",
+                "maxPrice": "left:max_price",
+                "minPrice": "left:min_price",
+                "tickSize": "left:tick_size",
+                "maxQty": "left:max_qty",
+                "minQty": "left:min_qty",
+                "stepSize": "left:step_size",
+                "limit": {
+                  "bits": "3ff4000000000000"
+                },
+                "notional": "left:notional",
+                "multiplierUp": "left:multiplier_up",
+                "multiplierDown": "left:multiplier_down",
+                "multiplierDecimal": "left:multiplier_decimal"
+              }
+            ],
+            "orderTypes": [
+              "left:one",
+              "left:two"
+            ],
+            "timeInForce": [
+              "left:one",
+              "left:two"
+            ],
+            "liquidationFee": "left:liquidation_fee",
+            "marketTakeBound": "left:market_take_bound"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "market",
+          "value": null
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "market",
+          "value": {}
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "market",
+          "value": []
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "market",
+          "value": {
+            "symbol": false
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "tickers",
+          "value": [
+            {
+              "symbol": "left:symbol",
+              "priceChange": "left:price_change",
+              "priceChangePercent": "left:price_change_percent",
+              "weightedAvgPrice": "left:weighted_avg_price",
+              "lastPrice": "left:last_price",
+              "lastQty": "left:last_qty",
+              "openPrice": "left:open_price",
+              "highPrice": "left:high_price",
+              "lowPrice": "left:low_price",
+              "volume": "left:volume",
+              "quoteVolume": "left:quote_volume",
+              "openTime": 1.25,
+              "closeTime": 1.25,
+              "firstId": 1.25,
+              "lastId": 1.25,
+              "count": 1.25,
+              "extensionMarker": "left",
+              "extensionNested": {
+                "checked": true,
+                "value": 17
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "symbol": "left:symbol",
+              "priceChange": "left:price_change",
+              "priceChangePercent": "left:price_change_percent",
+              "weightedAvgPrice": "left:weighted_avg_price",
+              "lastPrice": "left:last_price",
+              "lastQty": "left:last_qty",
+              "openPrice": "left:open_price",
+              "highPrice": "left:high_price",
+              "lowPrice": "left:low_price",
+              "volume": "left:volume",
+              "quoteVolume": "left:quote_volume",
+              "openTime": {
+                "bits": "3ff4000000000000"
+              },
+              "closeTime": {
+                "bits": "3ff4000000000000"
+              },
+              "firstId": {
+                "bits": "3ff4000000000000"
+              },
+              "lastId": {
+                "bits": "3ff4000000000000"
+              },
+              "count": {
+                "bits": "3ff4000000000000"
+              },
+              "extensionMarker": "left",
+              "extensionNested": {
+                "checked": true,
+                "value": {
+                  "bits": "4031000000000000"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "tickers",
+          "value": null
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "tickers",
+          "value": {}
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      },
+      {
+        "input": {
+          "kind": "tickers",
+          "value": []
+        },
+        "output": {
+          "ok": true,
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "kind": "tickers",
+          "value": {
+            "symbol": false
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "RepresentationError"
+        }
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: native-only typed bridge; invokes all three actual production monomorphizations and observes every returned field before JSON, plus real representation errors. Existing canonical typed wire boundaries remain separately declared; this is not a TS runtime validator."
+  },
+  "safe_cex_venue_asterdex::account_fetch::mapper_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "mapper_error",
+      "signature": {
+        "inputs": [
+          [
+            "(name, message)",
+            {
+              "tuple": [
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                },
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let error=$type(($value[\"name\"].as_str().unwrap(),$value[\"message\"].as_str().unwrap().to_owned())); serde_json::json!({\"name\":error.name,\"message\":error.message}) }",
+    "cases": [
+      {
+        "input": {
+          "name": "TypeError",
+          "message": "Cannot convert object"
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "Cannot convert object"
+        }
+      },
+      {
+        "input": {
+          "name": "Error",
+          "message": ""
+        },
+        "output": {
+          "name": "Error",
+          "message": ""
+        }
+      },
+      {
+        "input": {
+          "name": "RepresentationError",
+          "message": "non-ASCII café\nline"
+        },
+        "output": {
+          "name": "RepresentationError",
+          "message": "non-ASCII café\nline"
+        }
+      },
+      {
+        "input": {
+          "name": "custom-name",
+          "message": "separate message"
+        },
+        "output": {
+          "name": "custom-name",
+          "message": "separate message"
+        }
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: actual native error bridge preserves both independently supplied fields; no corresponding standalone TypeScript decoder is invented."
+  },
+  "safe_cex_venue_asterdex::types::present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "present",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let input=$value[\"value\"].clone(); let result=match $value[\"kind\"].as_str().unwrap() { \"string\"=>$type::<_,String>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"bool\"=>$type::<_,bool>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"number\"=>{ let decoded=if let Some(text)=$value[\"nativeNumber\"].as_str() {$type::<_,f64>(serde::de::value::F64Deserializer::<serde_json::Error>::new(text.parse().unwrap()))}else{$type::<_,f64>(input)}; decoded.map(observed::present_number) }, \"strings\"=>$type::<_,Vec<String>>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), \"stp\"=>$type::<_,crate::types::AsterDEXStpMode>(input).map(|v|(v.is_some(),serde_json::to_value(v).unwrap())), _=>unreachable!() }; match result {Ok((present,value))=>serde_json::json!({\"ok\":true,\"present\":present,\"value\":observed::project(value)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "cases": [
+      {
+        "input": {
+          "kind": "string",
+          "value": ""
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": ""
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "value": "value"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": "value"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "value": "café"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": "café"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "value": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "value": false
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "value": 1
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "value": []
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": true
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": "false"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": 1
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "bool",
+          "value": []
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "value": 0
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "0000000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "value": -0.0
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "8000000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "value": 1.25
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "3ff4000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "value": 9007199254740992
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "4340000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "value": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "value": "1"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "value": false
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "value": []
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "strings",
+          "value": []
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "kind": "strings",
+          "value": [
+            "a",
+            "b"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": [
+            "a",
+            "b"
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "strings",
+          "value": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "strings",
+          "value": "a"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "strings",
+          "value": [
+            1
+          ]
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "stp",
+          "value": "EXPIRE_TAKER"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": "EXPIRE_TAKER"
+        }
+      },
+      {
+        "input": {
+          "kind": "stp",
+          "value": "EXPIRE_MAKER"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": "EXPIRE_MAKER"
+        }
+      },
+      {
+        "input": {
+          "kind": "stp",
+          "value": "EXPIRE_BOTH"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": "EXPIRE_BOTH"
+        }
+      },
+      {
+        "input": {
+          "kind": "stp",
+          "value": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "stp",
+          "value": "expire_taker"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "stp",
+          "value": {}
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "stp",
+          "value": 1
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "nativeNumber": "inf"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "7ff0000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "nativeNumber": "-inf"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "fff0000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "nativeNumber": "NaN"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {
+            "bits": "NaN"
+          }
+        }
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: native Serde presence adapter, directly exercised at every concrete T used in types.rs: String, bool, f64, Vec<String>, AsterDEXStpMode. Missing fields are handled by the existing record defaults; explicit null is refused here. No source validator is fabricated."
+  },
+  "safe_cex_venue_asterdex::types::opaque_fields": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "opaque_fields",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::map::Map",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              },
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let result=if $value[\"nativeNaN\"]==true { $type(serde::de::value::MapDeserializer::<_,serde::de::value::Error>::new(std::iter::once((\"native\",f64::NAN)))) } else { let mut decoder=serde_json::Deserializer::from_str($value[\"raw\"].as_str().unwrap()); let result=$type(&mut decoder); if result.is_ok(){decoder.end().unwrap();} result.map_err(|e|serde::de::Error::custom(e.to_string())) }; match result {Ok(value)=>serde_json::json!({\"ok\":true,\"value\":observed::project(serde_json::Value::Object(value))}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "cases": [
+      {
+        "input": {
+          "raw": "{}"
+        },
+        "output": {
+          "ok": true,
+          "value": {}
+        }
+      },
+      {
+        "input": {
+          "raw": "{\"a\":-0.0,\"b\":1e400,\"c\":9007199254740993,\"nested\":[0.25,true,null]}"
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "a": {
+              "bits": "8000000000000000"
+            },
+            "b": {
+              "bits": "7ff0000000000000"
+            },
+            "c": {
+              "bits": "4340000000000000"
+            },
+            "nested": [
+              {
+                "bits": "3fd0000000000000"
+              },
+              true,
+              null
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": "{\"left\":\"kept\",\"right\":[{\"x\":2.5}]}"
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "left": "kept",
+            "right": [
+              {
+                "x": {
+                  "bits": "4004000000000000"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": "[]"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "raw": "null"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "raw": "7"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "raw": "\"text\""
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "nativeNaN": true
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: directly invokes the production opaque-map codec with raw JSON and a genuine native NaN visitor. Native number bits, complete nested values and structural refusal are observed; numeric passthrough and NaN refusal retain the existing canonical boundary."
+  },
+  "safe_cex_venue_asterdex::account_helpers::handle_execution_report": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "handle_execution_report",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "existing_order_ids",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "alloc::string::String",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "tuple": [
+                                    {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    },
+                                    {
+                                      "resolved_path": {
+                                        "path": "safe_cex_venue_asterdex::account_helpers::ExecutionReportUpdate",
+                                        "args": null
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let ids=$value[\"ids\"].as_array().unwrap().iter().map(|id|id.as_str().unwrap().to_owned()).collect::<Vec<_>>(); observed::execution($type(&$value[\"data\"],&ids)) }",
+    "cases": [
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "NEW",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "open"
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "PARTIALLY_FILLED",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "open"
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "FILLED",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "closed"
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "CANCELED",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "canceled"
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "REJECTED",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "canceled"
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "EXPIRED",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "canceled"
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "unknown",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "open"
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "toString",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "inherited",
+            "text": "function toString() { [native code] }",
+            "arity": 0
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "X": "__proto__",
+            "z": "2tail",
+            "q": "5"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "inherited",
+            "text": "[object Object]",
+            "arity": null
+          },
+          "bits": [
+            "4000000000000000",
+            "4008000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [],
+          "data": {
+            "i": 7
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "ids": [
+            "other"
+          ],
+          "data": {
+            "i": 7
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {}
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": null
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": null
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": {
+              "toString": null
+            }
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "z": "-0",
+            "q": "0"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "open"
+          },
+          "bits": [
+            "8000000000000000",
+            "0000000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "ids": [
+            "7"
+          ],
+          "data": {
+            "i": 7,
+            "z": "Infinity",
+            "q": "Infinity"
+          }
+        },
+        "output": {
+          "id": "7",
+          "status": {
+            "kind": "mapped",
+            "value": "open"
+          },
+          "bits": [
+            "7ff0000000000000",
+            "NaN"
+          ]
+        }
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+  },
+  "safe_cex_venue_asterdex::account_helpers::mirror_cumulative_order_fill": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "mirror_cumulative_order_fill",
+      "signature": {
+        "inputs": [
+          [
+            "order_data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "current_time_ms",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_asterdex::account_helpers::CumulativeOrderFill",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce() -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let clock=std::cell::Cell::new(0);let result=$type(&$value[\"data\"],||{clock.set(clock.get()+1);$value[\"now\"].as_f64().unwrap()});serde_json::json!({\"value\":observed::cumulative(result),\"clock\":clock.get()}) }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "i": 7,
+            "z": "2",
+            "q": "5",
+            "X": "FILLED",
+            "T": 8
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": {
+            "id": "7",
+            "status": "closed",
+            "bits": [
+              "4000000000000000",
+              "4008000000000000",
+              "4020000000000000"
+            ]
+          },
+          "clock": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": 7,
+            "z": "9",
+            "q": "5",
+            "E": 9
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": {
+            "id": "7",
+            "status": "open",
+            "bits": [
+              "4022000000000000",
+              "0000000000000000",
+              "4022000000000000"
+            ]
+          },
+          "clock": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": 7,
+            "z": "-0",
+            "q": "0",
+            "T": 0
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": {
+            "id": "7",
+            "status": "open",
+            "bits": [
+              "8000000000000000",
+              "0000000000000000",
+              "4093480000000000"
+            ]
+          },
+          "clock": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": 7,
+            "z": "1",
+            "q": "4",
+            "T": -5
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": {
+            "id": "7",
+            "status": "open",
+            "bits": [
+              "3ff0000000000000",
+              "4008000000000000",
+              "4093480000000000"
+            ]
+          },
+          "clock": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": 7,
+            "z": "1",
+            "q": "4",
+            "T": "Infinity"
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": {
+            "id": "7",
+            "status": "open",
+            "bits": [
+              "3ff0000000000000",
+              "4008000000000000",
+              "4093480000000000"
+            ]
+          },
+          "clock": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": 7,
+            "z": "Infinity",
+            "q": "4"
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": null,
+          "clock": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": 7,
+            "z": "bad",
+            "q": "4"
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": null,
+          "clock": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": 0,
+            "z": "0",
+            "q": "4"
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": {
+            "id": "0",
+            "status": "open",
+            "bits": [
+              "0000000000000000",
+              "4010000000000000",
+              "4093480000000000"
+            ]
+          },
+          "clock": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": "",
+            "z": 1,
+            "q": 2
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": null,
+          "clock": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "z": 1,
+            "q": 2
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": null,
+          "clock": 0
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "now": 1234
+        },
+        "output": {
+          "value": {
+            "error": "TypeError"
+          },
+          "clock": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "i": {
+              "toString": null
+            }
+          },
+          "now": 1234
+        },
+        "output": {
+          "value": {
+            "error": "TypeError"
+          },
+          "clock": 0
+        }
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+  },
+  "safe_cex_venue_asterdex::account_helpers::parse_asset_balance_updates": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_asset_balance_updates",
+      "signature": {
+        "inputs": [
+          [
+            "balances",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "total_field",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "free_field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "used_field",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_asterdex::account_helpers::AssetBalanceUpdate",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let fields=&$value[\"fields\"];match $type($value.get(\"rows\"),fields[\"total\"].as_str(),fields[\"free\"].as_str().unwrap(),fields[\"used\"].as_str()){Some(rows)=>observed::balances(&rows),None=>serde_json::Value::Null} }",
+    "cases": [
+      {
+        "input": {
+          "rows": null,
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "rows": [],
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": []
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "a": " USDT ",
+              "f": "2",
+              "l": "3"
+            }
+          ],
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": [
+          {
+            "asset": "USDT",
+            "bits": [
+              "4014000000000000",
+              "4000000000000000",
+              "4008000000000000"
+            ]
+          }
+        ]
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "a": "BTC",
+              "wb": "8",
+              "cw": "3"
+            }
+          ],
+          "fields": {
+            "total": "wb",
+            "free": "cw"
+          }
+        },
+        "output": [
+          {
+            "asset": "BTC",
+            "bits": [
+              "4020000000000000",
+              "4008000000000000",
+              "4014000000000000"
+            ]
+          }
+        ]
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "a": "USDT",
+              "f": "-0",
+              "l": "0"
+            }
+          ],
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": [
+          {
+            "asset": "USDT",
+            "bits": [
+              "0000000000000000",
+              "8000000000000000",
+              "0000000000000000"
+            ]
+          }
+        ]
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "a": "USDT",
+              "f": "1e308",
+              "l": "1e308"
+            }
+          ],
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": [
+          {
+            "asset": "USDT",
+            "bits": [
+              "7ff0000000000000",
+              "7fe1ccf385ebc8a0",
+              "7fe1ccf385ebc8a0"
+            ]
+          }
+        ]
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "a": "USDT",
+              "f": "2",
+              "l": "-1"
+            }
+          ],
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "a": "",
+              "f": "2",
+              "l": "1"
+            }
+          ],
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "a": "USDT",
+              "f": "2tail",
+              "l": "1"
+            }
+          ],
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "rows": [
+            {
+              "a": "USDT",
+              "f": "2",
+              "l": "1"
+            },
+            null
+          ],
+          "fields": {
+            "free": "f",
+            "used": "l"
+          }
+        },
+        "output": null
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+  },
+  "safe_cex_venue_asterdex::account_helpers::handle_account_update": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "handle_account_update",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_asterdex::account_helpers::AccountUpdateEffect",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "lifetime": "'_"
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } observed::effects($value,$type($value)) }",
+    "cases": [
+      {
+        "input": {},
+        "output": [
+          {
+            "kind": "emit",
+            "same": true
+          }
+        ]
+      },
+      {
+        "input": null,
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "B": null
+        },
+        "output": [
+          {
+            "kind": "emit",
+            "same": true
+          }
+        ]
+      },
+      {
+        "input": {
+          "B": []
+        },
+        "output": [
+          {
+            "kind": "balances",
+            "rows": []
+          },
+          {
+            "kind": "emit",
+            "same": true
+          }
+        ]
+      },
+      {
+        "input": {
+          "B": [
+            {
+              "a": "USDT",
+              "f": "2",
+              "l": "3"
+            }
+          ]
+        },
+        "output": [
+          {
+            "kind": "balances",
+            "rows": [
+              {
+                "asset": "USDT",
+                "bits": [
+                  "4014000000000000",
+                  "4000000000000000",
+                  "4008000000000000"
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "emit",
+            "same": true
+          }
+        ]
+      },
+      {
+        "input": {
+          "B": [
+            {
+              "a": "USDT",
+              "f": "2",
+              "l": "-1"
+            }
+          ]
+        },
+        "output": [
+          {
+            "kind": "emit",
+            "same": true
+          }
+        ]
+      },
+      {
+        "input": {
+          "B": false
+        },
+        "output": [
+          {
+            "kind": "emit",
+            "same": true
+          }
+        ]
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+  },
+  "safe_cex_venue_asterdex::account_helpers::get_account_update_upnl_deltas": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_account_update_upnl_deltas",
+      "signature": {
+        "inputs": [
+          [
+            "positions",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "existing_positions",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Position",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "currency_keys",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "alloc::string::String",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "tuple": [
+                                    {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    },
+                                    {
+                                      "primitive": "f64"
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } let existing=$value[\"existing\"].as_array().unwrap().iter().map(|row|{observed::position(row)}).collect::<Vec<_>>();let currencies=$value[\"currencies\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect::<Vec<_>>();match $type($value.get(\"positions\"),&existing,&currencies){Some(rows)=>serde_json::json!(rows.into_iter().map(|(key,n)|serde_json::json!([key,observed::bits(n)])).collect::<Vec<_>>()),None=>serde_json::Value::Null} }",
+    "cases": [
+      {
+        "input": {
+          "positions": [],
+          "existing": [],
+          "currencies": []
+        },
+        "output": []
+      },
+      {
+        "input": {
+          "positions": null,
+          "existing": [],
+          "currencies": []
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "s": "BTCUSDT",
+              "pa": "2",
+              "up": "5"
+            }
+          ],
+          "existing": [],
+          "currencies": []
+        },
+        "output": [
+          [
+            "USDT",
+            "4014000000000000"
+          ]
+        ]
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "s": "BTCUSDT",
+              "pa": "2",
+              "up": "5"
+            }
+          ],
+          "existing": [
+            {
+              "symbol": "BTCUSDT",
+              "side": "long",
+              "previous": 2
+            }
+          ],
+          "currencies": [
+            "USDT"
+          ]
+        },
+        "output": [
+          [
+            "USDT",
+            "4014000000000000"
+          ]
+        ]
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "s": "BTCUSDT",
+              "ps": "BOTH",
+              "pa": "-2",
+              "up": "7"
+            }
+          ],
+          "existing": [
+            {
+              "symbol": "BTCUSDT",
+              "side": "short",
+              "previous": 3
+            }
+          ],
+          "currencies": [
+            "USDT"
+          ]
+        },
+        "output": [
+          [
+            "USDT",
+            "4010000000000000"
+          ]
+        ]
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "s": "BTCUSDT",
+              "pa": "2",
+              "up": "5"
+            },
+            {
+              "s": "BTCUSDT",
+              "pa": "2",
+              "up": "8"
+            }
+          ],
+          "existing": [],
+          "currencies": [
+            "USDT"
+          ]
+        },
+        "output": [
+          [
+            "USDT",
+            "402a000000000000"
+          ]
+        ]
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "s": "TOKEN31",
+              "pa": "2",
+              "up": "4"
+            }
+          ],
+          "existing": [],
+          "currencies": [
+            "31",
+            "1"
+          ]
+        },
+        "output": [
+          [
+            "1",
+            "4010000000000000"
+          ]
+        ]
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "s": "BTCUSDT",
+              "pa": "2",
+              "up": "5"
+            }
+          ],
+          "existing": [
+            {
+              "symbol": "BTCUSDT",
+              "side": "short",
+              "previous": "NaN"
+            }
+          ],
+          "currencies": [
+            "USDT"
+          ]
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "s": "BTCUSDT",
+              "pa": "2",
+              "up": "Infinity"
+            }
+          ],
+          "existing": [],
+          "currencies": [
+            "USDT"
+          ]
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "s": "",
+              "pa": "2",
+              "up": "5"
+            }
+          ],
+          "existing": [],
+          "currencies": [
+            "USDT"
+          ]
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "existing": [],
+          "currencies": [
+            "USDT"
+          ]
+        },
+        "output": []
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+  },
+  "safe_cex_venue_asterdex::api_helpers::generate_v1_signature": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "generate_v1_signature",
+      "signature": {
+        "inputs": [
+          [
+            "query_string",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "secret",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } match observed::ready($type($value[\"query\"].as_str().unwrap(),$value[\"secret\"].as_str().unwrap())) {Ok(signature)=>serde_json::json!({\"signature\":signature}),Err(error)=>panic!(\"local HMAC failed: {error}\")} }",
+    "cases": [
+      {
+        "input": {
+          "query": "",
+          "secret": ""
+        },
+        "output": {
+          "signature": "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"
+        }
+      },
+      {
+        "input": {
+          "query": "symbol=BTCUSDT&timestamp=1",
+          "secret": "secret"
+        },
+        "output": {
+          "signature": "ef9d3d77a34d9a13a21a4c2d7f3e8cb091888a74ca62b5b62f430e78eded95ba"
+        }
+      },
+      {
+        "input": {
+          "query": "symbol=BTCUSDT&timestamp=1",
+          "secret": "different"
+        },
+        "output": {
+          "signature": "c16b493718a7523ea01a5343477c5d4468db1b3c3566763ee5e90029e065bb3b"
+        }
+      },
+      {
+        "input": {
+          "query": "café=火&x=\u0000",
+          "secret": "café-key"
+        },
+        "output": {
+          "signature": "53d6f56d09d4bb7bc9473130a84786cd7b7c628f02c524fe78a87dc3844672cb"
+        }
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+  },
+  "safe_cex_venue_asterdex::api_helpers::generate_aster_dex_code_message_signature": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "generate_aster_dex_code_message_signature",
+      "signature": {
+        "inputs": [
+          [
+            "query_string",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "signer_private_key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "testnet",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ #[allow(dead_code)] mod observed { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/accepted-account-observations.rs\")); } match $type($value[\"query\"].as_str().unwrap(),$value[\"key\"].as_str().unwrap(),$value[\"testnet\"].as_bool()){Ok(signature)=>serde_json::json!({\"signature\":signature}),Err(error)=>serde_json::json!({\"error\":error.name})} }",
+    "cases": [
+      {
+        "input": {
+          "query": "symbol=BTCUSDT",
+          "key": "0x0101010101010101010101010101010101010101010101010101010101010101",
+          "testnet": false
+        },
+        "output": {
+          "signature": "0x59c2f533c32ef08571700d4b2012234e00c1b384941f17e9a4e048ddb22c613a6ab9000110e8397e427effec8096d4c802f44b4cddeabd60d1930e2d529069731b"
+        }
+      },
+      {
+        "input": {
+          "query": "symbol=BTCUSDT",
+          "key": "0101010101010101010101010101010101010101010101010101010101010101",
+          "testnet": false
+        },
+        "output": {
+          "signature": "0x59c2f533c32ef08571700d4b2012234e00c1b384941f17e9a4e048ddb22c613a6ab9000110e8397e427effec8096d4c802f44b4cddeabd60d1930e2d529069731b"
+        }
+      },
+      {
+        "input": {
+          "query": "symbol=BTCUSDT",
+          "key": "0x0101010101010101010101010101010101010101010101010101010101010101",
+          "testnet": true
+        },
+        "output": {
+          "signature": "0x703cad2c6d5cf651f03836d3e4968febe5164ffef46e3367d994728c9f22d56a596ffe9284ba68f203b8b8b10bb53d86d57f4911b4a6c60c0c77acec28066b571b"
+        }
+      },
+      {
+        "input": {
+          "query": "café=火",
+          "key": "0x0202020202020202020202020202020202020202020202020202020202020202"
+        },
+        "output": {
+          "signature": "0x025b87c42e3b73da291e65dd0ae163150e2e031296383985ce2e7c84f0d7ddc66d21bb984944d544053f96b066522061c515655593d1c45d9de2e45fac9c11251b"
+        }
+      },
+      {
+        "input": {
+          "query": "",
+          "key": "0x01",
+          "testnet": false
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "query": "",
+          "key": "nothex",
+          "testnet": false
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "query": "",
+          "key": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "testnet": false
+        },
+        "output": {
+          "error": "Error"
+        }
+      }
+    ],
+    "evidence": "ACCOUNT_FUNCTION_CONTRACT_REVIEW.md: frozen expectations from maintained TypeScript with independently checked numeric/HMAC anchors. The direct production function observes native numeric bits, presence, effects/identity or real signing results; explicit capabilities do not replace the function under test. Compiled corruption/restoration controls are required."
+  },
   "safe_cex_venue_asterdex::virtual_clock::ClockOperation": {
     "shape": "typed",
     "evidence": "safe-cex-venue-asterdex/src/virtual_clock.rs; exact current compiler-selected APIs reviewed. Future::poll consumes the existing typed Pin/Context and forwards the shared typed completion. It accepts no serialized input and does not parse or construct a decoded model. The clock lifecycle witnesses exercise pending, completion, shared waiters and cancellation. This is an explicit typed classification; its accepted-set receipt is not claimed as a decoder execution.",

@@ -7452,3 +7452,107 @@ reason = "Native terminal presentation after the console capability receives ret
 [[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::exception_text"
 reason = "Text-only recording-host observation for existing fixture report lists after report_raw_exception receives the original Js exception. Native Error messages remain visible; non-Error finite fixture views preserve their prior explicit JSON observation. Production NativeRuntime reports through console_text, and rich sinks retain Js directly. The unchanged KuCoin default-binding witness and separate native identity assertions cover these distinct observations."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::INFO_RECORD"
+reason = "Native Serde record marker for preserving own undefined info properties on mapped model fields; ordinary wire serializers omit those fields. This is internal codec coordination, with no separate TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json/codec.rs::RETAINED_NATIVE"
+reason = "Native Serde newtype marker for the canonical retained data tree; it preserves number bits and UTF-16 units before the actual JSON boundary. No TypeScript SDK declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json/codec.rs::deserialize_native_payload"
+reason = "Closed native codec payload decoder shared by the typed ingress and output capture. It adds no venue mapping; executed native accepted-set contracts cover every payload variant and malformed payload refusal."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json/codec.rs::Input::into_native_payload"
+reason = "Closed native codec encoder for the canonical retained data tree; the ordinary JSON writer remains a separate explicit boundary. No new TypeScript behavior or duplicate carrier."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json/writer.rs::RetainedJsonInput::json_stringify"
+reason = "Canonical retained-data JSON.stringify writer moved below Num so model serialization and runtime output share one implementation. No separately exported TypeScript SDK declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::deserialize_present_retained_info"
+reason = "Native model info presence codec: preserves an own undefined or null value separately from field absence without an intermediate JSON projection. No separate TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::get"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::get_mut"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::as_object"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::as_object_mut"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::as_array"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::as_array_mut"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::is_nullish"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::text_equals"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::as_f64"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::is_truthy"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::as_text"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::as_bool"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::is_object"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::is_array"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::is_null"
+reason = "Canonical retained-tree inspection or mutation glue for existing mapped model info consumers. It preserves native values and UTF-16 keys without a JSON copy; no separate TypeScript SDK declaration or venue policy."
+
+[[exempt]]
+rs = "safe-cex-num/src/coercion.rs::js_retained_number"
+reason = "Shared ECMAScript coercion over the canonical retained data carrier for mapped model info consumers. Native source-derived contracts observe number bits and explicit UTF-8 boundary refusals; no separate TypeScript SDK declaration."
+
+[[exempt]]
+rs = "safe-cex-num/src/coercion.rs::js_retained_parse_float"
+reason = "Shared ECMAScript coercion over the canonical retained data carrier for mapped model info consumers. Native source-derived contracts observe number bits and explicit UTF-8 boundary refusals; no separate TypeScript SDK declaration."
+
+[[exempt]]
+rs = "safe-cex-num/src/coercion.rs::js_retained_string"
+reason = "Shared ECMAScript coercion over the canonical retained data carrier for mapped model info consumers. Native source-derived contracts observe number bits and explicit UTF-8 boundary refusals; no separate TypeScript SDK declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/info_record.rs::STORE_RECORD"
+reason = "Native Serde record hint retains an own undefined zkLinkConfig update without admitting undefined on other Store fields. It is internal codec coordination, covered by actual Store replacement parity."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json/native.rs::Input::decode_native"
+reason = "Shared native Serde reader moved below Num so nested retained model variants and the production JS bridge use one decoder. The raw tree is canonical RetainedJsonInput; no JSON reconstruction or new TypeScript policy."

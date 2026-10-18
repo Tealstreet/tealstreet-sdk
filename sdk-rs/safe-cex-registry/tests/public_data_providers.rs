@@ -973,7 +973,8 @@ fn gateway_provider_retains_literal_info_object() {
         "GATEWAY provider exact own key count"
     );
     assert_eq!(
-        info["$serde_json::private::Number"], "17",
+        info.get("$serde_json::private::Number").unwrap().as_text(),
+        Some("17".encode_utf16().collect::<Vec<_>>().as_slice()),
         "GATEWAY provider literal string value"
     );
     assert_eq!(

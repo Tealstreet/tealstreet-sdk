@@ -162,7 +162,7 @@ fn create_public(rt: &Rt) -> Result<Js, ExchangeError> {
         crate::construction::Venue::Spot => "KrakenSpotPublicWebsocket",
     };
     rt.global(class)
-        .and_then(|c| c.call(Js::Undefined, vec![rt.this.clone()]))
+        .and_then(|c| c.construct(vec![rt.this.clone()], None))
         .map_err(ex)
 }
 

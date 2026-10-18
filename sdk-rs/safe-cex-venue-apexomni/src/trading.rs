@@ -3,7 +3,7 @@ use crate::{
     api::serialize_apex_payload_legacy,
     data::{get, truthy},
     decimal::{Decimal, rounded_ratio},
-    exchange::{ApexOmniExchange, ApexRequest, failure, float, text},
+    exchange::{ApexOmniExchange, ApexRequest, failure, text},
     exchange_utils,
     order_records::Iso8601,
     protocol,
@@ -13,6 +13,7 @@ use crate::{
 use num_bigint::BigUint;
 use safe_cex_exchange::{error_reporting::ExchangeErrorInput, runtime::ExchangeError};
 use safe_cex_num::{JsJsonValue as J, adjust, js_number_string};
+use safe_cex_types::retained_json::RetainedJsonInput as R;
 use safe_cex_types::{
     Order, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PreparedOrderOpts,
     UpdateOrderOpts, UpdateOrderOptsUpdate,
@@ -74,7 +75,7 @@ impl ApexOmniExchange {
     async fn order_signature(
         &self,
         signer: &dyn ZkLinkHost,
-        config: &J,
+        config: &R,
         pair: f64,
         id: &str,
         price: &J,
@@ -89,12 +90,14 @@ impl ApexOmniExchange {
             .parse()
             .expect("u32 nonce");
         let low64 = &nonce % BigUint::from(u64::MAX);
-        let account = get(config, "contractAccount");
+        let account = crate::response::get(config, "contractAccount");
         let payload = SignContractPayload {
             direction,
             fee_rates: [
-                (float(get(account, "makerFeeRate"))? * 1e4).ceil(),
-                (float(get(account, "takerFeeRate"))? * 1e4).ceil(),
+                (crate::response::float(crate::response::get(account, "makerFeeRate"))? * 1e4)
+                    .ceil(),
+                (crate::response::float(crate::response::get(account, "takerFeeRate"))? * 1e4)
+                    .ceil(),
             ],
             nonce: low32,
             pair_id: pair,
@@ -103,10 +106,11 @@ impl ApexOmniExchange {
             size: Decimal::from_value(if truthy(size) { size } else { &J::Number(0.) })
                 .scaled_integer(18),
             slot_id: rounded_ratio(low64, u32max),
-            account_id: Decimal::from_value(if truthy(get(config, "id")) {
-                get(config, "id")
+            // Only the scalar consumed by the decimal signer crosses its strict prepared boundary.
+            account_id: Decimal::from_value(&if crate::response::get(config, "id").is_truthy() {
+                J::String(crate::response::text(crate::response::get(config, "id"))?)
             } else {
-                &J::Number(0.)
+                J::Number(0.)
             })
             .modulo_number(u32max),
             sub_account_id: 0.,
@@ -324,8 +328,8 @@ impl ApexOmniExchange {
                 .store
                 .zk_link_config()
                 .as_ref()
-                .map_or(J::Undefined, |v| J::from((**v).clone()));
-            let account_id = text(get(&config, "id"))?;
+                .map_or(R::Undefined, |v| (**v).clone());
+            let account_id = crate::response::text(crate::response::get(&config, "id"))?;
             let client = match &caller {
                 Some(id) => id.clone(),
                 None => self.new_client_id(&account_id)?,
@@ -333,16 +337,28 @@ impl ApexOmniExchange {
             let expiry = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
                 + 30. * 24. * 60. * 60. * 1000.;
             let mut pair = 0.;
-            for contract in
-                crate::data::array(get(get(&config, "contractConfig"), "perpetualContract"))
-                    .map_err(failure)?
+            for contract in crate::response::array(crate::response::get(
+                crate::response::get(&config, "contractConfig"),
+                "perpetualContract",
+            ))
+            .map_err(failure)?
             {
-                if get(contract, "symbol") == get(&payload, "symbol") {
-                    pair = crate::data::number(get(contract, "l2PairId")).map_err(failure)?;
+                if crate::response::get(contract, "symbol")
+                    .text_equals(&text(get(&payload, "symbol"))?)
+                {
+                    pair = crate::response::numeric(crate::response::get(contract, "l2PairId"))?;
                 }
             }
-            let rate = get(get(&config, "contractAccount"), "takerFeeRate");
-            let limit_fee = self.limit_fee(get(&payload, "price"), get(&payload, "size"), rate)?;
+            let rate = crate::response::get(
+                crate::response::get(&config, "contractAccount"),
+                "takerFeeRate",
+            );
+            let rate = if rate.is_truthy() {
+                J::String(crate::response::text(rate)?)
+            } else {
+                J::Number(0.)
+            };
+            let limit_fee = self.limit_fee(get(&payload, "price"), get(&payload, "size"), &rate)?;
             let signature = self
                 .order_signature(
                     signer.as_ref(),
@@ -384,7 +400,7 @@ impl ApexOmniExchange {
                         };
                         let price = exchange_utils::calculate_tp_sl_price(side, value, p_price);
                         let size = get(&payload, "size").clone();
-                        let fee = self.limit_fee(&string(js_number_string(price)), &size, rate)?;
+                        let fee = self.limit_fee(&string(js_number_string(price)), &size, &rate)?;
                         let sig = self
                             .order_signature(
                                 signer.as_ref(),
@@ -445,16 +461,26 @@ impl ApexOmniExchange {
         // The source maps IDs only after mapSeries finishes all submissions.
         let ids = responses
             .iter()
-            .filter(|response| !matches!(response, J::Undefined))
-            .map(|response| crate::data::property(get(response, "data"), "id").cloned())
+            .filter(|response| {
+                !matches!(
+                    response,
+                    safe_cex_types::retained_json::RetainedJsonInput::Undefined
+                )
+            })
+            .map(|response| {
+                crate::response::property(crate::response::get(response, "data"), "id").cloned()
+            })
             .collect::<Result<Vec<_>, _>>()?;
         services.throttle_fetch_orders()?;
         ids.into_iter()
             .map(|id| {
-                if matches!(id, J::Undefined) {
+                if matches!(
+                    id,
+                    safe_cex_types::retained_json::RetainedJsonInput::Undefined
+                ) {
                     return Err(failure("ApexOmni placement response is missing id".into()));
                 }
-                text(&id)
+                crate::response::text(&id)
             })
             .collect()
     }

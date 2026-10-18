@@ -280,8 +280,82 @@ fn retained_config_uses_the_production_store_update_without_json_copy() {
         let config = native.zk_link_config().expect("native config committed");
         observe(&from_typed(&*config).unwrap(), &case["stored"]);
         assert!(
-            native.serialize().zk_link_config.is_none(),
+            safe_cex_store::Store::serialize(native.as_ref())
+                .zk_link_config
+                .is_none(),
             "source snapshot omits config"
         );
     }
+}
+
+#[test]
+fn retained_config_replacement_preserves_top_level_undefined() {
+    for case in source()["replacements"].as_array().unwrap() {
+        let native = Rc::new(DefaultStore::new());
+        let facade = store::facade(native.clone());
+        facade
+            .call_method(
+                "update",
+                vec![from_json(
+                    &serde_json::json!({"zkLinkConfig":{"previous":true}}),
+                )],
+            )
+            .unwrap();
+        facade
+            .call_method("update", vec![input(&case["patch"])])
+            .unwrap();
+        let config = native
+            .zk_link_config()
+            .expect("present config after replacement");
+        observe(&from_typed(&*config).unwrap(), &case["stored"]);
+    }
+}
+
+fn retained_wrapper(kind: &str) {
+    let cases = source()["wrappers"].as_array().unwrap();
+    assert_eq!(cases.len(), 26, "nested wrapper source floor");
+    for case in cases.iter().filter(|case| case["kind"] == kind) {
+        let native = Rc::new(DefaultStore::new());
+        let facade = store::facade(native.clone());
+        let record = input(&case["record"]);
+        let update = if case["kind"] == "currency" {
+            let balance = from_json(
+                &source()["cases"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|c| c["model"] == "balance")
+                    .unwrap()["base"],
+            );
+            balance
+                .define("currencies", Js::object(vec![("USDT", record)]))
+                .unwrap();
+            Js::object(vec![("balance", balance)])
+        } else {
+            record.define("key", Js::str("displayed")).unwrap();
+            record.define("account", Js::str("account")).unwrap();
+            Js::object(vec![("displayedPositions", Js::array(vec![record]))])
+        };
+        facade
+            .call_method("update", vec![update])
+            .unwrap_or_else(|e| panic!("{} {}: {e:?}", case["kind"], case["profile"]));
+        let model = if case["kind"] == "currency" {
+            let balance = native.balance();
+            let row = balance.currencies.as_ref().unwrap().get("USDT").unwrap();
+            from_typed(row).unwrap()
+        } else {
+            let rows = native.displayed_positions();
+            from_typed(&rows[0]).unwrap()
+        };
+        info(&model, &case["stored"]);
+    }
+}
+
+#[test]
+fn retained_info_survives_currency_balance_wrapper() {
+    retained_wrapper("currency");
+}
+#[test]
+fn retained_info_survives_displayed_position_wrapper() {
+    retained_wrapper("displayed");
 }

@@ -358,3 +358,7 @@ impl safe_cex_exchange::journal::JournalFolder for NativeJournal {
 #[cfg(test)]
 #[path = "sdk_quantum_probe.rs"]
 mod sdk_quantum_probe;
+
+#[cfg(test)]
+#[path = "../tests/support/retained_order_info_binding.rs"]
+mod retained_order_info_binding;

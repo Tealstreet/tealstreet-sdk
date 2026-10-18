@@ -34,6 +34,12 @@ const text=[endpoints.getText(venueTypes),...constants.map(n=>n.getText(exchange
 vm.runInNewContext(ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:exported,Error,Date:{now(){trace.push({kind:'clock'});return clock;}},uuid(){trace.push({kind:'uuid'});return 'uuid-17';},chunk:require('lodash/chunk'),forEachSeries:require('p-iteration').forEachSeries});
 function revive(value) {if(value&&typeof value==='object'){if('$n' in value)return value.$n==='-0'?-0:Number(value.$n);if(Array.isArray(value))return value.map(revive);return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,revive(v)]));}return value;}
 function capture(v) {if(v===undefined)return {$undefined:true};if(typeof v==='number'){const b=Buffer.alloc(8);b.writeDoubleBE(v);return {$bits:b.toString('hex')};}if(require('node:util').types.isNativeError(v))return {name:v.name,message:v.message};if(v&&typeof v==='object'){if(Array.isArray(v))return v.map(capture);return Object.fromEntries(Object.entries(v).map(([k,v])=>[k,capture(v)]));}return v;}
+if(process.argv.includes('--retained-merge')) {
+ const r=new exported.Receiver(),info={missing:undefined,array:[NaN,Infinity,undefined]};
+ const order={id:'fresh',status:'open',lastUpdate:0,info};r.store={orders:[order]};
+ const merged=r.mergeRestOrdersWithFreshWsState([]);assert.equal(merged.length,1);
+ assert.equal(merged[0].info,info);process.stdout.write(JSON.stringify(capture(merged[0].info)));return;
+}
 function market(id) {return {id,symbol:id,base:'BTC',quote:id.endsWith('USDC')?'USDC':'USD',active:true,precision:{amount:0.001,price:0.05},limits:{amount:{min:0.001,max:100000},leverage:{min:1,max:10}},isSpot:true,isExpiring:false,contractSize:1};}
 function receiver(input) {
  const r=new exported.Receiver(), markets=Object.fromEntries((input.marketKeys??['BTC-USD','BTC-USDC']).map(id=>[id,market(id)]));

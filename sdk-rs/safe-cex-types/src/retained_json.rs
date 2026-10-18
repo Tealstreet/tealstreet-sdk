@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::{Error, Value};
 use std::fmt;
 mod codec;
+mod native;
 mod parser;
 mod writer;
 pub use codec::{RETAINED_NATIVE, deserialize_native_payload};

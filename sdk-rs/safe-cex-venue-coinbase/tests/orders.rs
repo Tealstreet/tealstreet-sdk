@@ -26,7 +26,7 @@ use comparison::compare;
 fn cfm_size_uses_javascript_number_not_parse_float() {
     for case in oracle()["sizes"].as_array().unwrap() {
         compare(
-            &json!(normalize_cfm_contract_size(&case["value"])),
+            &json!(normalize_cfm_contract_size(&case["value"].clone().into())),
             &case["result"],
             &format!("normalizeCfmContractSize {}", case["value"]),
         );
@@ -38,7 +38,7 @@ fn rest_order_configuration_sizing_and_raw_info() {
     let mut special = std::collections::BTreeSet::new();
     for case in oracle()["cases"].as_array().unwrap() {
         let market: Market = serde_json::from_value(case["market"].clone()).unwrap();
-        let result = map_coinbase_rest_order(&case["order"], &market, 12345.0);
+        let result = map_coinbase_rest_order(&case["order"].clone().into(), &market, 12345.0);
         let status = case["order"]["status"].as_str().unwrap();
         if matches!(
             status,

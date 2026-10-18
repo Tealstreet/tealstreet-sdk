@@ -153,7 +153,7 @@ impl SessionHost for Rt {
                     }
                 }
             }
-            "construct" => arg(&args, 0).call(Js::Undefined, args.into_iter().skip(1).collect()),
+            "construct" => arg(&args, 0).construct(args.into_iter().skip(1).collect(), None),
             "iterable spread" => Ok(Js::array(arg(&args, 0).iterable_values()?)),
             "Number.isFinite" => self
                 .shared
@@ -161,7 +161,7 @@ impl SessionHost for Rt {
                 .get("Number")?
                 .call_method("isFinite", args),
             "Number" => self.shared.globals.get("Number")?.call(Js::Undefined, args),
-            "new Map" => self.shared.globals.get("Map")?.call(Js::Undefined, args),
+            "new Map" => self.shared.globals.get("Map")?.construct(args, None),
             "Promise.resolve" => Ok(Js::Promise(Promise::settled(
                 &self.exchange_runtime(),
                 Ok(arg(&args, 0)),
@@ -176,7 +176,7 @@ impl SessionHost for Rt {
                         .collect(),
                 ))
             }
-            "new Set" => self.shared.globals.get("Set")?.call(Js::Undefined, args),
+            "new Set" => self.shared.globals.get("Set")?.construct(args, None),
             "super.mapPosition" => {
                 super::members::mapping::map_position(self, &arg(&args, 0), &arg(&args, 1))
             }

@@ -465,7 +465,7 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     );
     def(
         "AxiosHeaders",
-        Js::constructor("AxiosHeaders", |_, a| arg(&a, 0).spread_object()),
+        Js::constructor("AxiosHeaders", None, |_, a| arg(&a, 0).spread_object()),
     );
     let w = weak;
     def(

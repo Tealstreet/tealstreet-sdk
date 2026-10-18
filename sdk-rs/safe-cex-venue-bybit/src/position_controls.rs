@@ -321,7 +321,8 @@ where
     .await?;
     let list = data.get("result").and_then(|r| r.get("list"));
     if primary {
-        let meta = crate::response::get_bybit_response_meta(&data);
+        let meta = crate::response::get_bybit_response_meta(&data.as_ref().clone().into())
+            .map_err(|fault| error(fault.name, fault.message))?;
         if !meta.is_success && list.and_then(Value::as_array).is_none_or(Vec::is_empty) {
             let fallback = meta
                 .ret_msg

@@ -32,7 +32,7 @@ pub fn format_bybit_trading_agreement_error(
     let ret_code = if code.as_str().is_some_and(|s| js_trim(s).is_empty()) {
         Some(0.0)
     } else {
-        crate::response::normalize_code(code)
+        crate::response::normalize_code(&code.clone().into())
     };
     let ret_msg = get_bybit_payload_message(payload);
     let normalized = ret_msg.as_deref().unwrap_or("").to_lowercase();

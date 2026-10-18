@@ -1,11 +1,12 @@
 //! Lifecycle bodies use shared Store state and host-owned imported capabilities.
 use crate::{
     data,
-    exchange::{ApexOmniExchange, ApexRequest, failure, float, numeric},
+    exchange::{ApexOmniExchange, ApexRequest, failure},
     zklink_host::{SdkInitialization, ZkLinkHost},
 };
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
+    js_runtime::{promise::Promise, value::Js},
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_num::JsJsonValue as J;
@@ -189,13 +190,30 @@ impl ApexOmniExchange {
             return self.mark_loaded(true, true, true);
         }
         services.connect_websocket(true)?;
+        // The source's fetchPositions().then(...) is a started promise. Its
+        // Store continuation survives Promise.all rejecting on the balance leg.
+        let venue = self.clone();
+        let positions = Promise::spawn(
+            &self.base.runtime,
+            Box::pin(async move {
+                let p = venue.fetch_positions().await?;
+                if !venue.base.is_disposed() {
+                    venue
+                        .base
+                        .store
+                        .add_or_update_positions_full(p)
+                        .map_err(ExchangeError::from)?;
+                    venue.mark_loaded(false, true, true)?;
+                }
+                Ok(Js::Undefined)
+            }),
+        );
         let positions = async {
-            let p = self.fetch_positions().await?;
-            if !self.base.is_disposed() {
-                self.base.store.add_or_update_positions_full(p)?;
-                self.mark_loaded(false, true, true)?;
-            }
-            Ok::<_, ExchangeError>(())
+            positions
+                .wait()
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_exchange_error())
         };
         let result = futures::future::try_join(positions, self.fetch_raw_balance()).await;
         match result.map(|(_, balance)| balance) {
@@ -327,6 +345,7 @@ impl ApexOmniExchange {
         let response = self
             .request("get", "/v3/klines", J::Object(params), J::Undefined, false)
             .await?;
+        use crate::response::{self as data, float, numeric};
         let rows = data::get(data::get(&response, "data"), &opts.symbol);
         if !data::truthy(rows) {
             self.host.console(
@@ -336,11 +355,11 @@ impl ApexOmniExchange {
             )?;
             return Ok(Vec::new());
         }
-        let rows = if let J::Array(rows) = rows {
+        let rows = if let safe_cex_types::retained_json::RetainedJsonInput::Array(rows) = rows {
             rows
         } else {
             let map = data::property(rows, "map")?;
-            if matches!(map, J::Undefined | J::Null) {
+            if map.is_nullish() {
                 return Ok(Vec::new());
             }
             let mut error = failure("data?.data?.[opts.symbol].map is not a function".into());

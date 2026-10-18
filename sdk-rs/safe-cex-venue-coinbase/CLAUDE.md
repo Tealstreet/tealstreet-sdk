@@ -283,3 +283,8 @@ through mapping and DefaultStore. The native loopback regression in
 `tests/transport_binding.rs` compares real reqwest ingress with maintained source,
 including overflow, negative zero, lone UTF-16 and native own undefined/NaN.
 String fields actually consumed by typed models keep their existing UTF-8 boundary.
+
+PortfolioState captures the canonical retained object directly; Serde flatten
+buffers must not inspect opaque metadata. Metadata keys retain UTF-16, while
+uuid/type remain strict native strings. The local Frame graph keeps own and array
+undefined values during real merge/read operations, alongside native numeric bits.

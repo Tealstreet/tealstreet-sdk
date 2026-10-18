@@ -2,6 +2,14 @@
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/apexomni/CLAUDE.md).
 
+Startup's complete `fetchPositions().then(...)` Store continuation belongs to the
+shared eager native Promise runtime. A balance rejection releases its join waiter
+while the positions continuation still finishes; disposal suppresses its Store
+write. The binding regression holds the original account response until startup
+settles and leaves the separate tick requests pending. The maintained full class,
+Store and API run the same live/disposed cases with terminal HTTP/socket gates.
+Prepared lifecycle fixtures must pump runtime jobs while awaiting startup.
+
 The production binding host names its shared type imports explicitly. A wildcard
 can import macros and make its unqualified expression macros ambiguous to the
 accepted-set scanner; keep that scope check enforced without a policy waiver.
@@ -497,3 +505,21 @@ overflow, signed zero and false follow the actual TS exchange and DefaultStore.
 The shared ticker census records the witness. The compiling
 `parity/scripts/ticker-native-controls.py apexomni` fault must fail that test and
 pass after exact source restoration.
+
+
+REST response bodies and ApexHost results use canonical RetainedJsonInput.
+The installed Axios response interceptor keeps native Js response/config objects,
+including retry adapter/serializer capabilities, until the terminal data capture.
+Order/Position/Balance/Market info clones the original retained row; opaque UTF-16
+keys/text, native NaN/infinity/signed zero and own undefined never cross a whole
+response JSON projection. zkLinkConfig uses the same carrier, including source
+own-undefined assignments before later mapping errors. Named public model strings
+and placement inputs retain their strict field boundaries. Signing reads only
+its named scalar config fields; unrelated opaque config members cannot refuse it.
+Warnings use the shared retained writer at their explicit diagnostic text boundary.
+
+The existing binding target includes support/retained_info.rs. It checks actual
+HTTP/interceptor/host/model/Store paths and signs a placement after storing opaque
+contract config. The existing source loader's --retained-info mode executes the
+maintained TS methods for the same data classes; its ordinary driver marker stays
+stable for the existing controlled source corpora.

@@ -282,10 +282,7 @@ impl Exchange for BingxExchange {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod retained_info_native {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/support/retained_info_native.rs"
-    ));
-}
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/retained_info_native.rs"]
+mod retained_info_native;
