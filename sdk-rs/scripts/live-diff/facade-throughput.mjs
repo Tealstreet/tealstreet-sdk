@@ -34,17 +34,24 @@ for (let i = 1; i < reports.length; i++) {
 }
 assert.equal(runs(before, 'ts').length, before.length * 2);
 assert.equal(runs(after, 'ts').length, after.length * 2);
-const expected = deserialize(readFileSync(baseline[0].fixture));
+const expectedBytes = readFileSync(baseline[0].fixture);
+const expected = deserialize(expectedBytes);
 for (const run of [...baseline, ...candidate]) {
   assert.equal(run.receipt.delivered, 570);
   assert.equal(run.receipt.dropped, 0);
   assert.equal(run.receipt.inputHash, baseline[0].receipt.inputHash);
+  assert.equal(run.receipt.inputHash, run.receipt.expectedInputHash);
   assert.equal(run.receipt.applicationDrainVerified, true);
   assert.equal(run.receipt.nativeTransportVerified, true);
+  const actualBytes = readFileSync(run.fixture);
   assert.deepStrictEqual(
-    deserialize(readFileSync(run.fixture)),
+    deserialize(actualBytes),
     expected,
     run.label + ' complete retained output/state must equal baseline without normalization',
+  );
+  assert(
+    actualBytes.equals(expectedBytes),
+    run.label + ' serialized property order and reference structure must be identical',
   );
 }
 for (const report of reports) {
@@ -84,6 +91,7 @@ console.log(
   JSON.stringify(
     {
       identicalCompleteNativeOutput: true,
+      identicalSerializedNativeOutput: true,
       inputHash: baseline[0].receipt.inputHash,
       interleavedReportPaths: paths,
       control,
