@@ -72,19 +72,29 @@ array. All three independent old-body Wasm RED logs are retained with the proof.
 
 ## Final cutover validation
 
-The final merged-parent replay runs 15 native/Node array tests, 22 Backpack
-adapter and retained-rejection tests, two Orderly structural-alias tests, six
-Kraken member/page tests, two WOO history-row tests and eight Phemex lifecycle
-regressions. All preserve their original assertions. Cancellation and override
-inventories pass with only the existing explicitly gated export controls ignored.
-The canonical Store generation, alias and poisoned-unselected-row witnesses
-remain part of the core replay.
+The replay after normal inheritance of master `f5309ca181` passes 15 native/Node
+array tests, 102 runtime tests, 18 canonical Store tests, five retained-error tests,
+22 Backpack adapter/rejection tests, two Orderly structural-alias tests, six
+Orderly ticker row/subscriber tests and 17
+Kraken member/page/receiver/boundary tests. The real binary-delivery test retains
+Blob bytes. Cancellation (six) and override (seven) pass with only three existing
+explicitly gated controls ignored across the core targets. The incoming Kraken
+and Orderly fixtures unwrap checked array snapshots without changing their row
+or subscriber assertions. The setSetting fixture observes the maintained Store
+retaining its runtime key; the dial-header fixture waits for actual Open before
+close and retains every header assertion. Earlier WOO history-row (two) and
+Phemex lifecycle (eight) replays also passed on the prior merged parent.
 
-All 22 venue crates pass the all-feature, all-target cfg(test) compiler check.
-Strict all-target Clippy passes for the 28-crate native matrix and the 28-crate
-Wasm matrix. Node FFI is checked separately with its node feature because enabling
-its node and wasm features together is intentionally refused. Workspace formatting,
-layer checks, manifest freshness and the 376 CI wiring assertions pass.
+Before the final master refresh, all 22 venue crates passed the all-feature,
+all-target cfg(test) compiler check. Strict all-target Clippy passed for the
+28-crate native matrix and the 28-crate Wasm matrix. Node FFI passed separately
+with its node feature because enabling its node and wasm features together is
+intentionally refused. Layer checks, manifest freshness and all 376 CI wiring
+assertions also passed. After the final refresh, the touched four-crate strict
+all-target Clippy, full parity index (7,563 rows / 16,353 public Rust items),
+workspace formatting and all 376 wiring assertions pass before READY. The cached full compiler/native/Wasm matrices are replayed after
+auto-merge is queued, following the maintainer's bounded-refresh instruction;
+their earlier results are not relabeled as measurements of the refreshed head.
 
 These compiler and lint checks supplement the behavioral controls above; they
 do not count as behavioral RED evidence. Final accepted metadata is derived from
