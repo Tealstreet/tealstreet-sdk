@@ -46,5 +46,23 @@
     "file": "safe-cex-venue-kraken/src/binding/host_more.rs",
     "reason": "Reviewed the complete production PollHost impl. console_error forwards a supplied static prefix and the original Thrown.value as two native arguments to the shared runtime console_values sink, matching KrakenExchange.listenOHLCV console.error(prefix, err). It does not decode an error record or stringify the value before the host. tests/support/accepted_diagnostic_receivers.rs::poll_console_preserves_two_arguments_and_native_error_identity uses the actual Scope held by a constructed KrakenExchange and records the terminal native host arguments before rendering: exact severity/count/order/prefix, original TypeError identity, lone UTF16 and infinity metadata. A compiled original-body control fails this named assertion and exact restoration passes.",
     "itemSha256": "5503f77f5302f9ccda0045588185d8e99d539af203afa017b72377a25f218fd8"
+  },
+  "safe_cex_venue_kraken::trading::ErrorHost::lower_method for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host.rs",
+    "reason": "Reviewed the complete production ErrorHost impl. lower_method performs one native toLowerCase member lookup, checks callability, then calls it with the original receiver and no arguments. It preserves the result cell/getter error rather than imposing a String schema or projecting JSON; missing/noncallable members keep the source expression TypeError. tests/support/accepted_trading_error_receivers.rs::lower_method_calls_one_live_member_and_preserves_receiver_and_result reaches the actual constructed KrakenExchange Scope: UTF16 String casing, custom getter count/this/result identity, primitive refusal and original getter-thrown Error identity. scripts/trading-error-receiver-source.cjs independently executes live KrakenExchange.placeOrder and confirms its custom error-message member is read/called once and the original message reaches emission.",
+    "itemSha256": "593965b5f01b74b1833d17f78f3ca5112218d2620a72d00788c15d50ce0486a4"
+  },
+  "safe_cex_venue_kraken::trading::ErrorHost::upper_method for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host.rs",
+    "reason": "Reviewed the complete production ErrorHost impl. upper_method performs one native toUpperCase member lookup and invocation with the original receiver, preserving arbitrary native results and getter exceptions; it adds no record/model decoder. tests/support/accepted_trading_error_receivers.rs::upper_method_calls_one_live_member_and_preserves_receiver_and_result reaches the actual constructed Scope with UTF16 String casing, custom getter count/receiver, negative-zero result bits, noncallable primitive refusal and getter-thrown Error identity. scripts/trading-error-receiver-source.cjs independently executes live KrakenExchange.setLeverage: the same custom symbol receiver is called once and its original native result is forwarded to the request body.",
+    "itemSha256": "593965b5f01b74b1833d17f78f3ca5112218d2620a72d00788c15d50ce0486a4"
+  },
+  "safe_cex_venue_kraken::trading::ErrorHost::emit_and_log for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-kraken/src/binding/host.rs",
+    "reason": "Reviewed the complete production ErrorHost impl. emit_and_log forwards the original native message/Error cell and optional text context to the already-assembled emitAndLogError member; formatting/reporting belongs to BaseExchange and this receiver does not decode errors. tests/support/accepted_trading_error_receivers.rs::emit_and_log_reaches_real_base_console_and_event_with_context uses the actual constructed KrakenExchange Scope, real BaseExchange native console sink and error listener: original TypeError identity at the console, exact contextual event, then the separate context-absent string branch. No replacement emitter or host implementation is supplied.",
+    "itemSha256": "593965b5f01b74b1833d17f78f3ca5112218d2620a72d00788c15d50ce0486a4"
   }
 }

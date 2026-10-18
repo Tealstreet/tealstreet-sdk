@@ -2579,14 +2579,8 @@ impl ExchangeState {
         .map_err(failure)?;
         decoded(result)
     }
-    pub fn detect_balance_issue(&self, value: Option<&Value>) -> bool {
-        crate::order_logic::detect_balance_issue(value)
-    }
     pub fn is_algo_order_type(&self, kind: safe_cex_types::OrderType) -> bool {
         crate::order_logic::is_algo_order_type(kind)
-    }
-    pub fn is_post_only_rejection(&self, error: Option<&Value>) -> Result<bool, Failure> {
-        crate::order_logic::is_post_only_rejection_error(error).map_err(|e| failure(e.message))
     }
     pub fn apply_confirmed_mode(
         &self,
@@ -2605,25 +2599,6 @@ impl ExchangeState {
             args,
             |hedged, symbol| self.apply_confirmed_mode(hedged, symbol.map(str::to_owned)),
         )
-    }
-    pub fn get_response_header(
-        &self,
-        has_headers: bool,
-        name: &str,
-        get: impl FnMut() -> Result<crate::request_weight::HeaderGetMember, Failure>,
-        property: impl FnMut(&str) -> Result<Option<Value>, Failure>,
-    ) -> Result<Option<Value>, Failure> {
-        crate::request_weight::get_response_header(has_headers, name, get, property)
-    }
-    pub fn observe_request_weight(
-        &self,
-        status: Option<&Value>,
-        header: impl FnMut(&str) -> Result<Option<Value>, Failure>,
-    ) -> Result<(), Failure> {
-        crate::request_weight::observe_request_weight(status, header, |duration| {
-            self.pause(duration);
-            Ok(())
-        })
     }
     pub fn grafana_endpoints_every(&self) -> &'static [&'static str] {
         match self.venue {
