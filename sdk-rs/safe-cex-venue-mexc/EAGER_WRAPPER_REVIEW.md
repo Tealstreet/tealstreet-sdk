@@ -13,12 +13,14 @@ for metadata/cancel-all and explicit terminal dependencies for updateOrder.
 It confirms the immediate prefixes and ignored-Promise continuations.
 
 Native metadata/leverage now uses `eager::start_eager` and retains the existing
-BaseExchange, REST adapter and shared symbol-settings map directly, without JSON
+constructed receiver, BaseExchange, REST adapter and shared symbol-settings map directly, without JSON
 or a detached state snapshot. `updateFetchedLeverage` remains the same Store
 mutation, accepting the retained base handle. The private response uses the
 existing source-await reaction boundary: ready responses cannot commit or notify
 before the call returns. Public-only fallback still commits synchronously and
-returns rejection for the original throwing subscriber. The native unit oracle
+returns rejection for the original throwing subscriber. A separate compiled regression drops both the SDK owner and waiter while HTTP
+is held: the source receiver stays alive through the continuation and releases
+after completion. The native unit oracle
 retains its distinct 21/7 fallback values and original final subscriber cause;
 only its explicit lazy-prefix expectations change.
 

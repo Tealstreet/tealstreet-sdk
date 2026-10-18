@@ -1426,6 +1426,7 @@ impl MexcExchange {
         &self,
         symbol: String,
     ) -> ExchangeFuture<'static, Option<FetchedLeverage>> {
+        let owner = self.js().map(|host| host.venue()).transpose();
         let base = self.base.clone();
         let xhr = self.xhr.clone();
         let settings = self.symbol_settings.clone();
@@ -1450,6 +1451,7 @@ impl MexcExchange {
             Ok((private_market, config))
         })();
         start_eager(&self.base.runtime, async move {
+            let _owner = owner.map_err(ExchangeError::from)?;
             let (market, config) = prepared?;
             if let Some(market) = market {
                 let request = RestRequest {

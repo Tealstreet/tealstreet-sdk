@@ -214,7 +214,7 @@ impl Host {
         host
     }
 
-    fn venue(&self) -> Result<Rc<MexcExchange>, Thrown> {
+    pub(super) fn venue(&self) -> Result<Rc<MexcExchange>, Thrown> {
         self.venue
             .upgrade()
             .ok_or_else(|| Thrown::error("Error", "MEXC exchange was dropped"))

@@ -256,3 +256,30 @@ fn eager_metadata_ready_http_still_fences_throwing_store_continuation() {
     assert_eq!(later.get(), 0, "throw aborts each notification fanout");
     assert_eq!(store.fetched_leverage()["BTCUSDT"].sell_leverage, 20.0);
 }
+
+#[test]
+fn eager_metadata_retains_the_constructed_receiver_until_http_finishes() {
+    let (venue, rt, store, wire) = support::fixture();
+    load_market(&venue, &rt, &wire, &store);
+    script(
+        &wire,
+        LEVERAGE,
+        json!([{"positionType":1,"leverage":31,"maxLeverage":60}]),
+    );
+    wire.hold_responses.set(true);
+    let receiver = Rc::downgrade(&venue);
+    let waiter = venue.update_symbol_metadata("BTCUSDT".into());
+    drop(waiter);
+    drop(venue);
+    assert!(
+        receiver.upgrade().is_some(),
+        "held source method retains the constructed receiver"
+    );
+    wire.release_responses();
+    rt.pump();
+    assert_eq!(store.fetched_leverage()["BTCUSDT"].buy_leverage, 31.0);
+    assert!(
+        receiver.upgrade().is_none(),
+        "completed method releases its receiver"
+    );
+}
