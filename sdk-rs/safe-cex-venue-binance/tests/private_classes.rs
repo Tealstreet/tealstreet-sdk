@@ -4740,55 +4740,72 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
             })
         }
     }
-    let runtime = Rc::new(Runtime::default());
-    let requests = Arc::<Mutex<Vec<String>>>::default();
-    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
-        runtime.clone(),
-        Arc::new(Positions(requests.clone())),
-        Rc::new(|_, _| panic!("no external provider is configured")),
-        None,
-        safe_cex_exchange::native::NativeHttpEvents::default(),
-    );
-    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
-    let owner = ExchangeOwner::new(
-        Venue::Futures,
-        safe_cex_types::ExchangeName::Binance,
-        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        store,
-        dependencies,
-    )
-    .unwrap();
-    owner.private.position.last_fetch_time.set(-10_000.0);
-    owner.private.position.pending_events.set(true);
-    let private = owner.private.clone();
-    let positions_before = owner.base.store.update_ids().positions;
-    let starter: PositionFetchStarter<Failure> = Rc::new(move || private.throttled_positions());
-    starter().unwrap();
-    for _ in 0..32 {
-        runtime.pump();
+    for delayed in [false, true] {
+        let runtime = Rc::new(Runtime::default());
+        let requests = Arc::<Mutex<Vec<String>>>::default();
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            Arc::new(Positions(requests.clone())),
+            Rc::new(|_, _| panic!("no external provider is configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let owner = ExchangeOwner::new(
+            Venue::Futures,
+            safe_cex_types::ExchangeName::Binance,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store,
+            dependencies,
+        )
+        .unwrap();
+        owner
+            .private
+            .position
+            .last_fetch_time
+            .set(if delayed { 0.0 } else { -10_000.0 });
+        owner.private.position.pending_events.set(true);
+        let private = owner.private.clone();
+        let positions_before = owner.base.store.update_ids().positions;
+        let starter: PositionFetchStarter<Failure> = Rc::new(move || private.throttled_positions());
+        starter().unwrap();
+        if delayed {
+            runtime.pump();
+            assert!(owner.private.position.scheduled.get());
+            assert!(requests.lock().unwrap().is_empty());
+            assert_eq!(owner.base.store.update_ids().positions, positions_before);
+            let deadline = owner.private.position.throttle_ms.get();
+            assert_eq!(*runtime.sleeps.borrow(), [deadline as u64]);
+            runtime.now.set(deadline);
+            runtime.sleep_clock.set(deadline);
+        }
+        for _ in 0..32 {
+            runtime.pump();
+        }
+        let mut paths: Vec<_> = requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|url| url.split('?').next().unwrap().to_owned())
+            .collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            ["/fapi/v1/symbolConfig", "/fapi/v3/positionRisk"],
+            "the actual starter reaches both configured native REST requests"
+        );
+        assert_eq!(
+            owner.base.store.update_ids().positions,
+            positions_before + 1.0,
+            "the actual refresh publishes one complete position snapshot"
+        );
+        assert!(!owner.private.position.scheduled.get());
+        assert!(!owner.private.position.pending_events.get());
+        assert!(!owner.private.position.in_flight.get());
+        assert_eq!(
+            owner.private.position.last_fetch_time.get(),
+            runtime.now.get()
+        );
+        owner.dispose().unwrap();
     }
-    let mut paths: Vec<_> = requests
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|url| url.split('?').next().unwrap().to_owned())
-        .collect();
-    paths.sort();
-    assert_eq!(
-        paths,
-        ["/fapi/v1/symbolConfig", "/fapi/v3/positionRisk"],
-        "the actual starter reaches both configured native REST requests"
-    );
-    assert_eq!(
-        owner.base.store.update_ids().positions,
-        positions_before + 1.0,
-        "the actual refresh publishes one complete position snapshot"
-    );
-    assert!(!owner.private.position.pending_events.get());
-    assert!(!owner.private.position.in_flight.get());
-    assert_eq!(
-        owner.private.position.last_fetch_time.get(),
-        runtime.now.get()
-    );
-    owner.dispose().unwrap();
 }
