@@ -52,3 +52,13 @@ Discovery stays in the separate accepted-inventory target. Full parity index,
 strict scoped all-target Clippy and all-features cancellation inventory are
 separate readiness gates. Remaining Kraken aliases are not discharged by these
 finite construction profiles.
+
+The selected canonical replay reports two explicit classifications, zero failed
+owners and zero decoder runtime results. All three constructed native tests
+pass. Both semantic faults produce their named compiled assertion failures
+(wrong derivatives/history base and four instead of five admitted requests),
+then pass after exact restoration. The full Kraken inventory clears both
+construction profiles and now stops at `ohlcv_polling::PollFuture`, requiring its
+own finite profile. Seventeen of the original 24 aliases remain after these two,
+the two page aliases and the three earlier REST aliases. This is not a claim of
+whole-Kraken accepted-inventory success.
