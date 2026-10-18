@@ -47,8 +47,8 @@ fn portfolio(id: &str) -> Portfolio {
         uuid: id.into(),
         r#type: "SPOT".into(),
         metadata: indexmap::IndexMap::from_iter([
-            ("name".into(), json!("named").into()),
-            ("deleted".into(), json!(false).into()),
+            ("name".encode_utf16().collect(), json!("named").into()),
+            ("deleted".encode_utf16().collect(), json!(false).into()),
         ]),
     }))
 }

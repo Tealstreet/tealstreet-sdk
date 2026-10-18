@@ -154,7 +154,7 @@ pub fn map_coinbase_rest_order(
         }))
         .into(),
         reduce_only: false.into(),
-        info: (Some(raw_order.clone().into())).into(),
+        info: (Some(raw_order.clone())).into(),
         last_update,
         close: (None).into(),
         time_in_force: (None).into(),

@@ -67,7 +67,7 @@ fn json_number(n: f64) -> Result<Value, ExchangeError> {
 }
 fn pick<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
-        .find_map(|k| row.get(*k).filter(|v| v.is_truthy()))
+        .find_map(|k| row.get(k).filter(|v| v.is_truthy()))
 }
 fn stringify(v: &Input) -> Result<String, ExchangeError> {
     v.json_stringify()

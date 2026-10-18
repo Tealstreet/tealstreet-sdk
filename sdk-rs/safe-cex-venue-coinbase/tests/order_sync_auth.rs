@@ -957,7 +957,7 @@ impl OrderSnapshotHost for SnapshotHost {
             "mapper receives original market root"
         );
         let order = safe_cex_venue_coinbase::orders::map_coinbase_rest_order(
-            &*raw.borrow(),
+            &raw.borrow(),
             &market.borrow(),
             now,
         );

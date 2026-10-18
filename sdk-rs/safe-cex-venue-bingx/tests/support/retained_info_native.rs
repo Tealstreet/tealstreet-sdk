@@ -96,20 +96,21 @@ fn native_private_socket_and_store_keep_opaque_bingx_info() {
         })
         .await
         .expect("actual BingX private frame must commit its retained order");
-        let orders = store.orders();
-        assert_eq!(orders.len(), 1);
-        assert_eq!(orders[0].id, "retained-order");
-        assert_eq!(orders[0].symbol, "BTCUSDT");
-        assert_eq!(orders[0].status, OrderStatus::Open);
-        assert_eq!(orders[0].amount.to_bits(), 3f64.to_bits());
-        let order = from_typed(&orders[0]).unwrap();
-        let info = to_retained_input(&order.get("info").unwrap()).unwrap();
-        assert_eq!(
-            observation::observe(&info),
-            expected,
-            "native BingX opaque info"
-        );
-        drop(orders);
+        {
+            let orders = store.orders();
+            assert_eq!(orders.len(), 1);
+            assert_eq!(orders[0].id, "retained-order");
+            assert_eq!(orders[0].symbol, "BTCUSDT");
+            assert_eq!(orders[0].status, OrderStatus::Open);
+            assert_eq!(orders[0].amount.to_bits(), 3f64.to_bits());
+            let order = from_typed(&orders[0]).unwrap();
+            let info = to_retained_input(&order.get("info").unwrap()).unwrap();
+            assert_eq!(
+                observation::observe(&info),
+                expected,
+                "native BingX opaque info"
+            );
+        }
         venue.dispose().unwrap();
         release.send(()).unwrap();
         server.await.unwrap();

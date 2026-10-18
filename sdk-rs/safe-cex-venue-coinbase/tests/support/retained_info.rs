@@ -52,8 +52,9 @@ pub fn assert_info(actual: Option<&Input>, expected: &Value, label: &str) {
                     let value = fields
                         .iter()
                         .find(|(name, _)| name == &key)
-                        .map(|(_, value)| value);
-                    assert_info(value, &entry[1], label);
+                        .map(|(_, value)| value)
+                        .expect("native info retains the own UTF16 field");
+                    assert_info(Some(value), &entry[1], label);
                 }
                 return;
             }
@@ -64,8 +65,9 @@ pub fn assert_info(actual: Option<&Input>, expected: &Value, label: &str) {
                 let value = fields
                     .iter()
                     .find(|(name, _)| name == &key)
-                    .map(|(_, value)| value);
-                assert_info(value, expected, label);
+                    .map(|(_, value)| value)
+                    .expect("native info retains the own field");
+                assert_info(Some(value), expected, label);
             }
         }
         _ => assert_eq!(
