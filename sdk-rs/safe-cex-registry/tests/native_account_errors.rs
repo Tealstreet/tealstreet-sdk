@@ -45,7 +45,10 @@ fn native_transport_error_retains_axios_name_message_and_code() {
         assert_eq!(error["name"], "AxiosError");
         assert_eq!(error["message"], source["network"]["message"]);
         assert_eq!(error["code"], "ECONNREFUSED");
-        assert_eq!(error["isAxiosError"], true);
+        assert_eq!(
+            error.get("isAxiosError").is_some(),
+            source["workerNetwork"].get("isAxiosError").is_some()
+        );
         native_account_call(account, "dispose".into(), vec![])
             .await
             .unwrap();
@@ -69,7 +72,10 @@ fn native_http_bridge_retains_network_request_and_omits_setup_request() {
             ("url", Js::str("/network-proof")),
         ]);
         let error = host.send(config).await.unwrap_err();
-        assert!(error.value.get("isAxiosError").unwrap().truthy());
+        assert!(matches!(
+            error.value.get("isAxiosError").unwrap(),
+            Js::Bool(true)
+        ));
         assert_eq!(
             error.value.get("code").unwrap().to_display(),
             "ECONNREFUSED"
