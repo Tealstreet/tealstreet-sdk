@@ -73,3 +73,133 @@ fn phemex_registry_constructs_native_inputs_and_signs_account_http() {
         h.exchange.dispose().expect("Phemex dispose");
     });
 }
+
+#[derive(Default)]
+struct PendingPhemexSigner {
+    release: tokio::sync::Notify,
+    calls: std::cell::RefCell<Vec<serde_json::Value>>,
+}
+impl safe_cex_transport::signing::RemoteSigner for PendingPhemexSigner {
+    fn sign(
+        &self,
+        request: safe_cex_transport::signing::RemoteSignerRequest,
+    ) -> safe_cex_transport::TransportFuture<'_, safe_cex_transport::signing::RemoteSignerResponse>
+    {
+        self.calls
+            .borrow_mut()
+            .push(serde_json::to_value(&request).unwrap());
+        let safe_cex_transport::signing::RemoteSignerRequest::WsAuth { request, .. } = request
+        else {
+            panic!("private-only Phemex witness must request websocket auth");
+        };
+        Box::pin(async move {
+            self.release.notified().await;
+            Ok(safe_cex_transport::signing::RemoteSignerResponse::WsAuth(
+                safe_cex_types::ws_auth::WsAuthResponse {
+                    id: request.id,
+                    ws_auth_signature: Some("hosted-native-signature".into()),
+                    error: None,
+                },
+            ))
+        })
+    }
+}
+impl safe_cex_exchange::runtime::RemoteSigner for PendingPhemexSigner {
+    fn is_available(&self) -> bool {
+        true
+    }
+    fn on_availability_change(&self, _: Rc<dyn Fn(bool)>) -> safe_cex_exchange::runtime::Cleanup {
+        Box::new(|| {})
+    }
+}
+
+#[test]
+fn native_phemex_auth_resumes_on_signer_wake_and_subscribes_only_after_ack() {
+    support::run_local(async {
+        let signer = Rc::new(PendingPhemexSigner::default());
+        let h = support::venue_harness(
+            ExchangeName::Phemex,
+            Rc::new(|_| None),
+            json!({"key":"native-key","secret":""}),
+            Some((signer.clone(), Some("native-phemex-account".into()))),
+            safe_cex_exchange::native::native_runtime(),
+        )
+        .await;
+        h.exchange
+            .base()
+            .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private)
+            .expect("constructor registered the actual Phemex private socket")
+            .connect_and_subscribe(false)
+            .unwrap();
+        support::eventually("real Phemex connection awaiting hosted signature", || {
+            !signer.calls.borrow().is_empty() && !h.peers.borrow().is_empty()
+        })
+        .await;
+        let frames = || {
+            h.received
+                .borrow()
+                .iter()
+                .map(|frame| serde_json::from_str::<serde_json::Value>(frame).unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert!(!frames().iter().any(|frame| frame["method"] == "user.auth" || frame["method"] == "aop_p.subscribe"));
+        assert_eq!(signer.calls.borrow().len(), 1);
+        let call = signer.calls.borrow()[0].clone();
+        assert_eq!(call["exchangeName"], "phemex");
+        assert_eq!(call["accountName"], "native-phemex-account");
+        assert_eq!(call["wsAuth"]["outputFormat"], "hex");
+        assert!(
+            call["wsAuth"]["toSign"]
+                .as_str()
+                .unwrap()
+                .starts_with("native-key")
+        );
+        signer.release.notify_one();
+        support::eventually("Phemex user.auth after real signer IO wake", || {
+            frames().iter().any(|frame| frame["method"] == "user.auth")
+        })
+        .await;
+        let sent = frames();
+        let auth = sent
+            .iter()
+            .find(|frame| frame["method"] == "user.auth")
+            .unwrap();
+        assert_eq!(auth["id"], 999);
+        assert_eq!(auth["params"][0], "API");
+        assert_eq!(auth["params"][1], "native-key");
+        assert_eq!(auth["params"][2], "hosted-native-signature");
+        assert!(
+            !sent
+                .iter()
+                .any(|frame| frame["method"] == "aop_p.subscribe")
+        );
+        h.peers.borrow()[0]
+            .push
+            .send(json!({"id":999,"error":null,"result":{"status":"success"}}).to_string())
+            .unwrap();
+        support::eventually(
+            "source aop_p subscription after auth acknowledgement",
+            || {
+                frames()
+                    .iter()
+                    .any(|frame| frame["method"] == "aop_p.subscribe")
+            },
+        )
+        .await;
+        assert_eq!(
+            frames()
+                .iter()
+                .filter(|frame| frame["method"] == "user.auth")
+                .count(),
+            1
+        );
+        assert_eq!(
+            frames()
+                .iter()
+                .filter(|frame| frame["method"] == "aop_p.subscribe")
+                .count(),
+            1
+        );
+        h.exchange.dispose().unwrap();
+    });
+}
