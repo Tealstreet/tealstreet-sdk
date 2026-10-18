@@ -69,3 +69,39 @@ so the existing canonical ArraySetLength produces RangeError after precisely the
 same named/indexed writes as JavaScript. The Node witness compares these partial
 completions, own properties and negative-zero bits without cloning the huge sparse
 array. All three independent old-body Wasm RED logs are retained with the proof.
+
+## Final cutover validation
+
+The final merged-parent replay runs 15 native/Node array tests, 22 Backpack
+adapter and retained-rejection tests, two Orderly structural-alias tests, six
+Kraken member/page tests, two WOO history-row tests and eight Phemex lifecycle
+regressions. All preserve their original assertions. Cancellation and override
+inventories pass with only the existing explicitly gated export controls ignored.
+The canonical Store generation, alias and poisoned-unselected-row witnesses
+remain part of the core replay.
+
+All 22 venue crates pass the all-feature, all-target cfg(test) compiler check.
+Strict all-target Clippy passes for the 28-crate native matrix and the 28-crate
+Wasm matrix. Node FFI is checked separately with its node feature because enabling
+its node and wasm features together is intentionally refused. Workspace formatting,
+layer checks, manifest freshness and the 376 CI wiring assertions pass.
+
+These compiler and lint checks supplement the behavioral controls above; they
+do not count as behavioral RED evidence. Final accepted metadata is derived from
+fresh compiler artifacts, with reviewed source-item fingerprints at each changed
+receiver and the existing canonical contract runner for selected core decoders.
+
+Fresh native compiler spans identify 62 changed receiver policy records across
+ten reviewed implementation blocks: Backpack NativeValue (one), Kraken ReadHost
+and SpotCancelHost (ten), Bybit SnapshotHost and SessionHost (18), Bitget
+RestActionsHost, CancellationHost, OrderReadsHost and PrivateTopicsHost (27), and
+Binance EventOps (six). Pins cover the complete enclosing impl, so unchanged
+methods in a changed block share its refreshed fingerprint. Classifications stay
+unchanged. Bitrue's registered impls and the two Binance trait-default bodies
+match their existing pins and are left untouched.
+
+The reviewed differences replace mutable Vec access with canonical owner reads,
+Has/Get or checked snapshots, propagate original getter failures, and route
+iterator state through the shared iterator record. Backpack returns the original
+Js array from NativeValue::array. Existing scalar coercion profiles, raw-decoder
+obligations, receiver binding and error selection remain independently classified.
