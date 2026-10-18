@@ -4,6 +4,7 @@ pub mod build_records;
 pub mod capabilities;
 pub mod client_order_id;
 pub mod delivery_timers;
+pub mod eager;
 pub mod error_reporting;
 pub mod exchange;
 pub mod external;

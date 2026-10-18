@@ -833,14 +833,6 @@ rs = "safe-cex-crypto/src/lib.rs::Encoding"
 reason = "Named inline hex/base64 encoding union in PayloadSignerRequest; no added behavior."
 
 [[exempt]]
-rs = "safe-cex-crypto/src/lib.rs::PayloadScheme"
-reason = "Named HMAC-only runtime subset of PayloadSignerRequest scheme; Stark is deliberately omitted because signPayload never constructs it."
-
-[[exempt]]
-rs = "safe-cex-crypto/src/lib.rs::PayloadSigner::sign"
-reason = "Callback invocation seam for the TypeScript PayloadSigner function type; no implementation or added signing behavior."
-
-[[exempt]]
 rs = "safe-cex-crypto/src/lib.rs::WsOutputFormat"
 reason = "Named closed inline outputFormat union from RemoteSignerRequest.wsAuth; compiler-enforced exhaustive dispatch."
 

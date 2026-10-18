@@ -9,6 +9,7 @@ use safe_cex_exchange::{
     capabilities::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
     },
+    eager::start_eager,
     exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
     journal::HistoricalPositionOptions,
     runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
@@ -104,15 +105,21 @@ impl Exchange for BlofinNativeExchange {
         self.inner.dispose()
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move { self.inner.start().await.map_err(service_error) })
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner.start().await.map_err(service_error)
+        })
     }
     // TS BlofinExchange inherits BaseExchange.getAccount (base.ts:734): rejects 'Not implemented'.
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+        start_eager(&self.base().runtime, async move {
+            Err(ExchangeError::new("Not implemented"))
+        })
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
-        Box::pin(async move {
-            let result = self.inner.validate_account().await.map_err(service_error)?;
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            let result = inner.validate_account().await.map_err(service_error)?;
             Ok(ValidateAccountResult {
                 error: AccountValidationError::from_value(result.error),
                 balance: result.balance,
@@ -120,22 +127,30 @@ impl Exchange for BlofinNativeExchange {
         })
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
-        Box::pin(async move { self.inner.fetch_markets().await.map_err(service_error) })
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner.fetch_markets().await.map_err(service_error)
+        })
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
-        Box::pin(async move { self.inner.fetch_tickers().await.map_err(service_error) })
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner.fetch_tickers().await.map_err(service_error)
+        })
     }
     fn fetch_positions(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .fetch_positions(symbols.as_deref())
                 .await
                 .map_err(service_error)
         })
     }
     fn fetch_orders(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Order>> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .fetch_orders(symbols.as_deref())
                 .await
                 .map_err(service_error)
@@ -145,8 +160,9 @@ impl Exchange for BlofinNativeExchange {
         &self,
         symbol: String,
     ) -> ExchangeFuture<'_, Option<FetchedLeverage>> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .fetch_leverage_for_symbol(&symbol)
                 .await
                 .map_err(service_error)
@@ -154,7 +170,9 @@ impl Exchange for BlofinNativeExchange {
     }
     // TS BlofinExchange inherits BaseExchange.fetchSymbolMaxLeverage (base.ts:799): rejects 'Not implemented'.
     fn fetch_symbol_max_leverage(&self, _: String) -> ExchangeFuture<'_, f64> {
-        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+        start_eager(&self.base().runtime, async move {
+            Err(ExchangeError::new("Not implemented"))
+        })
     }
     fn set_leverage(
         &self,
@@ -162,51 +180,53 @@ impl Exchange for BlofinNativeExchange {
         leverage: f64,
         _: Option<PositionSide>,
     ) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .set_leverage(&symbol, leverage)
                 .await
                 .map_err(service_error)
         })
     }
     fn change_position_mode(&self, hedged: bool, _: Option<String>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .change_position_mode(hedged)
                 .await
                 .map_err(service_error)
         })
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .change_margin_type(isolated, symbol.as_deref())
                 .await
                 .map_err(service_error)
         })
     }
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
-        Box::pin(async move {
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
             let update = serde_json::to_value(&options.update)
                 .map_err(|e| ExchangeError::new(e.to_string()))?;
-            ids(self
-                .inner
+            ids(inner
                 .update_order(&options.order, &UtilityInput::from_retained(update))
                 .await
                 .map_err(service_error)?)
         })
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.inner
-                .cancel_orders(&orders)
-                .await
-                .map_err(service_error)
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner.cancel_orders(&orders).await.map_err(service_error)
         })
     }
     fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .cancel_symbol_orders(&symbol)
                 .await
                 .map_err(service_error)
@@ -214,7 +234,9 @@ impl Exchange for BlofinNativeExchange {
     }
     // TS BlofinExchange inherits BaseExchange.scheduleCancel (base.ts:989): rejects 'Not implemented'.
     fn schedule_cancel(&self, _: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+        start_eager(&self.base().runtime, async move {
+            Err(ExchangeError::new("Not implemented"))
+        })
     }
     // TS BlofinExchange inherits BaseExchange.fetchPublicTrades (base.ts:1138): rejects 'Not implemented'.
     fn fetch_public_trades(
@@ -222,13 +244,15 @@ impl Exchange for BlofinNativeExchange {
         _: String,
         _: Option<f64>,
     ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
-        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+        start_eager(&self.base().runtime, async move {
+            Err(ExchangeError::new("Not implemented"))
+        })
     }
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
         // order_rest::place_order opens with resolveCallerClientOrderId, as TS placeOrder does.
-        Box::pin(async move {
-            ids(self
-                .inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            ids(inner
                 .place_order(&safe_cex_types::PreparedOrderOpts::from(order.options()))
                 .await
                 .map_err(service_error)?)
@@ -236,30 +260,26 @@ impl Exchange for BlofinNativeExchange {
     }
     fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
         // order_rest::place_orders opens with assertCallerClientOrderIds, as TS placeOrders does.
-        Box::pin(async move {
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
             let opts: Vec<safe_cex_types::PreparedOrderOpts> =
                 orders.orders().iter().map(|o| o.options().into()).collect();
-            ids(self
-                .inner
-                .place_orders(&opts)
-                .await
-                .map_err(service_error)?)
+            ids(inner.place_orders(&opts).await.map_err(service_error)?)
         })
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
-        Box::pin(async move {
-            self.inner
-                .fetch_ohlcv(&options)
-                .await
-                .map_err(service_error)
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner.fetch_ohlcv(&options).await.map_err(service_error)
         })
     }
     fn fetch_historical_fills(
         &self,
         options: ExecutionsOptions,
     ) -> ExchangeFuture<'_, Vec<Execution>> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .fetch_historical_fills(&options)
                 .await
                 .map_err(service_error)
@@ -269,8 +289,9 @@ impl Exchange for BlofinNativeExchange {
         &self,
         options: Option<IncomeHistoryOptions>,
     ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .fetch_income_history(options.as_ref())
                 .await
                 .map_err(service_error)
@@ -282,8 +303,9 @@ impl Exchange for BlofinNativeExchange {
         end: f64,
         kind: Option<String>,
     ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .fetch_income_history_range(start, end, kind.as_deref())
                 .await
                 .map_err(service_error)
@@ -293,8 +315,9 @@ impl Exchange for BlofinNativeExchange {
         &self,
         options: HistoricalTradeOptions,
     ) -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .fetch_closed_pnl(&options)
                 .await
                 .map_err(service_error)
@@ -304,8 +327,9 @@ impl Exchange for BlofinNativeExchange {
         &self,
         options: Option<OrderHistoryOptions>,
     ) -> ExchangeFuture<'_, Vec<HistoricalOrder>> {
-        Box::pin(async move {
-            self.inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            inner
                 .fetch_historical_orders(options.as_ref())
                 .await
                 .map_err(service_error)
@@ -315,9 +339,9 @@ impl Exchange for BlofinNativeExchange {
         &self,
         options: HistoricalPositionOptions,
     ) -> ExchangeFuture<'_, Vec<Value>> {
-        Box::pin(async move {
-            let records = self
-                .inner
+        let inner = self.inner.clone();
+        start_eager(&self.base().runtime, async move {
+            let records = inner
                 .fetch_historical_positions(&HistoricalPositionsOptions {
                     account: options.account,
                     from: options.from,

@@ -1,4 +1,5 @@
-{"safe_cex_exchange::proxy_token::decode_token":{
+{
+  "safe_cex_exchange::proxy_token::decode_token": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -104,7 +105,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::proxy_token::js_number_text":{
+  },
+  "safe_cex_exchange::proxy_token::js_number_text": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -218,7 +220,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::proxy_token::js_number":{
+  },
+  "safe_cex_exchange::proxy_token::js_number": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -387,7 +390,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::proxy_token::expiration":{
+  },
+  "safe_cex_exchange::proxy_token::expiration": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -558,7 +562,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::proxy_token::is_token_expired":{
+  },
+  "safe_cex_exchange::proxy_token::is_token_expired": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -656,7 +661,8 @@
         "output": true
       }
     ]
-  },"safe_cex_exchange::proxy_token::js_array_text":{
+  },
+  "safe_cex_exchange::proxy_token::js_array_text": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -754,7 +760,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::http::body_value":{
+  },
+  "safe_cex_exchange::http::body_value": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -845,7 +852,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::http::is_tealstreet_proxy_auth_failure_body":{
+  },
+  "safe_cex_exchange::http::is_tealstreet_proxy_auth_failure_body": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -914,7 +922,8 @@
         "output": false
       }
     ]
-  },"safe_cex_exchange::client_order_id::js_string":{
+  },
+  "safe_cex_exchange::client_order_id::js_string": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -985,7 +994,8 @@
         "output": ",11,a,b"
       }
     ]
-  },"safe_cex_exchange::client_order_id::same_client_order_id":{
+  },
+  "safe_cex_exchange::client_order_id::same_client_order_id": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -1107,7 +1117,8 @@
         "output": false
       }
     ]
-  },"safe_cex_exchange::client_order_id::order_carries_client_order_id":{
+  },
+  "safe_cex_exchange::client_order_id::order_carries_client_order_id": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -1440,7 +1451,8 @@
         "output": false
       }
     ]
-  },"safe_cex_exchange::client_order_id::client_order_id_shape_message":{
+  },
+  "safe_cex_exchange::client_order_id::client_order_id_shape_message": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -1490,7 +1502,8 @@
     },
     "reason": "Formats an already typed PlaceOrderOpts and label into a diagnostic string; enum to_value is output formatting, not raw input parsing.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::client_order_id::client_order_id_split_message":{
+  },
+  "safe_cex_exchange::client_order_id::client_order_id_split_message": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -1525,7 +1538,8 @@
     },
     "reason": "Interpolates a literal label into a fixed diagnostic message; no representation decoding.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::client_order_id::pattern_client_order_id_rule":{
+  },
+  "safe_cex_exchange::client_order_id::pattern_client_order_id_rule": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -1623,7 +1637,8 @@
     },
     "reason": "Assembles a rule from supplied label/display/callback/overrides. Does not parse a RegExp or execute the supplied predicate.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::helpers::symbol_mapping":{
+  },
+  "safe_cex_exchange::cross_trade::helpers::symbol_mapping": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -1701,7 +1716,8 @@
     },
     "reason": "Looks up an already typed JsObjectMap<String> key and preserves inherited/missing table results; no representation parsing.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::helpers::get_copier_symbol_from_master":{
+  },
+  "safe_cex_exchange::cross_trade::helpers::get_copier_symbol_from_master": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -1809,7 +1825,8 @@
     },
     "reason": "Selects typed copier mappings or delegates symbol spelling conversion; no JSON/native model decoding. Converter behavior remains owned by its separate implementation.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::helpers::get_master_symbol_from_copier":{
+  },
+  "safe_cex_exchange::cross_trade::helpers::get_master_symbol_from_copier": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -1932,7 +1949,8 @@
     },
     "reason": "Reverses typed mappings and selects configured/fallback symbol strings; no JSON/native model parsing. Does not exempt delegated converter code.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::helpers::is_btc_like_symbol":{
+  },
+  "safe_cex_exchange::cross_trade::helpers::is_btc_like_symbol": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -1964,7 +1982,8 @@
     },
     "reason": "Case-sensitive prefix predicate over an already supplied symbol string.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::helpers::is_equivalent_currency":{
+  },
+  "safe_cex_exchange::cross_trade::helpers::is_equivalent_currency": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2008,7 +2027,8 @@
     },
     "reason": "Equality/member-set predicate over supplied currency names; no parser or model construction.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::manager::debug":{
+  },
+  "safe_cex_exchange::cross_trade::manager::debug": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2061,7 +2081,8 @@
     },
     "reason": "Prefixes a message and delegates host debug emission; no decoding.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::place_order::debug":{
+  },
+  "safe_cex_exchange::cross_trade::place_order::debug": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2114,7 +2135,8 @@
     },
     "reason": "Prefixes a message and delegates host debug emission; no decoding.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::types::default_cross_trade_config":{
+  },
+  "safe_cex_exchange::cross_trade::types::default_cross_trade_config": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2136,7 +2158,8 @@
     },
     "reason": "Zero-input constant/default native model construction; no raw representation is admitted.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::cross_trade::types::default_cross_trade_copier":{
+  },
+  "safe_cex_exchange::cross_trade::types::default_cross_trade_copier": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2158,7 +2181,8 @@
     },
     "reason": "Zero-input constant/default native model construction; no raw representation is admitted.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::exchange::emit_listeners":{
+  },
+  "safe_cex_exchange::exchange::emit_listeners": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2321,7 +2345,8 @@
     },
     "reason": "Selects event listeners, removes once rows before callbacks and forwards the existing native Js argument slice. It admits no decoded domain object; payload parsers remain separate owners.",
     "evidence": "safe-cex-exchange/EMITTER_CONTRACT_EVIDENCE.md; actual compiler declaration and scoped native/source emitter/formatter witnesses."
-  },"safe_cex_exchange::exchange::normalize_symbols":{
+  },
+  "safe_cex_exchange::exchange::normalize_symbols": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2375,7 +2400,8 @@
     },
     "reason": "Filters JS-whitespace-only entries and exact duplicate Strings while retaining first occurrence and original spelling; no raw JSON/model parser.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::fill_event_units::fill_event_units":{
+  },
+  "safe_cex_exchange::fill_event_units::fill_event_units": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2424,7 +2450,8 @@
     },
     "reason": "Selects Native/Base sizing policy by venue table lookup and preserves inherited/missing table status; not a decoder for a raw FillEventUnit representation.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::how_facade::get_server_latency_for_exchange":{
+  },
+  "safe_cex_exchange::how_facade::get_server_latency_for_exchange": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2526,7 +2553,8 @@
     },
     "reason": "Uses metadata to select domain and obtains host socket latency; orchestration over typed host/metadata results. No local raw response parser is exempted.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::http::stringify_response_body":{
+  },
+  "safe_cex_exchange::http::stringify_response_body": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2564,7 +2592,8 @@
     },
     "reason": "Returns an existing string or formats an existing JSON Value to text. Serialization direction, not raw JSON parsing.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::http::with_params_serializer":{
+  },
+  "safe_cex_exchange::http::with_params_serializer": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2678,7 +2707,8 @@
     },
     "reason": "Constructs an adapter wrapper from supplied adapter/serializer configuration; actual request execution and serializer behavior remain separate owners.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::journal::fold_closed_position_records":{
+  },
+  "safe_cex_exchange::journal::fold_closed_position_records": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2798,7 +2828,8 @@
     },
     "reason": "Checks capability, computes typed time defaults, builds a typed market-quote resolver and delegates to supplied JournalFolder. No JSON or venue row folding occurs in this function; actual folder parsing is not exempted.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::order_operations::order_options":{
+  },
+  "safe_cex_exchange::order_operations::order_options": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2854,7 +2885,8 @@
     },
     "reason": "Copies typed symbol/side/kind/amount into PlaceOrderOpts and sets remaining options to None; no raw root representation parsing.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::position_intervals::finish":{
+  },
+  "safe_cex_exchange::position_intervals::finish": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2933,7 +2965,8 @@
     },
     "reason": "Projects typed RunningPosition fields and numeric aggregates to PositionInterval; symbol is copied literally. No raw input decoding.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::position_intervals::leg_key":{
+  },
+  "safe_cex_exchange::position_intervals::leg_key": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -2977,7 +3010,8 @@
     },
     "reason": "Formats a supplied symbol and already typed PositionRecordLeg into a composite key; no parsing.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::socket_lifecycle::socket_diagnostics":{
+  },
+  "safe_cex_exchange::socket_lifecycle::socket_diagnostics": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -3037,7 +3071,8 @@
     },
     "reason": "Reads typed socket diagnostics, calls typed summary helper and serializes its output Value. Serialization direction; no input JSON parser.",
     "evidence": "Bounded source review of this actual free function, not a crate-wide exemption or native behavior proof."
-  },"safe_cex_exchange::error_reporting::read_status_text":{
+  },
+  "safe_cex_exchange::error_reporting::read_status_text": {
     "api": {
       "kind": "function",
       "name": "read_status_text",
@@ -3125,7 +3160,8 @@
         "output": ""
       }
     ]
-  },"safe_cex_exchange::error_reporting::get_http_failure":{
+  },
+  "safe_cex_exchange::error_reporting::get_http_failure": {
     "api": {
       "kind": "function",
       "name": "get_http_failure",
@@ -3244,7 +3280,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::error_reporting::record_http_failure":{
+  },
+  "safe_cex_exchange::error_reporting::record_http_failure": {
     "api": {
       "kind": "function",
       "name": "record_http_failure",
@@ -3376,7 +3413,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::error_reporting::assign":{
+  },
+  "safe_cex_exchange::error_reporting::assign": {
     "api": {
       "kind": "function",
       "name": "assign",
@@ -3517,7 +3555,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::error_reporting::insert_option":{
+  },
+  "safe_cex_exchange::error_reporting::insert_option": {
     "api": {
       "kind": "function",
       "name": "insert_option",
@@ -3679,7 +3718,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::error_reporting::enhance_axios_error":{
+  },
+  "safe_cex_exchange::error_reporting::enhance_axios_error": {
     "api": {
       "kind": "function",
       "name": "enhance_axios_error",
@@ -4033,7 +4073,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::websocket::is_heartbeat_frame":{
+  },
+  "safe_cex_exchange::websocket::is_heartbeat_frame": {
     "api": {
       "kind": "function",
       "name": "is_heartbeat_frame",
@@ -4116,7 +4157,8 @@
         "output": false
       }
     ]
-  },"safe_cex_exchange::websocket::json_secret_values":{
+  },
+  "safe_cex_exchange::websocket::json_secret_values": {
     "api": {
       "kind": "function",
       "name": "json_secret_values",
@@ -4170,7 +4212,8 @@
         "output": "{\"tokens\":\"kept\",\"token\":}"
       }
     ]
-  },"safe_cex_exchange::websocket::query_secret_values":{
+  },
+  "safe_cex_exchange::websocket::query_secret_values": {
     "api": {
       "kind": "function",
       "name": "query_secret_values",
@@ -4220,7 +4263,8 @@
         "output": "?tokens=abc&token=&session=[redacted]"
       }
     ]
-  },"safe_cex_exchange::websocket::redact_json":{
+  },
+  "safe_cex_exchange::websocket::redact_json": {
     "api": {
       "kind": "function",
       "name": "redact_json",
@@ -4381,7 +4425,8 @@
         "output": "[redacted]"
       }
     ]
-  },"safe_cex_exchange::websocket::redact_payload":{
+  },
+  "safe_cex_exchange::websocket::redact_payload": {
     "api": {
       "kind": "function",
       "name": "redact_payload",
@@ -4443,7 +4488,8 @@
         "output": "{\"secret\":\"[redacted]\",\"broken\":}"
       }
     ]
-  },"safe_cex_exchange::error_reporting::append_http_failure":{
+  },
+  "safe_cex_exchange::error_reporting::append_http_failure": {
     "api": {
       "kind": "function",
       "name": "append_http_failure",
@@ -4510,7 +4556,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:113",
     "reason": "Renders diagnostic text from an already supplied message and HTTP status; it appends an HTTP label but does not parse JSON or construct a decoded model. get_http_failure is separately executed."
-  },"safe_cex_exchange::error_reporting::describe_body":{
+  },
+  "safe_cex_exchange::error_reporting::describe_body": {
     "api": {
       "kind": "function",
       "name": "describe_body",
@@ -4562,7 +4609,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:128",
     "reason": "Serializes an existing JSON body for diagnostic text, or returns the literal undefined; it does not deserialize a representation."
-  },"safe_cex_exchange::error_reporting::describe_http_failure":{
+  },
+  "safe_cex_exchange::error_reporting::describe_http_failure": {
     "api": {
       "kind": "function",
       "name": "describe_http_failure",
@@ -4612,7 +4660,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:133",
     "reason": "Renders a label/status/body diagnostic and truncates text; it is not a record parser. The underlying status extractor has its own executed contract."
-  },"safe_cex_exchange::error_reporting::is_network_error":{
+  },
+  "safe_cex_exchange::error_reporting::is_network_error": {
     "api": {
       "kind": "function",
       "name": "is_network_error",
@@ -4647,7 +4696,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:386",
     "reason": "Computes a retry/network predicate over existing Axios metadata and string codes; no representation is parsed and no decoded data object is constructed."
-  },"safe_cex_exchange::error_reporting::js_string":{
+  },
+  "safe_cex_exchange::error_reporting::js_string": {
     "api": {
       "kind": "function",
       "name": "js_string",
@@ -4685,7 +4735,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:95",
     "reason": "Renders an existing JSON Value with JS-style string coercion for error diagnostics (including array joining); this is output formatting, not JSON parsing."
-  },"safe_cex_exchange::error_reporting::tag_safe_url":{
+  },
+  "safe_cex_exchange::error_reporting::tag_safe_url": {
     "api": {
       "kind": "function",
       "name": "tag_safe_url",
@@ -4748,7 +4799,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:65",
     "reason": "Builds a bounded telemetry URL tag by removing a query and truncating UTF-16 units; does not parse URL syntax into a model or authorize requests."
-  },"safe_cex_exchange::error_reporting::truthy":{
+  },
+  "safe_cex_exchange::error_reporting::truthy": {
     "api": {
       "kind": "function",
       "name": "truthy",
@@ -4783,7 +4835,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:150",
     "reason": "Delegates JS truthiness of an already retained Value to the numeric core; boolean control-flow predicate, not a parser or record decoder."
-  },"safe_cex_exchange::error_reporting::utf16_prefix":{
+  },
+  "safe_cex_exchange::error_reporting::utf16_prefix": {
     "api": {
       "kind": "function",
       "name": "utf16_prefix",
@@ -4824,7 +4877,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:92",
     "reason": "Truncates existing diagnostic text by UTF-16 code units using lossy surrogate handling; string rendering utility, not input decoding."
-  },"safe_cex_exchange::websocket::lifecycle_log":{
+  },
+  "safe_cex_exchange::websocket::lifecycle_log": {
     "api": {
       "kind": "function",
       "name": "lifecycle_log",
@@ -4877,7 +4931,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/websocket.rs:292",
     "reason": "Conditionally forwards an existing message to the supplied host console; host logging effect only, no decoded result."
-  },"safe_cex_exchange::websocket::secret_key":{
+  },
+  "safe_cex_exchange::websocket::secret_key": {
     "api": {
       "kind": "function",
       "name": "secret_key",
@@ -4909,7 +4964,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/websocket.rs:2361",
     "reason": "Tests whether a supplied key matches a finite ASCII-case-insensitive redaction vocabulary; classification predicate, no JSON parsing."
-  },"safe_cex_exchange::websocket::shorten_hex_secrets":{
+  },
+  "safe_cex_exchange::websocket::shorten_hex_secrets": {
     "api": {
       "kind": "function",
       "name": "shorten_hex_secrets",
@@ -4944,7 +5000,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/websocket.rs:2489",
     "reason": "Shortens already rendered long hexadecimal runs for telemetry redaction; does not parse them into bytes/numbers or a domain object."
-  },"safe_cex_exchange::websocket::skip_space":{
+  },
+  "safe_cex_exchange::websocket::skip_space": {
     "api": {
       "kind": "function",
       "name": "skip_space",
@@ -4982,7 +5039,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/websocket.rs:2387",
     "reason": "Advances an already valid UTF-8 byte offset through JS whitespace and returns an index; lexical position utility, no decoded result. Caller supplies character-boundary precondition."
-  },"safe_cex_exchange::websocket::stringify":{
+  },
+  "safe_cex_exchange::websocket::stringify": {
     "api": {
       "kind": "function",
       "name": "stringify",
@@ -5020,7 +5078,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/websocket.rs:2349",
     "reason": "Passes through an existing String or serializes an existing retained JSON Value for output; does not deserialize it."
-  },"safe_cex_exchange::websocket::stringify_json":{
+  },
+  "safe_cex_exchange::websocket::stringify_json": {
     "api": {
       "kind": "function",
       "name": "stringify_json",
@@ -5058,7 +5117,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/websocket.rs:2356",
     "reason": "Serializes existing retained JSON via JsJsonValue and JS JSON.stringify semantics; no raw-input parsing or decoded model construction."
-  },"safe_cex_exchange::cross_trade::types::CrossTradeExecution":{
+  },
+  "safe_cex_exchange::cross_trade::types::CrossTradeExecution": {
     "shape": "union",
     "positive": [
       "LimitSlippage",
@@ -5194,7 +5254,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::cross_trade::types::CrossTradWeightMode":{
+  },
+  "safe_cex_exchange::cross_trade::types::CrossTradWeightMode": {
     "shape": "union",
     "positive": [
       "Balance",
@@ -5308,7 +5369,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::runtime::LogSeverity":{
+  },
+  "safe_cex_exchange::runtime::LogSeverity": {
     "shape": "union",
     "positive": [
       "debug",
@@ -5504,7 +5566,8 @@
         "reason": "Method accepts the already decoded native owner; no additional raw input."
       }
     ]
-  },"safe_cex_exchange::worker::CallableMethodsInWorker":{
+  },
+  "safe_cex_exchange::worker::CallableMethodsInWorker": {
     "shape": "union",
     "positive": [
       "setLeverage",
@@ -5948,7 +6011,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::cross_trade::types::CrossTradeCopier":{
+  },
+  "safe_cex_exchange::cross_trade::types::CrossTradeCopier": {
     "shape": "map",
     "sample": {
       "enabled": true,
@@ -6060,7 +6124,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::cross_trade::types::CrossTradeConfig":{
+  },
+  "safe_cex_exchange::cross_trade::types::CrossTradeConfig": {
     "shape": "map",
     "sample": {
       "enabled": true,
@@ -6297,7 +6362,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::exchange::SubscribedCandle":{
+  },
+  "safe_cex_exchange::exchange::SubscribedCandle": {
     "shape": "map",
     "sample": {
       "timestamp": 11,
@@ -6483,7 +6549,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::proxy_token::BroadcastMessage":{
+  },
+  "safe_cex_exchange::proxy_token::BroadcastMessage": {
     "shape": "union",
     "positive": [
       {
@@ -6577,7 +6644,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::cross_trade::CrossTradeStore":{
+  },
+  "safe_cex_exchange::cross_trade::CrossTradeStore": {
     "shape": "map",
     "sample": {
       "positionsLoaded": true,
@@ -7609,7 +7677,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::runtime::ExchangeFuture":{
+  },
+  "safe_cex_exchange::runtime::ExchangeFuture": {
     "category": "non-decoder",
     "reason": "One fixed actual native future/callback alias; no polling, callback invocation, payload decoding or universal lifetime/type claim.",
     "evidence": "Exact compiler generic/raw/expanded target pins plus internally authored fixed expected type; actual native compiler witness and runtime classification must still be measured.",
@@ -7798,7 +7867,8 @@
         }
       }
     }
-  },"safe_cex_exchange::http::HttpFuture":{
+  },
+  "safe_cex_exchange::http::HttpFuture": {
     "category": "non-decoder",
     "reason": "One fixed actual native future/callback alias; no polling, callback invocation, payload decoding or universal lifetime/type claim.",
     "evidence": "Exact compiler generic/raw/expanded target pins plus internally authored fixed expected type; actual native compiler witness and runtime classification must still be measured.",
@@ -7983,7 +8053,8 @@
         }
       }
     }
-  },"safe_cex_exchange::income_paging::IncomePageFetcher":{
+  },
+  "safe_cex_exchange::income_paging::IncomePageFetcher": {
     "category": "non-decoder",
     "reason": "One fixed actual native future/callback alias; no polling, callback invocation, payload decoding or universal lifetime/type claim.",
     "evidence": "Exact compiler generic/raw/expanded target pins plus internally authored fixed expected type; actual native compiler witness and runtime classification must still be measured.",
@@ -8185,7 +8256,8 @@
         "lifetime": "'a"
       }
     }
-  },"safe_cex_exchange::runtime::Listener":{
+  },
+  "safe_cex_exchange::runtime::Listener": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/EMITTER_CONTRACT_EVIDENCE.md; actual compiler alias target and seven raw construction traits must execute. Native callbacks retain original Js values.",
     "reason": "Owned Rc event callback over a borrowed native Js value or argument slice. This is the listener capability, not a string/JSON construction API; payload decoders are separate owners.",
@@ -8268,7 +8340,8 @@
         }
       }
     }
-  },"safe_cex_exchange::snapshots::AccountMarketOverlay":{
+  },
+  "safe_cex_exchange::snapshots::AccountMarketOverlay": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/snapshots.rs::AccountMarketOverlay; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Owned Rc callback over already typed Market rows; the closure is not a wire decoder. Snapshot/model parsing is independently inventoried.",
@@ -8345,7 +8418,8 @@
         }
       }
     }
-  },"safe_cex_exchange::runtime::Cleanup":{
+  },
+  "safe_cex_exchange::runtime::Cleanup": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/runtime.rs::Cleanup; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Owned Box<dyn FnOnce()> cleanup callback; no input value or decoder output. This does not claim cleanup execution.",
@@ -8382,7 +8456,8 @@
         }
       }
     }
-  },"safe_cex_exchange::runtime::ListenerCleanup":{
+  },
+  "safe_cex_exchange::runtime::ListenerCleanup": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/runtime.rs::ListenerCleanup; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Owned fallible cleanup callback; its typed Result is produced only when invoked. This alias observation does not claim cancellation behavior.",
@@ -8443,7 +8518,8 @@
         }
       }
     }
-  },"safe_cex_exchange::http::HttpFailure":{
+  },
+  "safe_cex_exchange::http::HttpFailure": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/http.rs::HttpFailure; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Compatibility alias of the actual transport RestFailure record, which has no Serde/raw-string construction. Its typed transport-error conversions are separately inventoried on the real owner.",
@@ -8453,7 +8529,8 @@
         "args": null
       }
     }
-  },"safe_cex_exchange::http::ParamsSerializer":{
+  },
+  "safe_cex_exchange::http::ParamsSerializer": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/http.rs::ParamsSerializer; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Arc-owned callback from an already typed parameter map to text; query encoding and request parsing are separate operations, not alias construction.",
@@ -8530,7 +8607,8 @@
         }
       }
     }
-  },"safe_cex_exchange::http::ResponseTransform":{
+  },
+  "safe_cex_exchange::http::ResponseTransform": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/http.rs::ResponseTransform; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc-owned callback over a typed RestResponse; this alias is not constructible by any of the seven raw conversion traits. Response-body parser owners remain inventoried.",
@@ -8613,7 +8691,8 @@
         }
       }
     }
-  },"safe_cex_exchange::proxy_token::TokenUpdateCallback":{
+  },
+  "safe_cex_exchange::proxy_token::TokenUpdateCallback": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/proxy_token.rs::TokenUpdateCallback; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc-owned token notification callback over borrowed text; it receives token updates but does not parse a token by alias construction.",
@@ -8684,7 +8763,8 @@
         }
       }
     }
-  },"safe_cex_exchange::websocket::MessageHandler":{
+  },
+  "safe_cex_exchange::websocket::MessageHandler": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/websocket.rs::MessageHandler; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc-owned message callback over borrowed Value; wire-message parsers and actual callback invocation are separate owner probes.",
@@ -8758,7 +8838,8 @@
         }
       }
     }
-  },"safe_cex_exchange::websocket::HandlerList":{
+  },
+  "safe_cex_exchange::websocket::HandlerList": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/websocket.rs::HandlerList; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc<RefCell<Vec<MessageHandler>>> shared callback storage; its leaf callback has no Serde/raw conversion, and the list is not a wire domain.",
@@ -8874,7 +8955,8 @@
         }
       }
     }
-  },"safe_cex_exchange::websocket::MessageHandlersStats":{
+  },
+  "safe_cex_exchange::websocket::MessageHandlersStats": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/websocket.rs::MessageHandlersStats; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Ordered map of native MessageHandlerStat records; that record has no Deserialize or raw conversion implementation. This is runtime telemetry state, not a map decoder.",
@@ -8906,7 +8988,8 @@
         }
       }
     }
-  },"safe_cex_exchange::websocket::MessageHandlers":{
+  },
+  "safe_cex_exchange::websocket::MessageHandlers": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/websocket.rs::MessageHandlers; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Ordered map of shared native callback lists; callbacks have no raw value construction. Actual event dispatch is outside this alias-only classification.",
@@ -9044,7 +9127,8 @@
         }
       }
     }
-  },"safe_cex_exchange::access_token::TokenRefreshFunction":{
+  },
+  "safe_cex_exchange::access_token::TokenRefreshFunction": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/access_token.rs::TokenRefreshFunction; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc-owned asynchronous token-refresh callback. This receipt checks callback alias identity and absence of raw constructors, not refresh execution or token parsing.",
@@ -9178,7 +9262,8 @@
         }
       }
     }
-  },"safe_cex_exchange::access_token::ContextualTokenProvider":{
+  },
+  "safe_cex_exchange::access_token::ContextualTokenProvider": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/access_token.rs::ContextualTokenProvider; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc-owned contextual provider returning typed token/unavailable error. Provider invocation and downstream token parsing are separate from alias construction.",
@@ -9394,7 +9479,8 @@
         }
       }
     }
-  },"safe_cex_exchange::cross_trade::CrossTradeGetExchangeFn":{
+  },
+  "safe_cex_exchange::cross_trade::CrossTradeGetExchangeFn": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeGetExchangeFn; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc-owned typed exchange lookup callback over a borrowed account key; alias creation cannot decode a runtime Exchange.",
@@ -9504,7 +9590,8 @@
         }
       }
     }
-  },"safe_cex_exchange::cross_trade::CrossTradePlaceOrderFn":{
+  },
+  "safe_cex_exchange::cross_trade::CrossTradePlaceOrderFn": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradePlaceOrderFn; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc-owned asynchronous placement callback over a typed CrossTradeOrder; order decoders and placement behavior are separately inventoried.",
@@ -9667,7 +9754,8 @@
         }
       }
     }
-  },"safe_cex_exchange::cross_trade::CrossTradeValue":{
+  },
+  "safe_cex_exchange::cross_trade::CrossTradeValue": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeValue; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc<dyn Any> opaque runtime-owned payload; erasure requires an existing native object, not JSON/string conversion. No downcast or payload behavior claim.",
@@ -9699,7 +9787,8 @@
         }
       }
     }
-  },"safe_cex_exchange::cross_trade::CrossTradeLoopFn":{
+  },
+  "safe_cex_exchange::cross_trade::CrossTradeLoopFn": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoopFn; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
     "reason": "Rc-owned zero-argument asynchronous loop callback; the callable object has no raw-input constructors. Execution and returned Result decoding are not claimed.",
@@ -9816,7 +9905,8 @@
         }
       }
     }
-  },"safe_cex_exchange::access_token::ProxyTokenUnavailableError":{
+  },
+  "safe_cex_exchange::access_token::ProxyTokenUnavailableError": {
     "shape": "observed",
     "evidence": "Exact cached compiler API with actual native calls and direct field/identity observations; independently authored outputs. No owner reserialization, no general scheduling/host coverage claim.",
     "entrypoints": [
@@ -9911,7 +10001,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::client_order_id::ClientOrderIdPlaceOrderOpts":{
+  },
+  "safe_cex_exchange::client_order_id::ClientOrderIdPlaceOrderOpts": {
     "shape": "observed",
     "evidence": "Exact cached compiler API with actual native calls and direct field/identity observations; independently authored outputs. No owner reserialization, no general scheduling/host coverage claim.",
     "entrypoints": [
@@ -10076,7 +10167,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::runtime::ExchangeErrorOrigin":{
+  },
+  "safe_cex_exchange::runtime::ExchangeErrorOrigin": {
     "shape": "typed",
     "evidence": "Typed error-origin wrapper: new accepts an Error object, stores it in Rc and exposes its identity. It parses no string/JSON and provides no new decoder. This classification claims no deep copy or unique authority.",
     "entrypoints": [
@@ -10117,7 +10209,8 @@
         "reason": "Typed error-origin wrapper: new accepts an Error object, stores it in Rc and exposes its identity. It parses no string/JSON and provides no new decoder. This classification claims no deep copy or unique authority."
       }
     ]
-  },"safe_cex_exchange::websocket::HeaderCapableWebSocketUnavailableError":{
+  },
+  "safe_cex_exchange::websocket::HeaderCapableWebSocketUnavailableError": {
     "shape": "typed",
     "evidence": "Zero-argument construction of a zero-sized fixed transport-capability error marker; no raw representation, parsing, or configurable decoder domain.",
     "entrypoints": [
@@ -10137,7 +10230,8 @@
         "reason": "Zero-argument construction of a zero-sized fixed transport-capability error marker; no raw representation, parsing, or configurable decoder domain."
       }
     ]
-  },"safe_cex_exchange::capabilities::CapabilityBinding":{
+  },
+  "safe_cex_exchange::capabilities::CapabilityBinding": {
     "shape": "typed",
     "evidence": "implemented/empty_override store an existing typed callback and set an origin tag. These generic constructors do not invoke or decode callback arguments/results. This instantiation is exactly CapabilityBinding<(),()>; it is not evidence for arbitrary generic inputs.",
     "entrypoints": [
@@ -10329,7 +10423,8 @@
       }
     ],
     "instantiation": "CapabilityBinding<(), ()>"
-  },"safe_cex_exchange::http::HttpRequestStatsTracker":{
+  },
+  "safe_cex_exchange::http::HttpRequestStatsTracker": {
     "shape": "observed",
     "evidence": "Exact cached compiler API with actual native calls and direct field/identity observations; independently authored outputs. No owner reserialization, no general scheduling/host coverage claim.",
     "entrypoints": [
@@ -10577,7 +10672,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::access_token::AccessToken":{
+  },
+  "safe_cex_exchange::access_token::AccessToken": {
     "shape": "observed",
     "evidence": "Exact cached compiler API with actual native calls and direct field/identity observations; independently authored outputs. No owner reserialization, no general scheduling/host coverage claim.",
     "entrypoints": [
@@ -10856,7 +10952,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::runtime::ExchangeError":{
+  },
+  "safe_cex_exchange::runtime::ExchangeError": {
     "shape": "observed",
     "evidence": "Exact cached compiler API with actual native calls and direct field/identity observations; independently authored outputs. No owner reserialization, no general scheduling/host coverage claim.",
     "entrypoints": [
@@ -11360,7 +11457,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::proxy_token::ProxyTokenClient":{
+  },
+  "safe_cex_exchange::proxy_token::ProxyTokenClient": {
     "shape": "observed",
     "category": "decoder",
     "evidence": "Exact inventoried APIs with actual native factory/state/parser execution in a bounded deterministic probe harness. Uncompiled draft, no host/callback behavior blanket exemption.",
@@ -11747,7 +11845,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::cross_trade::manager::CrossTradeManager":{
+  },
+  "safe_cex_exchange::cross_trade::manager::CrossTradeManager": {
     "shape": "observed",
     "category": "decoder",
     "evidence": "Exact inventoried APIs with actual native factory/state/parser execution in a bounded deterministic probe harness. Uncompiled draft, no host/callback behavior blanket exemption.",
@@ -12294,7 +12393,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::capabilities::ExchangeCapabilities":{
+  },
+  "safe_cex_exchange::capabilities::ExchangeCapabilities": {
     "shape": "observed",
     "category": "decoder",
     "evidence": "Exact inventoried APIs with actual native factory/state/parser execution in a bounded deterministic probe harness. Uncompiled draft, no host/callback behavior blanket exemption.",
@@ -12577,7 +12677,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::capabilities::PlaceOrderBinding":{
+  },
+  "safe_cex_exchange::capabilities::PlaceOrderBinding": {
     "shape": "observed",
     "category": "decoder",
     "evidence": "Exact inventoried APIs with actual native factory/state/parser execution in a bounded deterministic probe harness. Uncompiled draft, no host/callback behavior blanket exemption.",
@@ -12993,7 +13094,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::capabilities::PlaceOrdersBinding":{
+  },
+  "safe_cex_exchange::capabilities::PlaceOrdersBinding": {
     "shape": "observed",
     "category": "decoder",
     "evidence": "Exact inventoried APIs with actual native factory/state/parser execution in a bounded deterministic probe harness. Uncompiled draft, no host/callback behavior blanket exemption.",
@@ -13388,7 +13490,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::websocket::BaseWebSocket":{
+  },
+  "safe_cex_exchange::websocket::BaseWebSocket": {
     "shape": "observed",
     "category": "decoder",
     "evidence": "Exact inventoried APIs with actual native factory/state/parser execution in a bounded deterministic probe harness. Uncompiled draft, no host/callback behavior blanket exemption.",
@@ -15178,7 +15281,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::how_facade::SafeCexHOW":{
+  },
+  "safe_cex_exchange::how_facade::SafeCexHOW": {
     "shape": "observed",
     "evidence": "Actual selected service operation with immediate typed in-memory host dependencies and independently authored direct native outputs. Finite two-input floor, not host/network proof.",
     "entrypoints": [
@@ -15317,7 +15421,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::http::HttpClient":{
+  },
+  "safe_cex_exchange::http::HttpClient": {
     "shape": "observed",
     "evidence": "Actual selected service operation with immediate typed in-memory host dependencies and independently authored direct native outputs. Finite two-input floor, not host/network proof.",
     "entrypoints": [
@@ -15442,7 +15547,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::ws_parent::WsExchangeParent":{
+  },
+  "safe_cex_exchange::ws_parent::WsExchangeParent": {
     "shape": "observed",
     "evidence": "Real weak parent around a typed mock Exchange, exact constructor/trait APIs, native identity forwarding and live vs expired weak behavior. No websocket dial or asynchronous snapshot execution claimed.",
     "entrypoints": [
@@ -16163,7 +16269,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::exchange::BaseExchange":{
+  },
+  "safe_cex_exchange::exchange::BaseExchange": {
     "shape": "observed",
     "evidence": "All 31 exact fresh compiler-selected APIs execute actual production entrypoints on typed native memory fixtures. Genuine raw order, worker Candle/OrderBook, HTTP shape and worker-error interpretation are directly observed. Native floating values use independent IEEE bit strings. Finite per-entry floors, no live venue/network or every async branch claim. Retained logger review adds native UTF16 console/event observations; the existing typed log cases now assert the source message/severity pair. Every prior case remains.",
     "entrypoints": [
@@ -20804,7 +20911,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::capabilities::options_unsupported":{
+  },
+  "safe_cex_exchange::capabilities::options_unsupported": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -20854,7 +20962,8 @@
     },
     "evidence": "safe-cex-exchange/src/capabilities.rs::options_unsupported; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Formats an unsupported-capability ExchangeError from an already typed ExchangeName and an unparsed display label; no raw input is decoded."
-  },"safe_cex_exchange::client_order_id::with_replacement_client_order_id":{
+  },
+  "safe_cex_exchange::client_order_id::with_replacement_client_order_id": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -20909,7 +21018,8 @@
     },
     "evidence": "safe-cex-exchange/src/client_order_id.rs::with_replacement_client_order_id; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Attaches an unparsed caller identifier to an existing Vec<String>. It performs no syntax admission or decoding and carries no one-use validation token."
-  },"safe_cex_exchange::js_runtime::base_exchange::secondary_options":{
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::secondary_options": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -20995,7 +21105,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/base_exchange.rs::secondary_options; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Spreads the existing native options object, copies secondary_ properties under stripped keys, and attaches an unparsed proxy string. This classifies the options-composition helper, not downstream HTTP input decoding."
-  },"safe_cex_exchange::js_runtime::builtins::array_member":{
+  },
+  "safe_cex_exchange::js_runtime::builtins::array_member": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21053,7 +21164,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/builtins.rs::array_member; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Selects or constructs a builtin member for an already native array receiver by method name. The returned callable is not invoked by this factory; this classification makes no claim about individual callback bodies."
-  },"safe_cex_exchange::js_runtime::builtins::map_member":{
+  },
+  "safe_cex_exchange::js_runtime::builtins::map_member": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21111,7 +21223,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/builtins.rs::map_member; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Selects or constructs a builtin member for an already native Map receiver by method name. Factory construction does not decode a raw record or execute the resulting callback."
-  },"safe_cex_exchange::js_runtime::builtins::method":{
+  },
+  "safe_cex_exchange::js_runtime::builtins::method": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21297,7 +21410,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/builtins.rs::method; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Wraps an already typed native closure in a named Js function, adapting its receiver away. The name is retained as a label without parsing."
-  },"safe_cex_exchange::js_runtime::builtins::plain_string_member":{
+  },
+  "safe_cex_exchange::js_runtime::builtins::plain_string_member": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21355,7 +21469,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/builtins.rs::plain_string_member; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Selects a builtin property or callable for existing UTF-16 units using a method-name selector; this classifies member lookup/construction, not later callback execution."
-  },"safe_cex_exchange::js_runtime::builtins::promise_member":{
+  },
+  "safe_cex_exchange::js_runtime::builtins::promise_member": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21413,7 +21528,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/builtins.rs::promise_member; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Selects builtin Promise member callables for an existing Promise handle. Constructing the member does not parse wire input or settle a new decoded record."
-  },"safe_cex_exchange::js_runtime::builtins::set_member":{
+  },
+  "safe_cex_exchange::js_runtime::builtins::set_member": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21471,7 +21587,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/builtins.rs::set_member; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Selects or constructs a builtin member for an already native Set receiver by method name; this factory does not execute the selected callback or decode a raw record."
-  },"safe_cex_exchange::js_runtime::builtins::string_member":{
+  },
+  "safe_cex_exchange::js_runtime::builtins::string_member": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21529,7 +21646,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/builtins.rs::string_member; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Selects native string properties or a builtin callable from existing UTF-16 units. The method name is a selector, not serialized input to a decoder."
-  },"safe_cex_exchange::js_runtime::client::optional":{
+  },
+  "safe_cex_exchange::js_runtime::client::optional": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21601,7 +21719,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/client.rs::optional; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Reads an existing native property by selector, returning Undefined for a nullish receiver. It introduces no parsed or typed record."
-  },"safe_cex_exchange::js_runtime::client::optional_text":{
+  },
+  "safe_cex_exchange::js_runtime::client::optional_text": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21687,7 +21806,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/client.rs::optional_text; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Reads an existing native configuration property and applies source JS string coercion, retaining nullish absence. It does not parse the resulting text into another type."
-  },"safe_cex_exchange::js_runtime::globals::enum_object":{
+  },
+  "safe_cex_exchange::js_runtime::globals::enum_object": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21743,7 +21863,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/globals.rs::enum_object; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Builds the runtime enum table from already typed pairs of string literals; it copies names and values without recognizing a serialized enum domain."
-  },"safe_cex_exchange::js_runtime::globals::form_encode":{
+  },
+  "safe_cex_exchange::js_runtime::globals::form_encode": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21778,7 +21899,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/globals.rs::form_encode; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Produces outbound percent-encoded form text from an existing UTF-8 string. This is an encoder, with no input-shape admission or decoded model."
-  },"safe_cex_exchange::js_runtime::library::dayjs_add":{
+  },
+  "safe_cex_exchange::js_runtime::library::dayjs_add": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21822,7 +21944,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/library.rs::dayjs_add; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Applies numeric timestamp arithmetic selected by a unit label. It does not parse a date representation; parse_iso has its separate executed decoder witnesses."
-  },"safe_cex_exchange::js_runtime::library::define_on":{
+  },
+  "safe_cex_exchange::js_runtime::library::define_on": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -21876,7 +21999,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/library.rs::define_on; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Defines an existing native value under an unparsed property key; it is a native object mutation, not raw-input decoding."
-  },"safe_cex_exchange::js_runtime::library::func":{
+  },
+  "safe_cex_exchange::js_runtime::library::func": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -22062,7 +22186,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/library.rs::func; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Wraps an already typed closure in a named native callable. It neither parses the name nor executes the supplied closure at construction."
-  },"safe_cex_exchange::js_runtime::library::in_operator":{
+  },
+  "safe_cex_exchange::js_runtime::library::in_operator": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -22131,7 +22256,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/library.rs::in_operator; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later. Fresh compiler Result<bool,Thrown> API reviewed; tests/js_in_function_prototypes.rs compares actual native function/intrinsic chains with Node without reading getters, and js_get_key_in.rs preserves primitive refusal/source cases.",
     "reason": "Tests key presence on an existing native receiver, preserving source TypeError behavior for invalid receivers. It creates no decoded record."
-  },"safe_cex_exchange::js_runtime::library::qs_encode":{
+  },
+  "safe_cex_exchange::js_runtime::library::qs_encode": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -22166,7 +22292,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/library.rs::qs_encode; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Encodes an existing string into outbound query text. It does not decode serialized input or admit a typed record."
-  },"safe_cex_exchange::js_runtime::library::qs_pairs":{
+  },
+  "safe_cex_exchange::js_runtime::library::qs_pairs": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -22264,7 +22391,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/library.rs::qs_pairs; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Serializes an existing native value into outbound query-pair strings under an unparsed prefix. Any later wire parsing is outside this encoder."
-  },"safe_cex_exchange::js_runtime::scope::bound_member":{
+  },
+  "safe_cex_exchange::js_runtime::scope::bound_member": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -22336,7 +22464,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/scope.rs::bound_member; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Looks up an existing member and wraps callables to retain their original receiver. The member name is a selector and no serialized input is decoded."
-  },"safe_cex_exchange::js_runtime::value::error_object":{
+  },
+  "safe_cex_exchange::js_runtime::value::error_object": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -22383,7 +22512,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs::error_object; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Constructs a native diagnostic object containing the supplied name and message without parsing either string; not a decoder for serialized error records."
-  },"safe_cex_exchange::js_runtime::value::to_json":{
+  },
+  "safe_cex_exchange::js_runtime::value::to_json": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -22443,7 +22573,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs::to_json; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Encodes a native JS-model value into the selected JSON boundary representation, including its explicit refusal/omission policies. This is the outbound projection, not a Deserialize path or arbitrary JS conformance claim."
-  },"safe_cex_exchange::js_runtime::value::utf16":{
+  },
+  "safe_cex_exchange::js_runtime::value::utf16": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -22478,7 +22609,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs::utf16; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Encodes an existing UTF-8 scalar string into UTF-16 code units. It does not parse an escaped string representation or manufacture a typed decoder result."
-  },"safe_cex_exchange::js_runtime::client::JsRestAdapter":{
+  },
+  "safe_cex_exchange::js_runtime::client::JsRestAdapter": {
     "shape": "typed",
     "evidence": "safe-cex-exchange/src/js_runtime/client.rs; exact compiler constructor APIs reviewed. This classification does not assert runtime I/O, scheduling, or arbitrary generic-payload behavior.",
     "entrypoints": [
@@ -22508,7 +22640,8 @@
         "reason": "Wraps an already typed native Axios handle and starts with an empty retained rejection slot; construction performs no wire or JSON parsing."
       }
     ]
-  },"safe_cex_exchange::js_runtime::promise::Promise":{
+  },
+  "safe_cex_exchange::js_runtime::promise::Promise": {
     "shape": "typed",
     "evidence": "safe-cex-exchange/src/js_runtime/promise.rs; exact compiler constructor APIs reviewed. This classification does not assert runtime I/O, scheduling, or arbitrary generic-payload behavior.",
     "entrypoints": [
@@ -22721,7 +22854,8 @@
         "reason": "Constructs reusable promise-state handles from typed runtime/result/future values. These constructors do not accept serialized input; the native Js result already exists before it is retained or asynchronously produced."
       }
     ]
-  },"safe_cex_exchange::js_runtime::scope::ScopeShared":{
+  },
+  "safe_cex_exchange::js_runtime::scope::ScopeShared": {
     "shape": "typed",
     "evidence": "safe-cex-exchange/src/js_runtime/scope.rs; exact compiler constructor APIs reviewed. This classification does not assert runtime I/O, scheduling, or arbitrary generic-payload behavior.",
     "entrypoints": [
@@ -22850,7 +22984,8 @@
         "reason": "Assembles typed runtime, HTTP, Store and native globals handles with caller-owned generic extra state. No constructor input is a raw serialized value and no configuration is parsed here."
       }
     ]
-  },"safe_cex_exchange::js_runtime::sockets::JsSocketContext":{
+  },
+  "safe_cex_exchange::js_runtime::sockets::JsSocketContext": {
     "shape": "typed",
     "evidence": "safe-cex-exchange/src/js_runtime/sockets.rs; exact compiler constructor APIs reviewed. This classification does not assert runtime I/O, scheduling, or arbitrary generic-payload behavior.",
     "entrypoints": [
@@ -22916,7 +23051,8 @@
         "reason": "Constructs a native socket registry around a typed WsRuntime handle, with no venue, cores or prototype initially. It performs no dialing or message parsing."
       }
     ]
-  },"safe_cex_exchange::js_runtime::value::string_to_number":{
+  },
+  "safe_cex_exchange::js_runtime::value::string_to_number": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -23020,7 +23156,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::library::parse_iso":{
+  },
+  "safe_cex_exchange::js_runtime::library::parse_iso": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -23088,7 +23225,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::value::to_typed":{
+  },
+  "safe_cex_exchange::js_runtime::value::to_typed": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -23197,7 +23335,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::value::from_json":{
+  },
+  "safe_cex_exchange::js_runtime::value::from_json": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -23303,7 +23442,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory":{
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory": {
     "category": "non-decoder",
     "target": {
       "resolved_path": {
@@ -23400,7 +23540,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/base_exchange.rs; actual compiler alias target retained, with native alias trait/root checks left enabled.",
     "reason": "Reviewed current base_exchange.rs alias: a native callback from already typed ExchangeOptions to the optional ExternalPublicData service. Its enclosing factory captures BaseExchange. It returns listener capability, not decoded domain data."
-  },"safe_cex_exchange::js_runtime::value::Str":{
+  },
+  "safe_cex_exchange::js_runtime::value::Str": {
     "category": "decoder",
     "shape": "union",
     "target": {
@@ -23498,7 +23639,8 @@
         }
       ]
     }
-  },"safe_cex_exchange::js_runtime::promise::JsFuture":{
+  },
+  "safe_cex_exchange::js_runtime::promise::JsFuture": {
     "category": "non-decoder",
     "target": {
       "resolved_path": {
@@ -23586,7 +23728,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/promise.rs; actual compiler alias target retained, with native alias trait/root checks left enabled.",
     "reason": "Owned asynchronous continuation producing an already native Js result or Thrown value; not a serialized-input decoder. Only the reviewed static instantiation is probed."
-  },"safe_cex_exchange::js_runtime::sockets::ListenerList":{
+  },
+  "safe_cex_exchange::js_runtime::sockets::ListenerList": {
     "category": "non-decoder",
     "target": {
       "resolved_path": {
@@ -23648,7 +23791,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/sockets.rs; actual compiler alias target retained, with native alias trait/root checks left enabled.",
     "reason": "Shared mutable listener rows containing native Js callbacks. Cloning shares the listener registry; there is no raw-record decoding at this alias."
-  },"safe_cex_exchange::js_runtime::value::NativeFn":{
+  },
+  "safe_cex_exchange::js_runtime::value::NativeFn": {
     "category": "non-decoder",
     "target": {
       "resolved_path": {
@@ -23739,7 +23883,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs; actual compiler alias target retained, with native alias trait/root checks left enabled.",
     "reason": "Typed executable callback over an existing native receiver and arguments; this classification concerns the callable type, not the body of arbitrary registered functions."
-  },"safe_cex_exchange::js_runtime::value::Getter":{
+  },
+  "safe_cex_exchange::js_runtime::value::Getter": {
     "category": "non-decoder",
     "target": {
       "resolved_path": {
@@ -23816,7 +23961,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs; actual compiler alias target retained, with native alias trait/root checks left enabled.",
     "reason": "Typed native property getter callback over an existing receiver; not a deserializer for any input representation."
-  },"safe_cex_exchange::js_runtime::value::Setter":{
+  },
+  "safe_cex_exchange::js_runtime::value::Setter": {
     "category": "non-decoder",
     "target": {
       "resolved_path": {
@@ -23896,7 +24042,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs; actual compiler alias target retained, with native alias trait/root checks left enabled.",
     "reason": "Typed native property setter callback over an existing receiver and value; no serialized record is decoded by this callable alias."
-  },"safe_cex_exchange::js_runtime::value::Js":{
+  },
+  "safe_cex_exchange::js_runtime::value::Js": {
     "shape": "observed",
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs; each raw compiler entrypoint has direct native field/effect observations. Already typed APIs keep separate exact classifications, never fabricated varying-input witnesses. Bounded fixture evidence, not complete JS/host conformance.",
     "entrypoints": [
@@ -26337,7 +26484,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::js_runtime::value::Thrown":{
+  },
+  "safe_cex_exchange::js_runtime::value::Thrown": {
     "shape": "observed",
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs; each raw compiler entrypoint has direct native field/effect observations. Already typed APIs keep separate exact classifications, never fabricated varying-input witnesses. Bounded fixture evidence, not complete JS/host conformance.",
     "entrypoints": [
@@ -26599,7 +26747,8 @@
         "reason": "Constructs from already typed native Js, ExchangeError or JsCoercionError values; no serialized representation is decoded by these exact conversions."
       }
     ]
-  },"safe_cex_exchange::js_runtime::scope::Scope":{
+  },
+  "safe_cex_exchange::js_runtime::scope::Scope": {
     "shape": "observed",
     "evidence": "safe-cex-exchange/src/js_runtime/scope.rs; each raw compiler entrypoint has direct native field/effect observations. Already typed APIs keep separate exact classifications, never fabricated varying-input witnesses. Bounded fixture evidence, not complete JS/host conformance.",
     "entrypoints": [
@@ -27175,7 +27324,8 @@
       }
     ],
     "instantiation": "Scope<()>"
-  },"safe_cex_exchange::js_runtime::sockets::JsProtocol":{
+  },
+  "safe_cex_exchange::js_runtime::sockets::JsProtocol": {
     "shape": "observed",
     "evidence": "safe-cex-exchange/src/js_runtime/sockets.rs; each raw compiler entrypoint has direct native field/effect observations. Already typed APIs keep separate exact classifications, never fabricated varying-input witnesses. Bounded fixture evidence, not complete JS/host conformance.",
     "entrypoints": [
@@ -27454,7 +27604,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::websocket::DormantSocket":{
+  },
+  "safe_cex_exchange::websocket::DormantSocket": {
     "shape": "observed",
     "evidence": "safe-cex-exchange/src/websocket.rs; each raw compiler entrypoint has direct native field/effect observations. Already typed APIs keep separate exact classifications, never fabricated varying-input witnesses. Bounded fixture evidence, not complete JS/host conformance.",
     "entrypoints": [
@@ -27580,7 +27731,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::http::remote_output_adapter":{
+  },
+  "safe_cex_exchange::http::remote_output_adapter": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -27685,7 +27837,8 @@
     },
     "evidence": "safe-cex-exchange/src/http.rs::remote_output_adapter; exact current compiler API and specific output role reviewed. Classification is not a behavior or host-execution proof.",
     "reason": "Wraps an already selected RestAdapter and optional native ParamsSerializer in the RemoteOutput outbound wire codec. It returns transport capability, not a decoded model; signing output remains a separate transform."
-  },"safe_cex_exchange::js_runtime::base_exchange::js_remote_signer":{
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::js_remote_signer": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -27793,7 +27946,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/base_exchange.rs::js_remote_signer; exact current compiler API and specific output role reviewed. Classification is not a behavior or host-execution proof.",
     "reason": "Builds a native JS facade over an existing RemoteSigner capability, optional account label and runtime. The string is forwarded as account context, not parsed into a model; returned methods perform outbound signing separately."
-  },"safe_cex_exchange::js_runtime::client::hosted_params_serializer":{
+  },
+  "safe_cex_exchange::js_runtime::client::hosted_params_serializer": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -27867,7 +28021,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/client.rs::hosted_params_serializer; exact current compiler API and specific output role reviewed. Classification is not a behavior or host-execution proof.",
     "reason": "Selects an existing callable paramsSerializer or bound serialize member from the native config and wraps it in an outbound ParamsSerializer. The wrapper formats typed query parameters into text; it does not parse an ingress model or claim the callback result is domain data."
-  },"safe_cex_exchange::js_runtime::client::rest_http_host_signed":{
+  },
+  "safe_cex_exchange::js_runtime::client::rest_http_host_signed": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -27997,7 +28152,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/client.rs::rest_http_host_signed; exact current compiler API and specific output role reviewed. Classification is not a behavior or host-execution proof.",
     "reason": "Constructs a service host from existing runtime, transport and optional hosted-signer capabilities. It returns a JsHttpHost handle and performs no input decoding at construction."
-  },"safe_cex_exchange::js_runtime::client::signed_adapter":{
+  },
+  "safe_cex_exchange::js_runtime::client::signed_adapter": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -28157,7 +28313,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/client.rs::signed_adapter; exact current compiler API and specific output role reviewed. Classification is not a behavior or host-execution proof.",
     "reason": "Composes an existing native signer, adapter, runtime clock and optional serializer into the outbound remote-signing transport. It returns a transport capability without parsing a model."
-  },"safe_cex_exchange::js_runtime::sockets::close_event":{
+  },
+  "safe_cex_exchange::js_runtime::sockets::close_event": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -28218,7 +28375,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/sockets.rs::close_event; exact current compiler API and specific output role reviewed. Classification is not a behavior or host-execution proof.",
     "reason": "Constructs an outbound native close-event object from a typed close code, reason text and clean flag. The reason is copied to a native string without parsing; code defaults to1005 when absent. It is a notification formatter, not an ingress decoder."
-  },"safe_cex_exchange::js_runtime::promise::PromiseWait":{
+  },
+  "safe_cex_exchange::js_runtime::promise::PromiseWait": {
     "shape": "typed",
     "evidence": "promise.rs::PromiseWait::poll; native Future polling over an existing promise state and Context/Waker. No serialized model input; this classifies its API role, not cancellation behavior.",
     "entrypoints": [
@@ -28318,7 +28476,8 @@
         "reason": "Polls existing runtime state with a native Context/Waker; no raw string, byte or serialized value enters this API."
       }
     ]
-  },"safe_cex_exchange::js_runtime::value::typed::decode":{
+  },
+  "safe_cex_exchange::js_runtime::value::typed::decode": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -28556,7 +28715,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::base_exchange::HostedSigner":{
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::HostedSigner": {
     "category": "non-decoder",
     "target": {
       "tuple": [
@@ -28668,7 +28828,8 @@
         }
       ]
     }
-  },"safe_cex_exchange::js_runtime::sockets::binary_data":{
+  },
+  "safe_cex_exchange::js_runtime::sockets::binary_data": {
     "category": "decoder",
     "api": {
       "kind": "function",
@@ -28798,7 +28959,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::store::json_patch":{
+  },
+  "safe_cex_exchange::js_runtime::store::json_patch": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -28880,7 +29042,8 @@
     },
     "evidence": "store.rs::json_patch is the extracted outbound JSON projection. Actual native js_store_patch_numbers tests (numeric_patch_keeps_omission_null_and_other_field_policy and all_model_patch_methods_keep_every_numeric_field) execute its fields through production Store facade updates; typed admission remains in the separate patch applicators. No decoder permission is claimed.",
     "reason": "Encodes an existing native Js value as the raw JSON patch dictionary, with an empty dictionary for non-object JSON. It neither parses a declared model nor validates model fields; native typed admission is owned by the Store patch applicators."
-  },"safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined":{
+  },
+  "safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined": {
     "api": {
       "kind": "function",
       "name": "to_typed_preserving_undefined",
@@ -29063,7 +29226,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::store::option_patch":{
+  },
+  "safe_cex_exchange::js_runtime::store::option_patch": {
     "api": {
       "kind": "function",
       "name": "option_patch",
@@ -29356,7 +29520,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::builtins::cached_iterator_member":{
+  },
+  "safe_cex_exchange::js_runtime::builtins::cached_iterator_member": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -29415,7 +29580,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/{builtins,collections}.rs; concrete native fixtures in builtin_iterator_contract_tests.rs and collection_contract_tests.rs, independently authored Node expectations in tests/iterator_contract_oracle.cjs. Classification-only receipt, with supplementary executed behavioral proof; no decoder exemption inherited by callers.",
     "reason": "Caches an already constructed native callable by an internal static method key in Map/Set storage. It upgrades a weak FunctionData handle or records the supplied native member; it does not parse the key, decode user data, or invoke the member. Native Map/Set identity and invocation witnesses exercise the actual helper; a fresh-member substitution is the compiled control."
-  },"safe_cex_exchange::js_runtime::collections::iterator_object":{
+  },
+  "safe_cex_exchange::js_runtime::collections::iterator_object": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -29459,7 +29625,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/{builtins,collections}.rs; concrete native fixtures in builtin_iterator_contract_tests.rs and collection_contract_tests.rs, independently authored Node expectations in tests/iterator_contract_oracle.cjs. Classification-only receipt, with supplementary executed behavioral proof; no decoder exemption inherited by callers.",
     "reason": "Constructs the internal iterator object from a static diagnostic brand and an already typed NativeFn continuation. It stores the capability in iterator_next, without decoding serialized data or interpreting the brand as an input language. Native Map/Set protocol-field and callback witnesses exercise this constructor; dropping its continuation slot is the compiled control."
-  },"safe_cex_exchange::js_runtime::collections::iterator_next_method":{
+  },
+  "safe_cex_exchange::js_runtime::collections::iterator_next_method": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -29494,7 +29661,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/{builtins,collections}.rs; concrete native fixtures in builtin_iterator_contract_tests.rs and collection_contract_tests.rs, independently authored Node expectations in tests/iterator_contract_oracle.cjs. Classification-only receipt, with supplementary executed behavioral proof; no decoder exemption inherited by callers.",
     "reason": "Constructs a native next callable parameterized by an internal static brand. The callable validates the actual native receiver and invokes its retained iterator_next capability. Neither the factory nor that dispatch decodes a raw string or JSON record. Native extracted-method, wrong-receiver and forged-brand witnesses exercise it; inverted brand admission is the compiled control."
-  },"safe_cex_exchange::js_runtime::collections::Collection":{
+  },
+  "safe_cex_exchange::js_runtime::collections::Collection": {
     "shape": "observed",
     "instantiation": "Collection<super::Js>",
     "evidence": "The compiler selects only the Deref dense native view, not a Deserialize implementation. The stable ordered storage serves JS Map/Set iteration; tests/iterator_contract_oracle.cjs independently captures ordered Map values. Direct native fixtures additionally retain signed zero and object reference identity. This bounded native/default instantiation is not a generic accepted-input or feature/wasm claim.",
@@ -29580,7 +29748,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::position_intervals::PositionInterval":{
+  },
+  "safe_cex_exchange::position_intervals::PositionInterval": {
     "shape": "map",
     "sample": {
       "symbol": "BTCUSDT",
@@ -29753,7 +29922,8 @@
       ]
     },
     "entrypoints": []
-  },"safe_cex_exchange::runtime::ArgsListener":{
+  },
+  "safe_cex_exchange::runtime::ArgsListener": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/EMITTER_CONTRACT_EVIDENCE.md; actual compiler alias target and seven raw construction traits must execute. Native callbacks retain original Js values.",
     "reason": "Owned Rc event callback over a borrowed native Js value or argument slice. This is the listener capability, not a string/JSON construction API; payload decoders are separate owners.",
@@ -29838,7 +30008,8 @@
         }
       }
     }
-  },"safe_cex_exchange::error_reporting::formatted_context":{
+  },
+  "safe_cex_exchange::error_reporting::formatted_context": {
     "api": {
       "kind": "function",
       "name": "formatted_context",
@@ -29898,7 +30069,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:169",
     "reason": "Projects already constructed typed ExchangeError metadata into a telemetry map (tag names, optional existing fields, header names); no raw text parse or new decoded domain object."
-  },"safe_cex_exchange::error_reporting::format_error_for_sentry":{
+  },
+  "safe_cex_exchange::error_reporting::format_error_for_sentry": {
     "api": {
       "kind": "function",
       "name": "format_error_for_sentry",
@@ -29936,7 +30108,8 @@
     "category": "non-decoder",
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:223",
     "reason": "Partitions an existing typed error telemetry projection into tags and extra for Sentry output; serialization/telemetry formatting, not input decoding. This does not classify enhance_axios_error."
-  },"safe_cex_exchange::store_delivery::StoreFrame":{
+  },
+  "safe_cex_exchange::store_delivery::StoreFrame": {
     "category": "decoder",
     "shape": "map",
     "evidence": "Canonical StoreFrame is an Rc<RefCell<StoreData>> alias with the existing StoreData Deserialize implementation. Compiled raw-trait probes detected that decoder, so it is explicitly classified here rather than exempted. Two direct decoded-field observations inspect numeric bits, typed fields and shared Rc mutation; the StoreData owner retains its broader field corpus. No type widening or new parsing implementation.",
@@ -30241,7 +30414,8 @@
         }
       ]
     }
-  },"safe_cex_exchange::message_stats::assign":{
+  },
+  "safe_cex_exchange::message_stats::assign": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -30319,7 +30493,8 @@
     },
     "reason": "Writes an already constructed statistics Value into the named group of typed StoreData. The object check protects the output accumulator; it parses no input into a new domain owner.",
     "evidence": "Reviewed the unchanged message_stats body moved from webworker into exchange-core; this finite output-formatting classification is not a behavior exemption."
-  },"safe_cex_exchange::message_stats::snapshot":{
+  },
+  "safe_cex_exchange::message_stats::snapshot": {
     "category": "non-decoder",
     "api": {
       "kind": "function",
@@ -30379,7 +30554,8 @@
     },
     "reason": "Formats existing typed BaseWebSocket diagnostic counters into a JSON statistics output map. It parses no raw input or native domain owner.",
     "evidence": "Reviewed the unchanged message_stats body moved from webworker into exchange-core; this finite output-formatting classification is not a behavior exemption."
-  },"safe_cex_exchange::store_delivery::StoreUpdateThrottle":{
+  },
+  "safe_cex_exchange::store_delivery::StoreUpdateThrottle": {
     "shape": "typed",
     "evidence": "The relocated constructor accepts an existing typed timer host, binary64 wait and store-frame callback; it stores these capabilities and initializes throttle bookkeeping without parsing raw data. Timing/cancellation behavior stays covered by the existing worker runtime tests.",
     "entrypoints": [
@@ -30507,7 +30683,8 @@
         "reason": "Typed host/callback construction and numeric wait normalization; no raw text/JSON or untyped callback result enters the constructor."
       }
     ]
-  },"safe_cex_exchange::throttle::ThrottleManager":{
+  },
+  "safe_cex_exchange::throttle::ThrottleManager": {
     "shape": "observed",
     "instantiation": "ThrottleManager<u64>",
     "evidence": "The existing generic keyed throttle constructor is relocated unchanged. The compiler treats the supplied get_key callback String result as a raw signature; two native constructor observations inspect stored delay/runtime/key callback and empty task/timer state for the explicit u64 instantiation. This claims neither arbitrary generic decoding nor callback execution/timer conformance.",
@@ -30682,7 +30859,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::iterator::IteratorRecord":{
+  },
+  "safe_cex_exchange::js_runtime::iterator::IteratorRecord": {
     "shape": "observed",
     "evidence": "safe-cex-exchange/src/js_runtime/iterator.rs; actual compiler-selected get API constructs retained native IteratorRecord state. Five independently executed Node strict iterator cases in tests/js_iterator_records_source.cjs contract mode pin native values/bits/UTF16, terminal state and non-iterable refusals. Eleven additional native/Node abrupt-close, elision, cached-next and normal-close cases exercise the production helper/global consumer; no raw JSON decoder, full runtime or HL cutover claim. Public from_iterator has the same unchanged protocol body as the former crate-private helper; Kraken needs it after resolving one protocol method while retaining the source spread diagnostic. Each exact constructor has its own executed native corpus; no method bypasses generated entrypoint dispatch.",
     "entrypoints": [
@@ -30923,7 +31101,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::js_runtime::value::WriteObserver":{
+  },
+  "safe_cex_exchange::js_runtime::value::WriteObserver": {
     "category": "non-decoder",
     "target": {
       "resolved_path": {
@@ -31020,7 +31199,8 @@
     },
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs; tests/js_write_observers.rs executes the native callback with original receiver, UTF-16 key and assigned referent, publication failures/reentry and capture release. Fresh compiler alias root and conversion-trait probes stay enabled.",
     "reason": "This exact native callback publishes an already completed ordinary-object assignment to typed host readers. It receives existing Js references and key units; it constructs no model, parses no wire representation and is not a deserializer."
-  },"safe_cex_exchange::js_runtime::for_in::ForInRecord":{
+  },
+  "safe_cex_exchange::js_runtime::for_in::ForInRecord": {
     "shape": "observed",
     "evidence": "safe-cex-exchange/src/js_runtime/for_in.rs; compiler-selected get constructs one retained property enumeration record. Actual native/Node tests pin descriptor shadowing, integer/UTF16 order, deletion before visitation, original undefined presence, function metadata and no getter reads. Direct executed native constructor observations below use maintained Node for-in results; no DTO decode or complete language-runtime claim.",
     "entrypoints": [
@@ -31127,7 +31307,8 @@
         "output": []
       }
     ]
-  },"safe_cex_exchange::js_runtime::native_store::DefaultStore":{
+  },
+  "safe_cex_exchange::js_runtime::native_store::DefaultStore": {
     "shape": "observed",
     "evidence": "Actual DefaultStore constructor/raw lookup/typed optional readers execute on the one material graph. Full original-cause, own-undefined, arbitrary config and owner lifetime source/native witnesses are in canonical_native_store.",
     "entrypoints": [
@@ -33712,7 +33893,8 @@
         ]
       }
     ]
-  },"safe_cex_exchange::js_runtime::native_store::selector":{
+  },
+  "safe_cex_exchange::js_runtime::native_store::selector": {
     "api": {
       "kind": "function",
       "name": "selector",
@@ -33747,7 +33929,8 @@
     "category": "non-decoder",
     "evidence": "Canonical Store typed admission helper; actual facade selector/loop regressions exercise its consumers.",
     "reason": "Constructs an own id property from the already admitted typed identifier; does not parse or decode the identifier."
-  },"safe_cex_exchange::js_runtime::native_store::selectors":{
+  },
+  "safe_cex_exchange::js_runtime::native_store::selectors": {
     "api": {
       "kind": "function",
       "name": "selectors",
@@ -33790,7 +33973,8 @@
     "category": "non-decoder",
     "evidence": "Canonical Store typed admission helper; actual facade selector/loop regressions exercise its consumers.",
     "reason": "Constructs selector records from admitted identifier references; no serialized input is parsed."
-  },"safe_cex_exchange::js_runtime::native_store::project":{
+  },
+  "safe_cex_exchange::js_runtime::native_store::project": {
     "api": {
       "kind": "function",
       "name": "project",
@@ -33883,7 +34067,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::native_store::admitted_patch":{
+  },
+  "safe_cex_exchange::js_runtime::native_store::admitted_patch": {
     "api": {
       "kind": "function",
       "name": "admitted_patch",
@@ -34034,7 +34219,8 @@
         }
       }
     ]
-  },"safe_cex_exchange::js_runtime::native_store::graph::Graph":{
+  },
+  "safe_cex_exchange::js_runtime::native_store::graph::Graph": {
     "shape": "observed",
     "evidence": "Production canonical graph operations, direct native input and observed reached properties. tests/canonical_native_store.rs additionally pins alias generations, descriptors, original errors, partial writes and subscriber ordering against maintained TS.",
     "entrypoints": [
@@ -34760,4 +34946,181 @@
         ]
       }
     ]
-  }}
+  },
+  "safe_cex_exchange::js_runtime::client::rest_http_host_with_signers": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "rest_http_host_with_signers",
+      "signature": {
+        "inputs": [
+          [
+            "runtime",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "adapter",
+            {
+              "resolved_path": {
+                "path": "alloc::sync::Arc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_transport::provider::RestAdapter",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "remote",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::base_exchange::HostedSigner",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "dyn_trait": {
+                                        "traits": [
+                                          {
+                                            "trait": {
+                                              "path": "safe_cex_crypto::PayloadSigner",
+                                              "args": null
+                                            },
+                                            "generic_params": []
+                                          }
+                                        ],
+                                        "lifetime": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::rc::Rc",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "dyn_trait": {
+                        "traits": [
+                          {
+                            "trait": {
+                              "path": "safe_cex_exchange::js_runtime::client::JsHttpHost",
+                              "args": null
+                            },
+                            "generic_params": []
+                          }
+                        ],
+                        "lifetime": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production JsHttpHost capability construction; the Paradex native_payload_provider_signs_real_paradex_order_modify_and_jwt witness executes this constructor with real NativeRuntime/reqwest and compares actual SDK preimages, signatures and HTTP headers to maintained Node code. API classification itself is not a decoder receipt.",
+    "reason": "Constructs the sole REST host from existing runtime, adapter and optional executable remote/payload signing providers. It retains capabilities without deserializing account options or admitting a domain model; rest_http_host_signed delegates here with no payload capability."
+  }
+}

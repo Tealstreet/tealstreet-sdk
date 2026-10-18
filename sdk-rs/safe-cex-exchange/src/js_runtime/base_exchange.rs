@@ -79,6 +79,55 @@ fn js_remote_signer(
     ])
 }
 
+fn js_payload_signer(
+    signer: Rc<dyn safe_cex_crypto::PayloadSigner>,
+    runtime: Rc<dyn ExchangeRuntime>,
+) -> Js {
+    use safe_cex_crypto::{Encoding, PayloadScheme, PayloadSignerRequest};
+    Js::function("payloadSigner", move |_, args| {
+        let request = arg(&args, 0);
+        let exchange_name = to_typed(&request.get("exchangeName")?)?;
+        let key: String = to_typed(&request.get("key")?)?;
+        let payload: String = to_typed(&request.get("payload")?)?;
+        let scheme: String = to_typed(&request.get("scheme")?)?;
+        let encoding: String = to_typed(&request.get("encoding")?)?;
+        let scheme = match (scheme.as_str(), encoding.as_str()) {
+            ("hmac-sha256", "hex") => PayloadScheme::HmacSha256 {
+                encoding: Encoding::Hex,
+            },
+            ("hmac-sha256", "base64") => PayloadScheme::HmacSha256 {
+                encoding: Encoding::Base64,
+            },
+            ("stark", "felt-pair") => PayloadScheme::Stark,
+            _ => {
+                return Err(Thrown::type_error(
+                    "Unsupported payload signer scheme/encoding",
+                ));
+            }
+        };
+        let signer = signer.clone();
+        Ok(Js::Promise(Promise::spawn(
+            &runtime,
+            Box::pin(async move {
+                let result = signer
+                    .sign(PayloadSignerRequest {
+                        exchange_name,
+                        key: &key,
+                        payload: &payload,
+                        scheme,
+                    })
+                    .await
+                    .map_err(|error| Thrown::error("Error", &error))?;
+                let output = Js::object(vec![("signature", Js::str(&result.signature))]);
+                if let Some(headers) = result.headers {
+                    output.define("headers", from_typed(&headers)?)?;
+                }
+                Ok(output)
+            }),
+        )))
+    })
+}
+
 fn assembled_venue(context: &Weak<JsSocketContext>) -> Result<Rc<dyn Exchange>, Thrown> {
     context
         .upgrade()
@@ -133,6 +182,14 @@ pub fn create(
             "remoteSigner",
             js_remote_signer(signer, account, runtime.clone()),
         )?;
+    }
+    let payload = {
+        let host = context.http.borrow().clone();
+        host.and_then(|host| host.payload_signer())
+    };
+    if let Some(signer) = payload {
+        core.signers.payload_signer = Some(signer.clone());
+        options.set("payloadSigner", js_payload_signer(signer, runtime.clone()))?;
     }
     let this = Js::object_with_class(
         "BaseExchange",
