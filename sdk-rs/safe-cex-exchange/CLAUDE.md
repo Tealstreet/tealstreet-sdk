@@ -1331,6 +1331,12 @@ belongs to the derived promise. Reading result() alone does not handle it.
 Checks retain discarded rejection values until their reporting turn, and host
 driver discard releases those pending captures without reporting them.
 
+Bitrue's constructed public socket regression drives malformed raw depth frames
+through the real socket dispatcher. Its discarded async listener promise reports
+the source TypeError exactly once; the next valid snapshot still reaches its
+callback. Native host controls cover catches before rejection, during the same
+microtask checkpoint, and after the first report, plus host-discard cleanup.
+
 String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
 units and honor their position argument after search-string coercion. Positions
 truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
