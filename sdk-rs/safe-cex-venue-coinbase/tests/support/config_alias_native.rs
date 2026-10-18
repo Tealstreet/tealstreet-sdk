@@ -120,13 +120,13 @@ fn request_private_options_and_account_aliases_come_from_real_class_adapters() {
                 panic!("native params array")
             };
             {
-            let values = values.borrow();
-            assert!(
-                matches!(values[0], Frame::Number(value) if value.to_bits()==(-0.0_f64).to_bits())
-            );
-            assert!(matches!(values[1], Frame::Number(value) if value.is_nan()));
-            assert!(matches!(values[2], Frame::Undefined));
-            assert!(matches!(&values[3], Frame::String(units) if units==&[0xd800]));
+                let values = values.borrow();
+                assert!(
+                    matches!(values[0], Frame::Number(value) if value.to_bits()==(-0.0_f64).to_bits())
+                );
+                assert!(matches!(values[1], Frame::Number(value) if value.is_nan()));
+                assert!(matches!(values[2], Frame::Undefined));
+                assert!(matches!(&values[3], Frame::String(units) if units==&[0xd800]));
             }
             let private = exchange.class.private_websocket.borrow().clone().unwrap();
             let options: PrivateOptions = private.receiver.host.options();
