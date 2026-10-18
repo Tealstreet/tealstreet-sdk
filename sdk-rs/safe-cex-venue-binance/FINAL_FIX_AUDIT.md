@@ -85,4 +85,27 @@ maximum is used to close any row.
 
 ## Validation
 
-Final gates and compiled-control results are recorded here after completion.
+Validation after the normal master merge `7c07b58332`:
+
+- Five independently compiled live-binding faults: RED, byte-exact restoration,
+  GREEN for each. The restored hashes also match after the master merge.
+- Full Binance all-targets/all-features suite with ignored source oracles enabled:
+  80 executables, 418 passed, one inherited historical-fold failure, zero ignored.
+- Strict all-targets/all-features host Clippy, strict Wasm library Clippy, scoped
+  cargo fmt --check, default/inverse generators: GREEN.
+- All-features cancellation: six Rust tests and eleven Node controls GREEN;
+  override contract: eight tests GREEN, retaining rejection controls.
+
+Inherited exception: `private_classes::delegated_native_routes::production_native_historical_positions_keeps_symbol_scoped_fold`
+exceeds its existing independent 64-tick virtual-clock bound at
+`tests/support/delegated_native_routes.rs:74`. It reproduces when run alone.
+The test, Runtime fixture and historical fold/pager/native-host production sources
+are unchanged by this PR; the four deleted codecs had no caller there.
+The coordinator routed this to the #1178 author (codex-l89ogr) and requested
+explicit disclosure in #1189. The assertion and bound remain unchanged.
+
+- Full parity index after declaring the live target files and exact rename
+  citations: GREEN, 7563 source rows / 16339 public Rust items.
+- CI wiring: 376/376 GREEN. TypeScript extractor: GREEN, zero changed manifests / added / orphaned symbols.
+
+Auto-merge stays OFF while the coordinator's #1110 landing hold is active.

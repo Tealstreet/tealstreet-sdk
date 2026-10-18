@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/binance/binancepm.types.ts"
-rust_files = [ "safe-cex-venue-binance/src/generated/binancepm.rs" ]
+rust_files = [ "safe-cex-venue-binance/src/generated/binancepm.rs", "safe-cex-venue-binance/src/position_snapshots.rs" ]
 
 [[symbol]]
 ts = "RECV_WINDOW"
@@ -112,4 +112,4 @@ kind = "type"
 layer = "adapted"
 rs = "safe-cex-venue-binance/src/position_snapshots.rs::fetch_pm_positions"
 status = "ported"
-note = "Erased TypeScript annotation; the unused generated Rust codec and its standalone tests were deleted after zero-consumer searches in this mirror and tealstreet-next (exchange-server/connect-edge use safe-cex-ffi). The actual positions binding reads the canonical native graph through position_snapshots.rs::fetch_pm_positions; no duplicate record or decoder remains. See safe-cex-venue-binance/FINAL_FIX_AUDIT.md for both-repo census, compiler proof and constructed native witnesses. This deletion does not authorize any shared numeric depth bound."
+note = "Erased TypeScript annotation; the unused generated Rust codec and its standalone tests were deleted after zero-consumer searches in this mirror and tealstreet-next (exchange-server/connect-edge use safe-cex-ffi). The actual positions binding reads the canonical native graph through position_snapshots.rs::fetch_pm_positions; no duplicate record or decoder remains. See safe-cex-venue-binance/FINAL_FIX_AUDIT.md for both-repo census, compiler proof and constructed native witnesses. This deletion does not authorize any shared numeric depth bound. Rename target: `safe-cex-venue-binance/src/position_snapshots.rs::fetch_pm_positions`."
