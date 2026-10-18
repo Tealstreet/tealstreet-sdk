@@ -1819,3 +1819,12 @@ the model codec and Store. The same test compiled against archived master
 after the old JSON projection rejects the opaque lone surrogate. The retained
 implementation passes. The observer reads numeric bits, UTF-16 units and own
 field counts before any JSON output.
+
+The same HTTP witness includes lone UTF-16 values and keys on the preceding
+`/portfolios` response. Serde's flattened metadata buffer compiled and failed
+actual product admission before the decoder cutover. PortfolioState now captures
+one retained object, requires only string uuid/type, and keeps opaque UTF-16
+metadata directly. The actual HTTP witness and existing portfolio corpus pass.
+The constructed Host.merge_rest regression separately compiled RED when undefined
+array info was refused, then passed with the native Frame::Undefined carrier;
+its maintained source oracle pins undefined, NaN and infinity before output.
