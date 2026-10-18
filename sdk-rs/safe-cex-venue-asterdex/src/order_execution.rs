@@ -23,12 +23,51 @@ use std::{
 pub(crate) const OPEN_INTEREST_POLL_INTERVAL_MS: f64 = 15000.;
 pub(crate) const OPEN_INTEREST_BATCH_SIZE: usize = 25;
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ExecutionOrder {
-    #[serde(flatten)]
     pub opts: AsterDEXPlaceOrderOpts,
-    #[serde(rename = "postOnly", default)]
     pub post_only: Option<bool>,
+}
+#[derive(serde::Deserialize)]
+#[serde(remote = "ExecutionOrder")]
+struct ExecutionOrderWire {
+    #[serde(flatten)]
+    opts: AsterDEXPlaceOrderOpts,
+    #[serde(rename = "postOnly", default)]
+    post_only: Option<bool>,
+}
+
+// A private typed projection lets the shared guard check every numeric output
+// without adding a serialization API to the workflow input owner.
+#[derive(serde::Serialize)]
+struct ExecutionOrderOutput {
+    #[serde(flatten)]
+    opts: AsterDEXPlaceOrderOpts,
+    #[serde(rename = "postOnly")]
+    post_only: Option<bool>,
+}
+impl safe_cex_num::numeric_ingress::JsNumberOutput for ExecutionOrderOutput {
+    fn check_number_output(&self) {
+        safe_cex_num::numeric_ingress::JsNumberOutput::check_number_output(&self.opts);
+    }
+}
+impl<'de> serde::Deserialize<'de> for ExecutionOrder {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?
+            .decode_with(|d| {
+                let value =
+                    ExecutionOrderWire::deserialize(safe_cex_types::strict_decode::object(d))?;
+                Ok(ExecutionOrderOutput {
+                    opts: value.opts,
+                    post_only: value.post_only,
+                })
+            })
+            .map(|value| Self {
+                opts: value.opts,
+                post_only: value.post_only,
+            })
+            .map_err(serde::de::Error::custom)
+    }
 }
 /// Venue-only fields decorate the shared prepared carrier; the public extended
 /// PlaceOrderOpts and its decoder retain their strict validation contract.

@@ -445,3 +445,55 @@ fn option_and_inverse_toggles_reach_constructors_with_source_metadata_and_overri
     assert_eq!(public.options.enable_option_markets, Some(true));
     assert_eq!(public.options.enable_inverse_markets, Some(false));
 }
+
+#[test]
+fn hyro_account_mode_maps_before_presence_aware_overrides() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/root_option_toggles_source.cjs"
+        ))
+        .arg("--hyro-modes")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        rows.len(),
+        24,
+        "two venues, three account flags, four override states"
+    );
+    let transport = TransportRegistry::default();
+    let host = AccountOptionsHost {
+        transport: &transport,
+        instance: None,
+        environment: &|_| None,
+        warn: &|_| {},
+    };
+    for row in rows {
+        let account: ExchangeAccountConfig =
+            serde_json::from_value(row["account"].clone()).unwrap();
+        let mut patch = ExchangeOptionsPatch::default();
+        if row["override"] != "absent" {
+            patch.extra = Some(ExchangeOptionsExtraPatch {
+                hyrotrader_mode: Some(if row["override"] == "undefined" {
+                    None
+                } else {
+                    Some(serde_json::from_value(row["override"].clone()).unwrap())
+                }),
+                ..Default::default()
+            });
+        }
+        let options = account_to_exchange_options(&account, Some(&patch), &host).unwrap();
+        assert_eq!(
+            serde_json::to_value(options.extra).unwrap(),
+            row["extra"],
+            "source Hyro account flag/override {}",
+            row
+        );
+    }
+}

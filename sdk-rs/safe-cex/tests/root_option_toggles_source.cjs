@@ -15,6 +15,18 @@ function evaluate(relative,extra,params,values,names) {
 const provider={publicCorsProxy:()=>undefined,serverProxyUrl:()=>undefined};
 let warnings=[];
 const account=evaluate('packages/safe-cex/src/createExchangeFromAccount.ts','',['getExchangeMetadata','resolveAccountTransport','normalizeBybitSiteId','getTransport','createExchange','process','console'],[metadata.getExchangeMetadata,routing.resolveAccountTransport,site.normalizeBybitSiteId,()=>provider,()=>{throw Error('unexpected constructor')},{env:{}},{warn:message=>warnings.push(message)}]);
+if(process.argv.includes('--hyro-modes')) {
+ const rows=[];
+ for(const exchange of ['hyrotrader','bybit'])for(const demo of ['absent',false,true])for(const override of ['absent','undefined','demo','production']) {
+  const input={exchange,name:'hyro-mode-account',apiKey:'fixture-key',apiSecret:'fixture-secret',...(demo==='absent'?{}:{hyrotraderDemo:demo})};
+  const patch=override==='absent'?undefined:{extra:{hyrotraderMode:override==='undefined'?undefined:override}};
+  const result=account.accountToExchangeOptions(input,patch);
+  rows.push({account:input,override,extra:result.extra??null});
+ }
+ assert.equal(rows.length,24);
+ process.stdout.write(JSON.stringify(rows));
+ process.exit(0);
+}
 const fields=['enableSpotMarkets','enableOptionMarkets','enableInverseMarkets'];
 const names=Object.keys(metadata.exchangeMetadata);assert.equal(names.length,48,'all declared exchange metadata entries');
 const rows=[];

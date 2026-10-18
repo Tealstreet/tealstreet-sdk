@@ -68,11 +68,19 @@ retain the separate obligations of lexical ordinary `Wire` decoders.
 `RECORD_CONTRACT_REVIEW.md` records twenty ordinary wire record contracts,
 184 native fields, 707 shape/field observations and a complete-array control.
 
+`DECODER_CONTRACT_REVIEW.md` reviews eleven remaining wire/workflow decoders,
+their direct native fields, per-field TS runtime null behavior, and the measured
+workflow object-shape and flattened numeric-ingress repairs.
+
 `ENUM_CONTRACT_REVIEW.md` records eleven string/position-mode enum contracts,
 their 173 raw-text/native observations and grouped String-frontdoor control.
 
 `DECISION_CONTRACT_REVIEW.md` records eight account/exchange decision contracts,
 their 98 fixed TS/native observations and five isolated compiled controls.
+
+`EXCHANGE_HELPER_CONTRACT_REVIEW.md` records twelve further production helper
+contracts, direct native fields/effects and the source checks for their 48 cases.
+The selected runner covers those twelve owners; the other full-matrix obligations remain.
 
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
@@ -168,3 +176,8 @@ behavior, requiring a compiled native failure and exact restored pass.
 companions and their direct shape/native-value witnesses. The focused
 `scripts/accepted-wire-contracts.mjs` retains all 608 observations and every
 compiler field, including each separately executed public-wrapper boundary.
+
+`ALTERNATE_OWNER_CONTRACT_REVIEW.md` records the assigned thirty-three-owner
+cohort: eleven Deserialize carriers, fourteen raw-input runtime owners and eight
+explicitly typed APIs. The selected runner uses CI's actual native probe path;
+constructor/conversion receipts remain distinct from decoder execution.

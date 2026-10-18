@@ -10,6 +10,7 @@ use safe_cex_types::{
 
 #[derive(Clone, Default)]
 pub struct ExchangeOptionsExtraPatch {
+    pub hyrotrader_mode: Option<Option<safe_cex_types::ExchangeOptionsExtraHyrotraderMode>>,
     pub tick_interval: Option<Option<f64>>,
     pub recv_window: Option<Option<f64>>,
     pub asterdex_api_version: Option<Option<ExchangeOptionsExtraAsterdexApiVersion>>,
@@ -26,6 +27,9 @@ pub(crate) fn apply_extra_patch(
     patch: &ExchangeOptionsExtraPatch,
     options: &mut ExchangeOptionsExtra,
 ) {
+    if let Some(value) = &patch.hyrotrader_mode {
+        options.hyrotrader_mode = value.clone();
+    }
     if let Some(value) = &patch.tick_interval {
         options.tick_interval = *value;
     }
@@ -59,7 +63,8 @@ pub(crate) fn apply_extra_patch(
 }
 
 pub(crate) fn extra_patch_present(patch: &ExchangeOptionsExtraPatch) -> bool {
-    patch.tick_interval.is_some()
+    patch.hyrotrader_mode.is_some()
+        || patch.tick_interval.is_some()
         || patch.recv_window.is_some()
         || patch.asterdex_api_version.is_some()
         || patch.aster_builder_address.is_some()
@@ -73,6 +78,7 @@ pub(crate) fn extra_patch_present(patch: &ExchangeOptionsExtraPatch) -> bool {
 
 pub(crate) fn empty_extra_options() -> ExchangeOptionsExtra {
     ExchangeOptionsExtra {
+        hyrotrader_mode: None,
         tick_interval: None,
         recv_window: None,
         asterdex_api_version: None,

@@ -75,6 +75,13 @@ pub(crate) fn should_use_local_fallback(rt: &Rt) -> Result<bool, Thrown> {
     )
 }
 
+fn local_fallback(rt: &Rt) -> Result<bool, Thrown> {
+    Ok(rt
+        .this
+        .call_method("shouldUseLocalRestOrderLifecycleFallback", vec![])?
+        .truthy())
+}
+
 // ts: BybitExchange#scheduleLocalReduceOnlyLimitOrderReconciliation
 pub(crate) fn schedule_reconciliation(rt: &Rt, order: Order) -> Result<(), Thrown> {
     let venue = venue(rt)?;
@@ -93,9 +100,7 @@ pub(crate) fn schedule_reconciliation(rt: &Rt, order: Order) -> Result<(), Throw
         &venue.order_state,
         handle,
         |order| {
-            lifecycle::should_reconcile_local_reduce_only_limit_order(order, || {
-                should_use_local_fallback(rt)
-            })
+            lifecycle::should_reconcile_local_reduce_only_limit_order(order, || local_fallback(rt))
         },
         |id| clear_timers(rt, id),
         move |callback, delay| Ok(timer_rt.set_timeout(Rc::new(move || callback()), delay)),
@@ -138,7 +143,7 @@ pub(crate) fn record_recently_placed_order(rt: &Rt, order: &Js) -> Result<(), Th
         &venue.order_state,
         Rc::new(RefCell::new(order)),
         || now(rt),
-        || should_use_local_fallback(rt),
+        || local_fallback(rt),
         |orders| {
             let rows: Vec<Order> = orders.borrow().iter().map(|o| o.borrow().clone()).collect();
             rt.this
@@ -154,7 +159,7 @@ pub(crate) fn record_recently_placed_order(rt: &Rt, order: &Js) -> Result<(), Th
 pub(crate) fn should_reconcile(rt: &Rt, order: &Js) -> Result<bool, Thrown> {
     let order: Order = to_typed(order)?;
     lifecycle::should_reconcile_local_reduce_only_limit_order(&Rc::new(RefCell::new(order)), || {
-        should_use_local_fallback(rt)
+        local_fallback(rt)
     })
 }
 
@@ -243,7 +248,7 @@ pub(crate) fn retire_cancelled_orders(rt: &Rt, orders: &Js) -> Result<(), Thrown
             }
         }
     }
-    if should_use_local_fallback(rt)? {
+    if local_fallback(rt)? {
         let ids = orders
             .iter()
             .map(|order| Ok(Js::object(vec![("id", order.get("id")?)])))

@@ -757,8 +757,8 @@ canonical shared String.prototype.localeCompare implementation.
 
 ## Native HyroTrader composition
 
-`BybitExchange::create(Hyrotrader, ...)` selects its explicit simulator origin,
-source receiver overrides and private acknowledgement/reconciliation protocol.
+`BybitExchange::create(Hyrotrader, ...)` selects its configured production or
+simulator origins, source receiver overrides and private acknowledgement/reconciliation protocol.
 The registry reuses the existing Bybit dependency edge. Missing build-time REST
 configuration returns the source error before IO; public/private WS origins use
 the existing build-time tables and REST-derived defaults. Never route Hyro to
@@ -871,6 +871,32 @@ production route and are deleted. Hyro socket disposal uses the existing concret
 PrivateProtocol hook followed by shared BaseWebSocket cleanup; the uncalled
 generic dispose wrapper and its three synthetic-only cases are removed. Preserve
 the actual constructor/socket/Store witnesses and the remaining439 session cases.
+
+Hyro defaults to production account classification; only the exact optional
+`extra.hyrotraderMode: "demo"` sets isDemo. Production uses configured PROD REST/WS
+origins, or borrows configured simulator origins while remaining production.
+Missing REST configuration reports the selected family and source hint. The
+local REST order-lifecycle fallback stays enabled in both modes through the
+actual protected-method receiver override, including the typed lifecycle callers.
+The shared option is a closed demo|production enum with ordinary optional-field
+and string-union admission; it does not add credential fallbacks.
+
+`tests/hyro_mode_binding.rs` compares the maintained constructor/hooks with real
+construction, signed HTTP dispatch, public/private socket dials and cancellation
+Store retirement. Its serialized child builds exercise production REST-derived
+WS, explicit WS overrides and simulator-backed production, each with absent,
+explicit demo and explicit production modes. The ordinary unconfigured profile
+checks the exact source refusal. All Cargo subprocesses use jobs1 and a timeout.
+
+The top-level account `hyrotraderDemo` boolean maps to the Hyro mode before
+presence-aware extra overrides, matching accountToExchangeOptions; other venues
+keep their existing extra shape. The 24 source/native account cases cover absent,
+false and true flags with absent, undefined, demo and production overrides.
+The live metadata snapshot keeps Hyro disabled in normal/preview discovery while
+enabledInDev remains true, matching the source rather than account-mode selection.
+The snapshot URL component oracle explicitly selects demo and executes the new
+source configuration methods; actual default production/fallback routing is covered
+separately through the constructed binding matrix.
 
 The constructed ticker census in `public_stream_binding` compares primary/demo
 linear and inverse categories, dedicated inverse and Spot with their maintained
