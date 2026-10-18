@@ -126,87 +126,34 @@ fn destructure(v: &Js, key: &str) -> Result<Js, Thrown> {
     v.get(key)
 }
 
-fn not_iterable(v: &Js) -> Thrown {
-    let what = match v {
-        Js::Undefined | Js::Null => v.to_display(),
-        Js::Number(_) | Js::Bool(_) => format!("{} {}", v.type_of(), v.to_display()),
-        Js::Function(_) => "function".to_owned(),
-        _ => "object".to_owned(),
-    };
-    Thrown::type_error(&format!(
-        "{what} is not iterable (cannot read property Symbol(Symbol.iterator))"
+/// Live native iterator over the iterable intrinsics.
+pub(crate) struct JsIter(safe_cex_exchange::js_runtime::iterator::IteratorRecord);
+fn iterate(value: &Js) -> Result<JsIter, Thrown> {
+    Ok(JsIter(
+        safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?,
     ))
 }
-
-/// Live native iterator over the iterable intrinsics.
-pub(crate) enum JsIter {
-    Array(Js, usize),
-    Map(Js, usize),
-    Set(Js, usize),
-    Values(Vec<Js>, usize),
-}
-
-fn iterate(v: &Js) -> Result<JsIter, Thrown> {
-    Ok(match v {
-        Js::Array(_) => JsIter::Array(v.clone(), 0),
-        Js::Map(_) => JsIter::Map(v.clone(), 0),
-        Js::Set(_) => JsIter::Set(v.clone(), 0),
-        Js::String(s) => {
-            let chars = char::decode_utf16(s.iter().copied())
-                .map(|c| match c {
-                    Ok(c) => Js::str(&c.to_string()),
-                    Err(e) => Js::utf16(&[e.unpaired_surrogate()]),
-                })
-                .collect();
-            JsIter::Values(chars, 0)
-        }
-        other => return Err(not_iterable(other)),
-    })
-}
-
-fn iter_next(it: &mut JsIter) -> Option<Js> {
-    match it {
-        JsIter::Array(Js::Array(items), i) => {
-            let out = items.borrow().get(*i).cloned();
-            *i += 1;
-            out.map(|v| v.unwrap_or(Js::Undefined))
-        }
-        JsIter::Map(Js::Map(entries), i) => {
-            let out = entries.borrow().get(*i).cloned();
-            *i += 1;
-            out.map(|(k, v)| Js::array(vec![k, v]))
-        }
-        JsIter::Set(Js::Set(values), i) => {
-            let out = values.borrow().get(*i).cloned();
-            *i += 1;
-            out
-        }
-        JsIter::Values(values, i) => {
-            let out = values.get(*i).cloned();
-            *i += 1;
-            out
-        }
-        _ => None,
-    }
+fn iter_next(it: &mut JsIter) -> Result<Option<Js>, Thrown> {
+    it.0.step_value()
 }
 
 fn array_len(v: &Js) -> usize {
     match v {
-        Js::Array(items) => items.borrow().len(),
+        Js::Array(items) => items.len(),
         _ => 0,
     }
 }
 
 /// HasProperty(i) then Get(i) on the live array.
-fn element(v: &Js, i: usize) -> Option<Js> {
-    match v {
-        Js::Array(items) => items.borrow().get(i).cloned().flatten(),
-        _ => None,
+fn element(v: &Js, i: usize) -> Result<Option<Js>, Thrown> {
+    if v.has_index(i) {
+        Ok(Some(v.get(&i.to_string())?))
+    } else {
+        Ok(None)
     }
 }
-
-fn element_or_undefined(v: &Js, i: usize) -> Js {
-    element(v, i).unwrap_or(Js::Undefined)
+fn element_or_undefined(v: &Js, i: usize) -> Result<Js, Thrown> {
+    Ok(element(v, i)?.unwrap_or(Js::Undefined))
 }
 
 /// Array callbacks run natively; a non-array receiver's member is not a builtin.
@@ -355,7 +302,7 @@ fn operation(name: &str, args: &[Js]) -> Result<Js, Thrown> {
         "remainder" => num_op(args, |a, b| a % b)?,
         "unaryPlus" => Js::Number(a0.to_number()?),
         "increment" => Js::Number(a0.to_number()? + 1.0),
-        "destructureFirst" => iter_next(&mut iterate(&a0)?).unwrap_or(Js::Undefined),
+        "destructureFirst" => iter_next(&mut iterate(&a0)?)?.unwrap_or(Js::Undefined),
         "objectSpread" => a0.spread_object()?,
         "typeofObject" => Js::Bool(a0.type_of() == "object"),
         "arrayAppendOwn" => {
@@ -535,7 +482,7 @@ impl RestActionsHost for Rt {
         require_array(&member, &array, "filter")?;
         let out = Js::array(vec![]);
         for i in 0..array_len(&array) {
-            if let Some(v) = element(&array, i)
+            if let Some(v) = element(&array, i)?
                 && predicate(v.clone())?
             {
                 out.push(v)?;
@@ -549,7 +496,7 @@ impl RestActionsHost for Rt {
     {
         require_array(&member, &array, "find")?;
         for i in 0..array_len(&array) {
-            let v = element_or_undefined(&array, i);
+            let v = element_or_undefined(&array, i)?;
             if predicate(v.clone())? {
                 return Ok(v);
             }
@@ -562,7 +509,7 @@ impl RestActionsHost for Rt {
     {
         require_array(&member, &array, "some")?;
         for i in 0..array_len(&array) {
-            if let Some(v) = element(&array, i)
+            if let Some(v) = element(&array, i)?
                 && predicate(v)?
             {
                 return Ok(true);
@@ -585,7 +532,7 @@ impl OrderPlacementHost for Rt {
     type Iterator = JsIter;
     fn spread_into(&self, array: &Js, elements: Js) -> Result<(), Thrown> {
         let mut it = iterate(&elements)?;
-        while let Some(v) = iter_next(&mut it) {
+        while let Some(v) = iter_next(&mut it)? {
             array.push(v)?;
         }
         Ok(())
@@ -594,12 +541,13 @@ impl OrderPlacementHost for Rt {
         iterate(value)
     }
     fn next(&self, iterator: &mut JsIter) -> Result<Option<Js>, Thrown> {
-        Ok(iter_next(iterator))
+        iter_next(iterator)
     }
     fn pair(&self, value: Js) -> Result<(Js, Js), Thrown> {
         let mut it = iterate(&value)?;
-        let first = iter_next(&mut it).unwrap_or(Js::Undefined);
-        let second = iter_next(&mut it).unwrap_or(Js::Undefined);
+        let first = iter_next(&mut it)?.unwrap_or(Js::Undefined);
+        let second = iter_next(&mut it)?.unwrap_or(Js::Undefined);
+        it.0.close()?;
         Ok((first, second))
     }
     fn map<F>(&self, member: Js, array: Js, mut callback: F) -> Result<Js, Thrown>
@@ -610,7 +558,7 @@ impl OrderPlacementHost for Rt {
         let len = array_len(&array);
         let mut out: Vec<Option<Js>> = vec![None; len];
         for (i, slot) in out.iter_mut().enumerate() {
-            if let Some(v) = element(&array, i) {
+            if let Some(v) = element(&array, i)? {
                 *slot = Some(callback(v)?);
             }
         }
@@ -623,7 +571,7 @@ impl OrderPlacementHost for Rt {
         require_array(&member, &array, "reduce")?;
         let mut acc = initial;
         for i in 0..array_len(&array) {
-            if let Some(v) = element(&array, i) {
+            if let Some(v) = element(&array, i)? {
                 acc = callback(acc, v)?;
             }
         }
@@ -635,7 +583,7 @@ impl OrderPlacementHost for Rt {
     {
         require_array(&member, &array, "forEach")?;
         for i in 0..array_len(&array) {
-            if let Some(v) = element(&array, i) {
+            if let Some(v) = element(&array, i)? {
                 callback(v)?;
             }
         }
@@ -680,7 +628,7 @@ impl OrderPreparationHost for Rt {
 
 impl RuntimeOrchestrationHost for Rt {
     fn first(&self, value: Js) -> Result<Js, Thrown> {
-        Ok(iter_next(&mut iterate(&value)?).unwrap_or(Js::Undefined))
+        Ok(iter_next(&mut iterate(&value)?)?.unwrap_or(Js::Undefined))
     }
     fn function<F>(&self, body: F) -> Js
     where
@@ -733,7 +681,7 @@ fn to_finite_number(value: &Js, fallback: Js) -> Result<Js, Thrown> {
 
 fn lodash_values(collection: &Js) -> Result<Vec<Js>, Thrown> {
     Ok(match collection {
-        Js::Array(_) => collection.array_values().unwrap_or_default(),
+        Js::Array(_) => collection.array_values()?.unwrap_or_default(),
         Js::Undefined | Js::Null => vec![],
         Js::String(_) => collection
             .own_entries()?
@@ -770,7 +718,7 @@ fn update_order_book(book: &Js, side: &Js, update: &Js, upsert: &Js) -> Result<J
     let mut found = None;
     while left <= right {
         let mid = ((left + right) as u64 >> 1) as i64;
-        let mid_price = element_or_undefined(&levels, mid as usize).get("price")?;
+        let mid_price = element_or_undefined(&levels, mid as usize)?.get("price")?;
         if mid_price.strict_equals(&price) {
             found = Some(mid as usize);
             break;
@@ -793,16 +741,16 @@ fn update_order_book(book: &Js, side: &Js, update: &Js, upsert: &Js) -> Result<J
     Ok(Js::Number(match found {
         None if !upsert || zero => -1.0,
         None => {
-            let at = (left as usize).min(items.borrow().len());
-            items.borrow_mut().insert(at, Some(update.clone()));
+            let at = (left as usize).min(items.len());
+            levels.splice_array(at, 0, vec![update.clone()])?;
             at as f64
         }
         Some(index) if zero => {
-            items.borrow_mut().remove(index);
+            levels.splice_array(index, 1, vec![])?;
             -1.0
         }
         Some(index) => {
-            element_or_undefined(&levels, index).set("amount", update.get("amount")?)?;
+            element_or_undefined(&levels, index)?.set("amount", update.get("amount")?)?;
             index as f64
         }
     }))
@@ -813,7 +761,7 @@ fn calc_order_book_total(book: &Js) -> Result<(), Thrown> {
         let levels = book.get(side)?;
         let mut total = Js::Number(0.0);
         for i in 0..array_len(&levels) {
-            let level = element_or_undefined(&levels, i);
+            let level = element_or_undefined(&levels, i)?;
             total = js_add(&total, &level.get("amount")?)?;
             level.set("total", total.clone())?;
         }
@@ -966,7 +914,7 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
                 out.define_key(&k, source.get_key(&k)?)?;
             }
             for path in a.iter().skip(1) {
-                let paths = path.array_values().unwrap_or_else(|| vec![path.clone()]);
+                let paths = path.array_values()?.unwrap_or_else(|| vec![path.clone()]);
                 for p in paths {
                     out.delete(&property_key(&p)?)?;
                 }
@@ -1011,7 +959,7 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
         "chunk",
         Js::function("chunk", |_, a| {
             let size = lodash_to_integer(&arg(&a, 1))?.max(0.0);
-            let values = arg(&a, 0).array_values().unwrap_or_default();
+            let values = arg(&a, 0).array_values()?.unwrap_or_default();
             if values.is_empty() || size < 1.0 {
                 return Ok(Js::array(vec![]));
             }
@@ -1028,7 +976,7 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
         Js::function("uniqBy", |_, a| {
             let iteratee = arg(&a, 1);
             let (mut seen, mut out): (Vec<Js>, Vec<Js>) = (vec![], vec![]);
-            for v in arg(&a, 0).array_values().unwrap_or_default() {
+            for v in arg(&a, 0).array_values()?.unwrap_or_default() {
                 let computed = lodash_iteratee(&iteratee, &v)?;
                 if !seen.iter().any(|s| s.same_value_zero(&computed)) {
                     seen.push(computed);
@@ -1133,7 +1081,7 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
         Js::function("assertCallerClientOrderIds", move |_, a| {
             let mut typed = vec![];
             let mut it = iterate(&arg(&a, 0))?;
-            while let Some(order) = iter_next(&mut it) {
+            while let Some(order) = iter_next(&mut it)? {
                 if !order.get("clientOrderId")?.is_undefined() {
                     typed.push(place_opts_typed(&order)?);
                 }

@@ -51,7 +51,10 @@ pub fn object(fields: Vec<(&str, Js)>) -> Js {
     Js::object(fields)
 }
 pub fn list(value: &Js) -> Vec<Js> {
-    value.array_values().expect("native fixture array")
+    value
+        .array_values()
+        .expect("fixture array property reads")
+        .expect("native fixture array")
 }
 pub fn get(value: &Js, key: &str) -> Js {
     value.get(key).expect("native fixture Get")

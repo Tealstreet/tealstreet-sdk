@@ -84,7 +84,7 @@ pub(crate) fn optional(value: &Js, key: &str) -> Result<Js, Thrown> {
 }
 pub(crate) fn rows(value: &Js) -> Result<Vec<Js>, Thrown> {
     value
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))
 }
 pub(crate) fn text(value: &Js) -> Result<String, Thrown> {

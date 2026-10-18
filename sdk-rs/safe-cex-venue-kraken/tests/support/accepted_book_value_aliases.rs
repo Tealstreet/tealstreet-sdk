@@ -242,7 +242,12 @@ fn native_level_values_reach_constructed_futures_and_spot_callbacks() {
         let books = emitted_books(name);
         let source = source_book(family);
         for side in ["bids", "asks"] {
-            let levels = books[0].get(side).unwrap().array_values().unwrap();
+            let levels = books[0]
+                .get(side)
+                .unwrap()
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap();
             let expected = source[side].as_array().unwrap();
             assert_eq!(expected.len(), 2, "nonempty source {side}");
             assert_eq!(levels.len(), expected.len(), "native {side} length");
@@ -266,7 +271,12 @@ fn native_levels_collection_keeps_both_sides_and_sort_order() {
     for name in [ExchangeName::Kraken, ExchangeName::Krakenspot] {
         let books = emitted_books(name);
         for (side, expected) in [("bids", [17.25_f64, 5.5]), ("asks", [37.75, 41.25])] {
-            let levels = books[0].get(side).unwrap().array_values().unwrap();
+            let levels = books[0]
+                .get(side)
+                .unwrap()
+                .array_values()
+                .expect("fixture array property reads")
+                .unwrap();
             assert_eq!(levels.len(), 2, "native {side} collection length");
             assert_eq!(
                 levels

@@ -42,7 +42,13 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
-        EventValue::Array(v) => Value::Array(array_values(v).iter().map(wire).collect()),
+        EventValue::Array(v) => Value::Array(
+            array_values(v)
+                .expect("fixture array reads")
+                .iter()
+                .map(wire)
+                .collect(),
+        ),
         EventValue::Object(_) => Value::Object(
             v.spread()
                 .iter()
@@ -97,7 +103,7 @@ fn arr(v: &EventValue) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("native Array")
     };
-    array_values(a)
+    array_values(a).expect("fixture array reads")
 }
 fn syn(k: LifecycleSync) -> &'static str {
     match k {

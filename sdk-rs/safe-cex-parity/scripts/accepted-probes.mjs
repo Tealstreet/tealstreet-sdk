@@ -9,6 +9,7 @@ import { contractJson } from './accepted-contract-files.mjs';
 import { aliasContract } from './accepted-aliases.mjs';
 import { defaultWitnessContract, telemetryDefaultWitness } from './accepted-defaults.mjs';
 import { grvtFieldsBody } from './accepted-grvt-fields.mjs';
+import { krakenNumericChangesBody } from './accepted-kraken-numeric-changes.mjs';
 import { nodeProbeConfiguration, nodeProbeHarness, executeNodeProbes } from './accepted-node-probes.mjs';
 import { requiredFeatures } from './accepted-feature-contracts.mjs';
 
@@ -33,6 +34,7 @@ function aliasBody(type, targetType, contract) {
     ? `std::any::type_name::<${contract.aliasProbeExpected}>().split('<').next().expect("reviewed unsized alias identity")`
     : literal(contract.canonical);
   const alternate = `|value| { let alternate = crate::__accepted_set_runtime::AliasAlternate::<${targetType}>(std::marker::PhantomData); let mut paths: Vec<_> = [${aliasTraitMethods.map(([, method, name]) => `(${literal(name)}, (&&alternate).${method}(value))`).join(',')}].into_iter().filter_map(|(name, accepted)| accepted.map(|accepted| (name, accepted))).collect(); if (&&alternate).has_static_from() && (&&alternate).probe_from_str_ref(value).is_none() { paths.push(("unsupported From<&'static str>", false)); } if (&&alternate).has_static_try() && (&&alternate).probe_try_str_ref(value).is_none() { paths.push(("unsupported TryFrom<&'static str>", false)); } paths }`;
+  if (contract.aliasProbeKind === 'reviewed-kraken-numeric-changes') return `{ ${equality} use crate::__accepted_set_runtime::{AliasStaticFrom as _, AliasStaticTry as _, ${aliasTraitMethods.map(([trait]) => `${trait} as _`).join(', ')}}; ${krakenNumericChangesBody(type, targetType, contract, alternate)} }`;
   if (contract.aliasProbeKind === 'reviewed-grvt-fields') return `{ ${equality} use crate::__accepted_set_runtime::{AliasStaticFrom as _, AliasStaticTry as _, ${aliasTraitMethods.map(([trait]) => `${trait} as _`).join(', ')}}; ${grvtFieldsBody(type, targetType, contract, alternate)} }`;
   const native = `|path, value| { let alternate = crate::__accepted_set_runtime::AliasAlternate::<${targetType}>(std::marker::PhantomData); match path { ${aliasTraitMethods.map(([, , name, method]) => `${literal(name)} => (&&alternate).${method}(value, &|${contract.nativeProjection ? 'decoded' : '_decoded'}| ${contract.nativeProjection?.replaceAll('$decoded', 'decoded') ?? 'serde_json::Value::Null'}),`).join(' ')} _ => None } }`;
   return `{ ${equality} use crate::__accepted_set_runtime::{DetectAlias as _, AliasStaticFrom as _, AliasStaticTry as _, ${aliasTraitMethods.map(([trait]) => `${trait} as _`).join(', ')}}; let probe = crate::__accepted_set_runtime::AliasProbe::<${targetType}>(std::marker::PhantomData); (&&&probe).probe(${literal(type.name)}, ${canonical}, ${literal(contractJson(contract))}, |${observation ? 'value' : '_value'}| ${observation ? observation.call.replaceAll('$type', targetType).replaceAll('$value', 'value') : 'serde_json::Value::Null'}, ${native}, ${alternate}); }`;

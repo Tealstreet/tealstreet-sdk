@@ -362,7 +362,7 @@ impl SpotCancelHost for Rt {
     }
     fn items(&self, orders: Rc<Js>) -> Result<Self::Items, Thrown> {
         let items = orders
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("orders is not iterable"))?;
         Ok(items
             .into_iter()
