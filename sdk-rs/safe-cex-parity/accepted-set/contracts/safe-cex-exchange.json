@@ -11024,6 +11024,162 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "retained_response_input",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual retained_response_input read on an API-created retained response origin. Native units, own undefined, signed-zero bits and original cause identity are observed separately from the computed diagnostic JSON view.",
+        "call": "{use safe_cex_types::retained_json::RetainedJsonInput as Input;let code=$value.as_u64().expect(\"authored surrogate\") as u16;let mut original=<$type>::new(\"message\");let old=crate::runtime::ExchangeErrorOrigin::new(std::io::Error::other(\"opaque cause\"));original.origin=Some(old.clone());let response=Input::Object(vec![(\"data\".encode_utf16().collect(),Input::Text(vec![code])),(\"zero\".encode_utf16().collect(),Input::Float(-0.0)),(\"ownUndefined\".encode_utf16().collect(),Input::Undefined)]);let decoded=original.with_retained_response(response);let native=decoded.retained_response_input().expect(\"retained response\");let units=match native.get(\"data\").unwrap(){Input::Text(units)=>units.clone(),_=>panic!(\"native text\")};let zero=safe_cex_num::js_retained_number(native.get(\"zero\")).unwrap().to_bits().to_string();let cause=std::error::Error::source(&decoded).and_then(|wrapper|wrapper.source()).and_then(|value|value.downcast_ref::<std::io::Error>()).expect(\"original cause\");serde_json::json!({\"units\":units,\"zero\":zero,\"undefined\":matches!(native.get(\"ownUndefined\"),Some(Input::Undefined)),\"sameCause\":std::ptr::eq(cause,old.error().downcast_ref::<std::io::Error>().unwrap()),\"view\":decoded.response_json_view()})}",
+        "cases": [
+          {
+            "input": 55296,
+            "output": {
+              "units": [
+                55296
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          },
+          {
+            "input": 57343,
+            "output": {
+              "units": [
+                57343
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "response_json_view",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual response_json_view read on an API-created retained response origin. Native units, own undefined, signed-zero bits and original cause identity are observed separately from the computed diagnostic JSON view.",
+        "call": "{use safe_cex_types::retained_json::RetainedJsonInput as Input;let code=$value.as_u64().expect(\"authored surrogate\") as u16;let mut original=<$type>::new(\"message\");let old=crate::runtime::ExchangeErrorOrigin::new(std::io::Error::other(\"opaque cause\"));original.origin=Some(old.clone());let response=Input::Object(vec![(\"data\".encode_utf16().collect(),Input::Text(vec![code])),(\"zero\".encode_utf16().collect(),Input::Float(-0.0)),(\"ownUndefined\".encode_utf16().collect(),Input::Undefined)]);let decoded=original.with_retained_response(response);let native=decoded.retained_response_input().expect(\"retained response\");let units=match native.get(\"data\").unwrap(){Input::Text(units)=>units.clone(),_=>panic!(\"native text\")};let zero=safe_cex_num::js_retained_number(native.get(\"zero\")).unwrap().to_bits().to_string();let cause=std::error::Error::source(&decoded).and_then(|wrapper|wrapper.source()).and_then(|value|value.downcast_ref::<std::io::Error>()).expect(\"original cause\");serde_json::json!({\"units\":units,\"zero\":zero,\"undefined\":matches!(native.get(\"ownUndefined\"),Some(Input::Undefined)),\"sameCause\":std::ptr::eq(cause,old.error().downcast_ref::<std::io::Error>().unwrap()),\"view\":decoded.response_json_view()})}",
+        "cases": [
+          {
+            "input": 55296,
+            "output": {
+              "units": [
+                55296
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          },
+          {
+            "input": 57343,
+            "output": {
+              "units": [
+                57343
+              ],
+              "zero": "9223372036854775808",
+              "undefined": true,
+              "sameCause": true,
+              "view": {
+                "data": "�",
+                "zero": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "new",
           "signature": {
             "inputs": [

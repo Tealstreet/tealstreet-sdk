@@ -161,7 +161,8 @@ fn signature_predicate_matches_actual_typescript() {
     assert_eq!(source.len(), inputs.len(), "source signature corpus floor");
     for ((data, rejected), source) in inputs.iter().zip(expected).zip(source) {
         assert_eq!(
-            safe_cex_venue_kucoin::api::is_kucoin_signature_rejection(&data.clone().into()).unwrap(),
+            safe_cex_venue_kucoin::api::is_kucoin_signature_rejection(&data.clone().into())
+                .unwrap(),
             rejected,
             "native signature predicate {data}"
         );
