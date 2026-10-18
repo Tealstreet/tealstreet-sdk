@@ -23,13 +23,13 @@ for (const secondaryKey of ['read-key', '', undefined]) {
       try { if (id !== undefined) await native.nativeAccountClose(id); }
       finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     });
-    id = await native.nativeAccountOpen({ exchange: 'mexc', optionsJson: JSON.stringify({
+    id = await native.nativeAccountOpen({ exchange: 'mexc', options: {
       key: 'primary-key', secret: 'primary-secret', overrideProxyUrl: `${origin}/primary`,
       secondary_key: secondaryKey, secondary_secret: 'read-secret', secondaryProxyUrl: `${origin}/secondary`,
-    }) }, () => {}, () => {});
-    const account = JSON.parse(await native.nativeAccountCallMethod(id, 'getAccount', '[]'));
+    } }, () => {}, () => {});
+    const account = await native.nativeAccountCallMethod(id, 'getAccount', []);
     assert.equal(account.userId, `mexc:${createHash('sha256').update('primary-key').digest('hex').slice(0, 24)}`);
-    await native.nativeAccountCallMethod(id, 'cancelAllOrders', '[]');
+    await native.nativeAccountCallMethod(id, 'cancelAllOrders', []);
     assert.equal(seen.length, 2);
     assert.deepEqual(seen.map(request => request.method), ['GET', 'POST']);
     for (const request of seen) {

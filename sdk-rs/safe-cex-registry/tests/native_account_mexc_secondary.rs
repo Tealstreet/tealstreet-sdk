@@ -52,7 +52,7 @@ async fn requests(secondary: Option<&str>) -> Vec<Seen> {
     let account = open_native_account(NativeAccountSpec {
         hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         exchange: "mexc".into(),
-        options,
+        options: options.into(),
         account_name: None,
         sign: None,
         proxy_token: None,
@@ -99,4 +99,114 @@ fn native_mexc_absent_or_empty_secondary_key_keeps_reads_and_writes_primary() {
             }
         }
     });
+}
+
+async fn receipt_case(rejected: bool) {
+    use safe_cex_registry::{native_host, rust_venues::RustVenueHost};
+    use safe_cex_transport::{RestBody, RestRequest};
+    use safe_cex_types::retained_json::RetainedJsonInput;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Rc::new(RefCell::new(vec![]));
+    tokio::task::spawn_local(serve_http(
+        listener,
+        Rc::new(move |request| {
+            let body = json!({"success":!rejected,"code":if rejected {403} else {0},
+            "data":[],"message":"receipt response","method":request.method});
+            Some(if rejected {
+                json!({"__status":403,"body":body})
+            } else {
+                body
+            })
+        }),
+        seen.clone(),
+    ));
+    let options = serde_json::from_value(json!({"key":"primary-key","secret":"primary-secret",
+        "overrideProxyUrl":format!("{origin}/primary"),"secondary_key":"read-key",
+        "secondary_secret":"read-secret","secondaryProxyUrl":format!("{origin}/secondary")}))
+    .unwrap();
+    let host = native_host::native_venue_host(native_host::hyperliquid_rate_limiter());
+    let client = host.mexc(&options).unwrap().http;
+    for (method, path, key, secret, proxy) in [
+        (
+            "GET",
+            "/api/v1/private/account/assets",
+            "read-key",
+            "read-secret",
+            "secondary",
+        ),
+        (
+            "POST",
+            "/api/v1/private/order/cancel_all",
+            "primary-key",
+            "primary-secret",
+            "primary",
+        ),
+    ] {
+        let mut request = RestRequest {
+            method: method.into(),
+            url: path.into(),
+            body: (method == "POST").then(|| {
+                RestBody::Untransformed(RetainedJsonInput::Object(vec![(
+                    "receipt".encode_utf16().collect(),
+                    RetainedJsonInput::Bool(true),
+                )]))
+            }),
+            ..Default::default()
+        };
+        request
+            .config_extensions
+            .insert("receiptTag".into(), RetainedJsonInput::Float(-0.0));
+        let result = client.execute_with_receipt(request).await;
+        let (config, response) = if rejected {
+            let failure = result.unwrap_err();
+            assert_eq!(failure.code.as_deref(), Some("ERR_BAD_REQUEST"));
+            (*failure.request, *failure.response.unwrap())
+        } else {
+            let execution = result.unwrap();
+            (execution.config, execution.response)
+        };
+        assert_eq!(config.method.to_ascii_uppercase(), method);
+        assert_eq!(
+            config.base_url.as_deref(),
+            Some(format!("{origin}/{proxy}/https://api.mexc.com").as_str())
+        );
+        assert_eq!(config.url, path);
+        let wire = seen.borrow().last().unwrap().clone();
+        assert_eq!(wire.path, format!("/{proxy}/https://api.mexc.com{path}"));
+        assert_signature(&wire, key, secret);
+        for name in ["apikey", "signature", "request-time"] {
+            assert_eq!(
+                config
+                    .headers
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                    .unwrap()
+                    .1,
+                &wire.headers[name],
+                "effective signed receipt {method}/{name}"
+            );
+        }
+        assert!(matches!(config.config_extensions.get("receiptTag"),
+            Some(RetainedJsonInput::Float(value)) if value.to_bits() == (-0.0f64).to_bits()));
+        assert_eq!(response.status, if rejected { 403 } else { 200 });
+        assert_eq!(response.body.json_value().unwrap()["method"], method);
+        if method == "POST" {
+            assert_eq!(
+                serde_json::from_str::<Value>(&wire.body).unwrap(),
+                json!({"receipt":true})
+            );
+        }
+    }
+    assert_eq!(seen.borrow().len(), 2);
+}
+
+#[test]
+fn native_mexc_secondary_receipts_keep_effective_signing_and_response() {
+    run_local(receipt_case(false));
+}
+
+#[test]
+fn native_mexc_secondary_failures_keep_effective_signing_and_response() {
+    run_local(receipt_case(true));
 }
