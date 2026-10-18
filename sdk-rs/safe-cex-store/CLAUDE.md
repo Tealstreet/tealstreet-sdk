@@ -189,3 +189,7 @@ Model info patches carry canonical RetainedJsonInput directly through PatchSourc
 No JSON copy precedes native Store mutation, and emptiness detection checks carried
 StoreUpdate fields without serializing them. Ticker info stripping retains the
 source truthiness rule; Order/Position own-undefined merge semantics are unchanged.
+
+Opaque zkLinkConfig uses the same retained carrier through Store.update and its
+borrowed getter. The source snapshot still omits this configuration. The core
+native Store witness compares thirteen configuration profiles with TypeScript.
