@@ -7820,3 +7820,7 @@ reason = "Native host capability: the one shared lodash throttle retains its arg
 [[exempt]]
 rs = "safe-cex-transport/src/native.rs::prepare_websocket"
 reason = "Native host capability: synchronously validates physical WebSocket constructor inputs and returns the one owned handshake future shared by connect_websocket and NativeRuntime's CONNECTING bridge. There is no maintained SDK declaration for the platform WebSocket constructor or native TCP/TLS handshake. This splits the existing terminal algorithm without adding a venue scheduler; registry native_connecting_socket real upgrades and source Bitget/BaseWebSocket witnesses cover admission, stable handle identity, send/close, cancellation and frames."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/sorting.rs::stable_sort"
+reason = "Native JS intrinsic capability: one stable fallible merge sorter backs Array.sort, lodash orderBy and venue comparator ports without Rust's total-order requirement. This exposes the shared V8 TimSort implementation for cross-crate reuse; no standalone maintained TS declaration. Native js_sort coverage and constructed Paradex socket/getter regressions exercise NaN comparisons, retained levels, stability and first-throw termination."

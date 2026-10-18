@@ -2056,3 +2056,16 @@ Bound call-only functions retain that target independently of constructibility.
 The js_construction Node comparison covers bound constructors, primitive left
 operands, null prototypes and invalid prototypes; native getter checks preserve
 original thrown identity. Hyro validation consumes this operation directly.
+
+`js_runtime::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
+natural-run detection, minrun, binary insertion, stack collapse, directional merges
+and adaptive galloping. Comparators may be inconsistent or equate NaN; callers
+retain source comparisons and the first failure. The 4096-case real Node
+differential checks native result identities, comparison counts, pair-trace hashes
+and random-comparator state, alongside the constructed Paradex ticker corpus.
+Do not replace this with Rust slice sorting or a differently scheduled merge.
+
+The differential rejects other Node versions: inconsistent comparator ordering is
+engine-dependent. Array sort compacts defined values before TimSort, then writes
+undefined values and deletes remaining holes; four native/Node profiles pin the
+comparator schedule as well as sparse output.
