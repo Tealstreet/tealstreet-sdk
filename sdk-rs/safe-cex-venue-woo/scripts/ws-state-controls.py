@@ -9,7 +9,6 @@ controls=[
  ('contracts','Some(Self::CommandFailureEnvelopeUndocumented)','Some(Self::CommandRequestIdTypeUndocumented)','WS-STATE native blocker code'),
  ('acknowledgements','time: require_integer(frame.get("time"), &format!("{path}.time"), 0.0)?,','time: require_integer(frame.get("time"), &format!("{path}.time"), 0.0)? + 1.0,','WS-STATE native ack time'),
  ('subscription-state','generation: state.generation + 1.0,','generation: state.generation + 2.0,','WS-STATE native generation'),
- ('sequence','next_expected_previous_timestamp: update.timestamp,','next_expected_previous_timestamp: update.previous_timestamp,','WS-STATE native sequence next'),
 ]
 results=[]
 for name,old,new,assertion in controls:
@@ -26,4 +25,4 @@ for name,old,new,assertion in controls:
  assert restored.returncode==0,restored.stdout
  results.append({'family':name,'old':old,'new':new,'assertion':assertion,'exit':run.returncode,'restored_exit':restored.returncode,'call_site':'safe-cex-venue-woo/src/v3_ws_state.rs:'+str(text[:text.index(old)].count('\n')+1)})
  print(name+' restored exit 0',flush=True)
-Path('/tmp/woo-ws-state-controls.json').write_text(json.dumps({'sha':sha,'command':command,'controls':results,'iterations':4,'survivors':0},indent=2)+'\n')
+Path('/tmp/woo-ws-state-controls.json').write_text(json.dumps({'sha':sha,'command':command,'controls':results,'iterations':3,'survivors':0},indent=2)+'\n')

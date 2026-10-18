@@ -86,7 +86,7 @@ v3_contracts::WooV3AccountInfo declaration is separate and stays unchanged.
 | 43 | `WooV3WsBalanceRow` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 44 | `WooV3WsExecutionReport` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 45 | `decodePrivatePayload` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
-| 46 | `advanceWooV3OrderBookSequence` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
+| 46 | `advanceWooV3OrderBookSequence` | ACCEPT | No production TS caller or native runtime registration; isolated Rust helper, result enum, orphan codecs and exact facade/oracle/control tail retired. The maintained constructed-class/native registration probes and actual legacy listenOrderBook snapshot/delta/cleanup target pass before and after; all-target Clippy compiles the remaining consumers. See WS_STATE_GATES.md. |
 | 47 | `WooV3AlgoOrderMapping` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 48 | `mapRegularOrderType` | OPEN | No runtime registration observed by assigned_v3_rows_have_no_constructed_runtime_registration; inspect caller closure and retire unused Rust port before ACCEPT. |
 | 49 | `WooPublicWebsocket.handleTickersStreamEvents` | OPEN | Existing live native witnesses available; reconcile this exact lead and refresh heartbeat/mapper/ticker receipt before ACCEPT. |
@@ -112,6 +112,6 @@ v3_contracts::WooV3AccountInfo declaration is separate and stays unchanged.
 - All-target compiler checking covers the remaining WOO consumers; the full parity
   index checks that no removed Rust target or obsolete exemption is left behind.
 
-The recovery, cancel-all-after, request-preparer, account-read and candle-mapper
-batches accept 8 of 60 assigned rows; the remaining 52 stay OPEN. Of those, 39
-are other inactive V3 rows whose Rust caller closures still need retirement.
+The recovery, cancel-all-after, request-preparer, account-read, candle-mapper and
+sequence batches accept 9 of 60 assigned rows; the remaining 51 stay OPEN.
+Of those, 38 are other inactive V3 rows whose Rust caller closures still need retirement.
