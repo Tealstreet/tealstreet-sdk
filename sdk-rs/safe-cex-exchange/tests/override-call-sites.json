@@ -7395,13 +7395,6 @@
       {
         "receiver": "path",
         "kind": "reference",
-        "hook": "update_order",
-        "callee": "crate :: order_controls :: update_order",
-        "count": 1
-      },
-      {
-        "receiver": "path",
-        "kind": "reference",
         "hook": "validate_account",
         "callee": "account_runtime :: validate_account",
         "count": 1
