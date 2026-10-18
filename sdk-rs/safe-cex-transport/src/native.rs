@@ -539,6 +539,7 @@ mod url_tests {
             for url in ["unsupported://fixture", "FTP://fixture/orders"] {
                 let failure = adapter
                     .execute(RestRequest {
+                        method: "GET".into(),
                         url: url.into(),
                         ..Default::default()
                     })
