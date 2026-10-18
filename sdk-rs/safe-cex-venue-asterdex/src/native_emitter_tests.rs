@@ -55,6 +55,37 @@ fn frame(venue: &AsterDEXExchange, value: Value) {
         ))
         .unwrap();
 }
+
+#[test]
+fn constructed_private_handlers_keep_surrogate_frames_and_their_neighbors() {
+    run(|venue, _| {
+        let socket = venue
+            .base()
+            .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private)
+            .unwrap();
+        let calls = Rc::new(RefCell::new(0));
+        let seen = calls.clone();
+        socket.message_handlers.borrow_mut().insert(
+            "retainedProbe".into(),
+            Rc::new(RefCell::new(vec![Rc::new(move |_| {
+                *seen.borrow_mut() += 1;
+                Ok(())
+            })])),
+        );
+        for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+            let frame = format!(r#"{{"e":"retainedProbe","unused":{{"{marker}":["{marker}"]}}}}"#);
+            socket
+                .on_message(&safe_cex_transport::socket::SocketFrame::Text(frame))
+                .unwrap();
+        }
+        frame(&venue, json!({"e":"retainedProbe","neighbor":true}));
+        assert_eq!(
+            *calls.borrow(),
+            4,
+            "all source-valid surrogate frames and the ordinary neighbor reach the constructed handler"
+        );
+    });
+}
 #[test]
 fn native_facade_preserves_zero_single_array_and_multiple_arguments() {
     run(|venue, _| {
