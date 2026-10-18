@@ -648,7 +648,7 @@ impl BingxPlacement {
                                 _ => None,
                             }) {
                                 if !msg.contains("Msg: lock fail") {
-                                    message = msg.into();
+                                    message = msg;
                                     self.report(message.clone(), None)?;
                                 }
                             } else {

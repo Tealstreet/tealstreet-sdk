@@ -771,8 +771,8 @@ fn run(case: &Value) {
             "BINGX-C direct native reduce-only"
         );
         assert_eq!(
-            native.info.as_ref().map(|v| retained_observe::observe(v)),
-            expected.info.as_ref().map(|v| retained_observe::observe(v)),
+            native.info.as_ref().map(retained_observe::observe),
+            expected.info.as_ref().map(retained_observe::observe),
             "BINGX-C direct native retained info"
         );
     }

@@ -57,7 +57,7 @@ fn native_http_and_store_keep_opaque_coinbase_info() {
         for (path, body) in [
             (
                 "/portfolios",
-                r#"{"portfolios":[{"uuid":"retained","type":"DEFAULT"}]}"#,
+                r#"{"portfolios":[{"uuid":"retained","type":"DEFAULT","opaque":"\ud800","\ud801":{"number":1e999}}]}"#,
             ),
             (
                 "/portfolios/retained",

@@ -80,7 +80,7 @@ impl Host {
             .map(|order| {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
-                fields.info = (Some(order.info.borrow().clone().into())).into();
+                fields.info = (Some(order.info.borrow().clone())).into();
                 fields
             })
             .collect()
@@ -250,7 +250,7 @@ impl CoinbaseOrderHost for OrderHost {
                 remaining: order.remaining,
                 extra: (Some(order.extra.clone())).into(),
                 reduce_only: order.reduce_only.into(),
-                info: (Some(info.into())).into(),
+                info: (Some(info)).into(),
                 last_update: order.last_update,
                 close: (None).into(),
                 client_order_id: (None).into(),
@@ -358,7 +358,7 @@ impl OrderSnapshotHost for Host {
         now: f64,
     ) -> Result<Option<SyncedOrderRoot>, PortfolioFailure> {
         Ok(
-            crate::orders::map_coinbase_rest_order(&*raw.borrow(), &market.borrow(), now).map(
+            crate::orders::map_coinbase_rest_order(&raw.borrow(), &market.borrow(), now).map(
                 |mut fields| {
                     fields.info = (None).into();
                     Rc::new(RefCell::new(SyncedOrder {

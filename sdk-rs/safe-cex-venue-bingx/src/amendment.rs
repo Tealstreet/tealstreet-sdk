@@ -33,7 +33,7 @@ fn set_field(fields: &mut Vec<(Vec<u16>, Input)>, key: Vec<u16>, value: Input) {
 }
 fn alias<'a>(info: Option<&'a Input>, keys: &[&str]) -> Option<&'a Input> {
     keys.iter().enumerate().find_map(|(index, key)| {
-        info.and_then(|value| value.get(*key))
+        info.and_then(|value| value.get(key))
             .filter(|value| index + 1 == keys.len() || !value.is_nullish())
     })
 }

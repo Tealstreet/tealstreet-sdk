@@ -16,12 +16,57 @@ pub type SupportedTypes = Rc<RefCell<Vec<String>>>;
 /// Mutable selection state, projected at the HTTP boundary to the two fields the
 /// source reads. Unobserved metadata is retained without applying the wire DTO's
 /// declaration-time requirements to a runtime response.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PortfolioState {
     pub uuid: String,
     pub r#type: String,
-    #[serde(flatten)]
-    pub metadata: IndexMap<String, Input>,
+    pub metadata: IndexMap<Vec<u16>, Input>,
+}
+impl<'de> serde::Deserialize<'de> for PortfolioState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let input = Input::deserialize(deserializer)?;
+        let Input::Object(fields) = input else {
+            return Err(D::Error::custom("Coinbase portfolio must be an object"));
+        };
+        let mut metadata: IndexMap<_, _> = fields.into_iter().collect();
+        let mut text = |key: &str| {
+            let value = metadata.shift_remove(&key.encode_utf16().collect::<Vec<_>>());
+            match value {
+                Some(Input::Text(units)) => String::from_utf16(&units).map_err(D::Error::custom),
+                _ => Err(D::Error::custom(format!(
+                    "Coinbase portfolio {key} must be a string"
+                ))),
+            }
+        };
+        let uuid = text("uuid")?;
+        let r#type = text("type")?;
+        Ok(Self {
+            uuid,
+            r#type,
+            metadata,
+        })
+    }
+}
+impl serde::Serialize for PortfolioState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut fields = vec![
+            (
+                "uuid".encode_utf16().collect(),
+                Input::Text(self.uuid.encode_utf16().collect()),
+            ),
+            (
+                "type".encode_utf16().collect(),
+                Input::Text(self.r#type.encode_utf16().collect()),
+            ),
+        ];
+        fields.extend(
+            self.metadata
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        Input::Object(fields).serialize(serializer)
+    }
 }
 pub type Portfolio = Rc<RefCell<PortfolioState>>;
 pub type Portfolios = Rc<RefCell<Vec<Portfolio>>>;

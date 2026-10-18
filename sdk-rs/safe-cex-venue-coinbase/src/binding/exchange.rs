@@ -412,6 +412,7 @@ impl ExchangeWsAuthHost for Host {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/retained_merge_native.rs"]
 mod retained_merge_native;

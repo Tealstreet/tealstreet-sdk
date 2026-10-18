@@ -213,14 +213,14 @@ fn assert_json(actual: Option<&Value>, expected: &Value, label: &str) {
 fn assert_portfolio(actual: &Portfolio, expected: &Value, label: &str) {
     let p = actual.borrow();
     assert_eq!(
-        p.metadata["name"],
+        p.metadata[&"name".encode_utf16().collect::<Vec<_>>()],
         expected["name"].clone().into(),
         "{label}"
     );
     assert_eq!(p.uuid, expected["uuid"], "{label}");
     assert_eq!(p.r#type, expected["type"], "{label}: native portfolio type");
     assert_eq!(
-        p.metadata["deleted"],
+        p.metadata[&"deleted".encode_utf16().collect::<Vec<_>>()],
         expected["deleted"].clone().into(),
         "{label}"
     );

@@ -229,7 +229,7 @@ impl BingxDataReads {
                 free: float(data.get("availableMargin"))?,
                 used: float(data.get("usedMargin"))?,
                 upnl: float(data.get("unrealizedProfit"))?,
-                info: Some(data.into()),
+                info: Some(data),
                 currencies: None,
                 coins: None,
             })
@@ -704,7 +704,7 @@ impl BingxDataReads {
                         contracts: contracts.abs(),
                         liquidation_price: float(alias(row, "liquidationPrice")?)?,
                         margin_size: margin_size.into(),
-                        info: (Some(row.clone().into())).into(),
+                        info: (Some(row.clone())).into(),
                         realized_pnl: (None).into(),
                         extra: (None).into(),
                         last_update: (None).into(),
