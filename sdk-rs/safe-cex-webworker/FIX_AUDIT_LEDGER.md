@@ -17,7 +17,7 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 17 | StoreWorkerPayload | OPEN | Whole worker carrier and report boundary. |
 | 18 | WorkerConfig | OPEN | Actual admitted config and host reachability. |
 | 19 | splitWorkerLogExtra | OPEN | Retained carrier across callers; no isolated JSON shim. |
-| 20 | start | OPEN | Startup listener ownership repaired below; raw init/config and session boundaries remain. |
+| 20 | start | FIX | Native Js ingress/config/dispatch, module-owned listeners and deterministic context teardown below. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
 | 22 | defaultChaserState | OPEN | Native default ownership and caller mutation. |
 | 23 | ChaserOrderManager | ACCEPT | Explicit required host composition; actual singleton/engine/Store binding below. |
@@ -204,3 +204,61 @@ buffer and forced-snapshot tests remain mandatory.
 Row 71's scheduling/ownership finding is repaired. Row 20 stays OPEN for raw
 init/config admission and independently declared session lifetime costs; this
 batch supplies no JSON/carrier/depth acceptance.
+
+## Native session ingress and ownership: completion of row 20
+
+The installed listener now accepts native Js directly. Config values, perf
+configure/dump/replay arguments, buffered messages and opaque handler calls use
+that same carrier; there is no JSON admission or fallback adapter. Unknown keys,
+array configs, nonfinite values, own undefined and UTF-16 text survive unchanged.
+Config uses the canonical in operator and ordinary Get in source order. Registered
+callbacks retain the same object, see live list appends, and may change the perf
+argument read after the loop. Console receives the original thrown value, not a
+name/message reconstruction. Shared options/settings/metadata and Store updates
+are decoded only where their existing typed consumers use them. Host identifiers
+keep their previously approved typed String boundary. Replay does not decode an
+unread exchange constructor, options or Store snapshot.
+
+The module owns its installed sessions, while sessions hold a weak reverse
+reference. Dropping the optional start return does not remove a live listener.
+The required registration cleanup detaches callbacks during module destruction.
+Maps and port state are removed before worker disposal; canonical native base
+teardown completes shared exchange cleanup. The required shutdown_context leaf
+releases remaining context runtime/replay/timer work, including startup losers.
+This implements the coordinator-approved native module drop-equals-dispose
+policy and prevents dangling callbacks without creating a module/session cycle.
+Teardown errors are reported and do not stop later cleanup stages or contexts.
+Source disposal and native teardown share one stage sequence with explicit error
+handling: the normal source entry returns the first error; native context cleanup
+reports it and continues. Native/actual-source observations preserve the normal
+first-handler throw, while module teardown disposes all nine exactly once even
+if the first fails. The two reviewed override edges moved with their shared
+function bodies; receiver/hook classifications and counts are unchanged.
+
+Compiled baseline 55d99ce37a (fresh master b10cec94d3 plus the now-merged #1203
+continuation prerequisite) fails three named real-listener tests: native NaN
+admission, array config delivery, and liveness after the start return is dropped.
+The actual-source oracle runs maintained ExchangeWorker and store.webworker.
+Native probes run WorkerModule/WorkerSession, the real worker, BaseExchange,
+DefaultStore and canonical runtime, supplying only terminal host capabilities.
+Additional observations pin config setter/callback/console/perf order, original
+non-Error cause identity, raw dump payload identity and binary64 bits, unknown-op
+fanout to all nine receivers, shared buffered identity and replay short circuit.
+A 150-level unread config remains intact; this is a preservation witness, not an
+accepted shared numeric-depth limit. Held startup teardown detaches listeners,
+disposes the actual exchange, clears timers/tasks, prevents a late snapshot and
+releases worker ownership even if a caller still holds the session handle.
+
+Independent compiled controls replace native config or buffering with JSON,
+remove module session ownership, omit context shutdown, or move constructor
+decoding before replay. All nine controls compiled and failed their named binding tests, including
+original-cause reconstruction, partial teardown, swallowed normal-dispose errors
+and a perf-dump JSON hop. Exact production bytes were restored before the
+positive gates. Existing numeric/field/source
+input corpora and worker lifecycle/buffer tests remain in place. The generic
+buffer helper keeps its owned-record fixture as a distinct parameter profile;
+production Js identity is proved through the actual worker binding.
+
+This closes row 20. It does not classify the separate legacy strict DTOs, worker
+logging/report carrier, or raw admission inside the called operation handlers
+(rows 17/18/19/26/72-79). Those remain OPEN with their original source cases.
