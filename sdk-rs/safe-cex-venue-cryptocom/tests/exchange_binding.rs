@@ -1277,11 +1277,16 @@ fn private_position_frames_update_hedged_sides_and_remove_zero_quantity() {
         Some(safe_cex_types::PositionMode::Hedged)
     );
     assert_eq!(short.last_update, Some(88.0));
-    let serialized = serde_json::to_value(short).expect("position JSON");
+    let info = short.info.value().expect("position info");
     assert_eq!(
-        serialized["info"],
-        json!({"markPrice":30001.0,"isolationId":"isolation-1"})
+        info.get("markPrice").unwrap().as_f64().unwrap().to_bits(),
+        30001.0_f64.to_bits()
     );
+    assert!(info.get("isolationId").unwrap().text_equals("isolation-1"));
+    let serialized = serde_json::to_value(short).expect("position JSON");
+    assert_eq!(serialized["info"].as_object().unwrap().len(), 2);
+    assert_eq!(serialized["info"]["markPrice"].as_f64(), Some(30001.0));
+    assert_eq!(serialized["info"]["isolationId"], "isolation-1");
     let long = positions
         .iter()
         .find(|p| p.side == PositionSide::Long)
