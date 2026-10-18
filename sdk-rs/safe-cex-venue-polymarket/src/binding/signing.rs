@@ -107,6 +107,7 @@ pub(crate) fn install(g: &Js, weak: Weak<Shared>) {
                     let clock = rt.shared.runtime.clone();
                     let random = clock.clone();
                     let builder = Builder {
+                        runtime: rt.exchange_runtime(),
                         signer,
                         chain,
                         signature_type,
@@ -281,6 +282,7 @@ fn order_fields() -> serde_json::Value {
     ])
 }
 struct Builder {
+    runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
     signer: Js,
     chain: Js,
     signature_type: Js,
@@ -290,6 +292,7 @@ struct Builder {
 }
 async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Result<Js, Thrown> {
     let Builder {
+        runtime,
         signer,
         chain,
         signature_type,
@@ -300,7 +303,7 @@ async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Re
     if version.to_number()? != 2. {
         return Err(error("Only CLOB V2 orders are bound"));
     }
-    let address = await_js(signer.call_method("getAddress", vec![])?).await?;
+    let address = await_js(&runtime, signer.call_method("getAddress", vec![])?).await?;
     let maker = if funder.is_undefined() {
         address.clone()
     } else {
@@ -366,10 +369,13 @@ async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Re
         let domain_hash = domain_hash(contract, chain.to_number()? as u64)?;
         types["TypedDataSign"] = serde_json::json!([{"name":"contents","type":"Order"},{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"},{"name":"salt","type":"bytes32"}]);
         let value = serde_json::json!({"contents":message,"name":"DepositWallet","version":"1","chainId":chain.to_number()?,"verifyingContract":message["signer"],"salt":ZERO});
-        let inner = await_js(signer.call_method(
-            "_signTypedData",
-            vec![from_json(&domain), from_json(&types), from_json(&value)],
-        )?)
+        let inner = await_js(
+            &runtime,
+            signer.call_method(
+                "_signTypedData",
+                vec![from_json(&domain), from_json(&types), from_json(&value)],
+            )?,
+        )
         .await?;
         format!(
             "0x{}{}{}{}00ba",
@@ -380,10 +386,13 @@ async fn build_order(builder: Builder, user: Js, options: Js, version: Js) -> Re
         )
     } else {
         text(
-            &await_js(signer.call_method(
-                "_signTypedData",
-                vec![from_json(&domain), from_json(&types), from_json(&message)],
-            )?)
+            &await_js(
+                &runtime,
+                signer.call_method(
+                    "_signTypedData",
+                    vec![from_json(&domain), from_json(&types), from_json(&message)],
+                )?,
+            )
             .await?,
         )?
     };
@@ -455,19 +464,13 @@ fn domain_hash(contract: &str, chain: u64) -> Result<[u8; 32], Thrown> {
 }
 
 #[cfg(test)]
+#[path = "../../tests/support/binding_harness.rs"]
+#[allow(dead_code)]
+mod signing_test_host;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        future::Future,
-        task::{Context, Poll, Waker},
-    };
-    fn ready<T>(f: impl Future<Output = T>) -> T {
-        let mut f = Box::pin(f);
-        match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-            Poll::Ready(v) => v,
-            Poll::Pending => panic!("native signer unexpectedly suspended"),
-        }
-    }
     #[test]
     fn pinned_sdk_and_actual_source_signatures() {
         let output = std::process::Command::new("node")
@@ -486,6 +489,11 @@ mod tests {
             serde_json::from_slice(&output.stdout).expect("source capture");
         let cases = corpus["cases"].as_array().unwrap();
         assert_eq!(cases.len(), 96, "independent SDK corpus floor");
+        let host = signing_test_host::harness(
+            safe_cex_types::ExchangeName::Polymarket,
+            signing_test_host::options(),
+            |_| {},
+        );
         let wallet = wallet(from_json(&corpus["key"])).unwrap();
         let globals = Js::object(vec![]);
         install(&globals, Weak::new());
@@ -509,6 +517,7 @@ mod tests {
             ]);
             let now = corpus["now"].as_f64().unwrap();
             let builder = Builder {
+                runtime: host.runtime.clone(),
                 signer,
                 chain: Js::Number(137.),
                 signature_type: from_json(&params["signatureType"]),
@@ -526,8 +535,13 @@ mod tests {
                 ("tickSize", from_json(&params["tickSize"])),
                 ("negRisk", from_json(&params["negRisk"])),
             ]);
-            let order = ready(build_order(builder, user, options, Js::Number(2.)))
-                .unwrap_or_else(|e| panic!("SDK params {params}: {}", e.message()));
+            let order = host
+                .drive(Box::pin(async move {
+                    build_order(builder, user, options, Js::Number(2.))
+                        .await
+                        .map_err(|e| e.to_exchange_error())
+                }))
+                .unwrap_or_else(|e| panic!("SDK params {params}: {}", e.message));
             let native = to_json(&order).unwrap();
             let expected = case["order"].as_object().unwrap();
             assert_eq!(

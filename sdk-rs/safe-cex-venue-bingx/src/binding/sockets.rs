@@ -153,9 +153,12 @@ impl Host {
         Box::pin(async move {
             let data = data.ok_or_else(|| ExchangeError::new("BingX binary frame was released"))?;
             let buffer = if matches!(&data,Js::Object(object) if object.class == "Blob") {
-                await_js(data.call_method("arrayBuffer", vec![]).map_err(error)?)
-                    .await
-                    .map_err(error)?
+                await_js(
+                    &self.scope.http.runtime(),
+                    data.call_method("arrayBuffer", vec![]).map_err(error)?,
+                )
+                .await
+                .map_err(error)?
             } else {
                 data
             };

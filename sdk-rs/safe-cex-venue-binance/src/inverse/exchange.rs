@@ -26,7 +26,7 @@ impl BinanceInverseExchange {
             .call_method(member, args)
             .map_err(|e| e.to_exchange_error());
         Box::pin(async move {
-            let value = await_js(pending?)
+            let value = await_js(&self.scope.exchange_runtime(), pending?)
                 .await
                 .map_err(|e| e.to_exchange_error())?;
             to_typed(&value).map_err(|e| e.to_exchange_error())
@@ -191,7 +191,9 @@ impl BinanceInverseExchange {
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let pending = self.scope.this.call_method(member, args).map_err(fail);
         Box::pin(async move {
-            await_js(pending?).await.map_err(fail)?;
+            await_js(&self.scope.exchange_runtime(), pending?)
+                .await
+                .map_err(fail)?;
             Ok(())
         })
     }

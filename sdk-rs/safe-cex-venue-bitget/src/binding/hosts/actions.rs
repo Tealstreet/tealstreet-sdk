@@ -250,10 +250,11 @@ fn promise_finally(rt: &Rt, promise: Promise) -> Js {
     Js::function("finally", move |_, a| {
         let callback = arg(&a, 0);
         let promise = promise.clone();
+        let runtime = rt.exchange_runtime();
         Ok(rt.spawn(Box::pin(async move {
             let result = promise.wait().await;
             if callback.is_callable() {
-                await_js(callback.call(Js::Undefined, vec![])?).await?;
+                await_js(&runtime, callback.call(Js::Undefined, vec![])?).await?;
             }
             result
         })))
@@ -471,7 +472,7 @@ impl RestActionsHost for Rt {
     }
     fn start(&self, method: Js, args: Vec<Js>) -> Result<RestActionFuture<'_, Js, Thrown>, Thrown> {
         let value = invoke_value(&method, args)?;
-        Ok(Box::pin(await_js(value)))
+        Ok(Box::pin(await_js(&self.exchange_runtime(), value)))
     }
     fn property(&self, value: &Js, name: &str) -> Result<Js, Thrown> {
         value.get(name)
@@ -673,7 +674,7 @@ impl OrderPreparationHost for Rt {
         Ok(self.spawn(body))
     }
     fn await_value(&self, promise: Js) -> RestActionFuture<'_, Js, Thrown> {
-        Box::pin(await_js(promise))
+        Box::pin(await_js(&self.exchange_runtime(), promise))
     }
 }
 
@@ -848,19 +849,24 @@ fn paginate_income_range(rt: Rt, fetch: Js, opts: Js) -> JsFuture<'static> {
             chunk_delay_ms: optional("chunkDelayMs")?,
             max_pages_per_chunk: optional("maxPagesPerChunk")?,
         };
+        let page_runtime = rt.exchange_runtime();
         let mut page = move |p: IncomePageParams| -> safe_cex_exchange::runtime::ExchangeFuture<
             'static,
             Vec<safe_cex_types::IncomeRecord>,
         > {
             let fetch = fetch.clone();
-            Box::pin(async move {
-                let request = Js::object(vec![
-                    ("startTime", Js::Number(p.start_time)),
-                    ("endTime", Js::Number(p.end_time)),
-                    ("limit", Js::Number(p.limit)),
-                ]);
-                let rows = await_js(invoke_value(&fetch, vec![request])?).await?;
-                Ok(to_typed(&rows)?)
+            Box::pin({
+                let await_runtime = page_runtime.clone();
+                async move {
+                    let request = Js::object(vec![
+                        ("startTime", Js::Number(p.start_time)),
+                        ("endTime", Js::Number(p.end_time)),
+                        ("limit", Js::Number(p.limit)),
+                    ]);
+                    let rows =
+                        await_js(&await_runtime, invoke_value(&fetch, vec![request])?).await?;
+                    Ok(to_typed(&rows)?)
+                }
             })
         };
         let runtime = rt.exchange_runtime();
@@ -1396,14 +1402,17 @@ async fn order_plan_type_and_amount(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
     let resolve = |symbol: &str, side: PositionSide| {
         let symbol = symbol.to_owned();
         let chosen = &chosen;
-        async move {
-            let value = rt.call_path(
-                "resolvePositionsForPlanType",
-                vec![Js::str(&symbol), enum_js(&side)?],
-            )?;
-            let value = await_js(value).await?;
-            *chosen.borrow_mut() = value.clone();
-            to_typed::<Vec<Position>>(&value)
+        {
+            let await_runtime = rt.exchange_runtime();
+            async move {
+                let value = rt.call_path(
+                    "resolvePositionsForPlanType",
+                    vec![Js::str(&symbol), enum_js(&side)?],
+                )?;
+                let value = await_js(&await_runtime, value).await?;
+                *chosen.borrow_mut() = value.clone();
+                to_typed::<Vec<Position>>(&value)
+            }
         }
     };
     let select = |_: order_logic::PlanSelectionOptions<'_>, _: &[Position]| -> Result<Js, Thrown> {

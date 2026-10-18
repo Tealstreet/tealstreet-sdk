@@ -144,7 +144,9 @@ impl OkxExchange {
     ) -> ExchangeFuture<'_, T> {
         let pending = self.call(member, args);
         Box::pin(async move {
-            let value = await_js(pending?).await.map_err(err)?;
+            let value = await_js(&self.scope.exchange_runtime(), pending?)
+                .await
+                .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
@@ -152,7 +154,9 @@ impl OkxExchange {
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let pending = self.call(member, args);
         Box::pin(async move {
-            await_js(pending?).await.map_err(err)?;
+            await_js(&self.scope.exchange_runtime(), pending?)
+                .await
+                .map_err(err)?;
             Ok(())
         })
     }
@@ -231,7 +235,9 @@ impl Exchange for OkxExchange {
         );
         Box::pin(async move {
             // ts: ClientOrderLookup = { found: true, order } | { found: false, definitive }
-            let lookup = await_js(pending?).await.map_err(err)?;
+            let lookup = await_js(&self.scope.exchange_runtime(), pending?)
+                .await
+                .map_err(err)?;
             if lookup.get("found").map_err(err)?.truthy() {
                 let order: Order = to_typed(&lookup.get("order").map_err(err)?).map_err(err)?;
                 return Ok(ClientOrderLookup::Found(Box::new(order)));

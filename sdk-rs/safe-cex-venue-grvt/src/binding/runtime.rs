@@ -145,7 +145,10 @@ impl SessionHost for Host {
         self.spawn(task)
     }
     fn await_value(&self, v: Js) -> JsPromise<Js> {
-        Box::pin(async move { value(await_js(v).await) })
+        {
+            let pending = await_js(&self.0.exchange_runtime(), v);
+            Box::pin(async move { value(pending.await) })
+        }
     }
 }
 

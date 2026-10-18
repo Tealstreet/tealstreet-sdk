@@ -311,7 +311,11 @@ async fn api_read(rt: Rc<Rt>, n: &str, a: Vec<Js>) -> Result<Js, Thrown> {
     } else {
         vec![url, config]
     };
-    let response = await_js(rt.this.get(owner)?.call_method(verb, args)?).await?;
+    let response = await_js(
+        &rt.exchange_runtime(),
+        rt.this.get(owner)?.call_method(verb, args)?,
+    )
+    .await?;
     if discard {
         return Ok(Js::Undefined);
     }
