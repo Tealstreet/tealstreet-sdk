@@ -41,3 +41,11 @@ probes use the maintained accepted-set build. The control script must restore
 original bytes after every independent production fault before another build.
 A STOP file in `target/bitrue-public-alias-controls` stops only between restored
 cases, allowing the full Store step-4 merge to release the array priority.
+
+All seven independent production controls pass: both synchronous callback
+returns, asynchronous argument order, future result retention, native metadata
+handle identity, and same-type field swaps in each actual response-list decoder.
+Every fault compiled and failed its named observation; exact source restoration
+passed and all source hashes match. The full canonical inventory now reaches the
+separate `binding/classes.rs::UNSUPPORTED_LOCAL_MACRO_EFFECTS:enums` boundary.
+That census issue is a follow-up, not a full-package GREEN claim here.

@@ -21,8 +21,13 @@ role reviews and compiler impl-item pins in the receiver-traits policy.
 `RECEIVER_REVIEW.md` maps each method to actual constructed-exchange native
 witnesses; `scripts/receiver-controls.py` independently faults all nine reviewed
 impls and requires compiled named failures plus byte-exact restored passes.
-The canonical inventory advances beyond the receiver guard to seven separately
-unclassified public aliases; these receiver records do not complete those aliases.
+The seven public aliases now have separate compiler-authenticated contracts: two
+response-list decoders and five specific capability classifications. Three exact
+production Rt registrations do not grant other generic instantiations.
+`PUBLIC_ALIAS_REVIEW.md` and `scripts/public-alias-controls.py` record the actual
+constructor/callback/Promise/cache witnesses and seven compiled faults with exact
+restoration. The full inventory next refuses the pre-existing local `enums` macro
+in `binding/classes.rs`; alias completion does not waive that census boundary.
 
 `wire.rs` mirrors declared response shapes, not unchecked Axios runtime values.
 Numbers are binary64. Record Deserialize implementations capture `JsNumberInput`
