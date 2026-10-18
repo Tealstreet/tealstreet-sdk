@@ -655,3 +655,87 @@ fn native_remote_sign_alias_carries_request_and_waits_for_host_result() {
         "RemoteSignCall retains native result"
     );
 }
+
+#[test]
+fn native_final_audit_position_readers_keep_fields_without_generated_dtos() {
+    for venue in [Venue::Futures, Venue::PM] {
+        let runtime = Rc::new(Runtime::default());
+        let http = Arc::new(Http::default());
+        let path = if venue == Venue::Futures {
+            "/fapi/v3/positionRisk"
+        } else {
+            "/papi/v1/um/positionRisk"
+        };
+        http.response(
+            path,
+            200,
+            json!([{
+                "symbol":"BTCUSDT", "positionAmt":"-2", "positionSide":"SHORT",
+                "entryPrice":"13", "notional":"-34", "leverage":"17",
+                "unRealizedProfit":"-0", "liquidationPrice":"19",
+                "isolatedMargin":"0", "updateTime":31,
+                "unknown":{"retained":"wire-only"}
+            }]),
+        );
+        if venue == Venue::Futures {
+            http.response(
+                "/fapi/v1/symbolConfig",
+                200,
+                json!([{"symbol":"BTCUSDT","leverage":"17","marginType":"CROSSED"}]),
+            );
+        }
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            http.clone(),
+            Rc::new(|_, _| panic!("no external provider")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let owner = ExchangeOwner::new(
+            venue,
+            if venue == Venue::Futures {
+                safe_cex_types::ExchangeName::Binance
+            } else {
+                safe_cex_types::ExchangeName::Binancepm
+            },
+            serde_json::from_value(json!({"key":"audit-key","secret":"audit-secret"})).unwrap(),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+            dependencies,
+        )
+        .unwrap();
+        let exchange = sdk_class(venue, owner.clone());
+        let positions = run(&runtime, exchange.fetch_positions(None)).unwrap();
+        assert_eq!(positions.len(), 1, "BINANCE-FINAL-POSITIONS live SDK row");
+        let row = &positions[0];
+        assert_eq!(row.symbol, "BTCUSDT");
+        assert_eq!(row.side, safe_cex_types::PositionSide::Short);
+        for (label, actual, expected) in [
+            ("entry", row.entry_price, 13.0_f64),
+            ("contracts", row.contracts, 2.0),
+            ("notional", row.notional, 34.0),
+            ("leverage", row.leverage, 17.0),
+            ("pnl", row.unrealized_pnl, -0.0),
+            ("liquidation", row.liquidation_price, 19.0),
+        ] {
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "BINANCE-FINAL-POSITIONS {venue:?} {label}"
+            );
+        }
+        let info = row.info.as_ref().expect("original wire position retained");
+        assert_eq!(
+            info.clone().into_value().unwrap()["unknown"]["retained"],
+            "wire-only"
+        );
+        assert_eq!(http.count(path), 1);
+        let requests = http.requests.lock().unwrap();
+        assert!(
+            requests
+                .iter()
+                .all(|r| r.url.contains("signature=") && r.method.eq_ignore_ascii_case("GET"))
+        );
+        drop(requests);
+        owner.dispose().unwrap();
+    }
+}
