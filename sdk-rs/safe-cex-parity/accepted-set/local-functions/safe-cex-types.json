@@ -10,11 +10,5 @@
     "runtimeOwner": "safe_cex_types::retained_json::codec::deserialize_native_payload",
     "reason": "The nested visitor implements the canonical closed native payload decoder. Execute its actual enclosing function and inspect tag variants, UTF16 units and native Number bits, including malformed cardinality and out-of-range units. Reviewed streaming-unit cutover: tag/cardinality checks and actual fields are unchanged; validated unit sequences remain unchanged while the private packed byte channel copies native UTF-16 in bulk; retained_utf16 compares every key and value unit. retained_utf16 executes all65536 units and malformed numeric/type/extra-element controls. Reviewed tag-enum dispatch removes temporary owned tag strings; all eight spellings, UTF8-byte admission and payload/cardinality checks remain intact.",
     "sourceSha256": "037a178e185cfede8404ece8f05478c36bbf548add659015dc51f1f13b4fe2b8"
-  },
-  "safe-cex-types/src/retained_json/codec.rs::LOCAL_TRAIT_IMPL:Visitor:TagVisitor": {
-    "category": "decoder-helper",
-    "runtimeOwner": "safe_cex_types::retained_json::codec::Tag",
-    "reason": "Closed tag visitor used by the real retained payload decoder. Observe all eight discriminants, valid string and UTF8-byte tags, and malformed-tag/byte refusals; retained_utf16 independently exercises owned-byte events. No allocation or wire-format change is hidden behind a classification.",
-    "sourceSha256": "037a178e185cfede8404ece8f05478c36bbf548add659015dc51f1f13b4fe2b8"
   }
 }

@@ -61200,7 +61200,7 @@
     "shape": "union",
     "sample": "Text",
     "entrypoints": [],
-    "evidence": "Closed retained payload tag decoder eliminates intermediate owned tags while preserving all eight names, string/UTF8 byte admission and malformed-tag refusals. Native observations inspect the actual enum discriminant before JSON output; retained_utf16 additionally invokes the owned-byte visitor through the actual payload decoder.",
+    "evidence": "Closed retained payload tag decoder eliminates intermediate owned tags while preserving all eight names, string/UTF8 byte admission and malformed-tag refusals. Native observations inspect the actual enum discriminant before JSON output; retained_utf16 additionally invokes the owned-byte visitor through the actual payload decoder. The helper contract separately observes the concrete Rust discriminant and its matched tag name.",
     "positive": [
       "Undefined",
       "Null",
@@ -61223,65 +61223,74 @@
       }
     ],
     "nativeObservation": {
-      "call": "{let result=if let Some(raw)=$value.get(\"bytes\"){let bytes:Vec<u8>=serde_json::from_value(raw.clone()).unwrap();<$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes))}else{serde_json::from_value::<$type>($value.clone())}; match result{Ok(tag)=>{let name=match tag{$type::Undefined=>\"Undefined\",$type::Null=>\"Null\",$type::Bool=>\"Bool\",$type::Text=>\"Text\",$type::Lexeme=>\"Lexeme\",$type::Float=>\"Float\",$type::Array=>\"Array\",$type::Object=>\"Object\"};serde_json::json!({\"ok\":true,\"tag\":name})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "call": "{let result=if let Some(raw)=$value.get(\"bytes\"){let bytes:Vec<u8>=serde_json::from_value(raw.clone()).unwrap();<$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes))}else{serde_json::from_value::<$type>($value.clone())}; match result{Ok(tag)=>{let discriminant=format!(\"{:?}\",std::mem::discriminant(&tag));let name=match tag{$type::Undefined=>\"Undefined\",$type::Null=>\"Null\",$type::Bool=>\"Bool\",$type::Text=>\"Text\",$type::Lexeme=>\"Lexeme\",$type::Float=>\"Float\",$type::Array=>\"Array\",$type::Object=>\"Object\"};serde_json::json!({\"ok\":true,\"tag\":name,\"discriminant\":discriminant})},Err(_)=>serde_json::json!({\"ok\":false})}}",
       "nativeFields": [
-        "tag"
+        "tag",
+        "discriminant"
       ],
       "cases": [
         {
           "input": "Undefined",
           "output": {
             "ok": true,
-            "tag": "Undefined"
+            "tag": "Undefined",
+            "discriminant": "Discriminant(0)"
           }
         },
         {
           "input": "Null",
           "output": {
             "ok": true,
-            "tag": "Null"
+            "tag": "Null",
+            "discriminant": "Discriminant(1)"
           }
         },
         {
           "input": "Bool",
           "output": {
             "ok": true,
-            "tag": "Bool"
+            "tag": "Bool",
+            "discriminant": "Discriminant(2)"
           }
         },
         {
           "input": "Text",
           "output": {
             "ok": true,
-            "tag": "Text"
+            "tag": "Text",
+            "discriminant": "Discriminant(3)"
           }
         },
         {
           "input": "Lexeme",
           "output": {
             "ok": true,
-            "tag": "Lexeme"
+            "tag": "Lexeme",
+            "discriminant": "Discriminant(4)"
           }
         },
         {
           "input": "Float",
           "output": {
             "ok": true,
-            "tag": "Float"
+            "tag": "Float",
+            "discriminant": "Discriminant(5)"
           }
         },
         {
           "input": "Array",
           "output": {
             "ok": true,
-            "tag": "Array"
+            "tag": "Array",
+            "discriminant": "Discriminant(6)"
           }
         },
         {
           "input": "Object",
           "output": {
             "ok": true,
-            "tag": "Object"
+            "tag": "Object",
+            "discriminant": "Discriminant(7)"
           }
         },
         {
@@ -61309,7 +61318,8 @@
           },
           "output": {
             "ok": true,
-            "tag": "Null"
+            "tag": "Null",
+            "discriminant": "Discriminant(1)"
           }
         },
         {
@@ -61328,7 +61338,8 @@
           },
           "output": {
             "ok": true,
-            "tag": "Undefined"
+            "tag": "Undefined",
+            "discriminant": "Discriminant(0)"
           }
         },
         {
@@ -61342,7 +61353,8 @@
           },
           "output": {
             "ok": true,
-            "tag": "Text"
+            "tag": "Text",
+            "discriminant": "Discriminant(3)"
           }
         },
         {
