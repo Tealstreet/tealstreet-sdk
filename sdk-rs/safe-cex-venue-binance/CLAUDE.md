@@ -870,3 +870,10 @@ Their classification receipts do not execute signing or establish arbitrary-JS
 parity. `tests/signing.rs` and `scripts/signing.mjs` separately execute the typed
 signer against the actual TS signer with installed Axios, qs and create-hmac.
 Keep the existing UTF-16 spread, nonfinite-config and owned-snapshot limits.
+
+`PrivateSocket` has a specific typed constructor/Deref accepted-set record.
+`scripts/private-socket-contracts.mjs` invokes the canonical owner measurement,
+including full dependency discovery and actual compiler features, then checks the
+one resulting classification receipt. It does not claim decoder execution;
+`private_owner_binding` and its independently compiled controls establish the
+separate real constructor/Store/authentication effects described above.

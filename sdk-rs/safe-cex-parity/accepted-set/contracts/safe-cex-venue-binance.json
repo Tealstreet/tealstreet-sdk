@@ -25573,5 +25573,130 @@
     },
     "reason": "This exact alias is an owned pinned HTTP continuation producing the typed listen-key outcome or original request failure. It is a suspended computation, not an input parser; this classification does not classify its payload or other futures.",
     "evidence": "tests/private_classes.rs::private_action_key_binding::private_pin_key_retains_native_value_and_request_rejection_after_suspension invokes the real ExchangeState PrivateParent::post_key using native_dependencies for Futures and PM. It holds each POST, observes Pending before release, then reads negative-zero bits, NaN and own-undefined from the actual native listenKey referent. Genuine RestFailure rejection retains the original HTTP error message and response detail, with one request and no resend. An independent production control replaces the actual data.listenKey read with undefined, requires the compiled named native witness to fail, then exact source restoration passes. Trait classification is separate from executing these real request continuations."
+  },
+  "safe_cex_venue_binance::private_classes::PrivateSocket": {
+    "shape": "typed",
+    "evidence": "PrivateSocket has no Deserialize and exposes only a typed Venue/PrivateDependencies constructor plus an Rc-owned state borrow through Deref. The native private_owner_binding tests separately construct actual native_dependencies/ExchangeOwner for Futures, PM and Spot, observe original parent Rc, defaults, Store order effects and terminal Spot HMAC send. scripts/private-owner-controls.py independently faults production family selection and HMAC payload forwarding, requires named compiled failures and exact-restoration passes. This compiler classification does not execute those effects or classify Auth/PrivateState raw APIs.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "venue",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::private_session::Venue",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "d",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::private_classes::PrivateDependencies",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "Self"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Constructs core websocket, captured receiver and callbacks from already typed Venue and PrivateDependencies; no external representation is decoded."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "core::ops::deref::Deref",
+          "name": "deref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Target",
+                    "args": null,
+                    "self_type": {
+                      "generic": "Self"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Borrows the original typed PrivateState behind the existing Rc without decoding or copying a representation."
+      }
+    ]
   }
 }
