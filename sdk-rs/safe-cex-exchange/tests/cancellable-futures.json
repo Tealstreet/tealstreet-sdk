@@ -1750,6 +1750,16 @@
       "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send. Reviewed response interceptor ownership: synchronous outcome/error handlers retain only Weak<BaseExchange>; existing request authorization and its asynchronous boundaries are unchanged."
     },
     {
+      "owner": "src/js_runtime/globals.rs::resolve_promise",
+      "boundaries": [
+        "async-block"
+      ],
+      "producer_sha256": "3281225f36ba1c41a6fa78d30c1ea44767a3ae3dfc159fed230b8a011d8f1928",
+      "classification": "delegated",
+      "delegate": "src/js_runtime/jobs.rs::Jobs::spawn / OwnedTasks driver",
+      "reason": "The existing runtime Jobs FIFO owns the constructor thenable job independently of its observer and orders it beside Promise reactions. The job retains its target promise until settlement or source retention of its resolvers. No exchange/socket reservation is installed; shared Driver discard drops queued captures. Real NativeRuntime constructor witnesses prove observer-drop execution and Node FIFO ordering; existing microtask host-discard witnesses cover driver cleanup."
+    },
+    {
       "owner": "src/js_runtime/jobs.rs::Driver as Future::poll",
       "boundaries": [
         "future-poll"
@@ -2988,16 +2998,6 @@
       "classification": "delegated",
       "delegate": "src/exchange.rs::Exchange::fetch_and_set_private_snapshot",
       "reason": "Weak WS bridge resolves the concrete venue then delegates the snapshot; it owns no second task or resync latch."
-    },
-    {
-      "owner": "src/js_runtime/globals.rs::resolve_promise",
-      "boundaries": [
-        "async-block"
-      ],
-      "producer_sha256": "3281225f36ba1c41a6fa78d30c1ea44767a3ae3dfc159fed230b8a011d8f1928",
-      "classification": "delegated",
-      "delegate": "src/js_runtime/jobs.rs::Jobs::spawn / OwnedTasks driver",
-      "reason": "The existing runtime Jobs FIFO owns the constructor thenable job independently of its observer and orders it beside Promise reactions. The job retains its target promise until settlement or source retention of its resolvers. No exchange/socket reservation is installed; shared Driver discard drops queued captures. Real NativeRuntime constructor witnesses prove observer-drop execution and Node FIFO ordering; existing microtask host-discard witnesses cover driver cleanup."
     }
   ]
 }
