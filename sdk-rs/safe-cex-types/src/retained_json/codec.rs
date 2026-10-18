@@ -1,4 +1,4 @@
-use super::{BufferVisitor, Capture, RAW_TOKEN, RetainedJsonInput as Input};
+use super::{BufferVisitor, Capture, RAW_TOKEN, RetainedJsonInput as Input, UTF16_UNITS};
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::ser::{Serialize, SerializeSeq, Serializer};
 use std::fmt;
@@ -58,10 +58,11 @@ pub fn deserialize_native_payload<'de, D: Deserializer<'de>>(d: D) -> Result<Inp
                     seq.next_element::<bool>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?,
                 ),
-                "Text" => Input::Text(units(
-                    seq.next_element::<Vec<Unit>>()?
-                        .ok_or_else(|| de::Error::custom("missing retained payload"))?,
-                )),
+                "Text" => Input::Text(
+                    seq.next_element::<Units>()?
+                        .ok_or_else(|| de::Error::custom("missing retained payload"))?
+                        .0,
+                ),
                 "Lexeme" => Input::Lexeme(
                     seq.next_element::<String>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?,
@@ -78,10 +79,10 @@ pub fn deserialize_native_payload<'de, D: Deserializer<'de>>(d: D) -> Result<Inp
                         .collect(),
                 ),
                 "Object" => Input::Object(
-                    seq.next_element::<Vec<(Vec<Unit>, Payload)>>()?
+                    seq.next_element::<Vec<(Units, Payload)>>()?
                         .ok_or_else(|| de::Error::custom("missing retained payload"))?
                         .into_iter()
-                        .map(|(key, value)| (units(key), value.0))
+                        .map(|(key, value)| (key.0, value.0))
                         .collect(),
                 ),
                 _ => return Err(de::Error::custom("invalid retained tag")),
@@ -124,8 +125,36 @@ impl<'de> serde::Deserialize<'de> for Unit {
         d.deserialize_f64(UnitVisitor)
     }
 }
-fn units(values: Vec<Unit>) -> Vec<u16> {
-    values.into_iter().map(|unit| unit.0).collect()
+struct Units(Vec<u16>);
+impl<'de> serde::Deserialize<'de> for Units {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct UnitsVisitor;
+        impl<'de> Visitor<'de> for UnitsVisitor {
+            type Value = Units;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("UTF-16 code units")
+            }
+            fn visit_bytes<E: de::Error>(self, bytes: &[u8]) -> Result<Units, E> {
+                if bytes.len() % 2 != 0 {
+                    return Err(E::custom("invalid retained UTF-16 bytes"));
+                }
+                Ok(Units(
+                    bytes
+                        .chunks_exact(2)
+                        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                        .collect(),
+                ))
+            }
+            fn visit_byte_buf<E: de::Error>(self, bytes: Vec<u8>) -> Result<Units, E> {
+                self.visit_bytes(&bytes)
+            }
+            fn visit_newtype_struct<D: Deserializer<'de>>(self, d: D) -> Result<Units, D::Error> {
+                serde::Deserialize::deserialize(d)
+                    .map(|values: Vec<Unit>| Units(values.into_iter().map(|unit| unit.0).collect()))
+            }
+        }
+        d.deserialize_newtype_struct(UTF16_UNITS, UnitsVisitor)
+    }
 }
 
 struct NativePayload<'a>(&'a Input);

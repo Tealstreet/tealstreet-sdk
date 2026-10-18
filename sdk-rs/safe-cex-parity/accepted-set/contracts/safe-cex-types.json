@@ -61077,5 +61077,117 @@
         }
       ]
     }
+  },
+"safe_cex_types::retained_json::codec::Units": {
+  "shape": "union",
+  "sample": [
+    65,
+    55296,
+    65535
+  ],
+  "evidence": "Private UTF-16 storage decoder accepts the existing validated numeric unit sequence or the canonical internal packed little-endian byte event. Direct native bytes observe empty/even/odd input and lone units; retained_utf16 exercises every unit through the actual payload adapter. No JSON wire format change.",
+  "entrypoints": [],
+  "positive": [
+    [],
+    [
+      0,
+      65535
+    ],
+    [
+      55296,
+      57343
+    ],
+    [
+      3.0,
+      -0.0
+    ]
+  ],
+  "negative": [
+    null,
+    false,
+    "1",
+    {},
+    [
+      -1
+    ],
+    [
+      65536
+    ],
+    [
+      1.5
+    ],
+    [
+      null
+    ],
+    [
+      true
+    ],
+    [
+      "1"
+    ]
+  ],
+  "nativeObservation": {
+    "call": "{let bytes:Vec<u8>=serde_json::from_value($value.clone()).unwrap(); match <$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes)){Ok(value)=>serde_json::json!({\"ok\":true,\"units\":value.0}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "nativeFields": [
+      "units"
+    ],
+    "cases": [
+      {
+        "input": [],
+        "output": {
+          "ok": true,
+          "units": []
+        }
+      },
+      {
+        "input": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "output": {
+          "ok": true,
+          "units": [
+            0,
+            65535
+          ]
+        }
+      },
+      {
+        "input": [
+          0,
+          216,
+          255,
+          223
+        ],
+        "output": {
+          "ok": true,
+          "units": [
+            55296,
+            57343
+          ]
+        }
+      },
+      {
+        "input": [
+          1
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          1,
+          0,
+          2
+        ],
+        "output": {
+          "ok": false
+        }
+      }
+    ]
   }
+}
 }

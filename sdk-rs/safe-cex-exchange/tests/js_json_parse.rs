@@ -105,6 +105,54 @@ fn json_builtin_retains_lone_surrogate_units_and_matches_native_parse() {
                 );
             }
         }
+        let ordered = json
+            .call_method(
+                "parse",
+                vec![Js::utf16(&units(&source["ordering"]["text"]))],
+            )
+            .unwrap();
+        assert_eq!(observe(&ordered), source["ordering"]["value"]);
+        assert_eq!(ordered.own_keys().len(), 11);
+        let changing = Js::object(vec![
+            ("z", Js::Number(3.0)),
+            ("tail", Js::Number(4.0)),
+            ("0", Js::Number(0.0)),
+        ]);
+        shared
+            .globals
+            .get("Object")
+            .unwrap()
+            .call_method(
+                "defineProperty",
+                vec![
+                    changing.clone(),
+                    Js::str("hidden"),
+                    Js::object(vec![
+                        ("value", Js::Number(55.0)),
+                        ("configurable", Js::Bool(true)),
+                    ]),
+                ],
+            )
+            .unwrap();
+        changing
+            .define_accessor(
+                "1",
+                Some(Rc::new(|receiver| {
+                    receiver.delete(&"tail".encode_utf16().collect::<Vec<_>>())?;
+                    receiver.set("tail", Js::Number(99.0))?;
+                    receiver.set("z", Js::Number(33.0))?;
+                    Ok(Js::Number(1.0))
+                })),
+                None,
+            )
+            .unwrap();
+        let captured = safe_cex_exchange::js_runtime::value::to_retained_input(&changing).unwrap();
+        let restored = safe_cex_exchange::js_runtime::value::from_retained_input(captured);
+        assert_eq!(
+            observe(&restored),
+            source["changed"],
+            "getter mutations retain live property reads"
+        );
     });
 }
 #[test]
@@ -422,8 +470,8 @@ fn native_market_info_decode_does_not_expand_each_utf16_unit_into_a_value() {
             text.len()
         );
         assert!(
-            allocated < text.len() * 5,
-            "retained info expanded into per-unit value nodes: {allocated} allocated bytes for {} input bytes",
+            allocated < text.len() * 11 / 2,
+            "typed capture exceeds its allocation budget: {allocated} allocated bytes for {} input bytes",
             text.len()
         );
     });

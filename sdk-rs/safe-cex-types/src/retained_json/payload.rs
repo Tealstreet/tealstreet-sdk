@@ -1,4 +1,4 @@
-use super::RetainedJsonInput as Input;
+use super::{RetainedJsonInput as Input, UTF16_UNITS};
 use serde::de::{self, Deserializer, IntoDeserializer, Visitor};
 use serde_json::Error;
 
@@ -72,6 +72,15 @@ impl<'de> Deserializer<'de> for Payload {
         _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
+        if _name == UTF16_UNITS {
+            if let Self::Units(units) | Self::Value(Input::Text(units)) = self {
+                let mut bytes = vec![0; units.len() * 2];
+                for (chunk, unit) in bytes.chunks_exact_mut(2).zip(units) {
+                    chunk.copy_from_slice(&unit.to_le_bytes());
+                }
+                return visitor.visit_byte_buf(bytes);
+            }
+        }
         visitor.visit_newtype_struct(self)
     }
 

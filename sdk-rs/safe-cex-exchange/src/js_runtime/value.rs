@@ -1089,7 +1089,7 @@ impl Js {
             _ => {}
         }
         if let Js::Object(data) = self
-            && key == utf16("next").as_ref()
+            && key == [b'n' as u16, b'e' as u16, b'x' as u16, b't' as u16]
             && data.iterator_next.borrow().is_some()
             && !data.props.borrow().contains_key(key)
         {
@@ -1723,33 +1723,34 @@ impl Js {
                 let Some(props) = self.own_props() else {
                     return vec![];
                 };
-                let keys: Vec<Str> = props
-                    .borrow()
-                    .iter()
-                    .filter(|(_, p)| {
-                        !matches!(
-                            p,
-                            Prop::DataDescriptor {
-                                enumerable: false,
-                                ..
-                            } | Prop::Accessor {
-                                enumerable: false,
-                                ..
-                            }
-                        )
-                    })
-                    .map(|(k, _)| k.clone())
-                    .collect();
-                let mut indexed: Vec<(usize, Str)> = keys
-                    .iter()
-                    .filter_map(|k| array_index(k).map(|i| (i, k.clone())))
-                    .collect();
-                indexed.sort_by_key(|(i, _)| *i);
-                let mut out: Vec<Str> = indexed.into_iter().map(|(_, k)| k).collect();
-                out.extend(keys.into_iter().filter(|k| array_index(k).is_none()));
-                out
+                Self::enumerable_property_indices(props)
+                    .into_iter()
+                    .map(|(key, _)| key)
+                    .collect()
             }
         }
+    }
+    fn enumerable_property_indices(props: &RefCell<IndexMap<Str, Prop>>) -> Vec<(Str, usize)> {
+        let mut keys: Vec<_> = props
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, prop))| {
+                !matches!(
+                    prop,
+                    Prop::DataDescriptor {
+                        enumerable: false,
+                        ..
+                    } | Prop::Accessor {
+                        enumerable: false,
+                        ..
+                    }
+                )
+            })
+            .map(|(index, (key, _))| (key.clone(), index))
+            .collect();
+        keys.sort_by_key(|(key, _)| array_index(key).unwrap_or(usize::MAX));
+        keys
     }
     /// Object.getOwnPropertyNames: own string keys, enumerable or not, in
     /// OrdinaryOwnPropertyKeys order; array and string `length` follows the indices.
@@ -1825,6 +1826,39 @@ impl Js {
     }
     /// Object spread / Object.assign source read: own enumerable values in key order.
     pub fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
+        if let Some(props) = self.own_props() {
+            let keys = Self::enumerable_property_indices(props);
+            let mut entries = Vec::with_capacity(keys.len());
+            let mut indices_valid = true;
+            for (key, index) in keys {
+                let value = if indices_valid {
+                    match &props
+                        .borrow()
+                        .get_index(index)
+                        .expect("unmodified property index")
+                        .1
+                    {
+                        Prop::Data(value) | Prop::DataDescriptor { value, .. } => {
+                            Some(value.clone())
+                        }
+                        Prop::Accessor { .. } => None,
+                    }
+                } else {
+                    None
+                };
+                let value = match value {
+                    Some(value) => value,
+                    None => {
+                        // A getter can reorder or replace later properties.
+                        // Subsequent reads must use their live keys.
+                        indices_valid = false;
+                        self.get_key(&key)?
+                    }
+                };
+                entries.push((key, value));
+            }
+            return Ok(entries);
+        }
         self.own_keys()
             .into_iter()
             .map(|k| {
