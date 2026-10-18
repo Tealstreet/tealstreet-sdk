@@ -1715,3 +1715,14 @@ prototype storage for arrays, Map/Set and other nonordinary variants remains a
 separate representation boundary; unsupported changes refuse explicitly.
 `tests/js_object_prototypes.rs` compares actual Node observations with production
 allocation/property algorithms and the installed Object facade.
+
+Native host objects retain one opaque Rc<dyn Any> on their canonical ObjectData.
+Js::host_object creates the ordinary reference, and resource<T> downcasts only its
+own attachment; prototypes and object spread never transfer that native slot.
+Ordinary descriptors, reflection, freeze and explicit JSON use the existing JS
+property operations, with the resource excluded from those property views.
+The native resource target checks original Rc identity, number bits, type refusal,
+private-slot mutation through freeze, inherited getter receivers and final release.
+Independent dropped-retention and leaked-retention faults must compile, fail named
+assertions, restore exact source and pass. This adds no native resource wire codec
+and does not switch a Hyperliquid consumer or change default prototype policy.
