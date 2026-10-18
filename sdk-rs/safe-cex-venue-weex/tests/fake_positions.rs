@@ -171,9 +171,10 @@ fn fake_positions_match_actual_typescript() {
     }
     assert_eq!(compared, 168, "cardinality::positions::compared");
     assert_eq!(compared, 168, "fake_position::compared");
-    assert!(
-        js_from_str::<Market>(corpus["refusal"].as_str().unwrap()).is_err(),
-        "fake_position_utf8_refusal"
+    typed_utf16::assert_projection(
+        corpus["refusal"].as_str().unwrap(),
+        &(js_from_str::<Market>(corpus["refusal"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
     eprintln!(
         "fake-position cases {}; header {}",
@@ -181,3 +182,6 @@ fn fake_positions_match_actual_typescript() {
         corpus["header"]
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

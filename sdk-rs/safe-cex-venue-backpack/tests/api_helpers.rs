@@ -217,10 +217,10 @@ fn actual_typescript_api_helpers_corpus() {
         "source behavior outside prepared-data domain"
     );
     for case in corpus["utf16"].as_array().unwrap() {
-        assert!(
-            safe_cex_num::numeric_ingress::js_from_str::<String>(case["raw"].as_str().unwrap())
-                .is_err(),
-            "shared UTF-8 URL refusal"
+        typed_utf16::assert_projection(
+            case["raw"].as_str().unwrap(),
+            &(safe_cex_num::numeric_ingress::js_from_str::<String>(case["raw"].as_str().unwrap()))
+                .expect("typed surrogate record is retained"),
         );
         assert!(
             case["units"]
@@ -287,3 +287,6 @@ fn actual_typescript_api_helpers_corpus() {
         corpus["instructions"].as_array().unwrap().len()
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

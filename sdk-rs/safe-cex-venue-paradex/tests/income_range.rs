@@ -261,8 +261,12 @@ fn actual_typescript_income_range() {
         "income_range_source_surrogate_match"
     );
     assert_eq!(corpus["surrogate"]["codeUnit"], 0xd800);
-    assert!(
-        js_from_str::<String>(corpus["surrogate"]["raw"].as_str().unwrap()).is_err(),
-        "income_range_utf8_refusal"
+    typed_utf16::assert_projection(
+        corpus["surrogate"]["raw"].as_str().unwrap(),
+        &(js_from_str::<String>(corpus["surrogate"]["raw"].as_str().unwrap()))
+            .expect("typed surrogate record is retained"),
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

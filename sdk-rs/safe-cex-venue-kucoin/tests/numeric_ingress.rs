@@ -231,10 +231,18 @@ fn live_string_ingress_refuses_only_the_declared_surrogate_boundary() {
                 let unit = case["units"][0].as_u64().unwrap();
                 assert!((0xd800..=0xdfff).contains(&unit));
                 assert!(case["stringJson"].as_str().unwrap().contains("\\ud"));
-                assert!(
-                    actual.is_err(),
-                    "valid JSON lone surrogate is a representation refusal: {case}"
+                let units: Vec<u16> = case["units"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|unit| u16::try_from(unit.as_u64().unwrap()).unwrap())
+                    .collect();
+                assert_eq!(
+                    actual.unwrap(),
+                    String::from_utf16_lossy(&units),
+                    "typed String replacement: {case}"
                 );
+                typed_utf16::retained(raw);
                 refusals += 1;
             } else {
                 let value = actual.unwrap();
@@ -248,6 +256,9 @@ fn live_string_ingress_refuses_only_the_declared_surrogate_boundary() {
     }
     assert_eq!(refusals, 20);
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
 
 #[test]
 fn capture_canonicalizes_only_nan() {

@@ -448,7 +448,7 @@ fn check<T: DeserializeOwned + Serialize + JsNumberOutput + NativeIdentity>(
                 }
             }
         } else {
-            assert!(result.is_err(), "{name} shared UTF8 representation refusal");
+            typed_utf16::assert_projection(w["encoded"].as_str().unwrap(), &result.unwrap());
         }
     }
 }
@@ -1004,10 +1004,7 @@ fn check_nested_numbers<T: DeserializeOwned + Serialize + JsNumberOutput>(
                 "{name} nested UTF16 retention"
             );
         } else {
-            assert!(
-                result.is_err(),
-                "{name} nested shared UTF8 representation refusal"
-            );
+            typed_utf16::assert_projection(raw, &result.unwrap());
         }
     }
 }
@@ -1225,13 +1222,13 @@ fn check_dictionary<T: DeserializeOwned + Serialize + JsNumberOutput>(
     for w in witnesses {
         let raw = w["encoded"].as_str().unwrap();
         if w["representable"] != true {
-            assert!(
-                serde_json::from_str::<T>(raw).is_err(),
-                "{name}.{field} bare UTF8 dictionary refusal"
+            typed_utf16::assert_projection(
+                raw,
+                &(serde_json::from_str::<T>(raw)).expect("typed surrogate record is retained"),
             );
-            assert!(
-                js_from_str::<T>(raw).is_err(),
-                "{name}.{field} shared UTF8 dictionary refusal"
+            typed_utf16::assert_projection(
+                raw,
+                &(js_from_str::<T>(raw)).expect("typed surrogate record is retained"),
             );
             continue;
         }
@@ -2085,3 +2082,5 @@ collection_cardinality_test!(
     "scheduledMaintenance",
     |v: &SystemStatus| v.scheduled_maintenance.as_ref().unwrap().len()
 );
+
+use unknown_depth::typed_utf16;

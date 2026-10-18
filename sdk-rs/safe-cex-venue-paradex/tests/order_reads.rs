@@ -349,11 +349,14 @@ fn actual_typescript_order_reads() {
         "orders_source_getter_reads"
     );
     assert_eq!(corpus["boundaries"]["surrogateCodeUnit"], 0xd800);
-    assert!(
-        safe_cex_num::numeric_ingress::js_from_str::<String>(
-            corpus["boundaries"]["surrogateRaw"].as_str().unwrap()
-        )
-        .is_err(),
-        "orders_utf8_refusal"
+    typed_utf16::assert_projection(
+        corpus["boundaries"]["surrogateRaw"].as_str().unwrap(),
+        &(safe_cex_num::numeric_ingress::js_from_str::<String>(
+            corpus["boundaries"]["surrogateRaw"].as_str().unwrap(),
+        ))
+        .expect("typed surrogate record is retained"),
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
