@@ -1507,7 +1507,7 @@ fn actual_order_snapshot_native_floor() {
     }
     assert_eq!(rows.len(), 60, "independent authored order snapshot floor");
     assert_eq!(
-        corpus["contentHash"], "9002a36c1e5b8168ebb5f27b9c93559181062617e30f7cf11ca91b4250da91e9",
+        corpus["contentHash"], "87ea98d83a0a9b5a2054530bafe8f28c119bcfdccc5ba3a41d56e758fbaca7f7",
         "actual source/import pin after native assertions"
     );
     eprintln!(
