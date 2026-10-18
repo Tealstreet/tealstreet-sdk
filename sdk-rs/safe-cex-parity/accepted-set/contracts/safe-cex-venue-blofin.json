@@ -9427,7 +9427,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -9474,7 +9474,7 @@
         "where_predicates": []
       }
     },
-    "call": "{let n=$type($value.get(\"v\")).unwrap();serde_json::json!({\"bits\":format!(\"{:016x}\",n.to_bits())})}",
+    "call": "{let input=safe_cex_types::retained_json::RetainedJsonInput::from($value.clone());let n=$type(input.get(\"v\")).unwrap();serde_json::json!({\"bits\":format!(\"{:016x}\",n.to_bits())})}",
     "cases": [
       {
         "input": {
@@ -9499,7 +9499,7 @@
         }
       }
     ],
-    "evidence": "The concrete ticker numeric projection executes parseFloat(String(raw)); exact native bits distinguish a numeric prefix, signed zero and undefined NaN before any wire serialization."
+    "evidence": "The concrete ticker numeric projection executes parseFloat(String(raw)); exact native bits distinguish a numeric prefix, signed zero and undefined NaN before any wire serialization. The production parameter is now Option<&RetainedJsonInput>; exact parser-prefix, signed-zero and missing-value observations use that direct carrier."
   },
   "safe_cex_venue_blofin::position_adapter::num": {
     "category": "decoder",
