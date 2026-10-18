@@ -1350,7 +1350,7 @@ pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown>
 pub fn to_retained_input(
     value: &Js,
 ) -> Result<safe_cex_types::retained_json::RetainedJsonInput, Thrown> {
-    typed::capture(value, 0, false)
+    typed::capture(value, 0, false, true)
 }
 /// Restore the canonical retained data carrier without a JSON roundtrip.
 pub fn from_retained_input(value: safe_cex_types::retained_json::RetainedJsonInput) -> Js {

@@ -519,7 +519,7 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "is_public_data_only",
-        "count": 1
+        "count": 2
       }
     ]
   },
@@ -531,6 +531,18 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "name",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-exchange/src/js_runtime/promise.rs",
+    "function": "spawn",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "start",
         "count": 1
       }
     ]
@@ -1047,12 +1059,6 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "update_order",
-        "count": 1
-      },
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "update_symbol_metadata",
         "count": 1
       },
       {

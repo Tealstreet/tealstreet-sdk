@@ -379,8 +379,8 @@ impl Routes {
 impl RestAdapter for Routes {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         let body = match &request.body {
-            Some(RestBody::Untransformed(v)) => v.clone(),
-            Some(RestBody::Transformed(d)) => d.value().clone(),
+            Some(RestBody::Untransformed(v)) => v.clone().into_value().unwrap(),
+            Some(RestBody::Transformed(d)) => d.value().clone().into_value().unwrap(),
             Some(RestBody::Encoded(bytes)) => serde_json::from_slice(bytes).unwrap_or(Value::Null),
             None => Value::Null,
         };

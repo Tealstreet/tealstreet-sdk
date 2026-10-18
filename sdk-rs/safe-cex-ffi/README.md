@@ -140,6 +140,13 @@ venue operation running, while its invalidated delivery token suppresses a late
 full snapshot. `tests/native-account-startup.test.mjs` exercises real gateway
 startup, cancellation, signer rejection and the actual deadline.
 
+`updateSymbolMetadata` reuses the worker's keyed 500ms leading/trailing throttle.
+It acknowledges immediately with null while the venue request runs separately;
+late failures follow the existing runtime exception reporting. Close and
+venue deactivation clear pending trailing metadata calls. The Rust
+`native_account_metadata` and Node `native-account-metadata.test.mjs` targets
+observe real Bitrue leverage-bracket HTTP requests and disposal.
+
 The parity manifest records native Store delivery as worker split members:
 construction reuses `_throttledStoreUpdate`, subscribed updates follow
 `_setupExchangeEventListeners`, snapshots follow `sendSnapshot`, and teardown

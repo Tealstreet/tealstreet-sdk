@@ -1,5 +1,10 @@
 //! Pure helpers from asterdex.types.ts.
-use crate::{tables::*, types::*};
+use crate::{
+    tables::{ASTERDEX_MAIN_WALLET_REQUIRED_HINT, ASTERDEX_STP_MODES},
+    types::{
+        AsterDEXAPIVersion, AsterDEXFapiVersion, AsterDEXUserTradeResponse, AsterDEXV3AuthContext,
+    },
+};
 use safe_cex_types::{ExchangeOptions, ExchangeOptionsExtraAsterdexApiVersion};
 use serde_json::Value;
 use std::collections::HashMap;

@@ -33,6 +33,26 @@ fn input(value: &Value) -> JsJsonValue {
         _ => JsJsonValue::from(value.clone()),
     }
 }
+// Test ingress preserves the existing tagged corpus, including native BigInt throw cases.
+fn native_input(value: &JsJsonValue) -> safe_cex_exchange::js_runtime::value::Js {
+    use safe_cex_exchange::js_runtime::value::Js;
+    match value {
+        JsJsonValue::Undefined => Js::Undefined,
+        JsJsonValue::Null => Js::Null,
+        JsJsonValue::Bool(v) => Js::Bool(*v),
+        JsJsonValue::Number(v) => Js::Number(*v),
+        JsJsonValue::String(v) => Js::str(v),
+        JsJsonValue::BigInt(v) => Js::BigInt(std::rc::Rc::new(v.clone())),
+        JsJsonValue::Array(v) => Js::array(v.iter().map(native_input).collect()),
+        JsJsonValue::Object(v) => {
+            let object = Js::object(vec![]);
+            for (key, value) in v {
+                object.define(key, native_input(value)).unwrap();
+            }
+            object
+        }
+    }
+}
 #[test]
 fn mexc_api_live_typescript_signatures_and_bodies() {
     let output = std::process::Command::new("node")
@@ -63,9 +83,12 @@ fn mexc_api_live_typescript_signatures_and_bodies() {
             "getQueryString" => {
                 json!({"output":get_query_string(&input(&args[0]["params"]),args[0]["url"].as_str()).unwrap()})
             }
-            "normalizeRequestData" => match normalize_request_data(&input(&args[0])) {
+            "normalizeRequestData" => match normalize_request_data(&native_input(&input(&args[0])))
+            {
                 Ok(value) => json!({"output":value}),
-                Err(e) => json!({"error":{"name":e.name,"message":e.message}}),
+                Err(e) => {
+                    json!({"error":{"name":e.value.get("name").unwrap().to_display(),"message":e.message()}})
+                }
             },
             name => panic!("unhandled {name}"),
         };
@@ -169,9 +192,11 @@ fn mexc_factory_live_json_transform_boundary() {
     );
     for case in &cases {
         if let Some(data) = case["scenario"]["config"].get("data") {
-            let bytes = safe_cex_transport::RestBody::Untransformed(data.clone())
-                .wire_bytes_for_content_type(Some("application/json"))
-                .unwrap();
+            let bytes = safe_cex_transport::RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone()).unwrap(),
+            )
+            .wire_bytes_for_content_type(Some("application/json"))
+            .unwrap();
             assert_eq!(
                 String::from_utf8(bytes).unwrap(),
                 case["capture"][0]["data"].as_str().unwrap(),
@@ -252,12 +277,19 @@ fn mexc_shared_utf8_string_boundary_witnesses() {
         } else {
             let value = JsJsonValue::from(value.unwrap());
             for (name, result) in [
-                ("serializeMexcParams", serialize_mexc_params(&value)),
+                (
+                    "serializeMexcParams",
+                    serialize_mexc_params(&value).map_err(|e| e.message.to_string()),
+                ),
                 (
                     "getQueryString",
-                    get_query_string(&value, Some("/private?x=1")),
+                    get_query_string(&value, Some("/private?x=1"))
+                        .map_err(|e| e.message.to_string()),
                 ),
-                ("normalizeRequestData", normalize_request_data(&value)),
+                (
+                    "normalizeRequestData",
+                    normalize_request_data(&native_input(&value)).map_err(|e| e.message()),
+                ),
             ] {
                 assert_eq!(
                     serde_json::to_string(&result.unwrap()).unwrap(),
@@ -295,7 +327,10 @@ fn mexc_head_retry_live_preimage_and_wire_parity() {
         ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
             Box::pin(async move {
                 let data = request.body.as_ref().unwrap().untransformed().unwrap();
-                let text = data.as_str().unwrap();
+                let safe_cex_types::retained_json::RetainedJsonInput::Text(units) = data else {
+                    panic!("native normalized request text")
+                };
+                let text = String::from_utf16(units).unwrap();
                 let n = self.0.borrow().len();
                 let preimage = format!("key{}{}", 1791800000123u64 + n as u64, text);
                 let wire = request
@@ -354,7 +389,9 @@ fn mexc_head_retry_live_preimage_and_wire_parity() {
         let request = RestRequest {
             method: "head".into(),
             url: "/private".into(),
-            body: Some(RestBody::Untransformed(data)),
+            body: Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap(),
+            )),
             timeout_ms: Some(20000),
             ..Default::default()
         };

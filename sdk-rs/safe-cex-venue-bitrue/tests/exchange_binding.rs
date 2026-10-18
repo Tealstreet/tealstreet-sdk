@@ -755,7 +755,12 @@ fn source_routing_authorizes_signed_requests_and_installs_bigint_only_for_tunnel
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"code":"0","data":{}})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"code":"0","data":{}}),
+                        )
+                        .unwrap(),
+                    ),
                 })
             })
         }
@@ -881,6 +886,98 @@ fn source_routing_authorizes_signed_requests_and_installs_bigint_only_for_tunnel
         }
         venue.dispose().unwrap();
     }
+}
+
+#[test]
+fn connected_candle_history_resolves_the_real_promise_executor_and_caches_the_response() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let runtime = Rc::new(support::Runtime::default());
+    let http = Rc::new(Http(
+        runtime.clone(),
+        RefCell::new(vec![]),
+        Cell::new(false),
+    ));
+    let venue = BitrueExchange::new(
+        ExchangeName::Bitrue,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+        BitrueDependencies {
+            runtime: runtime.clone(),
+            http,
+            external_public_data: None,
+        },
+    )
+    .unwrap();
+    complete(&runtime, venue.start()).unwrap();
+    let public_socket = || {
+        runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url.contains("/kline-api/ws"))
+            .map(|(_, s)| s.clone())
+    };
+    for _ in 0..16 {
+        if public_socket().is_some() {
+            break;
+        }
+        runtime.advance(1000.);
+    }
+    let public = public_socket().expect("actual public socket");
+    runtime.pump();
+    let opts = || serde_json::from_value(json!({"symbol":"E-BTC-USDT","interval":"15m"})).unwrap();
+    let mut future = venue.fetch_ohlcv(opts());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(
+        future.as_mut().poll(&mut cx).is_pending(),
+        "real Promise executor must return a pending candle request"
+    );
+    let topic = "market_e_btcusdt_kline_15min";
+    assert!(
+        public
+            .sent
+            .borrow()
+            .iter()
+            .any(|s| s.contains("\"event\":\"req\"") && s.contains(topic)),
+        "Promise executor sends the actual request synchronously"
+    );
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({
+                "event_rep":"rep","channel":topic,"data":[]
+            })
+            .to_string(),
+        )));
+    runtime.pump();
+    let candles =
+        complete(&runtime, future).expect("connected fetchOHLCV resolves server response");
+    assert!(
+        candles.is_empty(),
+        "empty server history resolves without inventing rows"
+    );
+    let before = public.sent.borrow().len();
+    let cached = complete(&runtime, venue.fetch_ohlcv(opts())).unwrap();
+    assert!(cached.is_empty());
+    assert_eq!(
+        public.sent.borrow().len(),
+        before,
+        "source ten-second request cache avoids another request"
+    );
+    runtime.advance(11000.);
+    let mut timeout = venue.fetch_ohlcv(opts());
+    assert!(timeout.as_mut().poll(&mut cx).is_pending());
+    runtime.advance(5000.);
+    let error =
+        complete(&runtime, timeout).expect_err("request timeout rejects the constructor promise");
+    assert_eq!(error.message, "Request timeout");
+    assert!(
+        runtime.reports.borrow().is_empty(),
+        "resolved request clears its timeout"
+    );
+    venue.dispose().unwrap();
 }
 
 struct AccountRowsHttp(Rc<Http>, Value);

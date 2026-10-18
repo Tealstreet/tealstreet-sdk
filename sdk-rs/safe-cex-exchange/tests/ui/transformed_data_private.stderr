@@ -1,5 +1,5 @@
 error[E0451]: field `value` of struct `TransformedData` is private
- --> tests/ui/transformed_data_private.rs:3:31
+ --> tests/ui/transformed_data_private.rs:4:31
   |
-3 |     let _ = TransformedData { value: serde_json::json!("guessed bytes") };
+4 |     let _ = TransformedData { value: RetainedJsonInput::Null };
   |                               ^^^^^ private field

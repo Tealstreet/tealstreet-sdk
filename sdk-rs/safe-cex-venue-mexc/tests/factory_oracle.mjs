@@ -47,6 +47,10 @@ if(process.argv.includes('--response-numbers')) {
  scenarios.length=0;
  for(const response of ['{"code":0,"data":-0}','{"code":0,"data":1e400}','{"code":0,"data":-1e400}','{"code":0,"data":[-0,1e400,-1e400,0,1.25]}']) scenarios.push({config:{url:'/private'},options:{key:'key',secret:'secret'},response});
 }
+if(process.argv.includes('--response-units')) {
+ scenarios.length=0;
+ for(const response of ['{"code":0,"data":[{"symbol":"\\ud800","vol":2,"price":3}]}', '{"code":0,"data":[{"symbol":"'+String.fromCharCode(0xd800)+'","vol":2,"price":3}]}']) scenarios.push({config:{url:'/private'},options:{key:'key',secret:'secret'},response});
+}
 // Observe the number before JSON.stringify erases -0 and non-finite values.
 function observe(value) {
  if(typeof value==='number'){if(Number.isNaN(value))return {$number:'7ff8000000000000'};const bytes=Buffer.alloc(8);bytes.writeDoubleBE(value);return {$number:bytes.toString('hex')};}
@@ -56,4 +60,9 @@ function observe(value) {
 }
 const results=[];
 for(const scenario of scenarios){capture=[];preimages=[];attempt=0;plan=scenario;let result;try{const response=await api.createAPI(scenario.options,{name:'mexc'}).request(scenario.config);result={data:response.data};}catch(error){result={error:error.message,hasResponse:!!error.response,data:error.response?.data??null};}results.push({scenario,capture,preimages,result,observedResult:observe(result)});}
+if(process.argv.includes('--response-units')) {
+ process.stdout.write(JSON.stringify(results.map(row=>({symbolUnits:Array.from(row.result.data.data[0].symbol,c=>c.charCodeAt(0)),code:row.result.data.code,vol:row.result.data.data[0].vol,price:row.result.data.data[0].price,http:row.capture.length}))));
+} else {
 process.stdout.write(JSON.stringify(results.map(item=>({captureArchitecture:process.arch,captureNodeMajor:Number(process.versions.node.split('.')[0]),...item}))));
+
+}

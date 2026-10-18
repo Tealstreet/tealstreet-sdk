@@ -484,6 +484,15 @@ compiles a live-mapper null-refusal control that must fail its named order-count
 assertion; decoder-only tests are not evidence
 for this production path.
 
+The production WOO signer now receives and returns the original native runtime
+config through `api` and `factory`. Shallow copies retain nested data identity,
+callables and own properties. V1 reuses the shared runtime qs serializer; V3 uses
+the existing native JSON.stringify operation at its signing boundary, retaining
+source BigInt throws and toJSON callbacks before any data-only transport capture. The constructed
+exchange regression in `native_signing_retention` observes NaN and Infinity in
+actual HMAC preimages before the terminal wire projection. Finite JSON fixture
+views in older tests are explicit observations after signing.
+
 The configured fetchOrders member admits mapped rows individually before either
 the Exchange trait or startup Store write. Order.amount/filled must be numbers;
 reduceOnly admits absent, own undefined and booleans. A malformed row emits its
