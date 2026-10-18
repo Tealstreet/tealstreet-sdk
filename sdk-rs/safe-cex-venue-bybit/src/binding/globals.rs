@@ -55,11 +55,16 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
             )
         }),
     );
-    // The source import omits literal top-level keys from object-literal requests.
+    // lodash omit copies enumerable inherited fields before removing literal paths.
     def(
         "omit",
         Js::function("omit", |_, args| {
-            let request = arg(&args, 0).spread_object()?;
+            let input = arg(&args, 0);
+            let request = Js::object(vec![]);
+            let mut keys = safe_cex_exchange::js_runtime::for_in::ForInRecord::get(&input);
+            while let Some(key) = keys.next_key()? {
+                request.define_key(&key, input.get_key(&key)?)?;
+            }
             for paths in args.iter().skip(1) {
                 for key in paths.array_values().unwrap_or_else(|| vec![paths.clone()]) {
                     request.delete(&key.to_js_string()?)?;

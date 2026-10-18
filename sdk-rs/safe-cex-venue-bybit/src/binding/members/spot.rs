@@ -257,23 +257,6 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(rt, "getOrderPositionIdx", |rt, _| {
         Ok(rt.spawn(Box::pin(async { Ok(Js::Number(0.)) })))
     })?;
-    method(rt, "getStopOrderPositionIdx", |rt, a| {
-        let opts = arg(&a, 0).spread_object()?;
-        opts.delete(&"reduceOnly".encode_utf16().collect::<Vec<_>>())?;
-        let pending = rt.this.call_method("getOrderPositionIdx", vec![opts])?;
-        Ok(rt.spawn(Box::pin({
-            let await_runtime = rt.exchange_runtime();
-            async move {
-                let index = text(&await_js(&await_runtime, pending).await?)?;
-                Js::object(vec![
-                    ("0", Js::Number(0.)),
-                    ("1", Js::Number(2.)),
-                    ("2", Js::Number(1.)),
-                ])
-                .get(&index)
-            }
-        })))
-    })?;
     method(rt, "fetchOrdersPositionsAndBalance", |rt, _| {
         Ok(rt.clone().spawn(Box::pin(async move {
             refresh::spot_account_refresh(&rt, rt.this.clone()).await

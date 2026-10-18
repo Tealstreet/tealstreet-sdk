@@ -3,7 +3,7 @@ const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH),root=path.resolve(__dirna
 function load(file){
  if(modules.has(file))return modules.get(file);
  const exports={};modules.set(file,exports);
- vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require(spec){
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,process,require(spec){
   assert(spec.startsWith('.')||spec.startsWith('@tealstreet/'),spec);
   const target=spec.startsWith('.')?path.resolve(path.dirname(file),spec):path.join(root,'packages',spec.slice('@tealstreet/'.length));
   return load(fs.existsSync(target+'.ts')?target+'.ts':path.join(target,'index.ts'));
@@ -12,13 +12,13 @@ function load(file){
 const enums=load(path.join(root,'packages/safe-cex/src/types.ts'));
 const params=load(path.join(root,'packages/safe-cex/src/exchanges/bybit/bybit.order-params.ts'));
 const omit=require(require.resolve('lodash/omit',{paths:[root,path.resolve(process.env.SAFE_CEX_TYPESCRIPT_PATH,'../..')]}));
-function subject(family){
+function subject(family, extra=[]){
  const [file,name]=({linear:['bybit.exchange.ts','BybitExchange'],inverse:['bybitinverse.exchange.ts','BybitInverseExchange'],spot:['bybitspot.exchange.ts','BybitSpotExchange']})[family];
  const source=fs.readFileSync(path.join(root,'packages/safe-cex/src/exchanges/bybit',file),'utf8');
  const ast=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true),cls=ast.statements.find(s=>ts.isClassDeclaration(s)&&s.name.text===name);assert(cls);
- const names=['reinitOnThrow','getOrderExecutionParams','getOrderPositionIdx','getStopOrderPositionIdx',...(family==='inverse'?['getExecutionQueryWindows','EXECUTION_QUERY_MAX_RANGE_MS']:[])];
+ const names=['reinitOnThrow','getOrderExecutionParams','getOrderPositionIdx','getStopOrderPositionIdx',...extra,...(family==='inverse'?['getExecutionQueryWindows','EXECUTION_QUERY_MAX_RANGE_MS']:[])];
  const body=names.map(n=>{const found=cls.members.filter(m=>m.name?.getText(ast)===n);assert.equal(found.length,1,`${name}.${n}`);return found[0].getText(ast);}).join('\n');
- const context=vm.createContext({OrderSide:enums.OrderSide,PositionMode:enums.PositionMode,omit,getBybitOrderExecutionParams:params.getBybitOrderExecutionParams});
+ const context=vm.createContext({OrderSide:enums.OrderSide,PositionMode:enums.PositionMode,omit,getBybitOrderExecutionParams:params.getBybitOrderExecutionParams,ENDPOINTS:load(path.join(root,'packages/safe-cex/src/exchanges/bybit/bybit.types.ts')).ENDPOINTS,getBybitResponseMeta:load(path.join(root,'packages/safe-cex/src/exchanges/bybit/bybit.response.ts')).getBybitResponseMeta});
  vm.runInContext(ts.transpileModule(`class Subject { ${body} } globalThis.subject=new Subject();`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
  return context.subject;
 }
@@ -32,7 +32,54 @@ function observe(value){
 const number=token=>token==='undefined'?undefined:Number(token);
 const makeError=(name,message)=>Object.assign(new Error(message),{name,marker:37});
 const errorResult=(error,original)=>({error:error.name,message:error.message,marker:error.marker??null,sameError:error===original});
+async function receiverProfiles() {
+ let profiles=0;
+ for(const family of ['linear','inverse','spot']) {
+  const api=subject(family), symbol={opaque:'\ud800'}, opts={symbol,side:'buy',reduceOnly:true};
+  let release,calls=0;
+  api.fetchPositionMode=received=>{assert.equal(received,symbol);calls++;return new Promise(resolve=>release=resolve);};
+  const result=api.getOrderPositionIdx(opts);
+  assert.equal(calls,family==='spot'?0:1);
+  opts.side='sell';opts.reduceOnly={};
+  if(release)release('hedged');
+  assert.equal(await result,family==='spot'?0:1);profiles++;
+  const opaque={text:'\ud800',zero:-0}, inherited={inherited:opaque};
+  for(const index of [0,1,2,3,'1','constructor']) {
+   const original=Object.assign(Object.create(inherited),{side:'buy',reduceOnly:true});
+   api.getOrderPositionIdx=received=>{
+    assert.notEqual(received,original);assert.equal(received.inherited,opaque);
+    assert(Object.hasOwn(received,'inherited'));assert(!Object.hasOwn(received,'reduceOnly'));
+    assert(original.reduceOnly);assert(Object.is(received.inherited.zero,-0));
+    return Promise.resolve(index);
+   };
+   const expected={0:0,1:2,2:1}[index];
+   const got=await api.getStopOrderPositionIdx(original);
+   if(index==='constructor')assert.equal(typeof got,'function');else assert.equal(got,expected);profiles++;
+  }
+  const reason={text:'\udfff'}, getter={};
+  Object.defineProperty(getter,'side',{enumerable:true,get(){throw reason;}});
+  let resultPromise;
+  assert.doesNotThrow(()=>resultPromise=api.getStopOrderPositionIdx(getter));
+  await assert.rejects(resultPromise,error=>error===reason);profiles++;
+  api.getOrderPositionIdx=()=>{throw reason;};
+  assert.doesNotThrow(()=>resultPromise=api.getStopOrderPositionIdx({}));
+  await assert.rejects(resultPromise,error=>error===reason);profiles++;
+ }
+ const api=subject('linear',['fetchPositionMode']);
+ const input=[{symbol:'BTCUSDT'}], mapped={positionMode:'\ud800'}, published=[];
+ api.store={positions:[],addOrUpdatePositions:rows=>published.push(rows)};
+ api.getCategoryForSymbol=()=> 'linear';
+ api.xhr={get:async()=>({data:{retCode:0,result:{list:input}}})};
+ api.mapPosition=function(row,index,array){
+  assert.equal(this,api);assert.equal(arguments.length,3);assert.equal(row,input[0]);assert.equal(index,0);assert.equal(array,input);return mapped;
+ };
+ assert.equal(await api.fetchPositionMode('BTCUSDT'),'\ud800');
+ assert.equal(published.length,1);assert.equal(published[0][0],mapped);profiles++;
+ assert.equal(profiles,28,'GUARD production receiver profiles');
+ return profiles;
+}
 async function main(){
+ const receiverProfilesCount=await receiverProfiles();
  const windows=[],inverse=subject('inverse'),defaultMax=inverse.EXECUTION_QUERY_MAX_RANGE_MS;
  const pairs=[['undefined','undefined'],['0','undefined'],['undefined','0'],['-0','0'],['0','-0'],['10','0'],['0','0'],['0','5'],['0','10'],['0','11'],['0','12'],['0','22'],['0','23'],['NaN','0'],['0','NaN'],['NaN','NaN'],['-10','10']];
  for(const [from,to]of pairs){inverse.EXECUTION_QUERY_MAX_RANGE_MS=10;windows.push({from,to,max:'10',result:observe(inverse.getExecutionQueryWindows(number(from),number(to)))});}
@@ -97,6 +144,6 @@ async function main(){
   executions.push({family,input,events,result});
  }
  assert.equal(executions.length,39,'GUARD independent execution floor');
- process.stdout.write(JSON.stringify({windows,reinit,index,stops,executions}));
+ process.stdout.write(JSON.stringify({receiverProfiles:receiverProfilesCount,windows,reinit,index,stops,executions}));
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

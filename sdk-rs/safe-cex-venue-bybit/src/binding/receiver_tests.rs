@@ -766,3 +766,288 @@ fn divergence_sdk_account_starts_original_client_before_waiter_poll() {
         exchange.base.dispose().unwrap();
     });
 }
+
+#[test]
+fn divergence_audit_order_index_keeps_live_options_and_rejection_identity() {
+    run(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitinverse,
+        ] {
+            let exchange = venue(name);
+            let runtime = exchange.base.runtime.clone();
+            let this = &exchange.js.get().unwrap().this;
+            let symbol = Js::object(vec![("opaque", Js::String(vec![0xd800].into()))]);
+            let opts = Js::object(vec![
+                ("symbol", symbol.clone()),
+                ("side", Js::str("buy")),
+                ("reduceOnly", Js::Bool(true)),
+            ]);
+            for reject in [false, true] {
+                let pending = safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+                let request = pending.clone();
+                let original_symbol = symbol.clone();
+                let calls = Rc::new(Cell::new(0));
+                let count = calls.clone();
+                this.define(
+                    "fetchPositionMode",
+                    Js::function("fetchPositionMode", move |_, args| {
+                        assert!(arg(&args, 0).strict_equals(&original_symbol));
+                        count.set(count.get() + 1);
+                        Ok(Js::Promise(request.clone()))
+                    }),
+                )
+                .unwrap();
+                let result = this
+                    .call_method("getOrderPositionIdx", vec![opts.clone()])
+                    .unwrap();
+                assert_eq!(calls.get(), 1, "mode request starts before returning");
+                opts.set("side", Js::str("sell")).unwrap();
+                opts.set("reduceOnly", Js::object(vec![])).unwrap();
+                let reason = Js::object(vec![("message", Js::String(vec![0xd800].into()))]);
+                pending.settle(if reject {
+                    Err(Thrown::new(reason.clone()))
+                } else {
+                    Ok(Js::str("hedged"))
+                });
+                let result = await_js(&runtime, result).await;
+                if reject {
+                    assert!(result.unwrap_err().value.strict_equals(&reason));
+                } else {
+                    assert!(
+                        result.unwrap().strict_equals(&Js::Number(1.)),
+                        "post-await reads see the same options graph"
+                    );
+                }
+            }
+            exchange.base.dispose().unwrap();
+        }
+        let exchange = venue(ExchangeName::Bybitspot);
+        let this = &exchange.js.get().unwrap().this;
+        let opts = Js::object(vec![]);
+        opts.define_accessor(
+            "symbol",
+            Some(Rc::new(|_| panic!("Spot must ignore options"))),
+            None,
+        )
+        .unwrap();
+        let result = this.call_method("getOrderPositionIdx", vec![opts]).unwrap();
+        assert!(
+            await_js(&exchange.base.runtime, result)
+                .await
+                .unwrap()
+                .strict_equals(&Js::Number(0.))
+        );
+        exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
+fn divergence_audit_primary_stop_index_is_a_live_member() {
+    run(async {
+        let exchange = venue(ExchangeName::Bybit);
+        let this = &exchange.js.get().unwrap().this;
+        let called = Rc::new(Cell::new(0));
+        let calls = called.clone();
+        this.define(
+            "getOrderPositionIdx",
+            Js::function("getOrderPositionIdx", move |_, args| {
+                calls.set(calls.get() + 1);
+                assert!(!arg(&args, 0).has_own("reduceOnly"));
+                Ok(Js::Number(1.))
+            }),
+        )
+        .unwrap();
+        let result = this
+            .call_method(
+                "getStopOrderPositionIdx",
+                vec![Js::object(vec![("reduceOnly", Js::Bool(true))])],
+            )
+            .expect("stop_index_live_member");
+        assert!(
+            await_js(&exchange.base.runtime, result)
+                .await
+                .unwrap()
+                .strict_equals(&Js::Number(2.))
+        );
+        assert_eq!(called.get(), 1);
+        exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
+fn divergence_audit_stop_index_copies_inherited_values_and_rejects_asynchronously() {
+    run(async {
+        for name in [
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+        ] {
+            let exchange = venue(name);
+            let this = &exchange.js.get().unwrap().this;
+            let rt = exchange.js.get().unwrap();
+            let opaque = Js::object(vec![
+                ("text", Js::String(vec![0xd800].into())),
+                ("zero", Js::Number(-0.0)),
+            ]);
+            let proto = Js::object(vec![("inherited", opaque.clone())]);
+            let opts = Js::object(vec![]);
+            rt.global("Object")
+                .unwrap()
+                .call_method("setPrototypeOf", vec![opts.clone(), proto])
+                .unwrap();
+            opts.set("side", Js::str("buy")).unwrap();
+            opts.set("reduceOnly", Js::Bool(true)).unwrap();
+            let request =
+                safe_cex_exchange::js_runtime::promise::Promise::pending(&exchange.base.runtime);
+            let pending = request.clone();
+            let shared = opaque.clone();
+            let original = opts.clone();
+            this.define(
+                "getOrderPositionIdx",
+                Js::function("getOrderPositionIdx", move |_, args| {
+                    let copied = arg(&args, 0);
+                    assert!(!copied.strict_equals(&original));
+                    assert!(!copied.has_own("reduceOnly"));
+                    assert!(
+                        copied.get("inherited")?.strict_equals(&shared),
+                        "stop_index_inherited_alias"
+                    );
+                    assert!(original.has_own("reduceOnly"));
+                    Ok(Js::Promise(pending.clone()))
+                }),
+            )
+            .unwrap();
+            let result = this
+                .call_method("getStopOrderPositionIdx", vec![opts])
+                .unwrap();
+            request.settle(Ok(Js::str("1")));
+            assert!(
+                await_js(&exchange.base.runtime, result)
+                    .await
+                    .unwrap()
+                    .strict_equals(&Js::Number(2.)),
+                "source table uses property-key coercion"
+            );
+            for index in [
+                Js::Number(0.),
+                Js::Number(1.),
+                Js::Number(2.),
+                Js::Number(3.),
+                Js::str("constructor"),
+            ] {
+                let returned = index.clone();
+                this.define(
+                    "getOrderPositionIdx",
+                    Js::function("getOrderPositionIdx", move |_, _| Ok(returned.clone())),
+                )
+                .unwrap();
+                let result = this
+                    .call_method("getStopOrderPositionIdx", vec![Js::object(vec![])])
+                    .unwrap();
+                let value = await_js(&exchange.base.runtime, result).await.unwrap();
+                if index.is_string() {
+                    assert!(value.is_callable(), "inherited table member remains native");
+                } else if index.strict_equals(&Js::Number(3.)) {
+                    assert!(value.is_undefined());
+                } else {
+                    let expected = [0., 2., 1.][index.to_number().unwrap() as usize];
+                    assert!(value.strict_equals(&Js::Number(expected)));
+                }
+            }
+            let reason = Js::object(vec![("opaque", Js::String(vec![0xdfff].into()))]);
+            let thrown = reason.clone();
+            let opts = Js::object(vec![]);
+            opts.define_accessor(
+                "side",
+                Some(Rc::new(move |_| Err(Thrown::new(thrown.clone())))),
+                None,
+            )
+            .unwrap();
+            let result = this
+                .call_method("getStopOrderPositionIdx", vec![opts])
+                .expect("async member must return rejected Promise");
+            assert!(
+                await_js(&exchange.base.runtime, result)
+                    .await
+                    .unwrap_err()
+                    .value
+                    .strict_equals(&reason)
+            );
+            exchange.base.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn divergence_audit_position_mode_maps_with_the_original_array_and_receiver() {
+    run(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+            let exchange = venue(name);
+            let this = &exchange.js.get().unwrap().this;
+            let rows = Js::array(vec![Js::object(vec![("symbol", Js::str("BTCUSDT"))])]);
+            let response = Js::object(vec![(
+                "data",
+                Js::object(vec![
+                    ("retCode", Js::Number(0.)),
+                    ("result", Js::object(vec![("list", rows.clone())])),
+                ]),
+            )]);
+            let count = Rc::new(Cell::new(0));
+            let mapped = Js::object(vec![("positionMode", Js::String(vec![0xd800].into()))]);
+            let mapped_row = mapped.clone();
+            let input_rows = rows.clone();
+            let receiver = this.clone();
+            let calls = count.clone();
+            this.define(
+                "mapPosition",
+                Js::function("mapPosition", move |actual_this, args| {
+                    assert!(actual_this.strict_equals(&receiver));
+                    if args.len() != 3 {
+                        return Err(Thrown::error("Error", "position_mode_mapper_arguments"));
+                    }
+                    assert!(arg(&args, 2).strict_equals(&input_rows));
+                    assert!(arg(&args, 0).strict_equals(&input_rows.get("0")?));
+                    assert!(arg(&args, 1).strict_equals(&Js::Number(0.)));
+                    calls.set(calls.get() + 1);
+                    Ok(mapped_row.clone())
+                }),
+            )
+            .unwrap();
+            let published = Rc::new(RefCell::new(Js::Undefined));
+            let observed = published.clone();
+            this.define(
+                "store",
+                Js::object(vec![
+                    ("positions", Js::array(vec![])),
+                    (
+                        "addOrUpdatePositions",
+                        Js::function("addOrUpdatePositions", move |_, args| {
+                            *observed.borrow_mut() = arg(&args, 0);
+                            Ok(Js::Undefined)
+                        }),
+                    ),
+                ]),
+            )
+            .unwrap();
+            this.define(
+                "xhr",
+                Js::object(vec![(
+                    "get",
+                    Js::function("get", move |_, _| Ok(response.clone())),
+                )]),
+            )
+            .unwrap();
+            let result = this
+                .call_method("fetchPositionMode", vec![Js::str("BTCUSDT")])
+                .unwrap();
+            let mode = await_js(&exchange.base.runtime, result).await.unwrap();
+            assert_eq!(units(&mode), [0xd800]);
+            assert_eq!(count.get(), 1);
+            assert!(published.borrow().get("0").unwrap().strict_equals(&mapped));
+            exchange.base.dispose().unwrap();
+        }
+    });
+}

@@ -967,3 +967,13 @@ The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
 DIVERGENCE_FIX_AUDIT.md records the seven audited rows and the remaining 30.
+
+
+Position-index audit rows 9/10/11/20/21 use constructed native receivers in
+`binding/receiver_tests.rs`. Stop-index dispatch is installed once in batch.rs;
+placement/amendment call the same replaceable members. The existing native omit
+facade uses canonical ForInRecord to preserve inherited enumerable aliases, and
+getter failures reject the original Promise. Position-mode mapping binds the
+mapper once and uses native Array.map with row/index/original-array arguments.
+Run the receiver tests, execution_guards source target and
+`scripts/position-index-controls.py`; the latter restores every compiled fault.

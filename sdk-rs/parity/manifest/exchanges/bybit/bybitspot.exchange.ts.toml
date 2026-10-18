@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/binding/members/lifecycle.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/lifecycle.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" ]
 
 [[symbol]]
 ts = "isBybitOrderAlreadyGoneCancelMessage"
@@ -382,14 +382,14 @@ note = "Actual REST/private-frame witnesses retain tpslOrder/OcoOrder/Bidirectio
 ts = "BybitSpotExchange#getOrderPositionIdx"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/execution_guards.rs::spot_get_order_position_idx"
+rs = [ "safe-cex-venue-bybit/src/execution_guards.rs::spot_get_order_position_idx", "safe-cex-venue-bybit/src/binding/members/spot.rs::install" ]
 status = "divergent"
-note = "CHOSEN: native Rust Future/host polling replaces JS Promise identity and microtask scheduling. This async helper ignores its generic input and returns exact numeric zero without any mode request or option reads. Constructor/order consumer wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::spot_get_order_position_idx."
+note = "ACCEPT audit row 20: the constructed Spot receiver returns the source Promise with numeric zero and never reads options, even when symbol has a throwing getter. The shared primary/inverse receiver retains its independent live-mode semantics. A compiled nonzero Spot return fault fails the actual receiver witness. The generic public helper remains supplemental adapter coverage. Renamed Rust targets: safe-cex-venue-bybit/src/execution_guards.rs::spot_get_order_position_idx, safe-cex-venue-bybit/src/binding/members/spot.rs::install."
 
 [[symbol]]
 ts = "BybitSpotExchange#getStopOrderPositionIdx"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx"
+rs = [ "safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx", "safe-cex-venue-bybit/src/binding/members/batch.rs::install" ]
 status = "divergent"
-note = "CHOSEN: Rust Future/host polling replaces JS Promise identity and microtask scheduling. Owned inert UTF-8 JSON map copies preserve own fields and remove reduceOnly before calling the explicit index host. Nested JS object aliases, inherited/getter fields and lone UTF-16 surrogates are outside this clone ABI. Awaited numeric indexes map 0->0, 1->2, 2->1, with other numbers represented as undefined; native host errors retain identity. Constructor/order consumer wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx."
+note = "FIX-audit row 21: reuse the common installed native stop-index member instead of the Spot own-only copy with synchronous getter errors. The canonical for-in graph walker in the existing omit facade retains inherited enumerable values and aliases, then deletes reduceOnly. Real constructed Spot/inverse/primary/demo receivers observe UTF16, signed zero, unchanged input, numeric/text/prototype table keys and original getter rejection identity. The old JSON helper remains supplemental finite-adapter coverage. Renamed Rust targets: safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx, safe-cex-venue-bybit/src/binding/members/batch.rs::install."
