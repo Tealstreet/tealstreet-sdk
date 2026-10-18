@@ -945,3 +945,18 @@ fn retained_handler_frames_cross_the_production_core_registry() {
     assert_eq!(calls.get(), 4, "source-valid native graphs reach the shared registry");
     socket.dispose();
 }
+
+#[cfg(test)]
+mod retained_handler_support {
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../safe-cex-exchange/tests/support/retained_handlers.rs"));
+}
+#[test]
+fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
+    let (socket, _, _) = fixture();
+    let cases = retained_handler_support::source_frames("bybit", "publicWebsocket");
+    let (handlers, calls) = retained_handler_support::pair(&cases, false);
+    socket.message_handlers.borrow_mut().insert("retainedProbe".into(), handlers);
+    for case in cases { on_message(&socket, case["frame"].as_str().unwrap()).unwrap(); }
+    assert_eq!(calls.get(), 8);
+    socket.dispose();
+}

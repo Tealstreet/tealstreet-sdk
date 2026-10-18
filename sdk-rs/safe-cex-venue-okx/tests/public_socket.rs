@@ -414,3 +414,21 @@ fn retained_handler_frames_cross_the_production_core_registry() {
     assert_eq!(*calls.borrow(), 4, "all valid frames reach the shared registry");
     socket.dispose();
 }
+
+#[cfg(test)]
+mod retained_handler_support {
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../safe-cex-exchange/tests/support/retained_handlers.rs"));
+}
+#[test]
+fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
+    let socket = BaseWebSocket::new(1, Parent::new(), Rc::new(Runtime::default()), Rc::new(Protocol));
+    let cases = retained_handler_support::source_frames("okx", "publicWebsocket");
+    let (handlers, calls) = retained_handler_support::pair(&cases, false);
+    socket.message_handlers.borrow_mut().insert("retainedProbe".into(), handlers);
+    let sequences = RefCell::new(HashMap::new());
+    let recovering = RefCell::new(HashSet::new());
+    let topics = RefCell::new(HashMap::new());
+    for case in cases { on_message(&socket, &SocketFrame::Text(case["frame"].as_str().unwrap().into()), &sequences, &recovering, &topics).unwrap(); }
+    assert_eq!(calls.get(), 8);
+    socket.dispose();
+}

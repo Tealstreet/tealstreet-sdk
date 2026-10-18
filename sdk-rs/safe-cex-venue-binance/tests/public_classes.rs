@@ -1097,3 +1097,17 @@ fn retained_handler_frames_cross_the_production_core_registry() {
     owner.on_message(r#"{"e":"retainedProbe","neighbor":true}"#).unwrap();
     assert_eq!(calls.get(), 4, "every source-valid frame reaches the real class/core registry");
 }
+
+#[cfg(test)]
+mod retained_handler_support {
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../safe-cex-exchange/tests/support/retained_handlers.rs"));
+}
+#[test]
+fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
+    let (owner, _, _) = fixture(PublicKind::FuturesMarket);
+    let cases = retained_handler_support::source_frames("binance", "publicWebsocket");
+    let (handlers, calls) = retained_handler_support::pair(&cases, true);
+    owner.base().message_handlers.borrow_mut().insert("retainedProbe".into(), handlers);
+    for case in cases { owner.on_message(case["frame"].as_str().unwrap()).unwrap(); }
+    assert_eq!(calls.get(), 8);
+}
