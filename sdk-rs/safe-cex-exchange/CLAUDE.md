@@ -1900,6 +1900,15 @@ nullish values, default separators, nested arrays and custom ToString results.
 
 ## Retained error responses
 
+Local `Thrown` conversions retain the original JS value in the existing opaque
+`ExchangeError.origin`. The retained Thrown's native slot holds the diagnostic
+projection before attaching that origin, avoiding a reference cycle. Recovery
+preserves original identity and numeric/string bits without replaying getters
+while the typed metadata is unchanged. Explicit diagnostic edits and retained
+response authority continue through the existing error materialization path.
+The constructed Backpack trigger-repair witness compares real TS rejection
+identity and stringify with native object, signed-zero, NaN and UTF16 values.
+
 ExchangeError has no cached JSON response field. retained_response_input reads the
 nearest response origin in its cause chain: the original RestFailure for transport
 failures, or the existing RetainedJsonInput inside the API-error origin wrapper.
