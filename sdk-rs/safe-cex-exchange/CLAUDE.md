@@ -1373,6 +1373,13 @@ The native-host `js_sort` target checks the compiled master panic and error coun
 plus Node ordering across merge boundaries. Ordering under an inconsistent
 comparator remains implementation-dependent under ECMAScript.
 
+Journal interval reconstruction reuses that sorter for both fills and reconstructed
+intervals. Equal timestamps with missing IDs and NaN close times need not define
+a total order. The journal target compares all position fields with maintained
+TS across 128 finite mixed-ID and 128 nonfinite-close profiles, alongside its
+192 existing interval/funding profiles. The old fill sort panics on the finite
+profiles; a separate reversed-result-order control checks the final sort.
+
 Ordinary numeric conversion of live objects/functions calls `valueOf` before
 `toString`, reading each member only when reached and retaining the original
 receiver and thrown value. String conversion uses the same private primitive
