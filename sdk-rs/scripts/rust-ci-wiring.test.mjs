@@ -402,7 +402,7 @@ test('mexc oracle removal is rejected', () => assert.throws(() => audit(workflow
 test('mexc oracle failure masking is rejected', () => assert.throws(() => audit(workflow.replace('run: yarn venue-oracle:mexc', 'run: yarn venue-oracle:mexc || true')), /Check mexc live TypeScript oracle command/));
 test('mexc oracle script preserves scoped live execution', () => {
   const scripts = JSON.parse(readFileSync(manifestFor(workflowUrlUsed), 'utf8')).scripts;
-  assert.equal(scripts['venue-oracle:mexc'], 'cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-mexc --all-targets --jobs 2 -- --include-ignored');
+  assert.equal(scripts['venue-oracle:mexc'], 'cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-mexc --all-targets --jobs 2 -- --include-ignored && cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-parity --test mexc_reporting_worker --jobs 1');
 });
 function auditJsPrimitive(source, name, target) {
   const job = source.match(/^  js-primitives:\n([\s\S]*?)(?=^  [\w-]+:|$(?![\s\S]))/m)?.[1];

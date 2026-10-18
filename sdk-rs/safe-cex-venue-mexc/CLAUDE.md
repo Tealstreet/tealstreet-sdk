@@ -386,3 +386,10 @@ The cross-layer MEXC/worker proof lives in parity tooling. The venue has no
 worker dependency, including dev-dependencies; architectural layer checks include
 test-only edges. All six browser-post and UI-clone cases remain mandatory in the
 relocated witness.
+
+The 120-case reporting-values/worker bridge corpus lives in tooling at
+`safe-cex-parity/tests/mexc_reporting_worker.rs`, using the public MEXC constructor.
+The MEXC unit target retains the six throwing-listener observations and primitive
+reporting helpers. `venue-oracle:mexc` runs both targets; worker dependencies never
+belong in this venue. Browser Error/structuredClone proof remains in the tooling
+example and Node runner documented above.

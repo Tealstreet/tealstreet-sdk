@@ -3946,6 +3946,8 @@ dependencies = [
 name = "safe-cex-parity"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "indexmap 2.14.2",
  "js-sys",
  "proc-macro2 1.0.107",
  "safe-cex-exchange",
