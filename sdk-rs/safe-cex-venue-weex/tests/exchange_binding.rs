@@ -1870,3 +1870,294 @@ fn ticker_info_keeps_source_own_undefined_and_opaque_native_rows() {
     );
     assert!(matches!(raw.get("undefined"), Some(Input::Undefined)));
 }
+
+// The audit enters through public SDK methods and the installed HTTP transform,
+// rather than treating the standalone utility decoder as the production ingress.
+fn audit_deep_response(candles: bool, tuple: bool) {
+    let deep = format!("{}0{}", "[".repeat(150), "]".repeat(150));
+    let h = harness(options(), |http| {
+        let (name, payload) = if candles {
+            (
+                "KLINES",
+                format!(
+                    r#"[{{"timestamp":1700000000000,"open":"11","high":"13","low":"7","close":"12","volume":"5","ignored":{deep}}}]"#
+                ),
+            )
+        } else if tuple {
+            (
+                "DEPTH",
+                format!(r#"{{"bids":[["1","2",{deep}]],"asks":[["3","4",{deep}]]}}"#),
+            )
+        } else {
+            (
+                "DEPTH",
+                format!(r#"{{"bids":[["1","2"]],"asks":[["3","4"]],"ignored":{deep}}}"#),
+            )
+        };
+        http.route_body(
+            "GET",
+            endpoint(name),
+            200,
+            safe_cex_transport::RestResponseBody::Encoded(payload.into_bytes()),
+        );
+        script(http);
+    });
+    seed(&h);
+    if candles {
+        let rows = h
+            .drive(h.venue().fetch_ohlcv(
+                serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(),
+            ))
+            .expect("WEEX-AUDIT unread candle property must not lose response");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].open.to_bits(), 11.0_f64.to_bits());
+    } else {
+        let book = h
+            .drive(h.exchange.fetch_order_book("BTCUSDT".into(), None))
+            .expect("WEEX-AUDIT unread book property must not lose response");
+        assert_eq!(book.bids.len(), 1);
+        assert_eq!(book.asks.len(), 1);
+        assert_eq!(book.bids[0].amount.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(book.asks[0].amount.to_bits(), 4.0_f64.to_bits());
+    }
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn fix_audit_unread_deep_candle_property() {
+    audit_deep_response(true, false);
+}
+#[test]
+fn fix_audit_unread_deep_book_property() {
+    audit_deep_response(false, false);
+}
+#[test]
+fn fix_audit_unread_deep_tuple_tail() {
+    audit_deep_response(false, true);
+}
+
+#[test]
+fn fix_audit_utilities_run_through_whole_source_and_constructed_native_methods() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fix-audit-source.cjs"),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        cases
+            .iter()
+            .map(|c| c["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "candle-aliases",
+            "candle-defaults",
+            "book-levels",
+            "ticker-percent",
+            "ticker-fallback",
+            "order-enums",
+            "order-defaults",
+            "position-enums",
+            "config-enums",
+            "fills-typed",
+            "candle-unread-deep",
+            "book-unread-deep",
+            "book-unread-tuple"
+        ]
+    );
+    for case in cases {
+        let h = harness(options(), |http| {
+            for (path, data) in case["routes"].as_object().unwrap() {
+                http.ok("GET", path, data.clone());
+            }
+            script(http);
+        });
+        seed(&h);
+        let (actual, keys): (Value, &[&str]) = match case["method"].as_str().unwrap() {
+            "candles" => {
+                let values = h
+                    .drive(
+                        h.venue().fetch_ohlcv(
+                            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"}))
+                                .unwrap(),
+                        ),
+                    )
+                    .unwrap();
+                assert_eq!(values.len(), 1);
+                let expected = &case["result"][0];
+                for (name, value) in [
+                    ("timestamp", values[0].timestamp),
+                    ("open", values[0].open),
+                    ("high", values[0].high),
+                    ("low", values[0].low),
+                    ("close", values[0].close),
+                    ("volume", values[0].volume),
+                ] {
+                    assert_eq!(
+                        value.to_bits(),
+                        expected[name].as_f64().unwrap().to_bits(),
+                        "{}:{name} native bits",
+                        case["id"]
+                    );
+                }
+                (
+                    serde_json::to_value(values).unwrap(),
+                    &["timestamp", "open", "high", "low", "close", "volume"],
+                )
+            }
+            "book" => {
+                let value = h
+                    .drive(h.exchange.fetch_order_book("BTCUSDT".into(), None))
+                    .unwrap();
+                assert_eq!(value.bids.len(), 2);
+                assert_eq!(value.asks.len(), 1);
+                assert_eq!(value.bids[0].price.to_bits(), 1.0_f64.to_bits());
+                (serde_json::to_value(value).unwrap(), &["bids", "asks"])
+            }
+            "tickers" => {
+                let values = h.drive(h.venue().fetch_tickers()).unwrap();
+                assert_eq!(values.len(), 1);
+                assert_eq!(
+                    values[0].percentage.to_bits(),
+                    case["result"][0]["percentage"].as_f64().unwrap().to_bits()
+                );
+                (
+                    serde_json::to_value(values).unwrap(),
+                    &["symbol", "last", "percentage", "volume"],
+                )
+            }
+            "orders" => (
+                serde_json::to_value(h.drive(h.venue().fetch_orders(None)).unwrap()).unwrap(),
+                &[
+                    "id",
+                    "side",
+                    "type",
+                    "status",
+                    "lastUpdate",
+                    "tpTriggerType",
+                    "slTriggerType",
+                ],
+            ),
+            "positions" => (
+                serde_json::to_value(
+                    h.drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into()])))
+                        .unwrap(),
+                )
+                .unwrap(),
+                &["symbol", "side", "contracts", "entryPrice", "marginType"],
+            ),
+            "leverage" => (
+                serde_json::to_value(
+                    h.drive(h.venue().fetch_leverage_for_symbol("BTCUSDT".into()))
+                        .unwrap(),
+                )
+                .unwrap(),
+                &["buyLeverage", "sellLeverage"],
+            ),
+            "fills" => (
+                serde_json::to_value(
+                    h.drive(h.venue().fetch_historical_fills(
+                        serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+                    ))
+                    .unwrap(),
+                )
+                .unwrap(),
+                &[
+                    "id",
+                    "orderId",
+                    "side",
+                    "price",
+                    "qty",
+                    "timestamp",
+                    "maker",
+                    "commissionAsset",
+                ],
+            ),
+            other => panic!("unexpected source case {other}"),
+        };
+        fn project(value: &Value, keys: &[&str]) -> Value {
+            if let Some(values) = value.as_array() {
+                return Value::Array(values.iter().map(|v| project(v, keys)).collect());
+            }
+            Value::Object(
+                keys.iter()
+                    .filter_map(|key| value.get(*key).map(|v| ((*key).into(), v.clone())))
+                    .collect(),
+            )
+        }
+        fn finite_numbers(value: &Value) -> Value {
+            match value {
+                Value::Number(n) => json!(n.as_f64().unwrap()),
+                Value::Array(a) => Value::Array(a.iter().map(finite_numbers).collect()),
+                Value::Object(o) => Value::Object(
+                    o.iter()
+                        .map(|(k, v)| (k.clone(), finite_numbers(v)))
+                        .collect(),
+                ),
+                v => v.clone(),
+            }
+        }
+        assert_eq!(
+            finite_numbers(&project(&actual, keys)),
+            finite_numbers(&case["result"]),
+            "WEEX-AUDIT actual SDK {}",
+            case["id"]
+        );
+        let sent = h.http.sent.lock().unwrap();
+        assert_eq!(sent.len(), case["requests"].as_array().unwrap().len());
+        assert!(
+            sent.iter().all(|r| r.headers.contains_key("ACCESS-SIGN")),
+            "actual signed HTTP"
+        );
+        drop(sent);
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn fix_audit_real_private_refreshes_debounce_await_and_skip_disposed_store() {
+    use safe_cex_transport::socket::SocketFrame;
+    for kind in ["orders", "positions", "account"] {
+        for disposed in [false,true] {
+            let h=setup();
+            h.drive(h.venue().start()).unwrap();
+            h.runtime.pump();
+            match kind {
+                "orders" => {let mut row=raw_order();row["price"]=json!(999);h.http.replace("GET",endpoint("OPEN_ORDERS"),json!([row]));},
+                "positions" => h.http.replace("GET",endpoint("POSITIONS"),json!([{"symbol":"BTCUSDT","positionSide":"LONG","size":"7","openValue":"714","leverage":"14","marginType":"CROSS","updatedTime":1700000000000.0}])),
+                "account" => h.http.replace("GET",endpoint("BALANCE"),json!([{"asset":"USDT","balance":"285","availableBalance":"240","unrealizePnl":"5"}])),
+                _=>unreachable!(),
+            }
+            let state=|| -> f64 {match kind {
+                "orders"=>h.store.orders().iter().find(|v|v.id=="native-9").unwrap().price,
+                "positions"=>h.store.positions().iter().find(|v|v.contracts>0.0).unwrap().contracts,
+                _=>h.store.balance().total,
+            }};
+            let before=state();
+            let held=h.http.hold_responses();
+            let sent=h.http.sent.lock().unwrap().len();
+            let socket=h.venue().base().get_private_sockets()[0].clone();
+            let frame=SocketFrame::Text(json!({"e":kind,"d":[]}).to_string());
+            socket.on_message(&frame).unwrap();h.runtime.advance(100.0);
+            socket.on_message(&frame).unwrap();h.runtime.advance(249.0);
+            assert_eq!(h.http.sent.lock().unwrap().len(),sent,"{kind}: reset debounce deadline");
+            h.runtime.advance(1.0);
+            assert_eq!(h.http.sent.lock().unwrap().len()-sent,if kind=="orders" {2}else{1},"{kind}: real fetch starts at timer deadline");
+            assert_eq!(state().to_bits(),before.to_bits(),"{kind}: held HTTP cannot update Store");
+            if disposed {h.venue().dispose().unwrap();}
+            held.release();h.runtime.pump();
+            let expected=if disposed {before} else {match kind {"orders"=>999.0,"positions"=>7.0,_=>285.0}};
+            assert_eq!(state().to_bits(),expected.to_bits(),"{kind}: disposed={disposed}, real Store settlement");
+            assert!(h.runtime.reports.borrow().is_empty(),"{:?}",h.runtime.reports.borrow());
+            h.venue().dispose().unwrap();
+        }
+    }
+}
