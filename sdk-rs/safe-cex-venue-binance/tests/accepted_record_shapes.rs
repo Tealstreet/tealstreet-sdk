@@ -12,13 +12,19 @@ fn futures_risk_vector_alias_preserves_native_rows() {
     let rows = serde_json::from_str::<futures::GetPositionRiskResponse>(raw)
         .expect("actual Futures vector alias decodes source rows");
     assert_eq!(rows.len(), 2);
-    assert_eq!((&*rows[0].symbol, &*rows[1].symbol), ("BTCUSDT", "ADAUSDT"));
     assert_eq!(
-        (&*rows[0].position_amt, &*rows[1].position_amt),
+        (rows[0].symbol.as_str(), rows[1].symbol.as_str()),
+        ("BTCUSDT", "ADAUSDT")
+    );
+    assert_eq!(
+        (rows[0].position_amt.as_str(), rows[1].position_amt.as_str()),
         ("2", "-22")
     );
     assert_eq!(
-        (&*rows[0].position_side, &*rows[1].position_side),
+        (
+            rows[0].position_side.as_str(),
+            rows[1].position_side.as_str()
+        ),
         ("LONG", "SHORT")
     );
     assert_eq!(rows[0].update_time.to_bits(), (-0.0_f64).to_bits());
@@ -42,12 +48,18 @@ fn pm_risk_vector_alias_preserves_native_rows() {
     let rows = serde_json::from_str::<pm::GetPositionRiskResponse>(raw)
         .expect("actual PM vector alias decodes source rows");
     assert_eq!(rows.len(), 2);
-    assert_eq!((&*rows[0].symbol, &*rows[1].symbol), ("ETHUSDT", "BNBUSDT"));
     assert_eq!(
-        (&*rows[0].position_amt, &*rows[1].position_amt),
+        (rows[0].symbol.as_str(), rows[1].symbol.as_str()),
+        ("ETHUSDT", "BNBUSDT")
+    );
+    assert_eq!(
+        (rows[0].position_amt.as_str(), rows[1].position_amt.as_str()),
         ("22", "42")
     );
-    assert_eq!((&*rows[0].leverage, &*rows[1].leverage), ("27", "47"));
+    assert_eq!(
+        (rows[0].leverage.as_str(), rows[1].leverage.as_str()),
+        ("27", "47")
+    );
     assert_eq!(rows[0].update_time.to_bits(), (-0.0_f64).to_bits());
     assert_eq!(rows[0].adl_quantile.to_bits(), (-0.0_f64).to_bits());
     assert!(!rows[1].isolated);
