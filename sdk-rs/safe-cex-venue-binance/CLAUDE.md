@@ -542,9 +542,10 @@ waiter after Promise.all rejection leaves its started sibling owned by the runti
 including response interceptors. Registry native_account_proxy_errors holds each
 orders/positions sibling response until after the first rejection to prove this.
 
-Ticker-capture aliases name retained state handles. The accepted alias review
-checks their actual compiler types and ordinary decoding/conversion traits;
-classification alone does not establish runtime reference behavior.
+Ticker-capture aliases name retained state handles and implement Deserialize
+in the production dependency graph. Their decoder contracts check map admission
+and every decoded Ticker field/bit/presence through the actual aliases. The
+separate constructed native witness establishes runtime reference behavior.
 `private_classes::production_native_ticker_capture_aliases_retain_cells_and_replace_generations`
 (`--features native`) constructs all three real native venues and dispatches
 book-ticker frames into their Store. It checks dictionary/cell identity, signed

@@ -3320,7 +3320,8 @@
     }
   },
   "safe_cex_venue_binance::ticker_capture::TickerReference": {
-    "category": "non-decoder",
+    "category": "decoder",
+    "shape": "map",
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -3355,11 +3356,83 @@
         }
       }
     },
-    "evidence": "Capture owns reference cells read by Target::id and PublicState::handle_stream; refresh patches a retained cell while the Store generation is unchanged and creates new cells for replacement rows. Native witness: tests/private_classes.rs::production_native_ticker_capture_aliases_retain_cells_and_replace_generations (features=native, all three family constructors). Source: public_classes.rs::handle_stream and ticker_capture.rs::Capture. No source-class equivalence beyond this finite state-reference corpus is claimed.",
-    "reason": "This alias is a retained mutable ticker state cell, not a decoder. Its producer takes an already typed Store ticker. Ordinary native alias probes enforce absence of raw decoding traits; the real native_dependencies frame/Store witness checks Rc identity and exact bid/ask/last bits before and after generation replacement."
+    "sample": {
+      "bid": -0.0,
+      "ask": 1.25,
+      "last": -2.5,
+      "mark": 3.75,
+      "index": 4.125,
+      "percentage": 5.5,
+      "openInterest": 6.25,
+      "fundingRate": -7.5,
+      "fundingTime": 8.75,
+      "volume": 9.125,
+      "quoteVolume": 10.5,
+      "id": "left🚀",
+      "symbol": "BTC",
+      "midPrice": -0.0,
+      "timestamp": 2.5,
+      "info": null
+    },
+    "evidence": "Actual Rc/RefCell alias implements Deserialize in the production dependency graph. Its qualified admission rejects non-map shapes; native observations inspect every decoded Ticker field, f64 bits, optional presence and dictionary keys before JSON transport. The separate actual native_dependencies witness tests all three constructed venue/Store paths: tests/private_classes.rs::production_native_ticker_capture_aliases_retain_cells_and_replace_generations. Source: ticker_capture.rs and public_classes.rs::handle_stream. No blanket state-handle exemption or feature-matrix equivalence is claimed.",
+    "entrypoints": [],
+    "observation": {
+      "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-alias-observers.rs\")); } let decoded:$type=serde_json::from_str($value[\"wire\"].as_str().unwrap()).unwrap();let row=decoded.borrow();witness::ticker(&row) }",
+      "cases": [
+        {
+          "input": {
+            "wire": "{\"bid\": -0.0, \"ask\": 1.25, \"last\": -2.5, \"mark\": 3.75, \"index\": 4.125, \"percentage\": 5.5, \"openInterest\": 6.25, \"fundingRate\": -7.5, \"fundingTime\": 8.75, \"volume\": 9.125, \"quoteVolume\": 10.5, \"id\": \"left🚀\", \"symbol\": \"BTC\", \"midPrice\": -0.0, \"timestamp\": 2.5, \"info\": null}"
+          },
+          "output": {
+            "bid": "8000000000000000",
+            "ask": "3ff4000000000000",
+            "last": "c004000000000000",
+            "mark": "400e000000000000",
+            "index": "4010800000000000",
+            "percentage": "4016000000000000",
+            "openInterest": "4019000000000000",
+            "fundingRate": "c01e000000000000",
+            "fundingTime": "4021800000000000",
+            "volume": "4022400000000000",
+            "quoteVolume": "4025000000000000",
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": "8000000000000000",
+            "timestamp": "4004000000000000",
+            "infoOwn": true,
+            "info": null
+          }
+        },
+        {
+          "input": {
+            "wire": "{\"bid\": 0.0, \"ask\": 11.25, \"last\": 12.5, \"mark\": 13.75, \"index\": 14.125, \"percentage\": 15.5, \"openInterest\": 16.25, \"fundingRate\": 17.5, \"fundingTime\": 18.75, \"volume\": 19.125, \"quoteVolume\": 20.5, \"id\": \"right\", \"symbol\": \"ETH\"}"
+          },
+          "output": {
+            "bid": "0000000000000000",
+            "ask": "4026800000000000",
+            "last": "4029000000000000",
+            "mark": "402b800000000000",
+            "index": "402c400000000000",
+            "percentage": "402f000000000000",
+            "openInterest": "4030400000000000",
+            "fundingRate": "4031800000000000",
+            "fundingTime": "4032c00000000000",
+            "volume": "4033200000000000",
+            "quoteVolume": "4034800000000000",
+            "id": "right",
+            "symbol": "ETH",
+            "midPrice": null,
+            "timestamp": null,
+            "infoOwn": false,
+            "info": null
+          }
+        }
+      ]
+    }
   },
   "safe_cex_venue_binance::ticker_capture::Dictionary": {
-    "category": "non-decoder",
+    "category": "decoder",
+    "shape": "map",
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -3444,7 +3517,138 @@
         }
       }
     },
-    "evidence": "The live PublicState::handle_stream obtains Capture::dictionary and uses the retained symbol table for native event lookup. Capture subscribes to the real Store, preserves the dictionary during in-place ticker patches, and replaces it on a ticker generation change. Native witness: tests/private_classes.rs::production_native_ticker_capture_aliases_retain_cells_and_replace_generations (features=native, all three family constructors). Source: public_classes.rs::handle_stream and ticker_capture.rs::Capture. No source-class equivalence beyond this finite state-reference corpus is claimed.",
-    "reason": "This alias is a shared mutable symbol-to-ticker reference table, not a parser or wire DTO. The public methods construct it from the typed Store; ordinary native alias probes enforce absence of declared raw decoders. The real native_dependencies constructor/frame/Store witness checks its pointer identity, replacement generation and readable row fields."
+    "sample": {
+      "BTC": {
+        "bid": -0.0,
+        "ask": 1.25,
+        "last": -2.5,
+        "mark": 3.75,
+        "index": 4.125,
+        "percentage": 5.5,
+        "openInterest": 6.25,
+        "fundingRate": -7.5,
+        "fundingTime": 8.75,
+        "volume": 9.125,
+        "quoteVolume": 10.5,
+        "id": "left🚀",
+        "symbol": "BTC",
+        "midPrice": -0.0,
+        "timestamp": 2.5,
+        "info": null
+      },
+      "ETH": {
+        "bid": 0.0,
+        "ask": 11.25,
+        "last": 12.5,
+        "mark": 13.75,
+        "index": 14.125,
+        "percentage": 15.5,
+        "openInterest": 16.25,
+        "fundingRate": 17.5,
+        "fundingTime": 18.75,
+        "volume": 19.125,
+        "quoteVolume": 20.5,
+        "id": "right",
+        "symbol": "ETH"
+      }
+    },
+    "evidence": "Actual Rc/RefCell alias implements Deserialize in the production dependency graph. Its qualified admission rejects non-map shapes; native observations inspect every decoded Ticker field, f64 bits, optional presence and dictionary keys before JSON transport. The separate actual native_dependencies witness tests all three constructed venue/Store paths: tests/private_classes.rs::production_native_ticker_capture_aliases_retain_cells_and_replace_generations. Source: ticker_capture.rs and public_classes.rs::handle_stream. No blanket state-handle exemption or feature-matrix equivalence is claimed.",
+    "entrypoints": [],
+    "observation": {
+      "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-alias-observers.rs\")); } let decoded:$type=serde_json::from_str($value[\"wire\"].as_str().unwrap()).unwrap();let rows=decoded.borrow();serde_json::json!({\"keys\":rows.keys().collect::<Vec<_>>(),\"rows\":rows.iter().map(|(key,row)|serde_json::json!({\"key\":key,\"ticker\":witness::ticker(&row.borrow())})).collect::<Vec<_>>()}) }",
+      "cases": [
+        {
+          "input": {
+            "wire": "{\"ETH\": {\"bid\": 0.0, \"ask\": 11.25, \"last\": 12.5, \"mark\": 13.75, \"index\": 14.125, \"percentage\": 15.5, \"openInterest\": 16.25, \"fundingRate\": 17.5, \"fundingTime\": 18.75, \"volume\": 19.125, \"quoteVolume\": 20.5, \"id\": \"right\", \"symbol\": \"ETH\"}, \"BTC\": {\"bid\": -0.0, \"ask\": 1.25, \"last\": -2.5, \"mark\": 3.75, \"index\": 4.125, \"percentage\": 5.5, \"openInterest\": 6.25, \"fundingRate\": -7.5, \"fundingTime\": 8.75, \"volume\": 9.125, \"quoteVolume\": 10.5, \"id\": \"left🚀\", \"symbol\": \"BTC\", \"midPrice\": -0.0, \"timestamp\": 2.5, \"info\": null}}"
+          },
+          "output": {
+            "keys": [
+              "BTC",
+              "ETH"
+            ],
+            "rows": [
+              {
+                "key": "BTC",
+                "ticker": {
+                  "bid": "8000000000000000",
+                  "ask": "3ff4000000000000",
+                  "last": "c004000000000000",
+                  "mark": "400e000000000000",
+                  "index": "4010800000000000",
+                  "percentage": "4016000000000000",
+                  "openInterest": "4019000000000000",
+                  "fundingRate": "c01e000000000000",
+                  "fundingTime": "4021800000000000",
+                  "volume": "4022400000000000",
+                  "quoteVolume": "4025000000000000",
+                  "id": "left🚀",
+                  "symbol": "BTC",
+                  "midPrice": "8000000000000000",
+                  "timestamp": "4004000000000000",
+                  "infoOwn": true,
+                  "info": null
+                }
+              },
+              {
+                "key": "ETH",
+                "ticker": {
+                  "bid": "0000000000000000",
+                  "ask": "4026800000000000",
+                  "last": "4029000000000000",
+                  "mark": "402b800000000000",
+                  "index": "402c400000000000",
+                  "percentage": "402f000000000000",
+                  "openInterest": "4030400000000000",
+                  "fundingRate": "4031800000000000",
+                  "fundingTime": "4032c00000000000",
+                  "volume": "4033200000000000",
+                  "quoteVolume": "4034800000000000",
+                  "id": "right",
+                  "symbol": "ETH",
+                  "midPrice": null,
+                  "timestamp": null,
+                  "infoOwn": false,
+                  "info": null
+                }
+              }
+            ]
+          }
+        },
+        {
+          "input": {
+            "wire": "{\"ONE\": {\"bid\": 0.0, \"ask\": 11.25, \"last\": 12.5, \"mark\": 13.75, \"index\": 14.125, \"percentage\": 15.5, \"openInterest\": 16.25, \"fundingRate\": 17.5, \"fundingTime\": 18.75, \"volume\": 19.125, \"quoteVolume\": 20.5, \"id\": \"right\", \"symbol\": \"ETH\"}}"
+          },
+          "output": {
+            "keys": [
+              "ONE"
+            ],
+            "rows": [
+              {
+                "key": "ONE",
+                "ticker": {
+                  "bid": "0000000000000000",
+                  "ask": "4026800000000000",
+                  "last": "4029000000000000",
+                  "mark": "402b800000000000",
+                  "index": "402c400000000000",
+                  "percentage": "402f000000000000",
+                  "openInterest": "4030400000000000",
+                  "fundingRate": "4031800000000000",
+                  "fundingTime": "4032c00000000000",
+                  "volume": "4033200000000000",
+                  "quoteVolume": "4034800000000000",
+                  "id": "right",
+                  "symbol": "ETH",
+                  "midPrice": null,
+                  "timestamp": null,
+                  "infoOwn": false,
+                  "info": null
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
   }
 }
