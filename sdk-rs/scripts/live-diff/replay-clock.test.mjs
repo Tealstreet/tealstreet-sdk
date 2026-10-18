@@ -184,3 +184,39 @@ test('TS HTTP completion receipt waits for response processing', () => {
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', timeout: 10000 });
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('TS WebSocket receipts include returned async listener work and preserve removal', () => {
+  const code = `
+    import { socketReceipts } from ${JSON.stringify(new URL('./replay-clock.mjs', import.meta.url).href)};
+    import assert from 'node:assert/strict';
+    import { WebSocketServer } from 'ws';
+    import { setImmediate as turn } from 'node:timers';
+    const receipts = socketReceipts();
+    const server = new WebSocketServer({host:'127.0.0.1',port:0});
+    await new Promise(resolve => server.once('listening',resolve));
+    let peer;
+    server.on('connection', socket => {peer=socket;});
+    const socket = new WebSocket('ws://127.0.0.1:'+server.address().port);
+    await new Promise(resolve => socket.addEventListener('open',resolve,{once:true}));
+    const removed = () => {throw new Error('removed listener ran');};
+    socket.addEventListener('message',removed);
+    socket.removeEventListener('message',removed);
+    let finish;
+    socket.addEventListener('message',async () => await new Promise(resolve => {finish=resolve;}));
+    peer.send('snapshot');
+    while (!finish) await new Promise(turn);
+    assert.equal(receipts.sockets()[0].consumed,1);
+    assert.equal(receipts.pendingJobs(),1);
+    finish();
+    await new Promise(turn);
+    assert.equal(receipts.pendingJobs(),0);
+    assert.equal(receipts.sockets()[0].processed,1);
+    socket.close();
+    await new Promise(resolve => socket.addEventListener('close',resolve,{once:true}));
+    await new Promise(turn);
+    assert.equal(receipts.sockets()[0].closeProcessed,1);
+    await new Promise(resolve => server.close(resolve));
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr);
+});

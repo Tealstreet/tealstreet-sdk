@@ -96,7 +96,47 @@ export function replayClock(epoch) {
 export function socketReceipts() {
   const NativeSocket = globalThis.WebSocket,
     receipts = [];
+  let pendingJobs = 0;
+  const listenerMaps = new WeakMap();
   globalThis.WebSocket = class extends NativeSocket {
+    addEventListener(event, listener, options) {
+      if (typeof listener !== 'function') return super.addEventListener(event, listener, options);
+      let listeners = listenerMaps.get(this);
+      if (!listeners) {
+        listeners = new WeakMap();
+        listenerMaps.set(this, listeners);
+      }
+      let entries = listeners.get(listener);
+      if (!entries) {
+        entries = new Map();
+        listeners.set(listener, entries);
+      }
+      const key = `${event}:${typeof options === 'boolean' ? options : Boolean(options?.capture)}`;
+      let wrapped = entries.get(key);
+      if (!wrapped) {
+        wrapped = function (...args) {
+          const result = listener.apply(this, args);
+          if (!result || typeof result.then !== 'function') return result;
+          pendingJobs++;
+          return Promise.resolve(result).then(
+            (value) => {
+              pendingJobs--;
+              return value;
+            },
+            (error) => {
+              pendingJobs--;
+              throw error;
+            },
+          );
+        };
+        entries.set(key, wrapped);
+      }
+      return super.addEventListener(event, wrapped, options);
+    }
+    removeEventListener(event, listener, options) {
+      const key = `${event}:${typeof options === 'boolean' ? options : Boolean(options?.capture)}`;
+      return super.removeEventListener(event, listenerMaps.get(this)?.get(listener)?.get(key) ?? listener, options);
+    }
     constructor(url, ...args) {
       super(url, ...args);
       const receipt = { url: String(url), consumed: 0, processed: 0, errors: 0, closeConsumed: 0, closeProcessed: 0 };
@@ -111,7 +151,7 @@ export function socketReceipts() {
       });
     }
   };
-  return () => structuredClone(receipts);
+  return { sockets: () => structuredClone(receipts), pendingJobs: () => pendingJobs };
 }
 
 // Axios uses these actual terminal protocols. Hold the replay clock through the

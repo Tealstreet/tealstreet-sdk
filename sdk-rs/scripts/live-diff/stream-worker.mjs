@@ -102,15 +102,27 @@ process.on('message', async (message) => {
     } else if (message.method === 'advance') {
       if (implementation === 'ts') {
         await clock.advance(message.args[0]);
-        value = { atMs: clock.now(), sockets: receipts(), pendingJobs: pendingHttp() };
+        value = { atMs: clock.now(), sockets: receipts.sockets(), pendingJobs: pendingHttp() + receipts.pendingJobs() };
       } else value = await native.nativeAccountReplay(id, { op: 'advance', atMs: message.args[0] });
     } else if (message.method === 'receipt') {
       value =
         implementation === 'ts'
-          ? { atMs: clock.now(), sockets: receipts(), pendingJobs: pendingHttp() }
+          ? { atMs: clock.now(), sockets: receipts.sockets(), pendingJobs: pendingHttp() + receipts.pendingJobs() }
           : await native.nativeAccountReplay(id, { op: 'receipt' });
     } else if (message.method === 'barrier') {
       if (implementation === 'rust') await native.nativeAccountCallMethod(id, 'getActiveTickerSymbols', []);
+      // Finish startup subscription Promises under real scheduling before
+      // activating the replay clock. Post-play barriers require the same fence.
+      if (implementation === 'rust' || clock) {
+        while (true) {
+          const pending =
+            implementation === 'rust'
+              ? (await native.nativeAccountReplay(id, { op: 'receipt' })).pendingJobs
+              : pendingHttp() + receipts.pendingJobs();
+          if (!pending) break;
+          await new Promise((resolve) => realTimeout(resolve, 1));
+        }
+      }
       // Include the trailing production Store throttle after the last frame.
       await new Promise((resolve) => realTimeout(resolve, 350));
     } else if (message.method === 'drain') {
