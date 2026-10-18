@@ -1861,3 +1861,13 @@ UTF-8 rendering belongs to the eventual terminal host. The NativeRuntime witness
 `native_array_join_preserves_utf16_elements_separators_and_coercions` compares
 eight independent Node cases directly as native code units, including holes,
 nullish values, default separators, nested arrays and custom ToString results.
+
+`eager::start_eager` is the typed async SDK call boundary. It starts the body
+through the existing canonical Promise driver at call time, retains native `T`
+without Clone/Serde/JSON, and returns a waiter. Dropping that waiter leaves the
+runtime-owned continuation alive. Native errors retain their original metadata
+and origin. `tests/eager_start.rs` executes the real native scheduler and checks
+prefix/drop behavior, non-Clone values, f64 bits, error identity and one await
+boundary for an already-ready result. It does not insert suspension points into
+arbitrary ready Rust leaf futures. Venue probes must still check their actual
+ready and pending I/O phases.
