@@ -48,6 +48,11 @@ mod generic_alias_native;
 
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/lifecycle_timer_native.rs"]
+mod lifecycle_timer_native;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/portfolio_alias_native.rs"]
 mod portfolio_alias_native;
 #[cfg(test)]
