@@ -71,6 +71,20 @@ async function observe(name, failedUpgrade) {
 const deadline = setTimeout(() => { console.error('source socket dispatch timed out'); process.exit(1); }, 10_000);
 (async () => {
   const name = process.argv[2];
-  const result = { live: await observe(name, false), failedUpgrade: await observe(name, true) };
+  const invalid = createVenue(name, 'invalid');
+  const invalidLogs = [];
+  invalid.on('log', message => invalidLogs.push(message));
+  let constructorError;
+  try { invalid.publicWebsocket.connectAndSubscribe(); }
+  catch (error) { constructorError = error; }
+  if (name === 'bitunix') assert.equal(constructorError?.name, 'SyntaxError');
+  else assert.equal(constructorError, undefined);
+  const invalidURL = {
+    count: invalid.publicWebsocket.onCloseCount,
+    reconnectScheduled: invalidLogs.some(message => message.includes('Reconnecting in')),
+  };
+  assert.deepEqual(invalidURL, { count: 0, reconnectScheduled: false });
+  invalid.dispose();
+  const result = { invalidURL, live: await observe(name, false), failedUpgrade: await observe(name, true) };
   process.stdout.write(`SOCKET_RESULT ${JSON.stringify(result)}\n`);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(deadline));

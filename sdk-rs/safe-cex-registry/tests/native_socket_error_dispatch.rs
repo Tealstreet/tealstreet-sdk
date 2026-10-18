@@ -42,6 +42,25 @@ fn source(name: &str) -> Value {
     serde_json::from_str(receipts[0]).unwrap()
 }
 
+fn construct(name: ExchangeName) -> Rc<dyn safe_cex_exchange::exchange::Exchange> {
+    let host = native_host::native_venue_host(native_host::hyperliquid_rate_limiter());
+    let constructor = match name {
+        ExchangeName::Asterdex => rust_venues::asterdex_constructor(host),
+        ExchangeName::Bitunix => rust_venues::bitunix_constructor(host),
+        _ => unreachable!(),
+    };
+    constructor
+        .construct(
+            name.clone(),
+            serde_json::from_value(
+                json!({"key":"", "secret":"", "tuning":{"consoleLogging":false}}),
+            )
+            .unwrap(),
+            Rc::new(DefaultStore::new()),
+        )
+        .unwrap()
+}
+
 async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
@@ -80,22 +99,7 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
         }
         released.await.unwrap();
     });
-    let host = native_host::native_venue_host(native_host::hyperliquid_rate_limiter());
-    let constructor = match name {
-        ExchangeName::Asterdex => rust_venues::asterdex_constructor(host),
-        ExchangeName::Bitunix => rust_venues::bitunix_constructor(host),
-        _ => unreachable!(),
-    };
-    let venue = constructor
-        .construct(
-            name.clone(),
-            serde_json::from_value(
-                json!({"key":"", "secret":"", "tuning":{"consoleLogging":false}}),
-            )
-            .unwrap(),
-            Rc::new(DefaultStore::new()),
-        )
-        .unwrap();
+    let venue = construct(name.clone());
     let logs = Rc::new(RefCell::new(Vec::new()));
     let seen = logs.clone();
     venue.base().on(
@@ -116,20 +120,34 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
         })
         .await
         .expect("actual native open");
-        socket.handle_web_socket_error("native transport failed").unwrap();
-        assert_eq!(socket.diagnostics().on_close_count, expected["afterError"].as_u64().unwrap() as usize);
-        assert!(!logs.borrow().iter().any(|line| line.contains("Reconnecting in")),
-            "error alone must not schedule reconnect");
+        socket
+            .handle_web_socket_error("native transport failed")
+            .unwrap();
+        assert_eq!(
+            socket.diagnostics().on_close_count,
+            expected["afterError"].as_u64().unwrap() as usize
+        );
+        assert!(
+            !logs
+                .borrow()
+                .iter()
+                .any(|line| line.contains("Reconnecting in")),
+            "error alone must not schedule reconnect"
+        );
         close.send(()).unwrap();
     }
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let done = if rejected_handshake {
-                logs.borrow().iter().any(|line| line.contains("WebSocket error:"))
+                logs.borrow()
+                    .iter()
+                    .any(|line| line.contains("WebSocket error:"))
             } else {
                 socket.diagnostics().on_close_count > 0
             };
-            if done { break; }
+            if done {
+                break;
+            }
             tokio::task::yield_now().await;
         }
     })
@@ -144,8 +162,15 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
     venue.dispose().unwrap();
     release.send(()).unwrap();
     server.await.unwrap();
-    let expected = if rejected_handshake { expected } else { &expected["closed"] };
-    assert_eq!(actual, *expected, "{name:?}: independent error suppression and close recovery");
+    let expected = if rejected_handshake {
+        expected
+    } else {
+        &expected["closed"]
+    };
+    assert_eq!(
+        actual, *expected,
+        "{name:?}: independent error suppression and close recovery"
+    );
 }
 
 fn check(name: ExchangeName, source_name: &str, failed_upgrade: bool) {
@@ -155,7 +180,11 @@ fn check(name: ExchangeName, source_name: &str, failed_upgrade: bool) {
         .build()
         .unwrap();
     tokio::task::LocalSet::new().block_on(&runtime, async {
-        let key = if failed_upgrade { "failedUpgrade" } else { "live" };
+        let key = if failed_upgrade {
+            "failedUpgrade"
+        } else {
+            "live"
+        };
         observe(name, failed_upgrade, &expected[key]).await;
     });
 }
@@ -175,4 +204,37 @@ fn aster_failed_upgrade_delivers_abnormal_close_and_reconnect() {
 #[test]
 fn bitunix_failed_upgrade_delivers_abnormal_close_and_reconnect() {
     check(ExchangeName::Bitunix, "bitunix", true);
+}
+
+#[test]
+fn native_invalid_url_does_not_deliver_close_or_schedule_reconnect() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&runtime, async {
+        for (name, source_name) in [(ExchangeName::Asterdex, "asterdex"), (ExchangeName::Bitunix, "bitunix")] {
+            let expected = source(source_name);
+            let venue = construct(name);
+            let logs = Rc::new(RefCell::new(Vec::new()));
+            let seen = logs.clone();
+            venue.base().on("log", Rc::new(move |_, value| {
+                seen.borrow_mut().push(String::from_utf16(&value.to_js_string()?).unwrap());
+                Ok(())
+            }));
+            let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
+            socket.start_websocket("invalid".into(), vec![], None);
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !logs.borrow().iter().any(|line| line.contains("WebSocket error:")) {
+                    tokio::task::yield_now().await;
+                }
+            }).await.expect("constructor failure reported");
+            let actual = json!({
+                "count": socket.diagnostics().on_close_count,
+                "reconnectScheduled": logs.borrow().iter().any(|line| line.contains("Reconnecting in")),
+            });
+            venue.dispose().unwrap();
+            assert_eq!(actual, expected["invalidURL"]);
+        }
+    });
 }

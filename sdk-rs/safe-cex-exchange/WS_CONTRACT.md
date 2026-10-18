@@ -119,5 +119,8 @@ The base error listener runs before venue listeners and stops immediate
 propagation. Plain WebSocket dispatch therefore logs the error without invoking
 `WsProtocol::on_error`; grouped ReconnectingWebSocket dispatch still invokes it,
 as that dispatcher ignores the DOM propagation flag. Actual close events retain
-their normal protocol handling. The production Aster and Bitunix host witnesses
+their normal protocol handling. A failed asynchronous dial reports the error
+then delivers one abnormal close (1006) for the active, undisposed generation,
+so the ordinary close path schedules recovery. Preparation/configuration failures
+remain separate from transport failure. The production Aster and Bitunix host witnesses
 are in registry's `native_socket_error_dispatch` target.

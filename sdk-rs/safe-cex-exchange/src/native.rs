@@ -397,7 +397,11 @@ impl WsRuntime for NativeRuntime {
             };
             let socket = connect_websocket(&url, &protocols, &headers)
                 .await
-                .map_err(|e| ExchangeError::new(e.to_string()))?;
+                .map_err(|cause| {
+                    let mut error = ExchangeError::new(cause.to_string());
+                    error.origin = Some(crate::runtime::ExchangeErrorOrigin::new(cause));
+                    error
+                })?;
             if replay {
                 frame_counts
                     .borrow_mut()
