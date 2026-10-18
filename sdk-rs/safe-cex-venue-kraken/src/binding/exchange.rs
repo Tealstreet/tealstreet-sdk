@@ -9,6 +9,9 @@ mod accepted_api_receivers;
 #[path = "../../tests/support/accepted_book_value_aliases.rs"]
 mod accepted_book_value_aliases;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_boundary_observers.rs"]
+mod accepted_boundary_observers;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_client_id_alias.rs"]
 mod accepted_client_id_alias;
 #[cfg(test)]

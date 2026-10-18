@@ -34,7 +34,7 @@ const dataWitnesses = {
     ]
   },
   "serialize_str": {
-    "call": "{ use serde::Serializer as _; let native = $type.serialize_str($value.as_str().unwrap()).expect(\"reviewed serializer input\"); match native.0 { super::Node::Text(v) => serde_json::Value::String(v), _ => panic!(\"native text node required\") } }",
+    "call": "{ use serde::Serializer as _; let native = $type.serialize_str($value.as_str().unwrap()).expect(\"reviewed serializer input\"); match native.0 { super::Node::Text(v) => serde_json::Value::String(String::from_utf16(&v).expect(\"serializer UTF16 text\")), _ => panic!(\"native text node required\") } }",
     "cases": [
       {
         "input": "left",
@@ -47,7 +47,7 @@ const dataWitnesses = {
     ]
   },
   "serialize_bytes": {
-    "call": "{ use serde::Serializer as _; let native = $type.serialize_bytes(&$value.as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u8).collect::<Vec<_>>()).expect(\"reviewed serializer input\"); match native.0 { super::Node::Array(values) => serde_json::json!(values.into_iter().map(|n|match n.0 {super::Node::Float(v)=>format!(\"{:016x}\",v.to_bits()),_=>panic!(\"native numeric byte\")}).collect::<Vec<_>>()), _ => panic!(\"native array node required\") } }",
+    "call": "{ use serde::Serializer as _; let native = $type.serialize_bytes(&$value.as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u8).collect::<Vec<_>>()).expect(\"reviewed serializer input\"); match native.0 { super::Node::Array(values) => serde_json::json!(values.into_iter().map(|n|match n {super::Node::Float(v)=>format!(\"{:016x}\",v.to_bits()),_=>panic!(\"native numeric byte\")}).collect::<Vec<_>>()), _ => panic!(\"native array node required\") } }",
     "cases": [
       {
         "input": [],
@@ -65,8 +65,18 @@ const dataWitnesses = {
       }
     ]
   },
+  // The model presence marker makes unit-struct capture data-dependent.
+  "serialize_unit_struct": {
+    "call": "{ use serde::Serializer as _; let name = match $value.as_str().unwrap() { \"First\" => \"First\", \"Second\" => \"Second\", \"undefined\" => safe_cex_types::model_field::UNDEFINED, \"near-marker\" => \"$safe_cex::UndefinedX\", _ => panic!(\"reviewed unit name\") }; let native = $type.serialize_unit_struct(name).expect(\"reviewed unit capture\"); match native.0 { super::Node::Null => serde_json::Value::Null, super::Node::Undefined => serde_json::json!({\"kind\":\"undefined\"}), _ => panic!(\"native unit node required\") } }",
+    "cases": [
+      { "input": "First", "output": null },
+      { "input": "Second", "output": null },
+      { "input": "undefined", "output": { "kind": "undefined" } },
+      { "input": "near-marker", "output": null }
+    ]
+  },
   "serialize_unit_variant": {
-    "call": "{ use serde::Serializer as _; let native = $type.serialize_unit_variant(\"Known\", 5, if $value.as_bool().unwrap() {\"Second\"} else {\"First\"}).expect(\"reviewed serializer input\"); match native.0 { super::Node::Text(v) => serde_json::Value::String(v), _ => panic!(\"native text node required\") } }",
+    "call": "{ use serde::Serializer as _; let native = $type.serialize_unit_variant(\"Known\", 5, if $value.as_bool().unwrap() {\"Second\"} else {\"First\"}).expect(\"reviewed serializer input\"); match native.0 { super::Node::Text(v) => serde_json::Value::String(String::from_utf16(&v).expect(\"serializer UTF16 text\")), _ => panic!(\"native text node required\") } }",
     "cases": [
       {
         "input": false,
@@ -92,7 +102,7 @@ const dataWitnesses = {
     ]
   },
   "serialize_newtype_variant": {
-    "call": "{ use serde::Serializer as _; let native = $type.serialize_newtype_variant(\"Known\", 5, \"Tagged\", &$value.as_bool().unwrap()).expect(\"reviewed serializer input\"); match native.0 {super::Node::Object(mut rows)=> {let (key,n)=rows.remove(0); match n.0 {super::Node::Bool(v)=>serde_json::json!({\"key\":key,\"value\":v}),_=>panic!(\"native bool node required\")}},_=>panic!(\"native object node required\")} }",
+    "call": "{ use serde::Serializer as _; let native = $type.serialize_newtype_variant(\"Known\", 5, \"Tagged\", &$value.as_bool().unwrap()).expect(\"reviewed serializer input\"); match native.0 {super::Node::Object(mut rows)=> {let (key,n)=rows.remove(0); match n {super::Node::Bool(v)=>serde_json::json!({\"key\":String::from_utf16(&key).expect(\"serializer UTF16 key\"),\"value\":v}),_=>panic!(\"native bool node required\")}},_=>panic!(\"native object node required\")} }",
     "cases": [
       {
         "input": false,
@@ -204,7 +214,7 @@ async function probe(mode) {
   const hookState = { count: 0, mode };
   globalThis.__constantSerializerEmitter = hookState;
   if (mode !== 'restored') {
-    const selected = specs.find(s => s.api.name === mode);
+    const selected = dataWitnesses[mode] ?? specs.find(s => s.api.name === mode);
     assert.ok(selected);
     const needle = mode === 'serialize_unit_struct'
       ? selected.call.match(/match native\.0 \{ .* \}/)[0].slice(0, -2)
