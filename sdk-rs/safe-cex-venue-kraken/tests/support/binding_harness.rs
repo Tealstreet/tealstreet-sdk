@@ -245,6 +245,8 @@ pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Js)>)>>,
     pub requests: RefCell<Vec<Request>>,
+    pub hold_responses: Rc<Cell<bool>>,
+    pub response_wakers: Rc<RefCell<Vec<Waker>>>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
@@ -316,7 +318,17 @@ impl JsHttpHost for Http {
                 &format!("unscripted request {method} {url}"),
             )),
         };
-        Box::pin(async move { result })
+        let held = self.hold_responses.clone();
+        let wakers = self.response_wakers.clone();
+        let mut result = Some(result);
+        Box::pin(std::future::poll_fn(move |cx| {
+            if held.get() {
+                wakers.borrow_mut().push(cx.waker().clone());
+                Poll::Pending
+            } else {
+                Poll::Ready(result.take().expect("HTTP completes once"))
+            }
+        }))
     }
 }
 

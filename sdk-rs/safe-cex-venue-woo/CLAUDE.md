@@ -536,3 +536,7 @@ array/tuple identities remain refused; no V3 migration route is enabled.
 
 `HISTORY_QUERY_REVIEW.md` records the history QueryValue cutover, actual signed
 class witnesses, TypeScript URL/HMAC comparison and native query-kind observations.
+
+The history catch reporter selects the canonical retained response message and
+passes its native value to Raw(Js), preserving non-string formatting and UTF16.
+The configured-class/source regression also pins falsy fallback and empty results.

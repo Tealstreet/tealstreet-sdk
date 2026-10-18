@@ -55,6 +55,7 @@ pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
             contract: Some(m.contract),
             linear: Some(m.linear),
             inverse: Some(m.inverse),
+            fees: None,
         },
         id: text(&m.id)?,
         symbol: text(&m.symbol)?,
