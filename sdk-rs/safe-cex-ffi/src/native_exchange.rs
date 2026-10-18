@@ -6,6 +6,7 @@
 #![cfg_attr(test, allow(dead_code))]
 use crate::{
     native_callback::{Callback, Request},
+    native_lifecycle::NativeStartup,
     native_value::{JsData, check_status},
 };
 use napi::{
@@ -29,7 +30,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
-type Notify = ThreadsafeFunction<JsData, Unknown<'static>, JsData, Status, false>;
+pub(crate) type Notify = ThreadsafeFunction<JsData, Unknown<'static>, JsData, Status, false>;
 type Reply<T> = oneshot::Sender<Result<T, NativeValue>>;
 
 /// A structured options object plus the account's name for remote signing.
@@ -73,6 +74,7 @@ struct Open {
     _sign: Option<Rc<Request>>,
     _proxy_token: Option<Rc<Request>>,
     closed: watch::Sender<bool>,
+    startup: Rc<NativeStartup>,
 }
 
 fn commands() -> &'static mpsc::UnboundedSender<Command> {
@@ -138,9 +140,19 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                         continue;
                     };
                     let account = open.account.clone();
+                    let startup = open.startup.clone();
+                    if method == "dispose" {
+                        startup.cancel(&account);
+                    }
+                    let operation: NativeAccountFuture<JsData> = if method == "start" {
+                        startup.start(account)
+                    } else {
+                        Box::pin(async move {
+                            native_account_call(account, method, args).await.map(JsData)
+                        })
+                    };
                     tokio::task::spawn_local(async move {
-                        let result = native_account_call(account, method, args).await.map(JsData);
-                        let _ = reply.send(result);
+                        let _ = reply.send(operation.await);
                     });
                 }
                 Command::SignerAvailable {
@@ -173,6 +185,7 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                         let _ = reply.send(result);
                         continue;
                     };
+                    open.startup.cancel(&open.account);
                     (open.unwatch)();
                     open.closed.send_replace(true);
                     // Acknowledgement means disposal finished; keep its errors visible
@@ -277,6 +290,12 @@ fn open(
             }) as NativeAccountFuture<String>
         }) as Rc<dyn Fn() -> NativeAccountFuture<String>>
     });
+    let on_event = Rc::new(on_event);
+    let startup = Rc::new(NativeStartup::new(
+        &init.exchange,
+        init.account_name.clone(),
+        on_event.clone(),
+    ));
     let account = open_native_account(NativeAccountSpec {
         hyperliquid_limiter,
         exchange: init.exchange,
@@ -285,9 +304,16 @@ fn open(
         sign: sign_source,
         proxy_token: proxy_source,
     })?;
+    let event_startup = startup.clone();
+    let watched_account = Rc::downgrade(&account);
     let unwatch = native_account_watch(
         &account,
         Rc::new(move |event: &str, data: &NativeValue| {
+            if event == "deactivate-status"
+                && let Some(account) = watched_account.upgrade()
+            {
+                event_startup.cancel(&account);
+            }
             on_event.call(
                 JsData(NativeValue::object([
                     ("event", NativeValue::string(event)),
@@ -306,6 +332,7 @@ fn open(
         _sign: sign,
         _proxy_token: proxy_token,
         closed,
+        startup,
     })
 }
 

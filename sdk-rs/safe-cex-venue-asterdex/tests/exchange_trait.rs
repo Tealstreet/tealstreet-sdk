@@ -57,10 +57,21 @@ fn constructed_aster_rejection_keeps_native_string_code_units() {
             })
         }
     }
-    for code in [
-        "ERR_NATIVE".encode_utf16().collect::<Vec<_>>(),
-        "ERR_λ".encode_utf16().collect::<Vec<_>>(),
-    ] {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/rejection-code-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let codes: Vec<Vec<u16>> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(codes.len(), 3);
+    for code in codes {
         let runtime = support::runtime_fixture();
         let calls = Rc::new(Cell::new(0));
         let host = Rc::new(RejectingHost {
@@ -96,6 +107,16 @@ fn constructed_aster_rejection_keeps_native_string_code_units() {
             code,
             "real Aster rejection retains exact code units"
         );
+        let origin = error
+            .origin
+            .as_ref()
+            .unwrap()
+            .error()
+            .downcast_ref::<safe_cex_transport::RestFailure>()
+            .unwrap();
+        assert_eq!(origin.request.method, "GET");
+        assert!(origin.request.url.contains("/openOrders"));
+        assert!(origin.response.is_none());
         venue.dispose().unwrap();
     }
 }

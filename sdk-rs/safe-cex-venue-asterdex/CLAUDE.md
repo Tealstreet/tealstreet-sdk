@@ -156,3 +156,8 @@ fields, raw numeric overflow and signed zero. It compares all eleven native numb
 fields before JSON; approved decision-3 refusal preserves the entire bad row.
 `parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
 behavior, requiring a compiled native failure and exact restored pass.
+
+`WIRE_CONTRACT_REVIEW.md` records the 42 private module-scope Deserialize
+companions and their direct shape/native-value witnesses. The focused
+`scripts/accepted-wire-contracts.mjs` retains all 608 observations and every
+compiler field, including each separately executed public-wrapper boundary.
