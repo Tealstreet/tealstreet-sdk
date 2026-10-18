@@ -15,6 +15,9 @@ mod accepted_diagnostic_receivers;
 #[path = "../../tests/support/accepted_handle_alias.rs"]
 mod accepted_handle_alias;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_member_aliases.rs"]
+mod accepted_member_aliases;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_page_aliases.rs"]
 mod accepted_page_aliases;
 #[cfg(test)]

@@ -536,3 +536,9 @@ The `polling-alias-contracts.mjs` native probes authenticate actual compiler
 identities; `accepted_polling_aliases` uses the constructed Scope, real chart
 client and timers. `polling-alias-controls.py` requires four independently named
 compiled runtime failures and exact-source restored passes.
+
+`MEMBER_ALIAS_REVIEW.md` covers three finite class dispatch/continuation aliases.
+`member-alias-contracts.mjs` authenticates their compiler identities; the native
+`accepted_member_aliases` witnesses use constructed receivers, real chart HTTP
+and the initialized arrow. `member-alias-controls.py` must fail three named
+compiled runtime assertions and restore exact source bytes before readiness.
