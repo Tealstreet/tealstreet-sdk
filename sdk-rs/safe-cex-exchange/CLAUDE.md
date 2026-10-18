@@ -1830,6 +1830,7 @@ The JS log facade passes its original message; source coercion runs only for the
 event template. The real PM repeated-snapshot warning and native facade witnesses
 cover lone UTF16 units; native_console_default separately executes the runtime's
 typed console default and Base logging so both forwarding paths remain observed.
+
 Native exception reporting retains its context through the reporter capability,
 then uses `RetainedJsonInput::json_stringify` only at the stderr terminal sink.
 Serialization errors stay visible; `native_console_default` checks both paths
