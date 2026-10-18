@@ -1525,6 +1525,68 @@ impl BaseExchange {
         result
     }
 
+    // ts: BaseExchange.closeAllPositionsAtMarket; called under nuke_inner's guard.
+    async fn close_all_positions_at_market(
+        &self,
+        venue: &dyn Exchange,
+    ) -> Result<(), ExchangeError> {
+        let positions: Vec<_> = self
+            .store
+            .positions()
+            .iter()
+            .filter(|position| position.contracts > 0.0)
+            .cloned()
+            .collect();
+        for position in positions {
+            let market = self
+                .store
+                .markets_by_symbol()
+                .get(&position.symbol)
+                .cloned();
+            let Some(market) = market else {
+                self.log(
+                    &format!(
+                        "Nuke: failed to close position on {}: market not loaded",
+                        position.symbol
+                    ),
+                    "error",
+                )?;
+                continue;
+            };
+            let amount = safe_cex_num::native_position_size(
+                &safe_cex_num::NativeSizeInputs {
+                    contracts: position.contracts,
+                    notional: Some(position.notional),
+                    contracts_native: position
+                        .extra
+                        .value()
+                        .and_then(|extra| extra.contracts_native),
+                },
+                &safe_cex_num::NativeSizeMarket {
+                    contract_size: market.contract_size,
+                    is_inverse: market.is_inverse,
+                },
+            );
+            let side = if position.side == PositionSide::Long {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            };
+            let mut order = order_options(position.symbol.clone(), side, OrderType::Market, amount);
+            order.reduce_only = Some(true);
+            if let Err(error) = self.place_order(venue, order).await {
+                self.log(
+                    &format!(
+                        "Nuke: failed to close position on {}: {}",
+                        position.symbol, error
+                    ),
+                    "error",
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     pub async fn nuke(&self, venue: &dyn Exchange, tries: u32) -> Result<(), ExchangeError> {
         self.nuke_inner(venue, tries, true).await
     }
@@ -1547,40 +1609,12 @@ impl BaseExchange {
             if !self.is_disposed() && !self.is_nuking.get() {
                 let guard = crate::order_operations::NukeGuard::new(&self.is_nuking);
                 let result: Result<(), ExchangeError> = async {
-                    let positions: Vec<_> = self
-                        .store
-                        .positions()
-                        .iter()
-                        .filter(|position| position.contracts > 0.0)
-                        .cloned()
-                        .collect();
-                    for position in positions {
-                        let side = if position.side == PositionSide::Long {
-                            OrderSide::Sell
-                        } else {
-                            OrderSide::Buy
-                        };
-                        let mut order = order_options(
-                            position.symbol.clone(),
-                            side,
-                            OrderType::Market,
-                            position.contracts,
-                        );
-                        order.reduce_only = Some(true);
-                        if let Err(error) = self.place_order(venue, order).await {
-                            self.log(
-                                &format!(
-                                    "Nuke: failed to close position on {}: {}",
-                                    position.symbol, error
-                                ),
-                                "error",
-                            )?;
+                    if cancel {
+                        if let Err(error) = venue.cancel_all_orders().await {
+                            self.log(&format!("Nuke: failed to cancel orders: {error}"), "error")?;
                         }
                     }
-                    if cancel {
-                        venue.cancel_all_orders().await?;
-                    }
-                    Ok(())
+                    self.close_all_positions_at_market(venue).await
                 }
                 .await;
                 guard.finish();

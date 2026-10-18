@@ -1628,3 +1628,7 @@ whitespace predicate. `tests/js_string_utf16.rs` compares 4,109 Node cases per
 method through the installed String builtin on NativeRuntime, including every
 surrogate unit, paired astral letters, Greek sigma and whitespace boundaries.
 All three regressions compile and fail against the original production bodies.
+
+Shared nuke closes use the canonical nativePositionSize port and cancel orders
+before closing; cancel failure logs and continues. NUKE_NATIVE_CLOSES.md records
+the real registry/OKX HTTP regression and pending-close guard witness.
