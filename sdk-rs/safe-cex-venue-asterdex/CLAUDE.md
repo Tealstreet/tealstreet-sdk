@@ -149,5 +149,5 @@ columns and missing-volume NaN against the maintained fetchOHLCV method.
 
 `WIRE_CONTRACT_REVIEW.md` records the 42 private module-scope Deserialize
 companions and their direct shape/native-value witnesses. The focused
-`scripts/accepted-wire-contracts.mjs` retains all 607 observations and every
+`scripts/accepted-wire-contracts.mjs` retains all 608 observations and every
 compiler field, including each separately executed public-wrapper boundary.

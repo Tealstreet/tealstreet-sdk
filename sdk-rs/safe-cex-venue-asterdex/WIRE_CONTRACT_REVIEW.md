@@ -11,7 +11,7 @@ CARGO_BUILD_JOBS=1 node sdk-rs/safe-cex-venue-asterdex/scripts/accepted-wire-con
 ```
 
 Each owner has a real Deserialize shape contract and direct native observations.
-The 607 fixed observations execute owned Value, borrowed Value, JSON text and
+The 608 fixed observations execute owned Value, borrowed Value, JSON text and
 qualified text decoding, compare every field, retain binary64 bits, and separately
 check its public wrapper. Ordinary internal Serde sequences and tagged enum maps
 are covered as internal inputs; public map/string restrictions remain separate.

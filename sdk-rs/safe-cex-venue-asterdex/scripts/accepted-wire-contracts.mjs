@@ -95,7 +95,7 @@ for (const owner of found.types) {
   assert.ok(contract.nativeObservation.cases.filter(row => row.output.ok).length >= 2);
   observations += contract.nativeObservation.cases.length;
 }
-assert.equal(observations, 607, 'retain every fixed native observation');
+assert.equal(observations, 608, 'retain every fixed native observation');
 const results = runProbes(workspace, metadata, [{ ...found,
   package: pkg.name, packageId: pkg.id, target, features: [],
   publicAliases: [], defaultWitnesses: [], locals: [], delegatedLocals: [],

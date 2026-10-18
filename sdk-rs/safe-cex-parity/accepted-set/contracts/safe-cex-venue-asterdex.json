@@ -29102,6 +29102,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29132,6 +29133,7 @@
         "cummulativeQuoteQty": "right:cummulative_quote_qty",
         "status": "right:status",
         "timeInForce": "right:time_in_force",
+        "type": "right:type",
         "side": "right:side",
         "stopPrice": "right:stop_price",
         "icebergQty": "right:iceberg_qty",
@@ -29168,6 +29170,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29198,6 +29201,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29228,6 +29232,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29258,6 +29263,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29288,6 +29294,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29318,6 +29325,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29348,6 +29356,7 @@
         "cummulativeQuoteQty": null,
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29378,6 +29387,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": null,
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29408,6 +29418,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": null,
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29438,6 +29449,38 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": null,
+        "side": "left:side",
+        "stopPrice": "left:stop_price",
+        "icebergQty": "left:iceberg_qty",
+        "time": 1.25,
+        "updateTime": 1.25,
+        "isWorking": true,
+        "workingTime": 1.25,
+        "origQuoteOrderQty": "left:orig_quote_order_qty",
+        "positionSide": "left:position_side",
+        "closePosition": true,
+        "reduceOnly": true,
+        "activatePrice": "left:activate_price",
+        "priceRate": "left:price_rate",
+        "priceProtect": true,
+        "extensionMarker": "left",
+        "extensionNested": {
+          "checked": true,
+          "value": 17
+        }
+      },
+      {
+        "symbol": "left:symbol",
+        "orderId": 1.25,
+        "clientOrderId": "left:client_order_id",
+        "price": "left:price",
+        "origQty": "left:orig_qty",
+        "executedQty": "left:executed_qty",
+        "cummulativeQuoteQty": "left:cummulative_quote_qty",
+        "status": "left:status",
+        "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": null,
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29468,6 +29511,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": null,
         "icebergQty": "left:iceberg_qty",
@@ -29498,6 +29542,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": null,
@@ -29528,6 +29573,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29558,6 +29604,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29588,6 +29635,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29618,6 +29666,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29648,6 +29697,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29678,6 +29728,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29708,6 +29759,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29738,6 +29790,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29768,6 +29821,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29798,6 +29852,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29828,6 +29883,7 @@
         "cummulativeQuoteQty": "left:cummulative_quote_qty",
         "status": "left:status",
         "timeInForce": "left:time_in_force",
+        "type": "left:type",
         "side": "left:side",
         "stopPrice": "left:stop_price",
         "icebergQty": "left:iceberg_qty",
@@ -29861,6 +29917,7 @@
         "cummulative_quote_qty",
         "status",
         "time_in_force",
+        "type",
         "side",
         "stop_price",
         "iceberg_qty",
@@ -29878,11 +29935,11 @@
         "extra",
         "public_accepts"
       ],
-      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXOrderResponse>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"symbol\":serde_json::json!(v.symbol),\"order_id\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.order_id.to_bits())}),\"client_order_id\":serde_json::json!(v.client_order_id),\"price\":serde_json::json!(v.price),\"orig_qty\":serde_json::json!(v.orig_qty),\"executed_qty\":serde_json::json!(v.executed_qty),\"cummulative_quote_qty\":serde_json::json!(v.cummulative_quote_qty),\"status\":serde_json::json!(v.status),\"time_in_force\":serde_json::json!(v.time_in_force),\"side\":serde_json::json!(v.side),\"stop_price\":serde_json::json!({\"present\":v.stop_price.is_some(),\"value\":v.stop_price.as_ref().map(|inner| serde_json::json!(inner))}),\"iceberg_qty\":serde_json::json!({\"present\":v.iceberg_qty.is_some(),\"value\":v.iceberg_qty.as_ref().map(|inner| serde_json::json!(inner))}),\"time\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.time.to_bits())}),\"update_time\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.update_time.to_bits())}),\"is_working\":serde_json::json!(v.is_working),\"working_time\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.working_time.to_bits())}),\"orig_quote_order_qty\":serde_json::json!(v.orig_quote_order_qty),\"position_side\":serde_json::json!({\"present\":v.position_side.is_some(),\"value\":v.position_side.as_ref().map(|inner| serde_json::json!(inner))}),\"close_position\":serde_json::json!({\"present\":v.close_position.is_some(),\"value\":v.close_position.as_ref().map(|inner| serde_json::json!(inner))}),\"reduce_only\":serde_json::json!({\"present\":v.reduce_only.is_some(),\"value\":v.reduce_only.as_ref().map(|inner| serde_json::json!(inner))}),\"activate_price\":serde_json::json!({\"present\":v.activate_price.is_some(),\"value\":v.activate_price.as_ref().map(|inner| serde_json::json!(inner))}),\"price_rate\":serde_json::json!({\"present\":v.price_rate.is_some(),\"value\":v.price_rate.as_ref().map(|inner| serde_json::json!(inner))}),\"price_protect\":serde_json::json!({\"present\":v.price_protect.is_some(),\"value\":v.price_protect.as_ref().map(|inner| serde_json::json!(inner))}),\"extra\":serde_json::json!(v.extra)}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
+      "call": "{ let raw=$value.as_str().expect(\"reviewed Wire JSON text\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let public_accepts=serde_json::from_str::<super::AsterDEXOrderResponse>(raw).is_ok(); let observe=|v:&$type| { let mut output=serde_json::json!({\"ok\":true,\"symbol\":serde_json::json!(v.symbol),\"order_id\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.order_id.to_bits())}),\"client_order_id\":serde_json::json!(v.client_order_id),\"price\":serde_json::json!(v.price),\"orig_qty\":serde_json::json!(v.orig_qty),\"executed_qty\":serde_json::json!(v.executed_qty),\"cummulative_quote_qty\":serde_json::json!(v.cummulative_quote_qty),\"status\":serde_json::json!(v.status),\"time_in_force\":serde_json::json!(v.time_in_force),\"type\":serde_json::json!(v.r#type),\"side\":serde_json::json!(v.side),\"stop_price\":serde_json::json!({\"present\":v.stop_price.is_some(),\"value\":v.stop_price.as_ref().map(|inner| serde_json::json!(inner))}),\"iceberg_qty\":serde_json::json!({\"present\":v.iceberg_qty.is_some(),\"value\":v.iceberg_qty.as_ref().map(|inner| serde_json::json!(inner))}),\"time\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.time.to_bits())}),\"update_time\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.update_time.to_bits())}),\"is_working\":serde_json::json!(v.is_working),\"working_time\":serde_json::json!({\"bits\":format!(\"{:016x}\",v.working_time.to_bits())}),\"orig_quote_order_qty\":serde_json::json!(v.orig_quote_order_qty),\"position_side\":serde_json::json!({\"present\":v.position_side.is_some(),\"value\":v.position_side.as_ref().map(|inner| serde_json::json!(inner))}),\"close_position\":serde_json::json!({\"present\":v.close_position.is_some(),\"value\":v.close_position.as_ref().map(|inner| serde_json::json!(inner))}),\"reduce_only\":serde_json::json!({\"present\":v.reduce_only.is_some(),\"value\":v.reduce_only.as_ref().map(|inner| serde_json::json!(inner))}),\"activate_price\":serde_json::json!({\"present\":v.activate_price.is_some(),\"value\":v.activate_price.as_ref().map(|inner| serde_json::json!(inner))}),\"price_rate\":serde_json::json!({\"present\":v.price_rate.is_some(),\"value\":v.price_rate.as_ref().map(|inner| serde_json::json!(inner))}),\"price_protect\":serde_json::json!({\"present\":v.price_protect.is_some(),\"value\":v.price_protect.as_ref().map(|inner| serde_json::json!(inner))}),\"extra\":serde_json::json!(v.extra)}); output[\"public_accepts\"]=serde_json::json!(public_accepts); output }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap(); let actual=observe(&owned); assert_eq!(actual,observe(&borrowed),\"Wire borrowed native values\"); assert_eq!(actual,observe(&text),\"Wire text native values\"); assert_eq!(actual,observe(&qualified),\"Wire qualified native values\"); actual},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}), _=>panic!(\"Wire decoder routes disagree\") } }",
       "cases": [
         {
           "label": "left-map",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": true,
             "symbol": "left:symbol",
@@ -29896,6 +29953,7 @@
             "cummulative_quote_qty": "left:cummulative_quote_qty",
             "status": "left:status",
             "time_in_force": "left:time_in_force",
+            "type": "left:type",
             "side": "left:side",
             "stop_price": {
               "present": true,
@@ -29952,7 +30010,7 @@
         },
         {
           "label": "right-map",
-          "input": "{\"symbol\":\"right:symbol\",\"orderId\":-0.0,\"clientOrderId\":\"right:client_order_id\",\"price\":\"right:price\",\"origQty\":\"right:orig_qty\",\"executedQty\":\"right:executed_qty\",\"cummulativeQuoteQty\":\"right:cummulative_quote_qty\",\"status\":\"right:status\",\"timeInForce\":\"right:time_in_force\",\"side\":\"right:side\",\"stopPrice\":\"right:stop_price\",\"icebergQty\":\"right:iceberg_qty\",\"time\":-0.0,\"updateTime\":-0.0,\"isWorking\":false,\"workingTime\":-0.0,\"origQuoteOrderQty\":\"right:orig_quote_order_qty\",\"positionSide\":\"right:position_side\",\"closePosition\":false,\"reduceOnly\":false,\"activatePrice\":\"right:activate_price\",\"priceRate\":\"right:price_rate\",\"priceProtect\":false,\"extensionMarker\":\"right\",\"extensionNested\":{\"checked\":false,\"value\":23}}",
+          "input": "{\"symbol\":\"right:symbol\",\"orderId\":-0.0,\"clientOrderId\":\"right:client_order_id\",\"price\":\"right:price\",\"origQty\":\"right:orig_qty\",\"executedQty\":\"right:executed_qty\",\"cummulativeQuoteQty\":\"right:cummulative_quote_qty\",\"status\":\"right:status\",\"timeInForce\":\"right:time_in_force\",\"type\":\"right:type\",\"side\":\"right:side\",\"stopPrice\":\"right:stop_price\",\"icebergQty\":\"right:iceberg_qty\",\"time\":-0.0,\"updateTime\":-0.0,\"isWorking\":false,\"workingTime\":-0.0,\"origQuoteOrderQty\":\"right:orig_quote_order_qty\",\"positionSide\":\"right:position_side\",\"closePosition\":false,\"reduceOnly\":false,\"activatePrice\":\"right:activate_price\",\"priceRate\":\"right:price_rate\",\"priceProtect\":false,\"extensionMarker\":\"right\",\"extensionNested\":{\"checked\":false,\"value\":23}}",
           "output": {
             "ok": true,
             "symbol": "right:symbol",
@@ -29966,6 +30024,7 @@
             "cummulative_quote_qty": "right:cummulative_quote_qty",
             "status": "right:status",
             "time_in_force": "right:time_in_force",
+            "type": "right:type",
             "side": "right:side",
             "stop_price": {
               "present": true,
@@ -30050,161 +30109,168 @@
         },
         {
           "label": "refused-4",
-          "input": "{\"symbol\":null,\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":null,\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-5",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":null,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":null,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-6",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":null,\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":null,\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-7",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":null,\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":null,\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-8",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":null,\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":null,\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-9",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":null,\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":null,\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-10",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":null,\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":null,\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-11",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":null,\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":null,\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-12",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":null,\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":null,\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-13",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":null,\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":null,\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-14",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":null,\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":null,\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-15",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":null,\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":null,\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-16",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":null,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":null,\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-17",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":null,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":null,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-18",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":null,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":null,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-19",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":null,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":null,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-20",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":null,\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":null,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-21",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":null,\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":null,\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-22",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":null,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":null,\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-23",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":null,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":null,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-24",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":null,\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":null,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-25",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":null,\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":null,\"priceRate\":\"left:price_rate\",\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
         },
         {
           "label": "refused-26",
-          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":null,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":null,\"priceProtect\":true,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "label": "refused-27",
+          "input": "{\"symbol\":\"left:symbol\",\"orderId\":1.25,\"clientOrderId\":\"left:client_order_id\",\"price\":\"left:price\",\"origQty\":\"left:orig_qty\",\"executedQty\":\"left:executed_qty\",\"cummulativeQuoteQty\":\"left:cummulative_quote_qty\",\"status\":\"left:status\",\"timeInForce\":\"left:time_in_force\",\"type\":\"left:type\",\"side\":\"left:side\",\"stopPrice\":\"left:stop_price\",\"icebergQty\":\"left:iceberg_qty\",\"time\":1.25,\"updateTime\":1.25,\"isWorking\":true,\"workingTime\":1.25,\"origQuoteOrderQty\":\"left:orig_quote_order_qty\",\"positionSide\":\"left:position_side\",\"closePosition\":true,\"reduceOnly\":true,\"activatePrice\":\"left:activate_price\",\"priceRate\":\"left:price_rate\",\"priceProtect\":null,\"extensionMarker\":\"left\",\"extensionNested\":{\"checked\":true,\"value\":17}}",
           "output": {
             "ok": false
           }
