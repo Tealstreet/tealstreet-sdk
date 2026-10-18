@@ -805,6 +805,16 @@ when the account option-market flag is true. hyro_binding compares all six paths
 with maintained Bybit methods and the actual Hyro guard; spot/inverse family
 routing remains independently defined.
 
+API response diagnostics can invoke fallible error listeners. Preserve the original
+name/message/code through the canonical owned callback transport cause and the
+Bybit HTTP receiver; do not stringify this rejection or attach a replacement
+request config. The owned-value capture profile explicitly refuses unsupported
+code values. `native_host_bybit` drives this path through signed native HTTP for
+all four account constructors, including NaN and own undefined inside code. The
+response-boundaries source oracle executes maintained createAPI with actual
+Axios/retry/qs and asserts the injected diagnostic throw is the identical final
+rejection after one physical attempt.
+
 Margin and position-mode control bodies forward the generic fetched batch without
 inspecting it. The production binding carries Js directly into Store publication;
 never serialize these intermediates through JSON, which erases native NaN and
@@ -835,3 +845,11 @@ Submission checks unknown outcome only for one payload carrying a caller client 
 The real HTTP regression sends a rejected first split lot with a non-coercible
 error code and verifies later lots still place; a single order without a caller
 ID also skips classification, while a caller-ID control still reaches it.
+
+The remaining generic callback dispatchers take closed per-module `Callback`
+selectors. Native routing converts only the original fixed factory tags; all
+matches are exhaustive. Their former unknown-callback intrinsic arms had no
+production route and are deleted. Hyro socket disposal uses the existing concrete
+PrivateProtocol hook followed by shared BaseWebSocket cleanup; the uncalled
+generic dispose wrapper and its three synthetic-only cases are removed. Preserve
+the actual constructor/socket/Store witnesses and the remaining439 session cases.

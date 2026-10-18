@@ -1,6 +1,9 @@
 //! Configured REST execution and open-interest ownership. API construction and
 //! the complete exchange lifecycle remain separate manifest rows.
-use crate::{builder, exchange_helpers as h, helpers, types::*};
+use crate::{
+    builder, exchange_helpers as h, helpers,
+    types::{AsterDEXAPIVersion, AsterDEXPlaceOrderOpts, AsterDEXStpMode},
+};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
@@ -151,7 +154,9 @@ impl OrderExecution {
         let response = adapter.execute(request).await.map_err(|failure| {
             let mut e = ExchangeError::new(failure.message);
             e.is_axios_error = true;
-            e.code = failure.code.map(Value::String);
+            e.code = failure
+                .code
+                .map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
             e.context = failure.context.map(|c| *c);
             e.method = Some(failure.request.method);
             e.url = Some(failure.request.url);

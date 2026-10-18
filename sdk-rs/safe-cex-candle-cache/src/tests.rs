@@ -1613,6 +1613,7 @@ fn malformed_stored_candle_keeps_valid_siblings_and_fetches_only_its_gap() {
 
 #[test]
 fn malformed_cached_candle_is_a_miss_and_refetches_without_error() {
+    let mut cases = 0;
     for mode in [
         CandleCacheBackendReadMode::ReadThrough,
         CandleCacheBackendReadMode::HydrateOnce,
@@ -1624,6 +1625,12 @@ fn malformed_cached_candle_is_a_miss_and_refetches_without_error() {
                 Some(serde_json::json!("invalid")),
                 Some(serde_json::json!(false)),
             ] {
+                // Numeric null is the JSON encoding of NaN, covered by real
+                // persistence roundtrips; timestamp null remains malformed.
+                if field != "timestamp" && invalid == Some(serde_json::Value::Null) {
+                    continue;
+                }
+                cases += 1;
                 let e = Executor::default();
                 let store = Rc::new(Store::default());
                 let backend = Rc::new(KeyValueCandleCacheBackend::new(
@@ -1733,6 +1740,7 @@ fn malformed_cached_candle_is_a_miss_and_refetches_without_error() {
             }
         }
     }
+    assert_eq!(cases, 38, "structurally malformed case floor");
 }
 
 #[test]

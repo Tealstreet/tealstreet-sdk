@@ -170,6 +170,15 @@
     "accepted-model-record-native.test.mjs": [
       "model record visitors have executed native field observations"
     ],
+    "accepted-napi-alias.test.mjs": [
+      "NAPI callbacks retain their exact compiler signatures and Cargo identities",
+      "unknown NAPI callback aliases keep the existing refusal",
+      "NAPI alias compiler and artifact guards are load bearing"
+    ],
+    "accepted-node-probes.test.mjs": [
+      "real Node probe execution is restricted to the production FFI addon profile",
+      "Node probe execution refuses failed builds and foreign or ambiguous Cargo artifacts"
+    ],
     "accepted-number-output-native.test.mjs": [
       "numeric production compiler binding catches a compiling recipe mutation"
     ],
@@ -403,6 +412,10 @@
     "transport HOW auth wire token",
     "transport relay close code",
     "transport registry instance precedence",
-    "transport provider foreign URL refusal"
+    "transport provider foreign URL refusal",
+    "NAPI alias source identity",
+    "NAPI alias expanded signature",
+    "NAPI alias nested Cargo identity",
+    "NAPI alias caller redirection"
   ]
 }

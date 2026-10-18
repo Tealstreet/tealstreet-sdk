@@ -6,12 +6,14 @@ use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
     exchange::Exchange,
     http::HttpClientOptions,
+    js_runtime::value::owned::{OwnedCallbackError, OwnedJsValue},
     runtime::{ExchangeError, ExchangeRuntime},
 };
 use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     RestAdapter, RestExecution, RestFailure, RestFuture, RestRequest, RestResponse,
     RestResponseBody, TransportError, TransportRegistry,
+    provider::TransportErrorOrigin,
     rate_limit::RateLimitClock,
     retry::{ClassifiedRequest, ReadClassification},
 };
@@ -302,7 +304,27 @@ impl Client {
         owner
             .base()
             .emit_and_log_error(ExchangeErrorInput::Message(message.into()), None, None)
-            .map_err(|error| RestFailure::pre_transmit(error.to_string(), request.clone()))
+            .map_err(|error| {
+                let mut fields = vec![
+                    ("name", OwnedJsValue::string(&error.name)),
+                    ("message", OwnedJsValue::string(&error.message)),
+                ];
+                if let Some(code) = &error.code {
+                    let code = match OwnedJsValue::from_js(code) {
+                        Ok(code) => code,
+                        Err(error) => {
+                            return RestFailure::pre_transmit(error.message, request.clone());
+                        }
+                    };
+                    fields.push(("code", code));
+                }
+                RestFailure::from_transport(
+                    TransportError::Rejected(TransportErrorOrigin::new(OwnedCallbackError::new(
+                        OwnedJsValue::object(fields),
+                    ))),
+                    request.clone(),
+                )
+            })
     }
 
     async fn get_env_probe_result(self: &Rc<Self>) -> Result<ProbeResult, ExchangeError> {

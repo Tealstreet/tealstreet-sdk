@@ -51,7 +51,7 @@ fn public_writer_matches_numeric_bits_and_notification_failure() {
                 if name == "first" && throws {
                     let mut cause =
                         safe_cex_exchange::runtime::ExchangeError::new("subscriber failure");
-                    cause.code = Some(json!(731));
+                    cause.code = Some(safe_cex_exchange::js_runtime::value::Js::Number(731.0));
                     return Err(cause.into());
                 }
                 Ok(())
@@ -90,8 +90,11 @@ fn public_writer_matches_numeric_bits_and_notification_failure() {
                 "writer retains one Store-local subscriber identity"
             );
             assert_eq!(
-                error.code,
-                Some(json!(731)),
+                error
+                    .code
+                    .as_ref()
+                    .and_then(safe_cex_exchange::js_runtime::value::Js::as_f64),
+                Some(731.0),
                 "subscriber cause identity survives writer"
             );
             assert_eq!(

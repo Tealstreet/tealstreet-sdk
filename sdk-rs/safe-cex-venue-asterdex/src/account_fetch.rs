@@ -1,7 +1,12 @@
 //! Stateful account reads/configuration from AsterDEXExchange. Configured REST
 //! instances are supplied by the host; API construction and exchange startup
 //! remain separate rows. Futures must be polled by the caller.
-use crate::{exchange_helpers as helpers, types::*};
+use crate::{
+    exchange_helpers as helpers,
+    types::{
+        AsterDEXAPIVersion, AsterDEXMarketResponse, AsterDEXOrderResponse, AsterDEXTickerResponse,
+    },
+};
 use safe_cex_exchange::{exchange::BaseExchange, runtime::ExchangeError};
 use safe_cex_num::{js_number_string, js_string, js_truthy, parse_float};
 use safe_cex_store::StoreUpdate;
@@ -62,7 +67,7 @@ impl AccountFetch {
             // inventing a JS Error object identity at the native boundary.
             let mut error = ExchangeError::new(failure.message);
             error.is_axios_error = true;
-            error.code = failure.code.map(Value::String);
+            error.code = failure.code.map(|code| safe_cex_exchange::js_runtime::value::Js::str(&code));
             error.context = failure.context.map(|context| *context);
             error.method = Some(failure.request.method);
             error.url = Some(failure.request.url);

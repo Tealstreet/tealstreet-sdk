@@ -1092,7 +1092,8 @@ fn mixed_market_asset_refusals_keep_fresh_siblings() {
                 .map_or_else(|| "undefined".into(), Value::to_string);
             let reports = errors.borrow();
             assert_eq!(reports.len(), 1, "one visible refusal per bad row");
-            let report = reports[0].as_str().unwrap();
+            let report = String::from_utf16(reports[0].as_str().unwrap())
+                .expect("market refusal is a scalar Unicode message");
             assert!(
                 report.contains("BAD-USDT") && report.contains(&format!("{field}={expected}")),
                 "{report}"
@@ -1194,7 +1195,7 @@ fn market_leverage_refusal_case(refresh: bool) {
         assert_eq!(markets[1].limits.leverage.max, 75.0);
         let errors = errors.borrow();
         assert_eq!(errors.len(), 1);
-        let message = errors[0].as_str().unwrap();
+        let message = String::from_utf16(errors[0].as_str().unwrap()).unwrap();
         assert!(
             message.contains("BAD-USDT")
                 && message.contains(&format!("limits.leverage.max={value}")),

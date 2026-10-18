@@ -2,6 +2,14 @@
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/apexomni/CLAUDE.md).
 
+The production binding host names its shared type imports explicitly. A wildcard
+can import macros and make its unqualified expression macros ambiguous to the
+accepted-set scanner; keep that scope check enforced without a policy waiver.
+
+`Iso8601` has a union contract with direct native variant/payload observations
+for its real timestamp visitor. The source alias accepts every string, including
+malformed-date text; only non-string/non-number shapes and malformed JSON refuse.
+
 Protocol constants are ordered own-property tables; consumer lookup behavior is
 not implied by the representation. Shared normalized order enums retain shared
 identity. Venue wire enums use String-first deserializers and have no permissive
@@ -478,3 +486,14 @@ Market batches retain the source config update, filter and complete numeric map
 before strict output admission. A refused id/symbol/base/quote/active/info row
 warns with its index, field and original value; valid siblings remain available
 to fetch and Store refresh. Source evaluation and reporting failures propagate.
+
+
+`binding::production_ticker_coercion_matches_constructed_typescript` adds
+64 field-independent cases through the constructed production socket/Store:
+three-row instrumentInfo frames, truthy guards and mark/index fallback. Each case resets both native and
+maintained TS Stores to finite baselines, then checks all eleven native numeric
+fields after malformed and good rows. Null, numeric/prefix/NaN strings, objects,
+overflow, signed zero and false follow the actual TS exchange and DefaultStore.
+The shared ticker census records the witness. The compiling
+`parity/scripts/ticker-native-controls.py apexomni` fault must fail that test and
+pass after exact source restoration.

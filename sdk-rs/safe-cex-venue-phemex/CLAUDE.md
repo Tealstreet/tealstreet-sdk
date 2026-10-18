@@ -226,3 +226,20 @@ snapshots replacing Store without fill notifications, terminal deltas emitting
 the execution price, supported-market position updates, and per-currency balance
 merging with current position PnL. These are coverage of existing source behavior,
 not additional venue fixes.
+
+
+Post-merge #418 review found snapshot failure warnings dispatching to the socket's
+missing log instead of parent.log, and stringifying Error rather than reading its
+message. The real constructed public-book regression proves both failures with
+compiled REDs. It compares the maintained TS subscription, asserts the warning
+text/severity, next-delta retries, 30-second warning throttling/reopening and later
+snapshot recovery with the buffered delta. Error instances read message; other
+thrown values retain String(value). The source supplement includes plain object
+and string rejections. The real read limiter remains active in this regression.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` drives 72 packed
+three-row frames through the live public socket. Each of nine numeric inputs
+varies independently across eight malformed/coercion values, while every native
+Ticker number is compared by bits with the maintained constructed TS exchange
+and DefaultStore. The control runner swaps last/mark in the live packed mapper
+and requires a compiled native assertion failure followed by exact restoration.

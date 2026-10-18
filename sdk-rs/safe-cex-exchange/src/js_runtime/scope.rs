@@ -188,21 +188,30 @@ impl<X> Scope<X> {
         let fired = Rc::new(std::cell::Cell::new(false));
         let (shared, own, done) = (Rc::downgrade(&self.shared), handle.clone(), fired.clone());
         let reporter = runtime.clone();
-        let task = runtime.spawn_local(Box::pin(async move {
-            let slept = reporter.sleep(delay).await;
-            done.set(true);
-            if let Some(shared) = shared.upgrade() {
-                drop(take_timers(&shared.timers, &own));
-            }
-            let outcome = match slept {
-                // A host timer that fails never fires; say so rather than run early.
-                Err(error) => Err((error, "setTimeout sleep")),
-                Ok(()) => callback().map_err(|error| (error.to_exchange_error(), "setTimeout")),
-            };
-            if let Err((error, source)) = outcome {
-                reporter.report_exception(&error, &serde_json::json!({ "source": source }));
-            }
-        }));
+        let deadline = runtime.monotonic_now_ms() + delay as f64;
+        let task = super::jobs::for_runtime(&(runtime.clone() as Rc<dyn ExchangeRuntime>)).timer(
+            deadline,
+            Box::pin(async move {
+                let remaining = (deadline - reporter.monotonic_now_ms()).max(0.0).ceil() as u64;
+                let slept = if remaining == 0 {
+                    Ok(())
+                } else {
+                    reporter.sleep(remaining).await
+                };
+                done.set(true);
+                if let Some(shared) = shared.upgrade() {
+                    drop(take_timers(&shared.timers, &own));
+                }
+                let outcome = match slept {
+                    // A host timer that fails never fires; say so rather than run early.
+                    Err(error) => Err((error, "setTimeout sleep")),
+                    Ok(()) => callback().map_err(|error| (error.to_exchange_error(), "setTimeout")),
+                };
+                if let Err((error, source)) = outcome {
+                    reporter.report_exception(&error, &serde_json::json!({ "source": source }));
+                }
+            }),
+        );
         // An inline host may already have run the timer: never register a dead task.
         if !fired.get() {
             self.shared.timers.borrow_mut().push((handle.clone(), task));
