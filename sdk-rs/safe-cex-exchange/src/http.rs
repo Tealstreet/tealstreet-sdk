@@ -703,7 +703,7 @@ impl HttpClient {
                     if let Err(error) = self.host.emit("error", &message) {
                         self.runtime.report_exception(
                             &ExchangeError::new(error),
-                            &json!({"event":"error"}),
+                            &json!({"event":"error"}).into(),
                         );
                     }
                 }

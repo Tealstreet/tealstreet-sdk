@@ -240,7 +240,7 @@ impl body::Host for Frame {
             if let Err(e) = venue.fetch_and_set_private_snapshot(1).await {
                 reporter.report_exception(
                     &e,
-                    &serde_json::json!({ "source": "fetchAndSetPrivateSnapshot" }),
+                    &serde_json::json!({ "source": "fetchAndSetPrivateSnapshot" }).into(),
                 );
             }
             Ok(Js::Undefined)

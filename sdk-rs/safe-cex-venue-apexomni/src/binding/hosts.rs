@@ -143,7 +143,7 @@ impl Host {
             if let Err(error) = result {
                 runtime.report_exception(
                     &error,
-                    &serde_json::json!({"operation":"ApexOmni callback"}),
+                    &serde_json::json!({"operation":"ApexOmni callback"}).into(),
                 );
             }
         }));

@@ -6,7 +6,10 @@
 //! executable graph getters/iterators/prototypes/symbols and mutable Error data
 //! are unclaimed. Map labels use a caller-supplied locale lowercase operation.
 use crate::{
-    private_event_value::*,
+    private_event_value::{
+        EventOps, EventValue, PrivateEnum, array_values, fallback, nullish, number, record, string,
+        table,
+    },
     request_weight::{Failure, type_error},
 };
 use safe_cex_types::{

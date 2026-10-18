@@ -94,7 +94,7 @@ impl Promise {
                 if let Some((runtime, error)) = report {
                     runtime.report_exception(
                         &error.to_exchange_error(),
-                        &serde_json::json!({"source":"unhandledRejection"}),
+                        &serde_json::json!({"source":"unhandledRejection"}).into(),
                     );
                 }
             }));

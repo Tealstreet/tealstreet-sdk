@@ -8,7 +8,9 @@
 //! cyclic/toJSON graphs and non-BMP/lone UTF16 coercion are unclaimed.
 use crate::{
     order_operations::{Method, Operation, OperationFuture, Sync, Venue, array},
-    private_event_value::*,
+    private_event_value::{
+        EventOps, EventValue, PrivateEnum, array_values, fallback, number, record, string,
+    },
     request_weight::{Failure, type_error},
 };
 use safe_cex_exchange::runtime::LogSeverity;

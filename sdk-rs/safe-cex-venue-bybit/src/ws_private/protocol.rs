@@ -35,7 +35,7 @@ impl WsProtocol for PrivateProtocol {
             if let Err(error) = owner.call_method("resetSession", vec![]) {
                 self.runtime.report_exception(
                     &error.to_exchange_error(),
-                    &serde_json::json!({"operation":"HyroTrader private disposal"}),
+                    &serde_json::json!({"operation":"HyroTrader private disposal"}).into(),
                 );
             }
         }

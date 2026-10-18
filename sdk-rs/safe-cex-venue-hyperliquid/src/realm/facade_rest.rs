@@ -88,7 +88,7 @@ fn build(
         {
             reporter.runtime.report_exception(
                 &error,
-                &serde_json::json!({ "context": "hyperliquid api emit" }),
+                &serde_json::json!({ "context": "hyperliquid api emit" }).into(),
             );
         }
     });

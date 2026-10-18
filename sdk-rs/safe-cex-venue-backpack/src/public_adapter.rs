@@ -85,7 +85,7 @@ impl Throttle {
                     if let Err(e) = result {
                         report.report_exception(
                             &e,
-                            &serde_json::json!({"operation":"Backpack ticker throttle"}),
+                            &serde_json::json!({"operation":"Backpack ticker throttle"}).into(),
                         );
                     }
                 }));
@@ -353,7 +353,7 @@ impl BackpackPublicWebSocket {
                 if let Err(e) = task.await {
                     report.report_exception(
                         &e,
-                        &serde_json::json!({"operation":"Backpack public socket"}),
+                        &serde_json::json!({"operation":"Backpack public socket"}).into(),
                     );
                 }
             })));

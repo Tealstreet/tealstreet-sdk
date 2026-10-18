@@ -43,7 +43,7 @@ impl Drop for AsterDEXExchange {
             if let Err(error) = self.dispose() {
                 self.rt.shared.runtime.report_exception(
                     &error,
-                    &serde_json::json!({"source":"AsterDEXExchange.drop"}),
+                    &serde_json::json!({"source":"AsterDEXExchange.drop"}).into(),
                 );
             }
         }
