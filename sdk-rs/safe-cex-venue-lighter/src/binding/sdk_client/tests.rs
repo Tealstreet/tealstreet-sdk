@@ -1209,3 +1209,82 @@ fn transaction_client_preserves_raw_l1_signature_metadata_and_wire_truthiness() 
     );
     assert_eq!(results, source.as_array().unwrap().clone());
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native_error_constructor {
+    use super::*;
+
+    fn realm() -> Realm {
+        let runtime = safe_cex_exchange::native::native_runtime();
+        let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
+        build_realm(
+            &ExchangeName::Lighter,
+            &serde_json::from_value(json!({"key":"", "secret":""})).unwrap(),
+            &store,
+            &LighterDependencies {
+                runtime: runtime.clone(),
+                http: client::rest_http_host(
+                    runtime,
+                    Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+                ),
+                registry: Rc::new(TransportRegistry::default()),
+                signing_entropy: None,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn native_api_error_preserves_error_descriptor_and_prototype() {
+        let realm = realm();
+        let class = realm.global("LighterApiError").unwrap();
+        let error = class.construct(vec![Js::utf16(&[0xd800])], None).unwrap();
+        let descriptor = realm.global("Object.getOwnPropertyDescriptor").unwrap()
+            .call(Js::Undefined, vec![error.clone(), Js::str("message")]).unwrap();
+        assert!(!descriptor.get("enumerable").unwrap().truthy(), "Error super message is non-enumerable");
+        assert_eq!(error.get("message").unwrap().to_js_string().unwrap().as_ref(), &[0xd800]);
+        assert_eq!(error.call_method("toString", vec![]).unwrap().to_js_string().unwrap().as_ref(),
+            "LighterApiError: ".encode_utf16().chain([0xd800]).collect::<Vec<_>>());
+        let omitted = class.construct(vec![], None).unwrap();
+        assert!(!omitted.has_own("message"));
+        assert_eq!(omitted.get("message").unwrap().to_display(), "");
+        assert_eq!(omitted.call_method("toString", vec![]).unwrap().to_display(), "LighterApiError");
+    }
+
+    #[test]
+    fn native_api_error_calls_capture_after_fields_and_propagates_throws() {
+        let realm = realm();
+        let class = realm.global("LighterApiError").unwrap();
+        let error_class = realm.global("Error").unwrap();
+        let details = Js::object(vec![]);
+        let expected_details = details.clone();
+        let expected_class = class.clone();
+        let expected_receiver = error_class.clone();
+        let calls = Rc::new(std::cell::Cell::new(0));
+        let count = calls.clone();
+        error_class.define("captureStackTrace", Js::function("captureStackTrace", move |this, args| {
+            assert!(this.strict_equals(&expected_receiver));
+            let target = arg(&args, 0);
+            assert!(arg(&args, 1).strict_equals(&expected_class));
+            assert!(target.get("details")?.strict_equals(&expected_details));
+            assert_eq!(target.get("name")?.to_display(), "LighterApiError");
+            assert_eq!(target.get("code")?.to_display(), "CUSTOM");
+            assert_eq!(target.get("requestId")?.to_display(), "request");
+            assert_eq!(target.get("statusCode")?.to_number()?.to_bits(), (-0_f64).to_bits());
+            target.define("stack", Js::utf16(&[0xd800]))?;
+            count.set(count.get() + 1);
+            Ok(Js::Undefined)
+        })).unwrap();
+        let result = class.construct(vec![Js::str("message"), Js::str("CUSTOM"), details,
+            Js::str("request"), Js::Number(-0.)], None).unwrap();
+        assert_eq!(calls.get(), 1, "source capture must run");
+        assert_eq!(result.get("stack").unwrap().to_js_string().unwrap().as_ref(), &[0xd800]);
+        let original = Js::object(vec![("marker", Js::Number(17.))]);
+        let thrown = original.clone();
+        error_class.define("captureStackTrace", Js::function("captureStackTrace", move |_, _| Err(Thrown::new(thrown.clone())))).unwrap();
+        assert!(class.construct(vec![Js::str("message")], None).unwrap_err().value.strict_equals(&original));
+        error_class.define("captureStackTrace", Js::Bool(true)).unwrap();
+        let error = class.construct(vec![Js::str("message")], None).unwrap_err();
+        assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
+    }
+}
