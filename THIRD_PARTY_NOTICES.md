@@ -85,10 +85,10 @@ which keep their upstream licences. `scripts/check-licenses.mjs` fails CI when a
 ## Native JavaScript TimSort
 
 - Source: https://github.com/v8/v8/blob/13.6.233.17/third_party/v8/builtins/array-sort.tq
-- Scope: `sdk-rs/safe-cex-exchange/src/js_runtime/sorting.rs`.
+- Scope: `sdk-rs/safe-cex-num/src/sorting.rs`.
 - Copyright Python Software Foundation and the V8 project authors.
 - Licences: PSF-2.0 and V8 BSD-3-Clause notices are retained in
-  `sdk-rs/safe-cex-exchange/licenses/v8-timsort.txt`.
+  `sdk-rs/safe-cex-num/licenses/v8-timsort.txt`.
 - Modified by Tealstreet: Rust translation of run detection, binary insertion,
   run-stack collapse and galloping merges, using the existing fallible native
   comparator and separate JavaScript receiver boundary.

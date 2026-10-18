@@ -7,8 +7,8 @@ ts = "sortOrderBook"
 kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/orderbook.rs::sort_order_book"
-status = "divergent"
-note = "CHOSEN: stable merge sort preserves the source subtraction comparator and NaN-as-equality bug, avoiding a total-order precondition absent in TS. Nontransitive NaN mixtures can have different permutations from the JS engine; Rust could reproduce a pinned engine algorithm, but this utility uses a portable stable algorithm. Finite-price ordering and ties match. ts-bug: source comparator is nontransitive for NaN; retained, not corrected. Mapped `safe-cex-store/src/orderbook.rs::sort_order_book`."
+status = "ported"
+note = "The shared safe-cex-num V8 TimSort retains source subtraction and NaN-as-equality comparison scheduling. Exact CI Node 24.20.0 / V8 13.6 permutations and all native price/amount/total bits are compared through the public helper for 112 profiles on each side, including minrun and galloping lengths. Stable consistent ordering is engine-independent; inconsistent comparator ordering follows the CI engine contract. Mapped `safe-cex-store/src/orderbook.rs::sort_order_book`."
 
 [[symbol]]
 ts = "calcOrderBookTotal"

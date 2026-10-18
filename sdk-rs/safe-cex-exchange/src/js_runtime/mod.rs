@@ -17,7 +17,6 @@ pub mod promise;
 pub mod regexp;
 pub mod scope;
 pub mod sockets;
-pub mod sorting;
 pub mod store;
 pub mod structured_clone;
 mod throttle;
