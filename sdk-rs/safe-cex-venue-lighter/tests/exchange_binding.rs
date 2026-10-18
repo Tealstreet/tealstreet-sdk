@@ -1026,7 +1026,12 @@ fn private_account_frame_for_deployment(name: ExchangeName) {
         "private position uses real venue mapper and Store"
     );
     assert_eq!(
-        *fills.borrow(),
+        fills
+            .borrow()
+            .iter()
+            .map(safe_cex_exchange::js_runtime::value::to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("finite Lighter fill fixture"),
         vec![json!({"id":"888","side":"buy","symbol":"BTC","price":49000.0,"amount":0.1})],
         "private trade produces source fill payload"
     );
@@ -1103,7 +1108,38 @@ fn private_fill_timestamp_types_match_the_maintained_handler() {
                 fill[field] = json!(fill[field].as_f64().unwrap());
             }
         }
-        assert_eq!(*fills.borrow(), expected, "real private frame: {case}");
+        let actual = fills.borrow();
+        assert_eq!(actual.len(), expected.len(), "real private frame: {case}");
+        for (actual, expected) in actual.iter().zip(&expected) {
+            let fields = expected.as_object().expect("source fill object");
+            assert_eq!(actual.own_keys().len(), fields.len());
+            for (key, expected) in fields {
+                assert!(actual.has_own(key), "source fill key {key}: {case}");
+                let value = actual.get(key).unwrap();
+                match expected {
+                    Value::Number(number) => {
+                        let safe_cex_exchange::js_runtime::value::Js::Number(number_actual) = value
+                        else {
+                            panic!("native fill Number {key}: {case}");
+                        };
+                        assert_eq!(number_actual.to_bits(), number.as_f64().unwrap().to_bits());
+                    }
+                    Value::String(text) => assert!(
+                        value.strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(text))
+                    ),
+                    _ => panic!("unexpected source fill field {key}: {case}"),
+                }
+            }
+        }
+        assert_eq!(
+            actual
+                .iter()
+                .map(safe_cex_exchange::js_runtime::value::to_json)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            expected,
+            "real private frame: {case}"
+        );
     }
     assert!(
         h.runtime.reports.borrow().is_empty(),
@@ -1182,4 +1218,49 @@ process.stdout.write(JSON.stringify(['1e400','-1e400','null'].map(raw=>{
             );
         }
     }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("lighter");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 1240);
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    let reports = h.runtime.reports.borrow().len();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("lighter")),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert_eq!(
+        h.runtime.reports.borrow().len(),
+        reports,
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
 }

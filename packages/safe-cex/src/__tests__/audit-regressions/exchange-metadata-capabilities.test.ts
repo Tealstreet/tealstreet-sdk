@@ -8,7 +8,7 @@ import { ExchangeName, ExchangeOptions } from '../../types';
 
 vi.hoisted(() => {
   // HyroTrader builds Bybit REST clients during construction, before the test ever starts I/O.
-  process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL ??= 'https://hyrotrader-simulator.test';
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL ??= 'https://hyrotrader-prod.test';
 });
 
 const liveInstances: BaseExchange[] = [];

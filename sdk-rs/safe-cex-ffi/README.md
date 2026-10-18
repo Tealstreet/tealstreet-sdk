@@ -38,10 +38,40 @@ The matching scoped Rust suite is
 
 With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
 `nativeAccountSignerAvailable` and `nativeAccountClose` expose the registry's
-JSON account host. Events and private Store slices are forwarded to JS; signing
+owned-value account host. Events and worker Store payloads are forwarded to JS; signing
 and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Calls and repeated closes against a removed account reject.
+Rejections are JavaScript Error objects with the source `name`, plain `message`
+and optional `code`. An absent source code stays absent; callers do not parse
+error messages as JSON. `tests/native-account-errors.test.mjs` checks this
+through the actual registry and native transport.
+
+The native API takes `nativeAccountOpen({exchange, options}, onEvent, onStore, sign?, proxyToken?)`
+and `nativeAccountCallMethod(id, method, argsArray)`. Options, method results,
+events, Store payloads and signer requests/responses are JavaScript values.
+The boundary retains `NaN`, infinities, negative zero, own `undefined` properties and
+UTF-16 strings. No JSON text API is accepted. Proxy-token callbacks resolve strings.
+The owned tree supports structured data, arrays and BigInts; cycles and functions
+reject visibly. Native builds require Node-API 6 or later.
+Emitter payloads and error codes retain the shared core’s JS values through owned
+capture. Hosted signer throws and rejected promises preserve name, message and
+code, including own undefined and nonfinite or structured code values.
+`tests/native-account-values.test.mjs` and the Rust `native_account_values`
+target exercise actual signed Binance reads containing nonfinite prices.
+The signer-rejection Node and Rust targets drive failed signing through actual
+Binance accounts and verify that no terminal HTTP request is sent.
+
+Store delivery uses the shared worker payload preparer and leading/trailing
+throttle (250ms times `tuning.dataUpdateThrottleMultiplier`). Startup posts a
+forced full snapshot; live posts omit stable markets, orders and positions.
+Browser-mode tickers use packed deltas, while `hostedMode` sends full tickers.
+Payloads include public markets, socket health and message statistics, and omit
+truthy raw `info` on orders, positions and displayed positions. Closing or
+deactivating the account cancels pending delivery. The Rust `native_account_store`
+and Node `tests/native-account-store.test.mjs` targets drive actual Binance
+gateway frames and signed HTTP reads through the account boundary.
+
 Venue `deactivate` requests clear host delivery, dispose the exchange, and post
 `{event: "deactivate-status", data: true}`, matching the TS worker. The Store
 reset performed by disposal is suppressed. The Rust `native_account_deactivation`
@@ -49,10 +79,6 @@ suite and Node `tests/native-account-deactivation.test.mjs` drive an actual
 Orderly-family account through a loopback expired-key response. The Rust suite
 also verifies that signer waits resolve as disposed.
 
-Rejections are JavaScript Error objects with the source `name`, plain `message`
-and optional `code`. An absent source code stays absent; callers do not parse
-error messages as JSON. `tests/native-account-errors.test.mjs` checks this
-through the actual registry and native transport.
 `smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.
 
 Streaming uses the same command channel: call `listenOHLCV([options])`,
@@ -94,3 +120,26 @@ the native registry path. Both use loopback HTTP.
 Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
 closures hold weak references so disposal releases callbacks even when a venue
 runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.
+
+The parity manifest records native Store delivery as worker split members:
+construction reuses `_throttledStoreUpdate`, subscribed updates follow
+`_setupExchangeEventListeners`, snapshots follow `sendSnapshot`, and teardown
+follows `_clearRuntimePipeline`. The native host shares the worker throttle and
+payload preparer; its weak owners and owned Store frames retain the documented
+native ownership boundary. `NativeAccountFuture` remains part of the native
+registry host mapping after its rename from `JsonFuture`.
+
+The individually listed native-boundary exemptions cover `OwnedJsValue` and its
+registry alias, the `JsData` napi codec, host callback handles/settlement glue,
+and the owned callback/std-error origin carriers. They name ABI representations
+with no separate TypeScript SDK declarations. They preserve the explicit tree
+cycle/depth and callback-inspection limits; they do not exempt Store delivery,
+exchange policy or worker algorithms from their source mappings and binding tests.
+
+Log, error, warning and Grafana event callbacks carry the worker’s rest-argument
+array, including an empty array for zero arguments. A single array argument stays
+one array element; fill payloads retain their scalar shape. Private websocket
+frame/subscription diagnostics (`grafana-pws`, `grafana-pws-sub`) use this same
+bridge. `tests/native-account-events.test.mjs` drives a real Binance preflight
+error and checks its metadata argument; registry event tests cover emitter arity
+and both diagnostic channels through a real native account.
