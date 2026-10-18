@@ -48,9 +48,11 @@ fn report(venue: &dyn Exchange, error: ExchangeError) -> Result<(), ExchangeErro
 fn parse_rows(rows: Vec<Value>) -> Result<Vec<ParsedWooTransaction>, ExchangeError> {
     let mut parsed = Vec::new();
     for row in rows {
-        let row = row
-            .as_object()
-            .ok_or_else(|| ExchangeError::new("history parser requires an object row"))?;
+        let Some(row) = row.as_object() else {
+            safe_cex_num::get_key::v_unknown(Some(&row), "symbol")
+                .map_err(|error| ExchangeError::new(error.message))?;
+            continue;
+        };
         if let Some(row) = parse_transaction_history_row(row).map_err(ExchangeError::new)? {
             parsed.push(row);
         }
