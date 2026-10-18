@@ -8,6 +8,8 @@ mod orders;
 mod reads;
 #[path = "generated/binanceinverse.rs"]
 pub mod types;
+mod ws_private;
+mod ws_public;
 
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
@@ -171,6 +173,16 @@ impl BinanceInverseExchange {
         });
         let erased: Rc<dyn safe_cex_exchange::exchange::Exchange> = venue.clone();
         *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&erased));
+        let (public, _) = ws_public::new(&venue.scope).map_err(|e| e.to_exchange_error())?;
+        receiver
+            .define("publicWebsocket", public)
+            .map_err(|e| e.to_exchange_error())?;
+        let (private, _) = ws_private::new(&venue.scope).map_err(|e| e.to_exchange_error())?;
+        receiver
+            .define("privateWebsocket", private)
+            .map_err(|e| e.to_exchange_error())?;
+        // BaseExchange's source property lookups resolve these actual receiver
+        // members into their Public/Private slots, including future replacement.
         Ok(venue)
     }
 

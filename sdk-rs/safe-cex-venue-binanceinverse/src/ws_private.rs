@@ -311,7 +311,7 @@ fn on_message(rt: &Rt, data: Js) -> Result<(), Thrown> {
     rt.call_path("trackLastReceived", vec![])?;
     rt.call_path("emitWsDiagnosticReceive", vec![data.clone()])?;
     let json = if let Js::String(text) = &data {
-        from_retained_input(&safe_cex_transport::how::big_int_as_string_json_parse_utf16(text))
+        from_retained_input(safe_cex_transport::how::big_int_as_string_json_parse_utf16(text))
     } else {
         data
     };

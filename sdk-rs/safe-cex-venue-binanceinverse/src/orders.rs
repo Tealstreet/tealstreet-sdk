@@ -700,7 +700,10 @@ fn apply_mode(rt: &Rt, a: &[Js]) -> Result<Js, Thrown> {
     for p in store(rt, "positions")?.iterable_values()? {
         let mut selected = false;
         for symbol in &symbols {
-            if p.get("symbol")?.strict_equals(symbol) { selected = true; break; }
+            if p.get("symbol")?.strict_equals(symbol) {
+                selected = true;
+                break;
+            }
         }
         if selected && p.get("contracts")?.to_number()? == 0.0 {
             let row = p.spread_object()?;
