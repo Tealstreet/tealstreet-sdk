@@ -54,10 +54,13 @@ The boundary retains `NaN`, infinities, negative zero, own `undefined` propertie
 UTF-16 strings. No JSON text API is accepted. Proxy-token callbacks resolve strings.
 The owned tree supports structured data, arrays and BigInts; cycles and functions
 reject visibly. Native builds require Node-API 6 or later.
-Emitter payloads and error codes still use the shared core’s existing JSON models;
-this boundary forwards those models without reconstructing lost values.
+Emitter payloads and error codes retain the shared core’s JS values through owned
+capture. Hosted signer throws and rejected promises preserve name, message and
+code, including own undefined and nonfinite or structured code values.
 `tests/native-account-values.test.mjs` and the Rust `native_account_values`
 target exercise actual signed Binance reads containing nonfinite prices.
+The signer-rejection Node and Rust targets drive failed signing through actual
+Binance accounts and verify that no terminal HTTP request is sent.
 
 Store delivery uses the shared worker payload preparer and leading/trailing
 throttle (250ms times `tuning.dataUpdateThrottleMultiplier`). Startup posts a
@@ -117,6 +120,21 @@ the native registry path. Both use loopback HTTP.
 Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
 closures hold weak references so disposal releases callbacks even when a venue
 runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.
+
+The parity manifest records native Store delivery as worker split members:
+construction reuses `_throttledStoreUpdate`, subscribed updates follow
+`_setupExchangeEventListeners`, snapshots follow `sendSnapshot`, and teardown
+follows `_clearRuntimePipeline`. The native host shares the worker throttle and
+payload preparer; its weak owners and owned Store frames retain the documented
+native ownership boundary. `NativeAccountFuture` remains part of the native
+registry host mapping after its rename from `JsonFuture`.
+
+The individually listed native-boundary exemptions cover `OwnedJsValue` and its
+registry alias, the `JsData` napi codec, host callback handles/settlement glue,
+and the owned callback/std-error origin carriers. They name ABI representations
+with no separate TypeScript SDK declarations. They preserve the explicit tree
+cycle/depth and callback-inspection limits; they do not exempt Store delivery,
+exchange policy or worker algorithms from their source mappings and binding tests.
 
 Log, error, warning and Grafana event callbacks carry the worker’s rest-argument
 array, including an empty array for zero arguments. A single array argument stays

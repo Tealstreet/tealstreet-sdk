@@ -32,7 +32,7 @@ fn tag(h: Option<&Handle>) -> String {
 fn error() -> Error {
     let mut e = ExchangeError::new("refresh failure");
     e.name = "TypeError".into();
-    e.code = Some(json!("REFRESH"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::Js::str("REFRESH"));
     e.store_subscriber_ids = vec![7, 3];
     Rc::new(e)
 }

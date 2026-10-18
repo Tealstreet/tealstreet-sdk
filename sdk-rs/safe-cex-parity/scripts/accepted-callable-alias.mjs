@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { identityAliasProbe } from './accepted-identity-alias.mjs';
 import { reviewedGenericAliasProbe } from './accepted-reviewed-aliases.mjs';
 import { reviewedFunctionPointerAliasProbe } from './accepted-function-pointer-alias.mjs';
+import { reviewedNapiAliasProbe } from './accepted-napi-alias.mjs';
 import { weexKlineTupleProbe } from './accepted-weex-kline-alias.mjs';
 import { localFutureAliasProbe } from './accepted-future-alias.mjs';
 import { loaderFutureAliasProbe } from './accepted-loader-future.mjs';
@@ -32,6 +33,8 @@ function boundedAst(node, parameter) {
   for (const value of Object.values(node)) boundedAst(value, parameter);
 }
 export function genericAliasProbe(alias, contract, context) {
+  const napi = reviewedNapiAliasProbe(alias, contract, context);
+  if (napi) return napi;
   const hosted = hostedSignerTupleProbe(alias, contract, context);
   if (hosted) return hosted;
   const weex = weexKlineTupleProbe(alias, contract, context);
