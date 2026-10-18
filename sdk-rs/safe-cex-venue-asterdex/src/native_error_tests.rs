@@ -28,9 +28,31 @@ impl JsHttpHost for Host {
     }
     fn send(&self, config: Js) -> JsFuture<'static> {
         let original = self.original.clone();
-        original.define("config", config).unwrap();
+        if original.is_object() {
+            original.define("config", config).unwrap();
+        }
         Box::pin(async move { Err(Thrown::new(original)) })
     }
+}
+fn venue(runtime: &Rc<support::Runtime>, original: Js) -> Rc<AsterDEXExchange> {
+    let host = Rc::new(Host {
+        runtime: runtime.clone(),
+        original,
+    });
+    AsterDEXExchange::new(
+        ExchangeName::Asterdex,
+        serde_json::from_value(
+            json!({"key":"fixture","secret":"fixture","tuning":{"consoleLogging":false}}),
+        )
+        .unwrap(),
+        Rc::new(DefaultStore::new()),
+        AsterDEXDependencies {
+            runtime: runtime.clone(),
+            http: Rc::new(move |_| Ok(host.clone())),
+            external_public_data: None,
+        },
+    )
+    .unwrap()
 }
 #[test]
 fn sync_position_mode_retains_native_axios_error_observations() {
@@ -50,24 +72,7 @@ fn sync_position_mode_retains_native_axios_error_observations() {
     cause.define("number", Js::Number(f64::INFINITY)).unwrap();
     cause.define("missing", Js::Undefined).unwrap();
     original.define("cause", cause).unwrap();
-    let host = Rc::new(Host {
-        runtime: runtime.clone(),
-        original: original.clone(),
-    });
-    let venue = AsterDEXExchange::new(
-        ExchangeName::Asterdex,
-        serde_json::from_value(
-            json!({"key":"fixture","secret":"fixture","tuning":{"consoleLogging":false}}),
-        )
-        .unwrap(),
-        Rc::new(DefaultStore::new()),
-        AsterDEXDependencies {
-            runtime: runtime.clone(),
-            http: Rc::new(move |_| Ok(host.clone())),
-            external_public_data: None,
-        },
-    )
-    .unwrap();
+    let venue = venue(&runtime, original.clone());
     let pending = venue
         .rt
         .this
@@ -140,4 +145,30 @@ fn native_error_contract_matches_both_maintained_typescript_clients() {
     let text = String::from_utf8(result.stdout).unwrap();
     let result: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
     assert_eq!(result, json!({"asterdex":true,"woo":true}));
+}
+
+#[test]
+fn sync_position_mode_keeps_primitive_rejection_diagnostics() {
+    for original in [
+        Js::str("primitive rejection"),
+        Js::Number(42.0),
+        Js::Null,
+        Js::Undefined,
+    ] {
+        let runtime = support::runtime_fixture();
+        let venue = venue(&runtime, original.clone());
+        let pending = venue
+            .rt
+            .this
+            .call_method("syncPositionMode", vec![])
+            .unwrap();
+        let error =
+            support::drive(&runtime, await_js(&venue.rt.exchange_runtime(), pending)).unwrap_err();
+        assert_eq!(
+            error.message(),
+            original.to_display(),
+            "ASTER-PRIMITIVE original rejection diagnostic"
+        );
+        venue.dispose().unwrap();
+    }
 }
