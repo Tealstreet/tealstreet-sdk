@@ -29,14 +29,14 @@ for (const recvWindow of [32, undefined]) {
       try { if (id !== undefined) await native.nativeAccountClose(id); }
       finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     });
-    id = await native.nativeAccountOpen({ exchange: 'hyperliquid', optionsJson: JSON.stringify({
+    id = await native.nativeAccountOpen({ exchange: 'hyperliquid', options: {
       key: address, secret: '', applicationId: address,
       overrideProxyUrl: `http://127.0.0.1:${server.address().port}`,
       extra: recvWindow === undefined ? undefined : { recvWindow },
-    }) }, () => {}, () => {});
-    const result = JSON.parse(await native.nativeAccountCallMethod(id, 'fetchIncomeHistory', JSON.stringify([
+    } }, () => {}, () => {});
+    const result = await native.nativeAccountCallMethod(id, 'fetchIncomeHistory', [
       { startTime: 1000, endTime: 2000, incomeType: 'FUNDING_FEE' },
-    ])));
+    ]);
     assert.deepEqual(result, []);
     assert.equal(completed, 1, 'the real info response must arrive before the method settles');
     assert.equal(seen.length, 1, 'a successful source read must not retry');
