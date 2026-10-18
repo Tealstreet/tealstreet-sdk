@@ -564,15 +564,51 @@ fn private_warning_prefix_preserves_native_surrogate_error_and_rejection() {
             } else {
                 "Binance COIN-M user data stream keepalive failed: "
             };
-            let expected: Vec<u16> = prefix.encode_utf16().chain(units).collect();
+            let enhanced = "[binanceinverse] Request setup error: ";
+            let expected: Vec<u16> = prefix
+                .encode_utf16()
+                .chain(enhanced.encode_utf16())
+                .chain(if structured {
+                    units.to_vec()
+                } else {
+                    "undefined".encode_utf16().collect()
+                })
+                .collect();
+            assert_eq!(h.http.requests.borrow().len(), 1, "no network-code retry");
             assert!(
                 h.runtime.raw_consoles.borrow().iter().any(|v| v
                     .as_str()
                     .is_some_and(|units| units.as_ref() == expected.as_slice())),
-                "actual Base error console must retain warning units for {method}/Error={structured}; observed={:?}",
+                "actual factory/Base warning must match maintained TS for {method}/Error={structured}; observed={:?}",
                 h.runtime.raw_consoles.borrow()
             );
         }
+    }
+}
+
+#[test]
+fn private_warning_keeps_venue_response_error_after_factory_interceptor() {
+    for method in ["connectAndSubscribe", "updateListenKey"] {
+        let h = support::fixture(false, false);
+        let units = [0xd800];
+        h.http.replies.borrow_mut().push_back(Ok(Js::object(vec![
+            ("code", Js::Number(-2011.0)),
+            ("msg", Js::utf16(&units)),
+        ])));
+        private_member(&h, method);
+        let prefix = if method == "connectAndSubscribe" {
+            "Binance COIN-M user data stream unavailable: "
+        } else {
+            "Binance COIN-M user data stream keepalive failed: "
+        };
+        let expected: Vec<u16> = prefix.encode_utf16().chain(units).collect();
+        assert_eq!(h.http.requests.borrow().len(), 1);
+        assert!(
+            h.runtime.raw_consoles.borrow().iter().any(|value| value
+                .as_str()
+                .is_some_and(|observed| observed.as_ref() == expected.as_slice())),
+            "venue rejection follows the factory and keeps the original warning: {method}"
+        );
     }
 }
 

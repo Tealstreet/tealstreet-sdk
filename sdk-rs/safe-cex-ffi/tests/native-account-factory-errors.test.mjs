@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { sourceFactoryErrorMessage } from './support/factory-error-source.mjs';
 const native = createRequire(import.meta.url)('../dist/node/safe_cex_ffi.node');
 const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhY2N0LTEiLCJleHAiOjQxMDI0NDQ4MDB9.c2ln';
 for (const [exchange, status, body, prefix] of [
@@ -28,7 +29,11 @@ for (const [exchange, status, body, prefix] of [
     id = await native.nativeAccountOpen({ exchange, options: {
       key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tealstreetProxy: true, tealstreetTunnel: false, overrideProxyUrl: `http://127.0.0.1:${server.address().port}`,
     } }, event => events.push(event), () => {}, undefined, async () => token);
-    if (exchange === 'bitrue') await assert.rejects(native.nativeAccountCallMethod(id, 'validateAccount', []), /Request failed with status code/);
+    if (exchange === 'bitrue') await assert.rejects(native.nativeAccountCallMethod(id, 'validateAccount', []), error => {
+      const expected = sourceFactoryErrorMessage(exchange, status, body, '/fapi/v2/account');
+      assert.ok(error.message.includes(expected), `source=${expected}; native=${error.message}`);
+      return true;
+    });
     else await native.nativeAccountCallMethod(id, 'validateAccount', []);
     for (let i = 0; i < 100 && !events.some(event => event.event === 'error' && JSON.stringify(event.data).includes(prefix)); i++) await delay(10);
     assert.ok(requests.some(request => request.headers.authorization && (exchange !== 'bitrue' || request.url.includes('/fapi/v2/account'))), JSON.stringify(requests));

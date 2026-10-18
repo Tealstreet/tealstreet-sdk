@@ -605,3 +605,15 @@ socket witnesses compare both sorted sides to the unchanged live source emitter.
 `book-level-alias-controls.py` requires two independently compiled consumer faults
 and exact restored native passes. Keep NumericChanges and JS callback-array
 identity separate; these two records do not classify either obligation.
+
+All four production socket message hosts share `binding/sockets.rs::parse_frame`.
+It sends original UTF-16 units through the canonical RetainedJsonInput parser
+and constructs native Js directly; a serde Value intermediate would reject
+lone-surrogate escapes and drop the complete frame. Strict and tolerant parse
+error branches remain distinct. `constructed_private_ingress_keeps_surrogate_frames_neighbors_and_raw_info`
+delivers frames through both constructed private sockets and checks Store orders,
+good neighbors and exact raw info units; the public book fixture also receives
+a lone-unit unknown field through both real public sockets. The maintained
+onMessage oracle observes dispatch for all four source classes before JSON
+projection. These are socket ingress checks, not acceptance of every typed REST
+or utility projection in this crate.

@@ -280,6 +280,16 @@ pub async fn connect_websocket(
     protocols: &[String],
     headers: &BTreeMap<String, String>,
 ) -> Result<NativeSocket, TransportError> {
+    prepare_websocket(url, protocols, headers)?.await
+}
+
+/// Validate constructor inputs before exposing a CONNECTING host handle. The
+/// returned future owns the single physical handshake and its pending I/O.
+pub fn prepare_websocket(
+    url: &str,
+    protocols: &[String],
+    headers: &BTreeMap<String, String>,
+) -> Result<TransportFuture<'static, NativeSocket>, TransportError> {
     let host_error =
         |e: &dyn std::fmt::Display| TransportError::Host(format!("WebSocket {url}: {e}"));
     let mut request = url.into_client_request().map_err(|e| host_error(&e))?;
@@ -296,93 +306,100 @@ pub async fn connect_websocket(
             protocols.join(", ").parse().map_err(|e| host_error(&e))?,
         );
     }
+    tokio_tungstenite::tungstenite::client::uri_mode(request.uri()).map_err(|e| host_error(&e))?;
     let connector = tokio_tungstenite::Connector::Rustls(ws_tls_config()?);
-    let (stream, _) =
-        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
-            .await
-            .map_err(|e| match e {
-                tokio_tungstenite::tungstenite::Error::Url(_) => host_error(&e),
-                _ => TransportError::Network(NetworkFailure::from_code(
-                    format!("WebSocket {url}: {e}"),
-                    Some("ECONNREFUSED".into()),
-                )),
-            })?;
-    let (mut sink, mut source) = stream.split();
-    let state = Rc::new(Cell::new(1));
-    let (outgoing, mut queued) = mpsc::unbounded_channel::<Message>();
-    let (deliver, incoming) = mpsc::unbounded_channel::<SocketFrame>();
-    let writer_state = state.clone();
-    tokio::task::spawn_local(async move {
-        while let Some(message) = queued.recv().await {
-            let closing = matches!(message, Message::Close(_));
-            if sink.send(message).await.is_err() || closing {
-                break;
-            }
-        }
-        writer_state.set(3);
-    });
-    let frame_counts = Rc::new(std::cell::RefCell::new(NativeFrameCounts::default()));
-    let reader_counts = frame_counts.clone();
-    let reader_state = state.clone();
-    let reader = tokio::task::spawn_local(async move {
-        let mut close = SocketFrame::Close {
-            code: 1006,
-            reason: String::new(),
-            was_clean: false,
-        };
-        while let Some(message) = source.next().await {
-            let frame = match message {
-                Ok(Message::Text(text)) => {
-                    reader_counts.borrow_mut().message += 1;
-                    SocketFrame::Text(text.to_string())
-                }
-                Ok(Message::Binary(bytes)) => {
-                    reader_counts.borrow_mut().message += 1;
-                    SocketFrame::Binary(bytes.to_vec())
-                }
-                Ok(Message::Ping(_)) => {
-                    reader_counts.borrow_mut().ping += 1;
-                    continue;
-                }
-                Ok(Message::Pong(_)) => {
-                    reader_counts.borrow_mut().pong += 1;
-                    continue;
-                }
-                Ok(Message::Close(frame)) => {
-                    reader_counts.borrow_mut().close += 1;
-                    close = frame.map_or(
-                        SocketFrame::Close {
-                            code: 1005,
-                            reason: String::new(),
-                            was_clean: true,
-                        },
-                        |f| SocketFrame::Close {
-                            code: f.code.into(),
-                            reason: f.reason.to_string(),
-                            was_clean: true,
-                        },
-                    );
+    let url = url.to_owned();
+    Ok(Box::pin(async move {
+        let (stream, _) =
+            tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
+                .await
+                .map_err(|e| match e {
+                    tokio_tungstenite::tungstenite::Error::Url(_) => {
+                        TransportError::Host(format!("WebSocket {url}: {e}"))
+                    }
+                    _ => TransportError::Network(NetworkFailure::from_code(
+                        format!("WebSocket {url}: {e}"),
+                        Some("ECONNREFUSED".into()),
+                    )),
+                })?;
+        let (mut sink, mut source) = stream.split();
+        let state = Rc::new(Cell::new(1));
+        let (outgoing, mut queued) = mpsc::unbounded_channel::<Message>();
+        let (deliver, incoming) = mpsc::unbounded_channel::<SocketFrame>();
+        let writer_state = state.clone();
+        tokio::task::spawn_local(async move {
+            while let Some(message) = queued.recv().await {
+                let closing = matches!(message, Message::Close(_));
+                if sink.send(message).await.is_err() || closing {
                     break;
                 }
-                Ok(_) => continue,
-                Err(_) => break,
-            };
-            if deliver.send(frame).is_err() {
-                break;
             }
-        }
-        reader_state.set(3);
-        let _ = deliver.send(close);
-    })
-    .abort_handle();
-    Ok(NativeSocket {
-        frame_counts,
-        state,
-        outgoing,
-        incoming: Rc::new(Mutex::new(incoming)),
-        reader,
-    })
+            writer_state.set(3);
+        });
+        let frame_counts = Rc::new(std::cell::RefCell::new(NativeFrameCounts::default()));
+        let reader_counts = frame_counts.clone();
+        let reader_state = state.clone();
+        let reader = tokio::task::spawn_local(async move {
+            let mut close = SocketFrame::Close {
+                code: 1006,
+                reason: String::new(),
+                was_clean: false,
+            };
+            while let Some(message) = source.next().await {
+                let frame = match message {
+                    Ok(Message::Text(text)) => {
+                        reader_counts.borrow_mut().message += 1;
+                        SocketFrame::Text(text.to_string())
+                    }
+                    Ok(Message::Binary(bytes)) => {
+                        reader_counts.borrow_mut().message += 1;
+                        SocketFrame::Binary(bytes.to_vec())
+                    }
+                    Ok(Message::Ping(_)) => {
+                        reader_counts.borrow_mut().ping += 1;
+                        continue;
+                    }
+                    Ok(Message::Pong(_)) => {
+                        reader_counts.borrow_mut().pong += 1;
+                        continue;
+                    }
+                    Ok(Message::Close(frame)) => {
+                        reader_counts.borrow_mut().close += 1;
+                        close = frame.map_or(
+                            SocketFrame::Close {
+                                code: 1005,
+                                reason: String::new(),
+                                was_clean: true,
+                            },
+                            |f| SocketFrame::Close {
+                                code: f.code.into(),
+                                reason: f.reason.to_string(),
+                                was_clean: true,
+                            },
+                        );
+                        break;
+                    }
+                    Ok(_) => continue,
+                    Err(_) => break,
+                };
+                if deliver.send(frame).is_err() {
+                    break;
+                }
+            }
+            reader_state.set(3);
+            let _ = deliver.send(close);
+        })
+        .abort_handle();
+        Ok(NativeSocket {
+            frame_counts,
+            state,
+            outgoing,
+            incoming: Rc::new(Mutex::new(incoming)),
+            reader,
+        })
+    }))
 }
+
 impl TunnelSocket for NativeSocket {
     fn ready_state(&self) -> u16 {
         self.state.get()

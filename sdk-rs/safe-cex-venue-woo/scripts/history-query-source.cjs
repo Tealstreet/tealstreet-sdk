@@ -54,14 +54,18 @@ vm.runInNewContext(compile(`${signing.join('\n')}; this.sign = (config, options)
     const scope = {console: {error() {}, trace() {}}, reportException() {}, readHttpFailureContext: () => undefined};
     vm.runInNewContext(compile(`class Reporter {${reporter.getText(baseAst)}} this.Reporter = Reporter;`), scope);
     owner.name = 'woo'; owner.options = {}; owner.isPublicDataOnly = false;
-    owner.emitter = {emit: (event, message) => {assert.equal(event, 'error'); emitted.push(message);}};
+    owner.emitter = {emit: (event, message) => {if (event === 'error') emitted.push(message);}};
     owner.emitAndLogError = value => scope.Reporter.prototype.emitAndLogError.call(owner, value);
-    owner.xhr = {get: async (url, config) => {
-      calls.push(context.sign({method: 'get', url, params: config.params}, {secret: 'fixture-secret'}).url);
-      const error = new Error('Request failed with status code 500');
-      error.response = {data: JSON.parse(input.raw)};
-      throw error;
-    }};
+    owner.grafanaEndpointsEvery = []; owner.grafanaEndpointsPeriodic = [];
+    const {safeCexAxiosCreate} = require(path.join(root, 'packages/safe-cex/src/safeCexAxiosCreate.ts'));
+    const axios = dependency('axios');
+    owner.xhr = safeCexAxiosCreate({}, {secret:'fixture-secret', key:'fixture-key'}, owner);
+    owner.xhr.interceptors.request.use(config => context.sign(config, {secret:'fixture-secret'}));
+    owner.xhr.defaults.adapter = async config => {
+      calls.push(config.url);
+      const response = {status:500, statusText:undefined, data:JSON.parse(input.raw), config};
+      throw new axios.AxiosError('Request failed with status code 500', 'ERR_BAD_RESPONSE', config, {}, response);
+    };
     const result = await owner[input.method](input.method === 'fetchHistoricalFills' ? {} : {symbol: 'BTCUSDT'});
     assert.equal(result.length, 0); assert.equal(emitted.length, 1);
     const units = value => Array.from({length: value.length}, (_, i) => value.charCodeAt(i));

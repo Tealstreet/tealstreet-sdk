@@ -32,7 +32,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-registry/src/public_data.rs::parse_candle_subscription_key"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#public-data-provider-choice. Valid generated delimiter-bearing keys match. Malformed no-colon astral fallback differs; no actual producer or program-observable materialized-unit witness is established for that private path. The unproved FORCED subclaim is withdrawn. Targets: safe-cex-registry/src/public_data.rs::parse_candle_subscription_key"
+note = "CHOSEN: typed String output replaces isolated UTF-16 units with U+FFFD under the approved UTF-8 addendum in divergence-cluster-rulings.md. FIXED: no-colon fallback removes one UTF-16 unit like source slice(0,-1), rather than a whole Unicode scalar. tests/data.rs proves the old scalar fallback fails and compares 40 maintained-source code-unit results, including valid pairs, combining marks, NUL and generated colon-bearing keys. scripts/check.mjs independently compares the actual native example with source toWellFormed output while retaining the original high-unit observation. Provider candle keys only originate in getCandleSubscriptionKey, which always inserts a colon, so malformed fallback is unreachable through production subscription/reconnect. No FORCED claim. Targets: safe-cex-registry/src/public_data.rs::parse_candle_subscription_key"
 
 [[symbol]]
 ts = "GatewayMessageType"

@@ -1,12 +1,13 @@
 //! Legacy transaction rows, retaining native numeric observations before projection.
-use crate::{response, utils::map_woo_hedge_transaction_side};
+use crate::utils::{map_woo_hedge_transaction_side, normalize_symbol};
 use safe_cex_num::{
-    TableHit,
-    get_key::{GetKeyObject, GetKeyValue, v},
-    js_number, js_string, js_truthy,
+    js_retained_number as js_number, js_retained_string as js_string,
+    js_retained_truthy as js_truthy,
 };
-use safe_cex_types::{BothPositionSide, ExecutionPositionSide, OrderSide, PositionSide};
-use serde_json::{Map, Value};
+use safe_cex_types::{
+    BothPositionSide, ExecutionPositionSide, OrderSide, PositionSide,
+    retained_json::RetainedJsonInput as Input,
+};
 
 pub struct ParsedWooTransaction {
     pub symbol: String,
@@ -19,59 +20,85 @@ pub struct ParsedWooTransaction {
     pub fill_id: Option<String>,
     pub maker: Option<bool>,
     pub commission: Option<f64>,
-    pub commission_asset: Option<Value>,
+    pub commission_asset: Option<Input>,
     pub realized_pnl: Option<f64>,
     pub position_side: ExecutionPositionSide,
 }
-fn field<'a>(row: &'a Map<String, Value>, key: &str) -> Result<Option<&'a Value>, String> {
-    match v(Some(GetKeyObject::Json(row)), key) {
-        TableHit::Mapped(GetKeyValue::Json(value)) => Ok(Some(value)),
-        TableHit::Mapped(GetKeyValue::Undefined) | TableHit::Missing => Ok(None),
-        TableHit::Inherited(_) => Err("transaction field cannot carry an inherited member".into()),
-    }
-}
-fn first<'a>(
-    row: &'a Map<String, Value>,
-    keys: &[&str],
-    truthy: bool,
-) -> Result<Option<&'a Value>, String> {
-    let mut result = None;
-    for key in keys {
-        result = field(row, key)?;
-        if if truthy {
-            js_truthy(result)
-        } else {
-            result.is_some_and(|v| !v.is_null())
-        } {
-            return Ok(result);
+fn field<'a>(row: &'a Input, key: &str) -> Option<&'a Input> {
+    for candidate in [
+        key.to_owned(),
+        safe_cex_num::lodash_snake_case(key),
+        safe_cex_num::lodash_camel_case(key),
+    ] {
+        if let Some(value) = row.get(&candidate) {
+            return Some(value);
         }
     }
-    Ok(result)
+    None
 }
-fn number(value: Option<&Value>) -> Result<f64, String> {
+fn first<'a>(row: &'a Input, keys: &[&str], truthy: bool) -> Option<&'a Input> {
+    let mut result = None;
+    for key in keys {
+        result = field(row, key);
+        if if truthy {
+            result.is_some_and(js_truthy)
+        } else {
+            result.is_some_and(|v| !v.is_nullish())
+        } {
+            return result;
+        }
+    }
+    result
+}
+fn number(value: Option<&Input>) -> Result<f64, String> {
     js_number(value).map_err(|e| e.message.to_owned())
 }
-fn text(value: Option<&Value>) -> Result<String, String> {
+fn text(value: Option<&Input>) -> Result<String, String> {
     js_string(value).map_err(|e| e.message.to_owned())
 }
-fn id(value: Option<&Value>) -> Result<Option<String>, String> {
-    if matches!(value, None | Some(Value::Null)) || value.and_then(Value::as_str) == Some("") {
+fn id(value: Option<&Input>) -> Result<Option<String>, String> {
+    if value.is_none_or(Input::is_nullish) || value.is_some_and(|v| v.text_equals("")) {
         return Ok(None);
     }
     text(value).map(Some)
 }
+fn timestamp(raw: Option<&Input>) -> Result<Option<f64>, String> {
+    if raw.is_none_or(Input::is_nullish) || raw.is_some_and(|v| v.text_equals("")) {
+        return Ok(None);
+    }
+    let value = number(raw)?;
+    Ok((value.is_finite() && value >= 0.0).then(|| {
+        if value >= 1_000_000_000_000.0 {
+            value.floor()
+        } else {
+            (value * 1000.0).floor()
+        }
+    }))
+}
 // ts: WOOXExchange#parseTransactionHistoryRow
-pub fn parse_transaction_history_row(
-    row: &Map<String, Value>,
-) -> Result<Option<ParsedWooTransaction>, String> {
-    let Some(symbol) = response::normalize_transaction_symbol(field(row, "symbol")?) else {
+pub fn parse_transaction_history_row(row: &Input) -> Result<Option<ParsedWooTransaction>, String> {
+    if !row.is_nullish() && row.as_object().is_none() && row.as_array().is_none() {
+        return Err(format!(
+            "Cannot use 'in' operator to search for 'symbol' in {}",
+            text(Some(row))?
+        ));
+    }
+    let Some(units) = field(row, "symbol")
+        .and_then(Input::as_text)
+        .filter(|s| !s.is_empty())
+    else {
         return Ok(None);
     };
+    let symbol = normalize_symbol(
+        &String::from_utf16(units)
+            .map_err(|_| "Cannot represent JavaScript UTF-16 string as UTF-8")?
+            .replace('/', "_"),
+    );
     if symbol.is_empty() {
         return Ok(None);
     }
-    let raw_side = field(row, "side")?;
-    let raw_side = if js_truthy(raw_side) {
+    let raw_side = field(row, "side");
+    let raw_side = if raw_side.is_some_and(js_truthy) {
         text(raw_side)?
     } else {
         String::new()
@@ -96,13 +123,13 @@ pub fn parse_transaction_history_row(
             "lastPrice",
         ],
         false,
-    )?)?;
+    ))?;
     let qty = number(first(
         row,
         &["executedQuantity", "quantity", "executed", "lastQty"],
         false,
-    )?)?;
-    let timestamp = response::normalize_timestamp_milliseconds(first(
+    ))?;
+    let timestamp = timestamp(first(
         row,
         &[
             "executedTimestamp",
@@ -115,33 +142,32 @@ pub fn parse_transaction_history_row(
             "updatedTime",
         ],
         true,
-    )?)
-    .map_err(|e| e.message.to_owned())?;
+    ))?;
     if !price.is_finite() || price <= 0.0 || !qty.is_finite() || qty <= 0.0 || timestamp.is_none() {
         return Ok(None);
     }
     let timestamp_milliseconds = timestamp.unwrap_or_default();
-    let order_id = id(first(row, &["orderId", "order_id", "id"], false)?)?;
-    let fill_id = id(first(row, &["id", "tradeId", "trade_id"], false)?)?;
-    let fee = number(first(row, &["fee", "total_fee"], false)?)?;
+    let order_id = id(first(row, &["orderId", "order_id", "id"], false))?;
+    let fill_id = id(first(row, &["id", "tradeId", "trade_id"], false))?;
+    let fee = number(first(row, &["fee", "total_fee"], false))?;
     let commission = fee.is_finite().then_some(fee);
-    let commission_asset = first(row, &["feeAsset", "fee_asset"], false)?;
-    let raw_pnl = first(row, &["realizedPnl", "realized_pnl"], false)?;
-    let pnl = if matches!(raw_pnl, None | Some(Value::Null)) {
+    let commission_asset = first(row, &["feeAsset", "fee_asset"], false);
+    let raw_pnl = first(row, &["realizedPnl", "realized_pnl"], false);
+    let pnl = if raw_pnl.is_none_or(Input::is_nullish) {
         f64::NAN
     } else {
         number(raw_pnl)?
     };
     let realized_pnl = pnl.is_finite().then_some(pnl);
-    let raw_maker = first(row, &["isMaker", "is_maker"], false)?;
-    let maker = if matches!(raw_maker, None | Some(Value::Null)) {
+    let raw_maker = first(row, &["isMaker", "is_maker"], false);
+    let maker = if raw_maker.is_none_or(Input::is_nullish) {
         None
     } else {
         let n = number(raw_maker)?;
         Some(n != 0.0 && !n.is_nan())
     };
-    let raw_position = first(row, &["positionSide", "position_side"], false)?;
-    let raw_position = if matches!(raw_position, None | Some(Value::Null)) {
+    let raw_position = first(row, &["positionSide", "position_side"], false);
+    let raw_position = if raw_position.is_none_or(Input::is_nullish) {
         String::new()
     } else {
         text(raw_position)?
@@ -166,9 +192,7 @@ pub fn parse_transaction_history_row(
         fill_id,
         maker,
         commission,
-        commission_asset: commission_asset
-            .filter(|value| js_truthy(Some(value)))
-            .cloned(),
+        commission_asset: commission_asset.filter(|value| js_truthy(value)).cloned(),
         realized_pnl,
         position_side,
     }))
