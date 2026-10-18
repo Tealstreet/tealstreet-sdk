@@ -117,7 +117,14 @@ fn private_pin_key_retains_native_value_and_request_rejection_after_suspension()
                     Err(error) => error,
                     Ok(_) => panic!("PinKey must propagate real HTTP refusal"),
                 };
-                assert!(error.message.contains("native listen-key refusal"));
+                assert_eq!(
+                    error.message, "Request failed with status code 400",
+                    "source rejected interceptor rethrows the original HTTP error"
+                );
+                assert_eq!(
+                    error.response.as_ref().expect("original HTTP response")["data"]["msg"],
+                    "native listen-key refusal"
+                );
                 assert!(!error.name.is_empty());
             } else {
                 let ListenKeyResponse::Data(ListenKeyData::Present(slot)) = settled.unwrap() else {
