@@ -284,3 +284,7 @@ impl Exchange for PolymarketExchange {
         inherited_rejection()
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "receiver_tests.rs"]
+mod receiver_tests;
