@@ -7,7 +7,7 @@ use safe_cex_num::{
     TableHit, js_date_parse, js_string, js_table_lookup, js_time_clip, js_truthy,
     numeric_ingress::js_value_as_f64, parse_float,
 };
-use safe_cex_types::Order;
+use safe_cex_types::{ModelField, Order};
 use serde_json::{Map, Value};
 
 #[derive(Debug)]
@@ -36,9 +36,13 @@ pub(crate) fn map_order_row(
             .and_then(Value::as_str)
             .ok_or_else(|| format!("Paradex order field {field} must be a string"))
     };
-    let side = match js_table_lookup(ORDER_SIDE, text("side")?) {
-        TableHit::Mapped(value) => *value,
-        _ => return Err("Paradex order side is outside the shared OrderSide domain".into()),
+    let side_key = js_string(row.get("side")).map_err(|error| error.to_string())?;
+    let side = match js_table_lookup(ORDER_SIDE, &side_key) {
+        TableHit::Mapped(value) => ModelField::Value(*value),
+        TableHit::Missing => ModelField::Undefined,
+        TableHit::Inherited(_) => {
+            return Err("Paradex order side is outside the shared OrderSide domain".into());
+        }
     };
     let reduce_only = row
         .get("reduce_only")
@@ -113,7 +117,7 @@ pub(crate) fn map_order_row(
         id,
         parent_id: (None).into(),
         symbol,
-        side: side.into(),
+        side,
         r#type: (kind).into(),
         status: status.into(),
         price: price.into(),

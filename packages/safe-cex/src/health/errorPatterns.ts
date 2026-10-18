@@ -84,7 +84,7 @@ export const DEFAULT_ERROR_PATTERNS: ErrorPattern[] = [
       'invalid credentials',
       'wrong api key or secret',
       'api_key_invalid',
-      /api[-_]?key.*invalid/i,
+      /api[-_ ]?key.*invalid/i,
       /invalid.*api[-_]?key/i,
       /(?:wrong|invalid).*(?:api[-_ ]?key|secret)/i,
       /secret.*invalid/i,
@@ -269,6 +269,14 @@ export const EXCHANGE_SPECIFIC_PATTERNS: Record<string, ErrorPattern[]> = {
     },
   ],
   hyrotrader: [
+    {
+      category: 'auth_invalid',
+      severity: 'critical',
+      patterns: [
+        /api\s*key\s+is\s+invalid/i,
+        /\b(?:ret)?code[=:\s]+10003\b/i,
+      ],
+    },
     {
       category: 'order_warning',
       severity: 'warning',

@@ -409,8 +409,12 @@ const HyrotraderMetadata: ExchangeMetadata = {
   darkLogo: '/static/exchanges/logos/HYROTRADER/logo.svg',
   refLink: undefined,
   refImage: '/static/exchanges/logos/HYROTRADER/full-white.svg',
-  enabled: true,
+  enabled: false,
   enabledInDev: true,
+  // Keep preview/prod dark until the private REST/WS path has either Hyro HTTPS
+  // origins or a Tealstreet relay. Local dev can still test the simulator
+  // directly over plain HTTP.
+  enableInPreview: false,
   forbidCors: false,
   enforceWsTunnel: false,
   supportsTunnel: false,

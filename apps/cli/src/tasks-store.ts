@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { BRAND } from './brand';
 
-const CONFIG_DIR = path.join(os.homedir(), '.tealstreet');
+const CONFIG_DIR = path.join(os.homedir(), BRAND.configDirName);
 export const TASKS_FILE = path.join(CONFIG_DIR, 'tasks.json');
 
 export interface PersistedTask {
