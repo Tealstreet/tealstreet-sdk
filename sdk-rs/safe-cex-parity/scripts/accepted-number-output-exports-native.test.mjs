@@ -1,4 +1,4 @@
-// Compiler-backed dependency source scan, not a numeric runtime-output proof.
+// Compiler-backed numeric dependency file scan, not the full provider inventory.
 // Both negative controls finish compilation before the maintained scan refuses.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,6 +13,7 @@ const sdk = path.resolve(scripts, '../..');
 const runner = path.join(scripts, 'accepted-set.mjs');
 const marker = 'NUMBER_OUTPUT_EXPORT_CHECKPOINT ';
 const compiled = 'NUMBER_OUTPUT_EXPORT_COMPILER_COMPLETE';
+const scope = 'cross_trade/types.rs effect scan; other files and runtime probes excluded';
 
 if (process.argv.includes('--number-output-export-checkpoint')) {
   const stop = 'NUMBER_OUTPUT_EXPORT_CHECKPOINT_COMPLETE';
@@ -22,8 +23,8 @@ if (process.argv.includes('--number-output-export-checkpoint')) {
     const loaded = next(url, context);
     if (url !== pathToFileURL(runner).href) return loaded;
     let source = String(loaded.source);
-    const anchor = '  // Same-name block-local types in different bodies are distinct declarations;';
-    assert.equal(source.split(anchor).length, 2, 'checkpoint follows the full unchanged dependency effect scan');
+    const anchor = "    for (const line of effects.stdout.trim().split('\\n').filter(Boolean)) {";
+    assert.equal(source.split(anchor).length, 2, 'checkpoint follows the actual dependency scanner execution');
     if (removeOrigin) {
       const origin = 'dependencyMacroOrigins.push(...verifiedNumberOutputOrigin(dependencyDoc, dependency, metadata, providerArtifacts, scanner));';
       assert.equal(source.split(origin).length, 2, 'control removes only the dependency numeric origin');
@@ -34,14 +35,19 @@ if (process.argv.includes('--number-output-export-checkpoint')) {
     source = source.replace(compilerAnchor, `  console.log(${JSON.stringify(compiled)});\n` + compilerAnchor);
     rewrites++;
     return { ...loaded, source: source.replace(anchor, `
-  if (pkg.name === 'safe-cex' && target.name === 'safe_cex') {
-    const providers = [...globProviders].filter(provider => provider.sources.some(file => file.endsWith('/safe-cex-exchange/src/cross_trade/types.rs')));
-    assert.equal(providers.length, 1, 'actual exchange dependency export provider required');
-    assert.ok(providers[0].effectsChecked, 'complete dependency effect scan must finish');
-    assert.ok(providers[0].macroOrigins.includes('safe_cex_num::js_number_output'), 'actual dependency numeric compiler origin required');
-    console.log(${JSON.stringify(marker)} + JSON.stringify({ package: pkg.name, provider: 'safe-cex-exchange', origin: 'safe_cex_num::js_number_output' }));
-    throw Object.assign(new Error(${JSON.stringify(stop)}), { code: ${JSON.stringify(stop)} });
-  }
+    if (pkg.name === 'safe-cex' && target.name === 'safe_cex') {
+      const numericSource = fs.realpathSync(path.join(root, 'safe-cex-exchange/src/cross_trade/types.rs'));
+      const selected = provider.sources.filter(file => fs.realpathSync(file) === numericSource);
+      if (selected.length) {
+        assert.equal(selected.length, 1, 'actual numeric dependency source required exactly once');
+        const numericEffects = effects.stdout.trim().split('\\n').filter(Boolean).filter(line => fs.realpathSync(line.split('\\t')[0]) === numericSource);
+        if (numericEffects.length === 0) {
+          assert.ok(provider.macroOrigins.includes('safe_cex_num::js_number_output'), 'actual dependency numeric compiler origin required');
+          console.log(${JSON.stringify(marker)} + JSON.stringify({ package: pkg.name, provider: 'safe-cex-exchange', origin: 'safe_cex_num::js_number_output', scope: ${JSON.stringify(scope)} }));
+          throw Object.assign(new Error(${JSON.stringify(stop)}), { code: ${JSON.stringify(stop)} });
+        }
+      }
+    }
 ` + anchor) };
   } });
   process.argv = [process.execPath, runner, '--inventory', '--package=safe-cex', '--jobs=1'];
@@ -49,7 +55,7 @@ if (process.argv.includes('--number-output-export-checkpoint')) {
   catch (error) { if (error.code === stop) checkpoints++; else throw error; }
   finally { hook.deregister(); }
   assert.equal(rewrites, 1, 'checkpoint must execute the maintained driver');
-  assert.equal(checkpoints, 1, 'checkpoint must finish the actual dependency scan');
+  assert.equal(checkpoints, 1, 'checkpoint must finish the actual numeric dependency file scan');
 } else {
   test('numeric dependency exports authenticate the real compiler origin and reject compiling grammar changes', { timeout: 1200000 }, () => {
     const execute = (args = []) => {
@@ -66,7 +72,7 @@ if (process.argv.includes('--number-output-export-checkpoint')) {
       const child = execute();
       assert.equal(child.status, 0, child.output);
       const receipts = child.output.split('\n').filter(line => line.startsWith(marker)).map(line => JSON.parse(line.slice(marker.length)));
-      assert.deepEqual(receipts, [{ package: 'safe-cex', provider: 'safe-cex-exchange', origin: 'safe_cex_num::js_number_output' }]);
+      assert.deepEqual(receipts, [{ package: 'safe-cex', provider: 'safe-cex-exchange', origin: 'safe_cex_num::js_number_output', scope }]);
     };
     const refusal = (child, expected) => {
       assert.equal(child.status, 1, child.output);
@@ -82,7 +88,7 @@ if (process.argv.includes('--number-output-export-checkpoint')) {
     const anchor = 'js_number_output!(self, enum { Balance, Absolute });';
     assert.equal(original.split(anchor).length, 2, 'grammar control selects one actual production macro call');
     try {
-      fs.writeFileSync(file, original.replace(anchor, 'js_number_output!((self), enum { Balance, Absolute });'));
+      fs.writeFileSync(file, original.replace(anchor, 'js_number_output!(::std::convert::identity(self), enum { Balance, Absolute });'));
       refusal(execute(), /dependency export module discovery assertion:.*DOC_CONFIGURATION/s);
       console.log('numeric dependency export opaque operand: named assertion; process exit 1');
     } finally { fs.writeFileSync(file, original); }
