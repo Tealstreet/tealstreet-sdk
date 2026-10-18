@@ -4,7 +4,7 @@ import type { ExchangeName, PlaceOrderOpts } from '@tealstreet/safe-cex/src/type
 import { tradfiPreflightMessage } from '@tealstreet/safe-cex/src/instrument-class/describe';
 import { classifyMarket } from '@tealstreet/safe-cex/src/instrument-class/resolve';
 import { assertMinimumPrice, roundOrderPrice } from '@tealstreet/script-api-core/src/order/orderPricing';
-import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
+import { nativePositionSize } from '@tealstreet/safe-cex/src/utils/nativePositionSize';
 import { clampReduceOnlyOrder, prepareOrder } from '@tealstreet/script-api-core/src/order/prepareOrder';
 import { ScriptValidationError } from '@tealstreet/script-api-core/src/order/ScriptValidationError';
 

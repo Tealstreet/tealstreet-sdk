@@ -54,6 +54,7 @@ import {
 } from '../types';
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
 import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
+import { nativePositionSize } from '../utils/nativePositionSize';
 import { adjust } from '../utils/safe-math';
 import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
 import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
@@ -1213,31 +1214,48 @@ export class BaseExchange implements Exchange {
     return result;
   };
 
+  /**
+   * One reduce-only market close per open position. `position.contracts` is base
+   * and `placeOrder` takes native units, so size with `nativePositionSize`.
+   */
+  private closeAllPositionsAtMarket = async () => {
+    const openPositions = this.store.positions.filter((position) => position.contracts > 0);
+
+    await forEachSeries(openPositions, async (position) => {
+      try {
+        const market = this.store.marketsBySymbol[position.symbol];
+        if (!market) throw new Error('market not loaded');
+
+        await this.placeOrder({
+          symbol: position.symbol,
+          side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
+          type: OrderType.Market,
+          amount: nativePositionSize(position, market),
+          reduceOnly: true,
+        });
+      } catch (err: unknown) {
+        // don't let one failing symbol abort closing the remaining positions
+        const reason = err instanceof Error ? err.message : String(err);
+        this.log(`Nuke: failed to close position on ${position.symbol}: ${reason}`, LogSeverity.Error);
+      }
+    });
+  };
+
   nuke = async (tries = 0) => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
       try {
-        // close all positions
-        const openPositions = this.store.positions.filter((position) => position.contracts > 0);
+        // Cancel first so a resting order can't fill after the closes and
+        // reopen a position. A failed cancel must not stop the closes.
+        try {
+          await this.cancelAllOrders();
+        } catch (err: unknown) {
+          const reason = err instanceof Error ? err.message : String(err);
+          this.log(`Nuke: failed to cancel orders: ${reason}`, LogSeverity.Error);
+        }
 
-        await forEachSeries(openPositions, async (position) => {
-          try {
-            await this.placeOrder({
-              symbol: position.symbol,
-              side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
-              type: OrderType.Market,
-              amount: position.contracts,
-              reduceOnly: true,
-            });
-          } catch (err: any) {
-            // don't let one failing symbol abort closing the remaining positions
-            this.log(`Nuke: failed to close position on ${position.symbol}: ${err?.message || err}`, LogSeverity.Error);
-          }
-        });
-
-        // cancel all orders
-        await this.cancelAllOrders();
+        await this.closeAllPositionsAtMarket();
       } finally {
         this.isNuking = false;
       }
@@ -1256,23 +1274,7 @@ export class BaseExchange implements Exchange {
       this.isNuking = true;
 
       try {
-        // close all positions
-        const openPositions = this.store.positions.filter((position) => position.contracts > 0);
-
-        await forEachSeries(openPositions, async (position) => {
-          try {
-            await this.placeOrder({
-              symbol: position.symbol,
-              side: position.side === 'long' ? OrderSide.Sell : OrderSide.Buy,
-              type: OrderType.Market,
-              amount: position.contracts,
-              reduceOnly: true,
-            });
-          } catch (err: any) {
-            // don't let one failing symbol abort closing the remaining positions
-            this.log(`Nuke: failed to close position on ${position.symbol}: ${err?.message || err}`, LogSeverity.Error);
-          }
-        });
+        await this.closeAllPositionsAtMarket();
       } finally {
         this.isNuking = false;
       }

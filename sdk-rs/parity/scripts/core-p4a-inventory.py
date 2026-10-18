@@ -8,10 +8,10 @@ import tomllib
 root = Path(__file__).resolve().parents[3]
 revision = sys.argv[1] if len(sys.argv) > 1 else 'HEAD'
 sha = subprocess.check_output(['git', 'rev-parse', revision], cwd=root, text=True).strip()
-files = ['exchanges/registry.ts.toml', 'exchanges/registry.native.ts.toml']
+files = ['exchanges/registry.ts.toml', 'exchanges/registry.native.ts.toml', 'utils/nativePositionSize.ts.toml']
 files += [f'script-api-core/order/{name}.ts.toml' for name in [
     'ScriptValidationError', 'breakevenPrice', 'downSizeReduceOrder', 'notionalSizing',
-    'orderPricing', 'positionSizing', 'prepareOrder', 'rounding', 'shouldRoundSizeDown',
+    'orderPricing', 'prepareOrder', 'rounding', 'shouldRoundSizeDown',
 ]]
 print(f'# CORE/P4a inventory at {sha}\n')
 print('Enumeration iteration 1: the fixed eleven assigned manifests. No other manifests are included.\n')

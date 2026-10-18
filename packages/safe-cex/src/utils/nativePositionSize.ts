@@ -11,6 +11,9 @@
  * straight from the store, which is base, and handed it to `placeOrder` as a
  * native amount. That is the same defect, one runtime over.
  *
+ * It lives in `safe-cex` because `BaseExchange.nuke` sizes its closes with it,
+ * and `safe-cex` cannot import from `script-api-core`.
+ *
  * This existed TWICE. `getPositionNativeSize` (the UI path) and
  * `getPositionNativeContracts` in `order/createMarketOrder.ts` (the full-close
  * check and the AI order path) each stated it, and the second one's own

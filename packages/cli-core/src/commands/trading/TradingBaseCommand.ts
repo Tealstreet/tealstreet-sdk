@@ -3,7 +3,7 @@ import type { CommandContext } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
-import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
+import { nativePositionSize } from '@tealstreet/safe-cex/src/utils/nativePositionSize';
 import { amountPrecisionOf } from '../../utils/marketPrecision';
 import { resolveMarketSymbol } from '../../utils/resolveMarketSymbol';
 import { baseToNativeContracts } from '@tealstreet/safe-cex/src/utils/baseToNativeContracts';

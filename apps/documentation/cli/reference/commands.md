@@ -330,6 +330,12 @@ Cancel + close everything. Up to 3 retries internally.
 | `nuke positions`    | Close all positions only          |
 | `nuke orders`       | Cancel all orders only            |
 
+`nuke` cancels resting orders before closing positions to avoid a resting order
+reopening a position after the close. Cancellation errors are logged and
+do not stop the closes. Both `nuke` and `nuke positions` send reduce-only
+market closes in the venue's native contract units; a position whose market
+is not loaded is skipped with an error while the remaining positions continue.
+
 Source: `NukeCommand.ts`.
 
 ---

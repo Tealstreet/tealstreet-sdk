@@ -298,7 +298,7 @@ position". If neither exists, the honest code path is a refusal.
 
 ### The inverse rule — and what is NOT true about it
 
-Inverse handling belongs in SIZING. `order/positionSizing.ts:nativePositionSize`
+Inverse handling belongs in SIZING. `safe-cex/src/utils/nativePositionSize.ts`
 branches on `isInverse` because an inverse contract is a fixed QUOTE amount, so
 its count comes from the notional.
 
@@ -367,9 +367,10 @@ only defined on linear markets.
 
 ### 3. Native position sizing — converged, and the proof it works
 
-`script-api-core/src/order/positionSizing.ts:nativePositionSize` is the single
+`safe-cex/src/utils/nativePositionSize.ts:nativePositionSize` is the single
 definition; web's `getPositionNativeSize` and the CLI's `nativeCloseSize` are
-both thin wrappers over it. Its own comment records that the copies HAD drifted
+both thin wrappers over it, and `BaseExchange.nuke`/`nukePositions` size their
+closes with it. Its own comment records that the copies HAD drifted
 before they were merged. One function in the shared layer, adapters either
 side.
 

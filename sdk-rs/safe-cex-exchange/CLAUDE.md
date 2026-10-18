@@ -1640,6 +1640,10 @@ method through the installed String builtin on NativeRuntime, including every
 surrogate unit, paired astral letters, Greek sigma and whitespace boundaries.
 All three regressions compile and fail against the original production bodies.
 
+Shared nuke closes use the canonical nativePositionSize port and cancel orders
+before closing; cancel failure logs and continues. NUKE_NATIVE_CLOSES.md records
+the real registry/OKX HTTP regression and pending-close guard witness.
+
 The typed `ExchangeRuntime::console` default forwards one unchanged string argument
 to `console_values`; production NativeRuntime inherits it. The real BaseExchange
 log witness in `tests/native_console_default.rs` checks exact native stderr and

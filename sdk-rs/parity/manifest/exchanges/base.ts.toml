@@ -667,12 +667,20 @@ status = "ported"
 note = " Split member `safe-cex-exchange/src/order_operations.rs::order_options`; plumbing this body consumes: rust construction plumbing for the PlaceOrderOpts object literal {symbol, side, type, amount} that the mapped BaseExchange derive-algo-orders and nuke paths and the crossTradePlaceOrder row build inline; every optional field stays absent. No independent order algorithm."
 
 [[symbol]]
+ts = "BaseExchange#closeAllPositionsAtMarket"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::close_all_positions_at_market"
+status = "ported"
+note = "One reduce-only market close per positive Store position, using the canonical native_position_size utility and current loaded market. Missing markets and placement errors log per row and preserve good siblings; native_nuke exercises actual OKX registry/HTTP writes and maintained source. Placement inputs retain the strict shared carrier."
+
+[[symbol]]
 ts = "BaseExchange.nuke"
 kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::nuke", "safe-cex-exchange/src/exchange.rs::Exchange::nuke" ]
 status = "ported"
-note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::nuke preserve venue polymorphism. ts-bug: BaseExchange.nuke retries from current store even after disposal. Shared iterative helper preserves four attempts and per-position error continuation."
+note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::nuke preserve venue polymorphism. ts-bug: BaseExchange.nuke retries from current store even after disposal. Shared iterative helper preserves four attempts and per-position error continuation. nuke cancels before closing and logs cancellation failures without aborting closes; nukePositions never cancels. Both use the shared native-contract close helper."
 
 [[symbol]]
 ts = "BaseExchange.nukePositions"
@@ -680,7 +688,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::nuke_positions", "safe-cex-exchange/src/exchange.rs::Exchange::nuke_positions" ]
 status = "ported"
-note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::nuke_positions preserve venue polymorphism. ts-bug: BaseExchange.nuke retries from current store even after disposal. Shared iterative helper preserves four attempts and per-position error continuation."
+note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::nuke_positions preserve venue polymorphism. ts-bug: BaseExchange.nuke retries from current store even after disposal. Shared iterative helper preserves four attempts and per-position error continuation. nuke cancels before closing and logs cancellation failures without aborting closes; nukePositions never cancels. Both use the shared native-contract close helper."
 
 [[symbol]]
 ts = "BaseExchange.nukeOrders"

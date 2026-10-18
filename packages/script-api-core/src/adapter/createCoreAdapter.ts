@@ -31,7 +31,7 @@ import {
   roundOrderPrice,
   roundOrderSizeToNearest,
 } from '../order/orderPricing';
-import { nativePositionSize } from '../order/positionSizing';
+import { nativePositionSize } from '@tealstreet/safe-cex/src/utils/nativePositionSize';
 import { ScriptValidationError } from '../order/ScriptValidationError';
 import { bySymbol } from './HostBindings';
 
