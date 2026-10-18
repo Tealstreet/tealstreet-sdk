@@ -231,3 +231,139 @@ fn production_native_public_listener_aliases_wait_buffer_reuse_and_unsubscribe()
         owner.dispose().unwrap();
     }
 }
+
+fn native_depth_overflow_case(venue: Venue, buffered: bool, previous: Option<&str>) {
+    let runtime = Rc::new(Runtime::default());
+    let socket = Rc::new(PublicSocket {
+        events: Rc::new(RefCell::new(std::collections::VecDeque::from([
+            WsEvent::Open,
+        ]))),
+        sent: RefCell::default(),
+    });
+    *runtime.dial_socket.borrow_mut() = Some(socket.clone());
+    let http = Arc::new(HeldDepth {
+        released: AtomicBool::new(!buffered),
+        requests: Mutex::default(),
+    });
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        http.clone(),
+        Rc::new(|_, _| panic!("unexpected external data")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let name = match venue {
+        Venue::Futures => "binance",
+        Venue::PM => "binancepm",
+        Venue::Spot => "binancespot",
+    };
+    let owner = ExchangeOwner::new(
+        venue,
+        serde_json::from_value(json!(name)).unwrap(),
+        serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        dependencies,
+    )
+    .unwrap();
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    let cleanup = owner
+        .public
+        .listen_order_book(
+            "BTCUSDT".into(),
+            Rc::new(move |book| {
+                sink.borrow_mut().push(book.borrow().bids[0].amount);
+                Ok(())
+            }),
+        )
+        .unwrap();
+    owner.public_socket().connect_and_subscribe().unwrap();
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    runtime.sleep_clock.set(100.0);
+    for _ in 0..8 {
+        runtime.pump();
+    }
+    let push = |raw: String| {
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(raw)));
+        for _ in 0..16 {
+            runtime.pump();
+        }
+    };
+    push(
+        r#"{"e":"depthUpdate","s":"BTCUSDT","U":101,"u":101,"pu":100,"b":[["99.25","4"]],"a":[]}"#
+            .into(),
+    );
+    assert_eq!(seen.borrow().len(), usize::from(!buffered));
+    if let Some(previous) = previous {
+        push(r#"{"e":"depthUpdate","s":"BTCUSDT","U":102,"u":102,"pu":OVERFLOW,"b":[["99.25","6"]],"a":[]}"#.replace("OVERFLOW", previous));
+        if buffered {
+            assert!(seen.borrow().is_empty());
+            http.released.store(true, Ordering::SeqCst);
+            for _ in 0..16 {
+                runtime.pump();
+            }
+        }
+        assert_eq!(
+            seen.borrow().last().copied(),
+            Some(6.0),
+            "source keeps contiguous raw overflow-pu update {venue:?}, buffered={buffered}, previous={previous}"
+        );
+        assert_eq!(seen.borrow().len(), if buffered { 1 } else { 2 });
+        assert_eq!(
+            http.requests.lock().unwrap().len(),
+            1,
+            "no spurious resnapshot {venue:?}"
+        );
+    } else {
+        assert!(!buffered);
+        http.released.store(false, Ordering::SeqCst);
+        push(
+            r#"{"e":"depthUpdate","s":"BTCUSDT","U":102,"u":1e400,"pu":101,"b":[],"a":[]}"#.into(),
+        );
+        assert_eq!(
+            http.requests.lock().unwrap().len(),
+            2,
+            "source treats nonfinite final ID as a gap and requests held resnapshot {venue:?}"
+        );
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "bad final ID must not publish another book"
+        );
+    }
+    cleanup().unwrap();
+    owner.dispose().unwrap();
+    assert!(runtime.reported.borrow().is_empty());
+}
+
+#[test]
+fn production_native_depth_overflow_previous_id_keeps_contiguous_updates() {
+    let mut completed = 0;
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        for buffered in [false, true] {
+            for previous in ["1e400", "-1e400"] {
+                native_depth_overflow_case(venue, buffered, Some(previous));
+                completed += 1;
+            }
+        }
+    }
+    assert_eq!(
+        completed, 12,
+        "all family/live/buffered/signed overflow cases execute"
+    );
+}
+
+#[test]
+fn production_native_depth_overflow_final_id_requests_resnapshot() {
+    let mut completed = 0;
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        native_depth_overflow_case(venue, false, None);
+        completed += 1;
+    }
+    assert_eq!(completed, 3);
+}
