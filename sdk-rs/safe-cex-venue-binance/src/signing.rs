@@ -171,3 +171,73 @@ pub async fn sign_binance_request(
     next.shift_remove("data");
     Ok(next)
 }
+
+/// `signBinanceRequest` over the canonical native graph. The assembled COIN-M
+/// client keeps shallow aliases and native numbers until the shared query codec
+/// consumes them; this is the same source helper as the typed extraction above.
+pub async fn sign_binance_request_native(
+    config: &safe_cex_exchange::js_runtime::value::Js,
+    options: &safe_cex_exchange::js_runtime::value::Js,
+    exchange: ExchangeName,
+    recv_window: safe_cex_exchange::js_runtime::value::Js,
+    clock: &VirtualClock,
+    payload_signer: Option<&dyn safe_cex_crypto::PayloadSigner>,
+) -> Result<safe_cex_exchange::js_runtime::value::Js, safe_cex_exchange::js_runtime::value::Thrown>
+{
+    use safe_cex_exchange::js_runtime::{
+        client::axios_headers_from,
+        library::qs_stringify,
+        value::{Js, Thrown, utf16},
+    };
+    let next = config.spread_object()?;
+    let key = options.get("key")?;
+    let secret = options.get("secret")?;
+    if options.get("remoteSigner")?.truthy()
+        || !key.truthy()
+        || (!secret.truthy() && payload_signer.is_none())
+    {
+        return Ok(next);
+    }
+    let body = config.get("data")?;
+    let input = if body.truthy() {
+        body
+    } else {
+        config.get("params")?
+    };
+    let data = input.spread_object()?;
+    data.delete(&utf16("signature"));
+    data.set("timestamp", Js::Number(clock.get_current_time_ms()))?;
+    data.set("recvWindow", recv_window)?;
+    let query = qs_stringify(&data, &Js::object(vec![("arrayFormat", Js::str("repeat"))]))?;
+    let key = String::from_utf16(&key.to_js_string()?)
+        .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at signing key boundary"))?;
+    let secret = if secret.truthy() {
+        String::from_utf16(&secret.to_js_string()?)
+            .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at signing secret boundary"))?
+    } else {
+        String::new()
+    };
+    let signed = sign_payload(
+        &SigningOptions {
+            key: &key,
+            secret: &secret,
+            payload_signer,
+        },
+        exchange,
+        &query,
+        Encoding::Hex,
+    )
+    .await
+    .map_err(|error| Thrown::error("Error", &error))?;
+    data.set("signature", Js::str(&signed.signature))?;
+    next.set("params", data)?;
+    if let Some(headers) = signed.headers {
+        let merged = config.get("headers")?.spread_object()?;
+        for (key, value) in headers {
+            merged.set(&key, Js::str(&value))?;
+        }
+        next.set("headers", axios_headers_from(&merged)?)?;
+    }
+    next.delete(&utf16("data"));
+    Ok(next)
+}

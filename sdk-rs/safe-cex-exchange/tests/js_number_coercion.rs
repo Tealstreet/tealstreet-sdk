@@ -87,7 +87,7 @@ console.log(JSON.stringify(rows));
         if let Js::Object(data) = &inherited { *data.proto.borrow_mut() = Some(proto); }
         assert_eq!(number.call(Js::Undefined, vec![inherited]).unwrap().as_f64(), Some(17.));
         let null_proto = Js::object(vec![]);
-        if let Js::Object(data) = &null_proto { *data.proto.borrow_mut() = Some(Js::Null); }
+        if let Js::Object(data) = &null_proto { *data.proto.borrow_mut() = None; }
         let error = null_proto.to_number().unwrap_err();
         assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
         let function=Js::function("source function",|_,_|unreachable!());

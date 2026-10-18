@@ -537,7 +537,54 @@ misroutes the live last-price publication and requires all three family tests
 to compile and fail, then all three pass after exact restoration. Default-feature
 filtered runs cannot execute these native-host witnesses.
 
+COIN-M inverse sockets live in `src/inverse/ws_public.rs` and `ws_private.rs`.
+Their constructor receives the actual parent Scope; field arrows retain their
+lexical socket while lifecycle and task ownership remain in the shared core.
+`tests/inverse_socket_binding.rs` exercises that constructor, real Store and HTTP
+clients with primitive runtime ports. Its mandatory source test runs maintained
+whole socket classes and imported algorithms, including inherited book reset.
+The eleven source groups cover topics/tickers, candles, depth sequencing, native
+fill contracts/large IDs, inverse positions, capped listen-key retry, keepalive
+recovery, disposal, stale REST suppression, escaped-surrogate frame handling and native warning units. This is a selected corpus, not exhaustive equivalence.
+
+Run `python3 sdk-rs/safe-cex-venue-binance/scripts/inverse-socket-controls.py` from
+the repository root to compile five isolated socket behavior faults and require
+their named tests to fail, then pass after exact restoration. It runs Cargo from
+`sdk-rs` with one job. The public book bridge reuses canonical family depth
+algorithms and retains the family's typed, owned callback snapshot boundary;
+it does not claim mutable JavaScript graph aliases across that boundary.
+
+The inverse public dispatcher retains the documented family UTF8 parser profile:
+TS accepts an escaped lone surrogate in an otherwise usable frame while native
+Serde refuses that frame. The constructed refusal/plain-frame control and actual
+TS acceptance are explicit witnesses; public class/onMessage rows remain divergent.
+Connection/keepalive warning concatenation must retain native UTF16 before the
+existing shared reporting/log boundaries; tests read the actual Base console Js
+argument before any diagnostic display projection.
+
+The eleven inverse socket raw-string helper contracts use the separate
+`scripts/inverse-socket-helper-contracts.mjs` runner and 79 native cases.
+Their scope, primitive capability seams and actual-class source coverage are
+reviewed in [INVERSE_SOCKET_HELPER_CONTRACT_REVIEW.md](INVERSE_SOCKET_HELPER_CONTRACT_REVIEW.md).
+The runner keeps rustdoc artifacts in `target/accepted-inventory`, separate from
+normal native builds. The companion Python control runner compiles isolated
+production faults and restores exact bytes; source fixtures are never substitutes
+for those native receipts.
+
 Native HTTP requests use the existing eager class settlement. Dropping a snapshot
 waiter after Promise.all rejection leaves its started sibling owned by the runtime,
 including response interceptors. Registry native_account_proxy_errors holds each
 orders/positions sibling response until after the first rejection to prove this.
+
+Ticker-capture aliases name retained state handles and implement Deserialize
+in the production dependency graph. Their decoder contracts check map admission
+and every decoded Ticker field/bit/presence through the actual aliases. The
+separate constructed native witness establishes runtime reference behavior.
+`private_classes::production_native_ticker_capture_aliases_retain_cells_and_replace_generations`
+(`--features native`) constructs all three real native venues and dispatches
+book-ticker frames into their Store. It checks dictionary/cell identity, signed
+zero and replacement generations before serialization. The separate
+`scripts/ticker-alias-controls.py` corrupts dictionary reuse and retained-cell
+updates independently, requires the named native assertion to fail, restores exact
+source bytes and requires a pass after each fault. The selected alias inventory
+runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
