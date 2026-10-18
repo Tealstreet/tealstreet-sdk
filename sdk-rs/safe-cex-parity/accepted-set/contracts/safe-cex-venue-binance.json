@@ -717,7 +717,7 @@
           "output": null
         },
         {
-          "input": "﻿TRANSFER",
+          "input": "\ufeffTRANSFER",
           "output": null
         },
         {
@@ -733,7 +733,7 @@
           "output": null
         },
         {
-          "input": "﻿WELCOME_BONUS",
+          "input": "\ufeffWELCOME_BONUS",
           "output": null
         },
         {
@@ -749,7 +749,7 @@
           "output": null
         },
         {
-          "input": "﻿REALIZED_PNL",
+          "input": "\ufeffREALIZED_PNL",
           "output": null
         },
         {
@@ -765,7 +765,7 @@
           "output": null
         },
         {
-          "input": "﻿FUNDING_FEE",
+          "input": "\ufeffFUNDING_FEE",
           "output": null
         },
         {
@@ -781,7 +781,7 @@
           "output": null
         },
         {
-          "input": "﻿COMMISSION",
+          "input": "\ufeffCOMMISSION",
           "output": null
         },
         {
@@ -797,7 +797,7 @@
           "output": null
         },
         {
-          "input": "﻿INSURANCE_CLEAR",
+          "input": "\ufeffINSURANCE_CLEAR",
           "output": null
         },
         {
@@ -813,7 +813,7 @@
           "output": null
         },
         {
-          "input": "﻿REFERRAL_KICKBACK",
+          "input": "\ufeffREFERRAL_KICKBACK",
           "output": null
         },
         {
@@ -829,7 +829,7 @@
           "output": null
         },
         {
-          "input": "﻿COMMISSION_REBATE",
+          "input": "\ufeffCOMMISSION_REBATE",
           "output": null
         },
         {
@@ -845,7 +845,7 @@
           "output": null
         },
         {
-          "input": "﻿API_REBATE",
+          "input": "\ufeffAPI_REBATE",
           "output": null
         },
         {
@@ -861,7 +861,7 @@
           "output": null
         },
         {
-          "input": "﻿CONTEST_REWARD",
+          "input": "\ufeffCONTEST_REWARD",
           "output": null
         },
         {
@@ -877,7 +877,7 @@
           "output": null
         },
         {
-          "input": "﻿CROSS_COLLATERAL_TRANSFER",
+          "input": "\ufeffCROSS_COLLATERAL_TRANSFER",
           "output": null
         },
         {
@@ -893,7 +893,7 @@
           "output": null
         },
         {
-          "input": "﻿OPTIONS_PREMIUM_FEE",
+          "input": "\ufeffOPTIONS_PREMIUM_FEE",
           "output": null
         },
         {
@@ -909,7 +909,7 @@
           "output": null
         },
         {
-          "input": "﻿OPTIONS_SETTLE_PROFIT",
+          "input": "\ufeffOPTIONS_SETTLE_PROFIT",
           "output": null
         },
         {
@@ -925,7 +925,7 @@
           "output": null
         },
         {
-          "input": "﻿INTERNAL_TRANSFER",
+          "input": "\ufeffINTERNAL_TRANSFER",
           "output": null
         },
         {
@@ -941,7 +941,7 @@
           "output": null
         },
         {
-          "input": "﻿AUTO_EXCHANGE",
+          "input": "\ufeffAUTO_EXCHANGE",
           "output": null
         },
         {
@@ -957,7 +957,7 @@
           "output": null
         },
         {
-          "input": "﻿DELIVERED_SETTELMENT",
+          "input": "\ufeffDELIVERED_SETTELMENT",
           "output": null
         },
         {
@@ -973,7 +973,7 @@
           "output": null
         },
         {
-          "input": "﻿COIN_SWAP_DEPOSIT",
+          "input": "\ufeffCOIN_SWAP_DEPOSIT",
           "output": null
         },
         {
@@ -989,7 +989,7 @@
           "output": null
         },
         {
-          "input": "﻿COIN_SWAP_WITHDRAW",
+          "input": "\ufeffCOIN_SWAP_WITHDRAW",
           "output": null
         },
         {
@@ -1005,7 +1005,7 @@
           "output": null
         },
         {
-          "input": "﻿POSITION_LIMIT_INCREASE_FEE",
+          "input": "\ufeffPOSITION_LIMIT_INCREASE_FEE",
           "output": null
         }
       ]
@@ -1086,7 +1086,7 @@
           "output": null
         },
         {
-          "input": "﻿papi",
+          "input": "\ufeffpapi",
           "output": null
         },
         {
@@ -1102,7 +1102,7 @@
           "output": null
         },
         {
-          "input": "﻿fapi",
+          "input": "\ufefffapi",
           "output": null
         }
       ]
@@ -1194,7 +1194,7 @@
           "output": null
         },
         {
-          "input": "﻿applied",
+          "input": "\ufeffapplied",
           "output": null
         },
         {
@@ -1210,7 +1210,7 @@
           "output": null
         },
         {
-          "input": "﻿ignored",
+          "input": "\ufeffignored",
           "output": null
         },
         {
@@ -1226,7 +1226,7 @@
           "output": null
         },
         {
-          "input": "﻿gap",
+          "input": "\ufeffgap",
           "output": null
         }
       ]
