@@ -46,4 +46,15 @@ for(const operation of ['order','position','positions','market']) {
  }
 }
 assert.equal(cases.length,65);assert.equal(patches.length,52);
-process.stdout.write(JSON.stringify({cases,patches}));
+const coercions=[];
+const conversionProfiles=[...profiles,['numericText',' -0 '],['prefixText','12.5x'],['prefixSurrogate','12.5\ud800'],['hexText','0x10'],['arrayNumber',[12.5]],['arrayNull',[null]],['throwingObject',{toString:null}]];
+for(const [profile,value] of conversionProfiles) {
+ const result={profile,value:native(value)};
+ for(const [name,convert] of [['number',Number],['parseFloat',parseFloat],['string',String]]) {
+  try {result[name]={value:native(convert(value))};}
+  catch(error) {result[name]={error:{name:error.name,message:error.message}};}
+ }
+ coercions.push(result);
+}
+assert.equal(coercions.length,20);
+process.stdout.write(JSON.stringify({cases,patches,coercions}));

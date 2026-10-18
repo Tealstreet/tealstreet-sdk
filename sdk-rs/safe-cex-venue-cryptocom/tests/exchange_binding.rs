@@ -1475,7 +1475,8 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         .into_iter()
         .map(|ticker| {
             let mut market = template.clone();
-            market.info = Some(json!({"underlyingSymbol": ticker.id.split('-').next().unwrap()}));
+            market.info =
+                Some(json!({"underlyingSymbol": ticker.id.split('-').next().unwrap()}).into());
             market.id = ticker.id;
             market.symbol = ticker.symbol;
             market

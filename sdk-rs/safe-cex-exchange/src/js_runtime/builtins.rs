@@ -39,6 +39,15 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
         Js::Map(_) => map_member(this, &name),
         Js::Set(_) => set_member(this, &name),
         Js::Promise(p) => promise_member(p.clone(), &name),
+        Js::Function(_) if name == "call" => Some(Js::function("call", |target, args| {
+            if !target.is_callable() {
+                return Err(Thrown::type_error(
+                    "Function.prototype.call requires a callable receiver",
+                ));
+            }
+            let this = arg(&args, 0);
+            target.call(this, args.into_iter().skip(1).collect())
+        })),
         Js::Function(_) if name == "bind" => Some(Js::function("bind", |target, args| {
             if !target.is_callable() {
                 return Err(Thrown::type_error("Bind must be called on a function"));

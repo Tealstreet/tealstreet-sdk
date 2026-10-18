@@ -40,18 +40,12 @@ fn finite_input(v: &Value) -> FiniteNumberInput<'_> {
         FiniteNumberInput::Other
     }
 }
-fn encode_json_numbers(v: &Value) -> Value {
-    match v {
-        Value::Number(n) => encoded(n.as_f64().unwrap()),
-        Value::Array(a) => a.iter().map(encode_json_numbers).collect(),
-        Value::Object(o) => Value::Object(
-            o.iter()
-                .map(|(k, v)| (k.clone(), encode_json_numbers(v)))
-                .collect(),
-        ),
-        _ => v.clone(),
-    }
+#[path = "../../parity/evidence/retained_model_values.rs"]
+pub mod retained_model_values;
+fn encode_json_numbers(value: &(impl serde::Serialize + ?Sized)) -> Value {
+    retained_model_values::observe(value, encoded)
 }
+
 fn encoded_position(p: Position) -> Value {
     let mut value = json!({
         "id":p.id,"symbol":p.symbol,"side":p.side,"entryPrice":encoded(p.entry_price),
@@ -274,7 +268,15 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
     );
     let numeric_order = map_order(Some(&numeric_input), "usdt-futures", || 1.0).unwrap();
     assert!(
-        numeric_order[0].info.as_ref().unwrap()["nested"]["amount"].is_null(),
+        numeric_order[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("nested")
+            .unwrap()
+            .get("amount")
+            .unwrap()
+            .is_null(),
         "CHOSEN JSON input price is already present before mapOrder"
     );
     let alias = &oracle["mapOrderAlias"];
@@ -300,11 +302,17 @@ fn check_mapped_orders(oracle: &Value, field_identity: bool) {
     let mut orders = map_order(Some(&input), "usdt-futures", || 1.0).unwrap();
     input["label"] = json!("after-input");
     assert_eq!(
-        orders[0].info.as_ref().unwrap()["label"],
-        "before",
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("label")
+            .unwrap()
+            .text_equals("before"),
+        true,
         "CHOSEN mapOrder owned info does not observe gateway mutation"
     );
-    orders[0].info.as_mut().unwrap()["label"] = json!("after-output");
+    *orders[0].info.as_mut().unwrap().get_mut("label").unwrap() = json!("after-output").into();
     assert_eq!(
         input["label"], "after-input",
         "CHOSEN mapOrder gateway does not observe owned info mutation"
@@ -484,7 +492,15 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
     let numeric_order =
         map_inverse_order(Some(&numeric_input), "coin-futures", |_| None, || 1.0).unwrap();
     assert!(
-        numeric_order[0].info.as_ref().unwrap()["nested"]["amount"].is_null(),
+        numeric_order[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("nested")
+            .unwrap()
+            .get("amount")
+            .unwrap()
+            .is_null(),
         "CHOSEN JSON input price is already present before inverse mapOrder"
     );
     let extra_alias = &reference["extraAlias"];
@@ -535,8 +551,14 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
     let mut orders = map_inverse_order(Some(&input), "coin-futures", |_| None, || 1.0).unwrap();
     input["label"] = json!("after-input");
     assert_eq!(
-        orders[0].info.as_ref().unwrap()["label"],
-        "before",
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("label")
+            .unwrap()
+            .text_equals("before"),
+        true,
         "CHOSEN inverse mapOrder info snapshot retains old input"
     );
     assert_eq!(
@@ -561,14 +583,20 @@ fn check_inverse_orders(oracle: &Value, field_identity: bool) {
         Some(3.0),
         "CHOSEN inverse mapOrder attached extra mutation leaves sibling unchanged"
     );
-    orders[1].info.as_mut().unwrap()["label"] = json!("after-output");
+    *orders[1].info.as_mut().unwrap().get_mut("label").unwrap() = json!("after-output").into();
     assert_eq!(
         input["label"], "after-input",
         "CHOSEN inverse mapOrder gateway does not share owned leg info"
     );
     assert_eq!(
-        orders[0].info.as_ref().unwrap()["label"],
-        "before",
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("label")
+            .unwrap()
+            .text_equals("before"),
+        true,
         "CHOSEN inverse mapOrder legs do not share info"
     );
 }

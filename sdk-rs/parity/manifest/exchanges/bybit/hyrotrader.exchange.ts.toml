@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/hyrotrader.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/hyro_capabilities.rs", "safe-cex-venue-bybit/src/hyro_private_reads.rs", "safe-cex-venue-bybit/src/hyro_snapshot.rs", "safe-cex-venue-bybit/src/hyro_order_publication.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/hyro.rs", "safe-cex-venue-bybit/src/exchange.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/hyro_configuration.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/hyro_capabilities.rs", "safe-cex-venue-bybit/src/hyro_private_reads.rs", "safe-cex-venue-bybit/src/hyro_snapshot.rs", "safe-cex-venue-bybit/src/hyro_order_publication.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/hyro.rs", "safe-cex-venue-bybit/src/exchange.rs" ]
 
 [[symbol]]
 ts = "HyrotraderExchange"
@@ -293,18 +293,18 @@ note = "Returns a fresh linear-only vector on each call. Renamed Rust target: sa
 [[symbol]]
 ts = "HyrotraderExchange#hyrotraderMode"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/hyro_configuration.rs::hyrotrader_mode"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/hyro_configuration.rs::hyrotrader_mode. Exact optional demo|production shared option: only demo selects demo, otherwise production. The real constructor, signed REST, public/private dials and Store cancellation witness compare maintained source across bundled environment profiles."
 
 [[symbol]]
 ts = "HyrotraderExchange#getConfiguredUrls"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/hyro_configuration.rs::get_configured_urls"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/hyro_configuration.rs::get_configured_urls. Selects simulator for explicit demo; production prefers configured production REST, then configured simulator origins without changing account classification, then the empty production table. Actual binding witness covers both URL families and configured/unconfigured boundaries."
 
 [[symbol]]
 ts = "HyrotraderExchange.getBybitRestBaseUrl"
@@ -365,7 +365,7 @@ note = "Exact true capability method. Renamed Rust target: safe-cex-venue-bybit/
 [[symbol]]
 ts = "HyrotraderExchange.shouldUseLocalRestOrderLifecycleFallback"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/hyro_configuration.rs::should_use_local_rest_order_lifecycle_fallback"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/hyro_configuration.rs::should_use_local_rest_order_lifecycle_fallback. Always true in Hyro, independently of account mode and URL family. Bound override and typed lifecycle consumers retain local retirement after acknowledged REST cancellation; regular live Bybit keeps its existing gate."

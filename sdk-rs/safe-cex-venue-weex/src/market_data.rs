@@ -126,7 +126,7 @@ pub(crate) fn normalize_market_row(
         contract_size: Some(contract_val),
         maker_fee: Some(maker_fee),
         taker_fee: Some(taker_fee),
-        info: Some(value.clone()),
+        info: Some(value.clone().into()),
         pretty_symbol: None,
         is_expiring: None,
         is_inverse: None,
@@ -176,6 +176,6 @@ pub fn normalize_ticker(
         volume: to_number(pick(&["volume", "v"]).as_ref(), None)?,
         quote_volume: to_number(pick(&["quoteVolume", "q"]).as_ref(), None)?,
         timestamp: None,
-        info: Some(Value::Object(info)),
+        info: Some(Value::Object(info).into()),
     })
 }

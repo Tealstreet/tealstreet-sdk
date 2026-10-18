@@ -48,7 +48,7 @@ fn ticker(v: &Value) -> Ticker {
         quote_volume: number(&v["quoteVolume"]),
         mid_price: v.get("midPrice").map(number),
         timestamp: v.get("timestamp").map(number),
-        info: v.get("info").cloned(),
+        info: v.get("info").cloned().map(Into::into),
     }
 }
 #[test]

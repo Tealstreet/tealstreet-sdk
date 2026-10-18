@@ -46,4 +46,19 @@ fn a_bad_contract_value_row_does_not_hide_the_other_markets() {
     );
     assert!(markets[1].contract_size.unwrap().is_nan());
     assert_eq!(markets[0].contract_size, Some(0.001));
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    for (index, expected) in [(0, 0.001_f64), (1, f64::NAN), (2, f64::NAN)] {
+        let info = markets[index].info.as_ref().expect("raw market info");
+        let Input::Float(actual) = info.get("contractValue").expect("computed contract value")
+        else {
+            panic!("source parseFloat result must remain a native number");
+        };
+        if expected.is_nan() {
+            assert!(actual.is_nan());
+        } else {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+        assert_eq!(info.get("lotSize").and_then(Input::as_f64), Some(1.0));
+        assert!(info.get("instId").unwrap().text_equals(ids[index]));
+    }
 }

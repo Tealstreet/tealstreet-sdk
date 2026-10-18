@@ -97,11 +97,26 @@ fn streaming_map_keeps_nested_numbers_retained_info_and_late_display_fields() {
     assert_eq!(balance.upnl, -8.75);
     let info = value.position.info.unwrap();
     assert_eq!(
-        info["large"].as_number().unwrap().as_str(),
+        match info.get("large").unwrap() {
+            safe_cex_types::retained_json::RetainedJsonInput::Lexeme(text) => text.as_str(),
+            other => panic!("expected retained lexeme, got {other:?}"),
+        },
         "9007199254740993"
     );
-    assert_eq!(info["zero"].as_number().unwrap().as_str(), "-0");
-    assert_eq!(info["over"].as_number().unwrap().as_str(), "1e+400");
+    assert_eq!(
+        match info.get("zero").unwrap() {
+            safe_cex_types::retained_json::RetainedJsonInput::Lexeme(text) => text.as_str(),
+            other => panic!("expected retained lexeme, got {other:?}"),
+        },
+        "-0"
+    );
+    assert_eq!(
+        match info.get("over").unwrap() {
+            safe_cex_types::retained_json::RetainedJsonInput::Lexeme(text) => text.as_str(),
+            other => panic!("expected retained lexeme, got {other:?}"),
+        },
+        "1e+400"
+    );
     assert_eq!(value.exchange_name.as_deref(), Some("venue"));
     assert_eq!(value.has_active_chaser, Some(true));
     assert_eq!(value.has_active_twap, Some(false));

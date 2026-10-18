@@ -508,3 +508,13 @@ The constructed clientOrderIdRule retains its source Number(input) conversion an
 uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
 compares26 maintained-source identifiers, including safe-range and canonical-decimal
 boundaries, without replacing the rule or its operation table.
+
+
+The constructed ticker census in `tests/binding_streams.rs::production_ticker_coercion_matches_constructed_typescript`
+uses the maintained TS exchange and DefaultStore via `parity/scripts/ticker-strict-source.cjs`.
+72 packed three-row frames cover every copied ticker/BBO/mark numeric field. Fifty-four malformed rows are visibly refused while their good siblings retain source-equal native values.
+The corpus includes null, strings, NaN-producing inputs, objects, booleans, missing
+fields, raw numeric overflow and signed zero. It compares all eleven native number
+fields before JSON; approved decision-3 refusal preserves the entire bad row.
+`parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
+behavior, requiring a compiled native failure and exact restored pass.

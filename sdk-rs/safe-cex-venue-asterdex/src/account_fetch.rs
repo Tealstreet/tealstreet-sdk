@@ -277,7 +277,7 @@ impl AccountFetch {
                         liquidation_price: 0.0,
                         margin_type: (Some(MarginType::Cross)).into(),
                         position_mode: (Some(mode)).into(),
-                        info: (Some(json!({}))).into(),
+                        info: (Some(json!({}).into())).into(),
                         realized_pnl: (None).into(),
                         margin_size: (None).into(),
                         last_update: (None).into(),

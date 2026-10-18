@@ -16,14 +16,24 @@ use std::{
 fn bits(value: f64) -> Value {
     json!({"number":if value.is_nan(){"nan".into()}else{format!("{:016x}",value.to_bits())}})
 }
-fn info(value: Value) -> Value {
+fn info(value: safe_cex_types::retained_json::RetainedJsonInput) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match value {
-        Value::Number(_) => bits(js_value_as_f64(&value).unwrap()),
-        Value::Array(v) => Value::Array(v.into_iter().map(info).collect()),
-        Value::Object(v) => Value::Object(v.into_iter().map(|(k, v)| (k, info(v))).collect()),
-        other => other,
+        Input::Float(v) => bits(v),
+        Input::Lexeme(v) => bits(v.parse().unwrap()),
+        Input::Array(v) => Value::Array(v.into_iter().map(info).collect()),
+        Input::Object(v) => Value::Object(
+            v.into_iter()
+                .map(|(k, v)| (String::from_utf16(&k).unwrap(), info(v)))
+                .collect(),
+        ),
+        Input::Text(v) => Value::String(String::from_utf16(&v).unwrap()),
+        Input::Bool(v) => Value::Bool(v),
+        Input::Null => Value::Null,
+        Input::Undefined => panic!("source corpus has no native undefined in JSON info"),
     }
 }
+
 fn native(ticker: Ticker) -> Value {
     assert!(ticker.mid_price.is_none(), "ticker_mid_price_absent");
     let mut value = json!({"id":ticker.id,"symbol":ticker.symbol,"bid":bits(ticker.bid),"ask":bits(ticker.ask),

@@ -142,7 +142,7 @@ fn utilities_match_actual_typescript() {
         };
         assert_eq!(
             format_symbol_out(markets.as_deref(), row["symbol"].as_str()),
-            row["result"],
+            row["result"].clone().into(),
             "native symbol output first match: {row}"
         );
     }
@@ -155,17 +155,19 @@ fn utilities_match_actual_typescript() {
             safe_cex_num::numeric_ingress::js_from_str(row["raw"].as_str().unwrap()).unwrap();
         let result = format_symbol_out(Some(&[market]), Some("BTC"));
         if row["type"] == "number" {
-            assert!(result.is_number(), "native symbol output numeric type");
+            assert!(
+                result.as_f64().is_some(),
+                "native symbol output numeric type"
+            );
             assert_eq!(
-                safe_cex_num::numeric_ingress::js_value_as_f64(&result)
-                    .unwrap()
-                    .to_bits(),
+                result.as_f64().unwrap().to_bits(),
                 from_bits(&row["result"]).to_bits(),
                 "native symbol output numeric bits"
             );
         } else {
             assert_eq!(
-                result, row["result"],
+                result,
+                row["result"].clone().into(),
                 "native symbol output numeric fallback"
             );
         }

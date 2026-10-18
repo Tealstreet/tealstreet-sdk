@@ -100,7 +100,7 @@ fn project_instrument(inst: &Value) -> Result<Result<Market, ExchangeError>, Exc
         is_spot: Some(false),
         is_perpetual: Some(is_perpetual),
         is_read_only: None,
-        info: Some(Value::Object(info)),
+        info: Some(Value::Object(info).into()),
         taker_fee: None,
         maker_fee: None,
         option: None,

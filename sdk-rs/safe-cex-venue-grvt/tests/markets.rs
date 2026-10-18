@@ -319,8 +319,14 @@ fn refresh_markets_declared_owned_old_value_boundary() {
         "REFRESH owned native removed count"
     );
     assert_eq!(
-        changes.removed[0].info.as_ref().unwrap()["ih"],
-        "old-a",
+        changes.removed[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("ih")
+            .unwrap()
+            .text_equals("old-a"),
+        true,
         "REFRESH declared owned old metadata"
     );
     assert_eq!(
@@ -432,7 +438,7 @@ fn refresh_markets_native_store_and_effect_order() {
                 "REFRESH native stored id"
             );
             assert_eq!(
-                market.info.as_ref().unwrap()["ih"],
+                market.info.as_ref().unwrap().get("ih").unwrap(),
                 expected["info"]["ih"],
                 "REFRESH native replaced signing hash"
             );
@@ -465,7 +471,7 @@ fn refresh_markets_native_store_and_effect_order() {
                         "REFRESH native added id"
                     );
                     assert_eq!(
-                        market.info.as_ref().unwrap()["ih"],
+                        market.info.as_ref().unwrap().get("ih").unwrap(),
                         expected["info"]["ih"],
                         "REFRESH native added hash"
                     );
@@ -481,7 +487,7 @@ fn refresh_markets_native_store_and_effect_order() {
                         "REFRESH native removed id"
                     );
                     assert_eq!(
-                        market.info.as_ref().unwrap()["ih"],
+                        market.info.as_ref().unwrap().get("ih").unwrap(),
                         expected["info"]["ih"],
                         "REFRESH native removed hash"
                     );

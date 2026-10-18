@@ -17,7 +17,7 @@ fn order() -> Order {
 #[test]
 fn client_lookup_uses_every_mapper_field_and_js_numeric_coercion() {
     let mut order = order();
-    assert!(!carries_client_id(&order, "123"));
+    assert!(!carries_client_id(&order, "123").unwrap());
     for field in [
         "clOrdId",
         "clientOrderId",
@@ -29,37 +29,34 @@ fn client_lookup_uses_every_mapper_field_and_js_numeric_coercion() {
         "client_order_id",
         "clientId",
     ] {
-        order.info = (Some(json!({field:123.0}))).into();
-        assert!(carries_client_id(&order, "123"), "mapper field {field}");
-        assert!(!carries_client_id(&order, "124"));
+        order.info = (Some(json!({field:123.0}).into())).into();
+        assert!(
+            carries_client_id(&order, "123").unwrap(),
+            "mapper field {field}"
+        );
+        assert!(!carries_client_id(&order, "124").unwrap());
     }
     order.info = (None).into();
     order.parent_id = (Some("caller".into())).into();
-    assert!(carries_client_id(&order, "caller"));
+    assert!(carries_client_id(&order, "caller").unwrap());
     order.id = "direct-caller".into();
-    assert!(carries_client_id(&order, "direct-caller"));
+    assert!(carries_client_id(&order, "direct-caller").unwrap());
 }
 
 #[test]
 fn client_lookup_matches_the_top_level_client_order_id() {
     let mut order = order();
     order.client_order_id = (Some("0x0123456789abcdef0123456789abcdef".into())).into();
-    assert!(carries_client_id(
-        &order,
-        "0x0123456789abcdef0123456789abcdef"
-    ));
-    assert!(!carries_client_id(
-        &order,
-        "0x0123456789abcdef0123456789abcdee"
-    ));
+    assert!(carries_client_id(&order, "0x0123456789abcdef0123456789abcdef").unwrap());
+    assert!(!carries_client_id(&order, "0x0123456789abcdef0123456789abcdee").unwrap());
     order.client_order_id = (Some("0".into())).into();
-    assert!(!carries_client_id(&order, "0"));
+    assert!(!carries_client_id(&order, "0").unwrap());
     order.client_order_id = (None).into();
     let mut wire = serde_json::to_value(&order).unwrap();
     wire["clientOrderId"] = json!("0xfeed");
     let decoded: Order = serde_json::from_value(wire).unwrap();
     assert_eq!(decoded.client_order_id.as_deref(), Some("0xfeed"));
-    assert!(carries_client_id(&decoded, "0xfeed"));
+    assert!(carries_client_id(&decoded, "0xfeed").unwrap());
     assert_eq!(
         serde_json::to_value(&decoded).unwrap()["clientOrderId"],
         "0xfeed"
@@ -89,12 +86,12 @@ fn client_lookup_rejects_sentinel_ids_even_if_venue_matches() {
         let mut order = order();
         order.id = sentinel.into();
         order.parent_id = (Some(sentinel.into())).into();
-        order.info = (Some(json!({"clientOrderId":sentinel}))).into();
-        assert!(!carries_client_id(&order, sentinel));
+        order.info = (Some(json!({"clientOrderId":sentinel}).into())).into();
+        assert!(!carries_client_id(&order, sentinel).unwrap());
     }
     let mut order = order();
-    order.info = (Some(json!({"clientOrderId":null}))).into();
-    assert!(!carries_client_id(&order, "null"));
+    order.info = (Some(json!({"clientOrderId":null}).into())).into();
+    assert!(!carries_client_id(&order, "null").unwrap());
 }
 
 #[test]

@@ -1318,16 +1318,40 @@ fn exchange_helpers_match_typescript() {
                 input.symbol = "SOURCE_AFTER".to_owned();
                 assert_eq!(output.symbol, "BTC", "{kind} mapped scalar snapshot");
                 assert_eq!(
-                    output.info.as_ref().unwrap()["symbol"],
+                    String::from_utf16(
+                        output
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("symbol")
+                            .unwrap()
+                            .as_text()
+                            .unwrap()
+                    )
+                    .unwrap(),
                     "BTC",
                     "{kind} owned info snapshot"
                 );
-                output.info.as_mut().unwrap()["symbol"] = json!("INFO_AFTER");
+                *output.info.as_mut().unwrap().get_mut("symbol").unwrap() =
+                    json!("INFO_AFTER").into();
                 assert_eq!(
                     input.symbol, "SOURCE_AFTER",
                     "{kind} typed info mutation cannot reach source"
                 );
-                assert_eq!(output.info.as_ref().unwrap()["symbol"], "INFO_AFTER");
+                assert_eq!(
+                    String::from_utf16(
+                        output
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("symbol")
+                            .unwrap()
+                            .as_text()
+                            .unwrap()
+                    )
+                    .unwrap(),
+                    "INFO_AFTER"
+                );
             }
             "ticker" => {
                 let mut input: safe_cex_venue_asterdex::types::AsterDEXTickerResponse =
@@ -1336,16 +1360,40 @@ fn exchange_helpers_match_typescript() {
                 input.symbol = "SOURCE_AFTER".to_owned();
                 assert_eq!(output.symbol, "BTC", "{kind} mapped scalar snapshot");
                 assert_eq!(
-                    output.info.as_ref().unwrap()["symbol"],
+                    String::from_utf16(
+                        output
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("symbol")
+                            .unwrap()
+                            .as_text()
+                            .unwrap()
+                    )
+                    .unwrap(),
                     "BTC",
                     "{kind} owned info snapshot"
                 );
-                output.info.as_mut().unwrap()["symbol"] = json!("INFO_AFTER");
+                *output.info.as_mut().unwrap().get_mut("symbol").unwrap() =
+                    json!("INFO_AFTER").into();
                 assert_eq!(
                     input.symbol, "SOURCE_AFTER",
                     "{kind} typed info mutation cannot reach source"
                 );
-                assert_eq!(output.info.as_ref().unwrap()["symbol"], "INFO_AFTER");
+                assert_eq!(
+                    String::from_utf16(
+                        output
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("symbol")
+                            .unwrap()
+                            .as_text()
+                            .unwrap()
+                    )
+                    .unwrap(),
+                    "INFO_AFTER"
+                );
             }
             "position" => {
                 let mut input = c["input"].clone();
@@ -1353,16 +1401,40 @@ fn exchange_helpers_match_typescript() {
                 input["symbol"] = json!("SOURCE_AFTER");
                 assert_eq!(output.symbol, "BTC", "{kind} mapped scalar snapshot");
                 assert_eq!(
-                    output.info.as_ref().unwrap()["symbol"],
+                    String::from_utf16(
+                        output
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("symbol")
+                            .unwrap()
+                            .as_text()
+                            .unwrap()
+                    )
+                    .unwrap(),
                     "BTC",
                     "{kind} owned info snapshot"
                 );
-                output.info.as_mut().unwrap()["symbol"] = json!("INFO_AFTER");
+                *output.info.as_mut().unwrap().get_mut("symbol").unwrap() =
+                    json!("INFO_AFTER").into();
                 assert_eq!(
                     input["symbol"], "SOURCE_AFTER",
                     "{kind} typed info mutation cannot reach source"
                 );
-                assert_eq!(output.info.as_ref().unwrap()["symbol"], "INFO_AFTER");
+                assert_eq!(
+                    String::from_utf16(
+                        output
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("symbol")
+                            .unwrap()
+                            .as_text()
+                            .unwrap()
+                    )
+                    .unwrap(),
+                    "INFO_AFTER"
+                );
             }
             _ => panic!("unknown alias kind {kind}"),
         }
@@ -1431,18 +1503,15 @@ fn exchange_helpers_match_typescript() {
             f64::NEG_INFINITY
         };
         let result = transform_market(&input, &std::collections::BTreeMap::new());
-        if input.price_precision.is_nan() {
-            assert!(
-                result.unwrap_err().1.contains("refuses NaN"),
-                "native market metadata refuses NaN visibly"
-            );
-            continue;
-        }
         let market = result.unwrap();
-        let retained = safe_cex_num::numeric_ingress::js_value_as_f64(
-            &market.info.as_ref().unwrap()["pricePrecision"],
-        )
-        .unwrap();
+        let retained = market
+            .info
+            .as_ref()
+            .unwrap()
+            .get("pricePrecision")
+            .unwrap()
+            .as_f64()
+            .unwrap();
         assert_eq!(
             retained.to_bits(),
             input.price_precision.to_bits(),
@@ -1511,9 +1580,7 @@ fn exchange_helpers_match_typescript() {
         }
         let info = result.unwrap();
         assert_eq!(
-            safe_cex_num::numeric_ingress::js_value_as_f64(&info[field])
-                .unwrap()
-                .to_bits(),
+            info.get(field).unwrap().as_f64().unwrap().to_bits(),
             value.to_bits(),
             "native {} metadata bits {field}",
             c["kind"]
@@ -1717,7 +1784,7 @@ fn exchange_helpers_match_typescript() {
         assert_eq!(
             json!(is_algo_order(
                 serde_json::from_value(c["type"].clone()).unwrap(),
-                c.get("info")
+                c.get("info").cloned().map(Into::into).as_ref()
             )),
             c["output"],
             "isAlgoOrder {c}"
@@ -2274,17 +2341,15 @@ fn order_mapper_matches_typescript() {
             _ => unreachable!(),
         }
         let result = transform_order(&input);
-        if value.is_nan() {
-            assert!(
-                result.unwrap_err().1.contains("refuses NaN"),
-                "native order metadata NaN refusal"
-            );
-            continue;
-        }
         let output = result.unwrap();
-        let retained =
-            safe_cex_num::numeric_ingress::js_value_as_f64(&output.info.as_ref().unwrap()[field])
-                .unwrap();
+        let retained = output
+            .info
+            .as_ref()
+            .unwrap()
+            .get(field)
+            .unwrap()
+            .as_f64()
+            .unwrap();
         assert_eq!(
             retained.to_bits(),
             value.to_bits(),
@@ -2355,9 +2420,14 @@ fn order_mapper_matches_typescript() {
         let output = transform_order(&input).unwrap();
         let expected = case["output"].clone();
         assert_eq!(expected["info"][field], case["raw"]);
-        let retained =
-            safe_cex_num::numeric_ingress::js_value_as_f64(&output.info.as_ref().unwrap()[field])
-                .unwrap();
+        let retained = output
+            .info
+            .as_ref()
+            .unwrap()
+            .get(field)
+            .unwrap()
+            .as_f64()
+            .unwrap();
         assert_eq!(
             retained.to_bits(),
             value.to_bits(),
@@ -2405,8 +2475,21 @@ fn order_mapper_matches_typescript() {
     let mut output = transform_order(&input).unwrap();
     input.symbol = "SOURCE_AFTER".to_owned();
     assert_eq!(output.symbol, "BTC");
-    assert_eq!(output.info.as_ref().unwrap()["symbol"], "BTC");
-    output.info.as_mut().unwrap()["symbol"] = json!("INFO_AFTER");
+    assert_eq!(
+        String::from_utf16(
+            output
+                .info
+                .as_ref()
+                .unwrap()
+                .get("symbol")
+                .unwrap()
+                .as_text()
+                .unwrap()
+        )
+        .unwrap(),
+        "BTC"
+    );
+    *output.info.as_mut().unwrap().get_mut("symbol").unwrap() = json!("INFO_AFTER").into();
     assert_eq!(input.symbol, "SOURCE_AFTER");
 }
 
@@ -2598,7 +2681,7 @@ fn mapper_metadata_retains_native_numbers() {
                 $map
             }};
         }
-        let result: Result<Value, String> = match kind {
+        let result: Result<safe_cex_types::retained_json::RetainedJsonInput, String> = match kind {
             "ticker" => mapped!(AsterDEXTickerResponse, input,
                 transform_ticker(&input,None).map(|o|o.info.unwrap()).map_err(|e|e.to_string()),
                 "/openTime"=>open_time, "/closeTime"=>close_time, "/firstId"=>first_id, "/lastId"=>last_id, "/count"=>count),
@@ -2633,21 +2716,31 @@ fn mapper_metadata_retains_native_numbers() {
             }
             _ => panic!("unknown mapper"),
         };
-        if value.is_nan() {
+        if value.is_nan() && kind == "position" {
             assert!(
                 result.unwrap_err().contains("refuses NaN"),
-                "visible native metadata NaN refusal {kind}{pointer}"
+                "explicit Value input refusal {kind}{pointer}"
             );
         } else {
             let info = result.unwrap();
-            let retained =
-                safe_cex_num::numeric_ingress::js_value_as_f64(info.pointer(pointer).unwrap())
-                    .unwrap();
-            assert_eq!(
-                retained.to_bits(),
-                bits,
-                "native metadata bits {kind}{pointer} iteration {iteration}"
-            );
+            let mut retained = &info;
+            for key in pointer.trim_start_matches('/').split('/') {
+                retained = if let Some(array) = retained.as_array() {
+                    &array[key.parse::<usize>().unwrap()]
+                } else {
+                    retained.get(key).unwrap()
+                };
+            }
+            let actual = retained.as_f64().unwrap();
+            if value.is_nan() {
+                assert!(actual.is_nan());
+            } else {
+                assert_eq!(
+                    actual.to_bits(),
+                    bits,
+                    "native metadata bits {kind}{pointer} iteration {iteration}"
+                );
+            }
         }
     }
     assert_eq!(

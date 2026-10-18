@@ -1,3 +1,5 @@
+#[path = "../../parity/evidence/retained_model_values.rs"]
+pub mod retained_model_values;
 use safe_cex_num::{JsJsonValue, numeric_ingress::js_from_str};
 use safe_cex_types::{Order, OrderSide, OrderType, Position, PositionSide};
 use safe_cex_venue_bitunix::{order_state as state, tpsl_helpers::TpslLeg};
@@ -81,12 +83,13 @@ fn actual_typescript_order_state() {
             "id" => {
                 counts[1] += 1;
                 let positions = positions(&f);
-                let cache: HashMap<String, Value> = serde_json::from_value(
-                    f.get("cache")
-                        .cloned()
-                        .unwrap_or(json!({"BTCUSDT:short":"CACHE-ID"})),
-                )
-                .unwrap();
+                let cache: HashMap<String, safe_cex_types::retained_json::RetainedJsonInput> =
+                    serde_json::from_value(
+                        f.get("cache")
+                            .cloned()
+                            .unwrap_or(json!({"BTCUSDT:short":"CACHE-ID"})),
+                    )
+                    .unwrap();
                 let result =
                     state::get_position_id("BTCUSDT", PositionSide::Short, &positions, &cache);
                 if let Some(v) = result {
@@ -97,7 +100,7 @@ fn actual_typescript_order_state() {
                         .and_then(|p| p.info.as_ref())
                         .and_then(|i| i.get("positionId"));
                     let expected = raw
-                        .filter(|v| safe_cex_num::js_truthy(Some(v)))
+                        .filter(|v| v.is_truthy())
                         .or_else(|| cache.get("BTCUSDT:short"))
                         .unwrap();
                     assert!(
@@ -107,7 +110,7 @@ fn actual_typescript_order_state() {
                 }
                 assert_eq!(row["identity"], true, "ORDER STATE source id identity");
                 result.map_or(json!({"undefined":true}), |v| {
-                    obs(JsJsonValue::from(v.clone()))
+                    obs(retained_model_values::prepared(v))
                 })
             }
             "hydrate" => {

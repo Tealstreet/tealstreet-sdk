@@ -3,6 +3,7 @@ use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_json};
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_num::{JsCoercionError, js_number, js_string, js_truthy, parse_float};
 use safe_cex_transport::{RestAdapter, RestRequest};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     Balance, BothPositionSide, ExchangeAccount, Execution, ExecutionPositionSide, OrderBook,
     OrderBookOrders, OrderSide, OrderType, PositionSide,
@@ -142,20 +143,25 @@ pub async fn fetch_open_interest_map(
 }
 
 // ts: AsterDEXExchange.isAlgoOrder
-pub fn is_algo_order(order_type: OrderType, info: Option<&Value>) -> bool {
+pub fn is_algo_order(order_type: OrderType, info: Option<&Input>) -> bool {
     matches!(
         order_type,
         OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
     ) || is_raw_algo_order(info)
 }
 
-fn is_raw_algo_order(info: Option<&Value>) -> bool {
-    matches!(
-        info.and_then(|v| v.get("type")).and_then(Value::as_str),
-        Some(
-            "STOP" | "STOP_MARKET" | "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" | "TRAILING_STOP_MARKET"
-        )
-    )
+fn is_raw_algo_order(info: Option<&Input>) -> bool {
+    info.and_then(|v| v.get("type")).is_some_and(|v| {
+        [
+            "STOP",
+            "STOP_MARKET",
+            "TAKE_PROFIT",
+            "TAKE_PROFIT_MARKET",
+            "TRAILING_STOP_MARKET",
+        ]
+        .iter()
+        .any(|text| v.text_equals(text))
+    })
 }
 
 // ts: AsterDEXExchange.reverseMapTimeInForce
@@ -369,22 +375,8 @@ pub fn build_change_margin_type_request(
 
 fn retained_info<T: serde::Serialize>(
     record: &T,
-    fields: impl IntoIterator<Item = (String, Option<f64>)>,
-) -> Result<Value, serde_json::Error> {
-    let mut info = serde_json::to_value(record)?;
-    for (path, value) in fields {
-        if let Some(value) = value {
-            let retained =
-                safe_cex_types::retained_json::RetainedJsonInput::Float(value).into_value()?;
-            let slot = info.pointer_mut(&path).ok_or_else(|| {
-                <serde_json::Error as serde::ser::Error>::custom(format!(
-                    "Missing native metadata field {path}"
-                ))
-            })?;
-            *slot = retained;
-        }
-    }
-    Ok(info)
+) -> Result<safe_cex_types::retained_json::RetainedJsonInput, serde_json::Error> {
+    safe_cex_num::numeric_ingress::js_capture_output(record)
 }
 
 // ts: AsterDEXExchange.transformTicker
@@ -412,16 +404,7 @@ pub fn transform_ticker(
             .unwrap_or(0.0),
         volume: parse_float(&ticker.volume),
         quote_volume: parse_float(&ticker.quote_volume),
-        info: Some(retained_info(
-            ticker,
-            [
-                ("/openTime".into(), Some(ticker.open_time)),
-                ("/closeTime".into(), Some(ticker.close_time)),
-                ("/firstId".into(), Some(ticker.first_id)),
-                ("/lastId".into(), Some(ticker.last_id)),
-                ("/count".into(), Some(ticker.count)),
-            ],
-        )?),
+        info: Some(retained_info(ticker)?),
     })
 }
 
@@ -496,7 +479,7 @@ pub fn transform_position(
         .into(),
         liquidation_price: number("liquidationPrice", true)?,
         position_mode: Some(mode).into(),
-        info: Some(pos.clone()).into(),
+        info: Some(pos.clone().into()).into(),
         margin_size: None.into(),
         extra: None.into(),
         last_update: None.into(),
@@ -511,7 +494,7 @@ pub fn get_max_algo_orders_limit(
     let Some(filters) = market
         .and_then(|m| m.info.as_ref())
         .and_then(|v| v.get("filters"))
-        .and_then(Value::as_array)
+        .and_then(Input::as_array)
     else {
         return Ok(None);
     };
@@ -523,8 +506,11 @@ pub fn get_max_algo_orders_limit(
                 message: "Cannot read properties of null (reading 'filterType')",
             });
         }
-        if filter.get("filterType").and_then(Value::as_str) == Some("MAX_NUM_ALGO_ORDERS") {
-            let value = js_number(filter.get("limit"))?;
+        if filter
+            .get("filterType")
+            .is_some_and(|v| v.text_equals("MAX_NUM_ALGO_ORDERS"))
+        {
+            let value = safe_cex_num::js_retained_number(filter.get("limit"))?;
             return Ok(value.is_finite().then_some(value));
         }
     }
@@ -579,8 +565,8 @@ pub fn assert_algo_order_capacity(
 // ts: AsterDEXExchange.getTickSize
 pub fn get_tick_size(market: &safe_cex_types::Market) -> Result<f64, JsCoercionError> {
     let filters = market.info.as_ref().and_then(|v| v.get("filters"));
-    if safe_cex_num::js_truthy(filters) {
-        let Some(filters) = filters.and_then(Value::as_array) else {
+    if filters.is_some_and(Input::is_truthy) {
+        let Some(filters) = filters.and_then(Input::as_array) else {
             return Err(JsCoercionError {
                 name: "TypeError",
                 message: "market.info.filters.find is not a function",
@@ -593,10 +579,13 @@ pub fn get_tick_size(market: &safe_cex_types::Market) -> Result<f64, JsCoercionE
                     message: "Cannot read properties of null (reading 'filterType')",
                 });
             }
-            if filter.get("filterType").and_then(Value::as_str) == Some("PRICE_FILTER") {
+            if filter
+                .get("filterType")
+                .is_some_and(|v| v.text_equals("PRICE_FILTER"))
+            {
                 let tick = filter.get("tickSize");
-                if safe_cex_num::js_truthy(tick) {
-                    return Ok(safe_cex_num::parse_float(&js_string(tick)?));
+                if tick.is_some_and(Input::is_truthy) {
+                    return Ok(safe_cex_num::js_retained_parse_float(tick)?);
                 }
                 break;
             }
@@ -957,32 +946,7 @@ pub fn transform_market(
             },
             price: None,
         },
-        info: Some(
-            retained_info(
-                market,
-                [
-                    ("/deliveryDate".into(), market.delivery_date),
-                    ("/onboardDate".into(), market.onboard_date),
-                    ("/pricePrecision".into(), Some(market.price_precision)),
-                    ("/quantityPrecision".into(), Some(market.quantity_precision)),
-                    (
-                        "/baseAssetPrecision".into(),
-                        Some(market.base_asset_precision),
-                    ),
-                    ("/quotePrecision".into(), Some(market.quote_precision)),
-                    ("/settlePlan".into(), market.settle_plan),
-                ]
-                .into_iter()
-                .chain(
-                    market
-                        .filters
-                        .iter()
-                        .enumerate()
-                        .map(|(i, filter)| (format!("/filters/{i}/limit"), filter.limit)),
-                ),
-            )
-            .map_err(|e| ("Error", e.to_string()))?,
-        ),
+        info: Some(retained_info(market).map_err(|e| ("Error", e.to_string()))?),
         is_expiring: None,
         is_inverse: None,
         is_spot: None,
@@ -1059,19 +1023,7 @@ pub fn transform_order(
         status: status.into(),
         reduce_only: (order.close_position == Some(true) || order.reduce_only == Some(true)).into(),
         last_update: order.time,
-        info: (Some(
-            retained_info(
-                order,
-                [
-                    ("/orderId".into(), Some(order.order_id)),
-                    ("/time".into(), Some(order.time)),
-                    ("/updateTime".into(), Some(order.update_time)),
-                    ("/workingTime".into(), Some(order.working_time)),
-                ],
-            )
-            .map_err(|error| ("Error", error.to_string()))?,
-        ))
-        .into(),
+        info: (Some(retained_info(order).map_err(|error| ("Error", error.to_string()))?)).into(),
         close: (None).into(),
         time_in_force: (None).into(),
         trigger_type: (None).into(),

@@ -446,6 +446,13 @@ impl RetainedJsonInput {
         }
     }
 
+    pub fn as_object_mut(&mut self) -> Option<&mut Vec<(Vec<u16>, Self)>> {
+        match self {
+            Self::Object(values) => Some(values),
+            _ => None,
+        }
+    }
+
     pub fn as_array(&self) -> Option<&[Self]> {
         match self {
             Self::Array(values) => Some(values),

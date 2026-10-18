@@ -8,6 +8,75 @@ use safe_cex_exchange::{
 use serde_json::json;
 use support::drive;
 
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let corpus = ticker_coercion::source("orderly");
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 120);
+    ticker_coercion::assert_case_counts(cases, 120, 54);
+    for name in private_topic_names() {
+        let (venue, rt, store, wire) = support::fixture_for(
+            name.clone(),
+            json!({
+                "key":"fixture-key", "secret":"11111111111111111111111111111111", "applicationId":"fixture-account"
+            }),
+        );
+        script(&wire);
+        drive(&rt, venue.start()).unwrap();
+        for _ in 0..16 {
+            rt.pump();
+        }
+        let socket = rt
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("private"))
+            .unwrap()
+            .1
+            .clone();
+        for case in cases {
+            Store::update(
+                store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(ticker_coercion::seed("orderly")),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            rt.console.borrow_mut().clear();
+            rt.errors.borrow_mut().clear();
+            for frame in case["frames"].as_array().unwrap() {
+                socket.events.borrow_mut().push_back(
+                    safe_cex_exchange::websocket::WsEvent::Message(
+                        safe_cex_transport::socket::SocketFrame::Text(
+                            frame.as_str().unwrap().into(),
+                        ),
+                    ),
+                );
+                for _ in 0..8 {
+                    rt.pump();
+                }
+            }
+            ticker_coercion::assert_native(&store.tickers(), case);
+            let reports = rt
+                .errors
+                .borrow()
+                .iter()
+                .chain(rt.console.borrow().iter())
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n");
+            ticker_coercion::assert_refusals(&reports, case);
+        }
+        venue.dispose().unwrap();
+    }
+}
+
 #[test]
 fn public_books_and_candles_reach_each_family_binding() {
     use safe_cex_exchange::websocket::WsEvent;

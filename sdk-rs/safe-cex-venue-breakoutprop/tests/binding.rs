@@ -2,6 +2,7 @@
 // shared JavaScript functions/promises, with HTTP as the sole scripted leaf.
 #[allow(dead_code)]
 mod clock {
+    pub use virtual_time::WakeSignal;
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../safe-cex-exchange/tests/support/runtime.rs"
@@ -162,14 +163,18 @@ struct Fixture {
 impl Fixture {
     fn run<T>(&self, future: impl Future<Output = T>) -> T {
         let mut future = Box::pin(future);
+        let signal = Arc::new(clock::WakeSignal::default());
+        let waker = signal.waker();
         for _ in 0..512 {
-            if let Poll::Ready(value) = future
-                .as_mut()
-                .poll(&mut Context::from_waker(Waker::noop()))
-            {
+            signal.take();
+            if let Poll::Ready(value) = future.as_mut().poll(&mut Context::from_waker(&waker)) {
                 return value;
             }
-            self.runtime.advance(self.runtime.now.get() + 25);
+            // Promise reactions are ready work, not elapsed timer intervals.
+            self.runtime.advance(self.runtime.now.get());
+            if !signal.take() {
+                self.runtime.advance(self.runtime.now.get() + 25);
+            }
         }
         panic!("production binding exceeded 512 deterministic polls")
     }
@@ -465,14 +470,18 @@ fn http_failure_preserves_axios_code_and_config() {
 
 #[test]
 fn poll_loop_uses_source_fallback_and_disables_infinity() {
-    for delay in [
+    let source = scheduling_source();
+    for (index, delay) in [
         None,
         Some(0.0),
         Some(-1.0),
         Some(f64::NAN),
         Some(125.0),
         Some(f64::INFINITY),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let f = fixture();
         let calls = Rc::new(Cell::new(0));
         let observed = calls.clone();
@@ -486,7 +495,10 @@ fn poll_loop_uses_source_fallback_and_disables_infinity() {
                 delay,
             )
             .unwrap();
+        let source = &source["loops"][index];
         if delay == Some(f64::INFINITY) {
+            assert_eq!(source, &json!({"disabled":true,"calls":0}));
+            assert_eq!(calls.get(), 0);
             assert_eq!(
                 f.runtime.tasks.borrow().len(),
                 before,
@@ -494,13 +506,16 @@ fn poll_loop_uses_source_fallback_and_disables_infinity() {
             );
             continue;
         }
-        let deadline = if delay == Some(125.0) { 125 } else { 5000 };
+        let deadline = source["sleep_ms"].as_u64().unwrap();
+        assert_eq!(source["queued_calls"], 0);
+        assert_eq!(source["callback_ms"], 0);
         f.runtime.advance(0);
         assert_eq!(calls.get(), 0, "poll loop must not run immediately");
         f.runtime.advance(deadline - 1);
         assert_eq!(calls.get(), 0, "source interval must elapse");
         f.runtime.advance(deadline);
-        assert_eq!(calls.get(), 0, "source enqueues callback after sleep");
+        // advance drains all ready turns, including the source's zero timer.
+        assert_eq!(calls.get(), source["drained_calls"].as_u64().unwrap());
         f.runtime.advance(deadline);
         assert_eq!(calls.get(), 1, "deferred callback runs exactly once");
         f.exchange.dispose().unwrap();
@@ -552,7 +567,7 @@ fn refusal_fixture(input: &Value) -> Fixture {
                     free: 3.5,
                     total: 4.75,
                     upnl: -0.0,
-                    info: Some(json!({"refusal":"retained-info"})),
+                    info: Some(json!({"refusal":"retained-info"}).into()),
                     currencies: None,
                     coins: None,
                 }),
@@ -684,7 +699,34 @@ pub fn accepted_refusal_fetch_public_trades(input: &Value) -> Value {
         .unwrap_err()
     })
 }
-fn expected_inherited_refusal() -> Value {
+#[cfg(test)]
+fn scheduling_source() -> &'static Value {
+    static SOURCE: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    SOURCE.get_or_init(|| {
+        let result = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/binding_scheduling_source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let source: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(source["defaults"].as_object().unwrap().len(), 5);
+        assert_eq!(source["loops"].as_array().unwrap().len(), 6);
+        source
+    })
+}
+#[cfg(test)]
+fn expected_inherited_refusal(method: &str) -> Value {
+    assert_eq!(
+        scheduling_source()["defaults"][method],
+        json!({"error":"Not implemented","error_name":"Error","timers":0})
+    );
     json!({"error":"Not implemented","error_name":"Error","metadata_default":true,"http":0,"state_unchanged":true,"notifications":0,"errors_emitted":0,"now_unchanged":true,"tasks_unchanged":true,"reports_unchanged":true,"login_handle_unchanged":true,"limited_client_unchanged":true,"unlimited_client_unchanged":true,"socket_handle_unchanged":true})
 }
 fn inherited_refusal_cases() -> [Value; 2] {
@@ -698,7 +740,7 @@ fn inherited_max_leverage_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_fetch_symbol_max_leverage(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("fetchSymbolMaxLeverage")
         );
     }
 }
@@ -707,7 +749,7 @@ fn inherited_set_leverage_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_set_leverage(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("setLeverage")
         );
     }
 }
@@ -716,7 +758,7 @@ fn inherited_position_mode_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_change_position_mode(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("changePositionMode")
         );
     }
 }
@@ -725,7 +767,7 @@ fn inherited_margin_type_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_change_margin_type(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("changeMarginType")
         );
     }
 }
@@ -734,7 +776,7 @@ fn inherited_public_trades_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_fetch_public_trades(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("fetchPublicTrades")
         );
     }
 }
@@ -1221,7 +1263,7 @@ fn ticker_reads_ignore_missing_unused_declaration_fields() {
         (rows[0].bid, rows[0].ask, rows[0].last),
         (91.25, 94.5, 91.25)
     );
-    assert_eq!(rows[0].info, Some(row));
+    assert_eq!(rows[0].info, Some(row.into()));
 }
 
 #[test]
@@ -1236,7 +1278,7 @@ fn ticker_reads_ignore_malformed_unused_declaration_fields() {
         (rows[0].bid, rows[0].ask, rows[0].mark),
         (81.25, 84.5, 81.25)
     );
-    assert_eq!(rows[0].info, Some(row));
+    assert_eq!(rows[0].info, Some(row.into()));
 }
 
 fn malformed_ticker_fallback(prefix: Value) {
@@ -1366,7 +1408,7 @@ fn portfolio_orders_ignore_unused_declaration_fields_and_unread_collections() {
     assert_eq!(orders[0].price.value(), Some(&101.25));
     assert_eq!(
         orders[0].info.value(),
-        Some(&data["portfolios"][0]["orders"][0])
+        Some(&data["portfolios"][0]["orders"][0].clone().into())
     );
 }
 #[test]
@@ -1385,7 +1427,7 @@ fn portfolio_positions_ignore_unused_declaration_fields_and_unread_collections()
     assert_eq!(positions[0].margin_size.value(), Some(&10.0));
     assert_eq!(
         positions[0].info.value(),
-        Some(&data["portfolios"][0]["positions"][0])
+        Some(&data["portfolios"][0]["positions"][0].clone().into())
     );
 }
 #[test]
@@ -1402,7 +1444,7 @@ fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
     assert_eq!(balance.upnl, -2.0);
     assert_eq!(balance.used, 10.0);
     assert_eq!(balance.free, 38.25);
-    assert_eq!(balance.info, Some(data));
+    assert_eq!(balance.info, Some(data.into()));
     f.exchange.dispose().unwrap();
 }
 
@@ -1417,7 +1459,7 @@ fn portfolio_array_like_root_retains_order_and_position_info() {
     assert_eq!(orders.len(), 1);
     assert_eq!(
         orders[0].info.value(),
-        Some(&data["portfolios"]["0"]["orders"][0])
+        Some(&data["portfolios"]["0"]["orders"][0].clone().into())
     );
     queue_portfolio(&f, data.clone());
     let positions = f
@@ -1426,7 +1468,7 @@ fn portfolio_array_like_root_retains_order_and_position_info() {
     assert_eq!(positions.len(), 1);
     assert_eq!(
         positions[0].info.value(),
-        Some(&data["portfolios"]["0"]["positions"][0])
+        Some(&data["portfolios"]["0"]["positions"][0].clone().into())
     );
 }
 

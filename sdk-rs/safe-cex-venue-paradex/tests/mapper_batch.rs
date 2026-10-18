@@ -261,6 +261,50 @@ fn assert_json(native: &Value, source: &Value, label: &str) {
         }
     }
 }
+fn assert_retained(
+    native: &safe_cex_types::retained_json::RetainedJsonInput,
+    source: &Value,
+    label: &str,
+) {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    match native {
+        Input::Undefined => assert_eq!(source["kind"], "undefined", "{label}"),
+        Input::Null => assert_eq!(source["kind"], "null", "{label}"),
+        Input::Bool(value) => {
+            assert_eq!(source["kind"], "boolean", "{label}");
+            assert_eq!(Some(*value), source["value"].as_bool(), "{label}");
+        }
+        Input::Text(value) => assert_string(&String::from_utf16(value).unwrap(), source, label),
+        Input::Float(_) | Input::Lexeme(_) => {
+            assert_number(native.as_f64().unwrap(), source, label)
+        }
+        Input::Array(values) => {
+            assert_eq!(source["kind"], "array", "{label}");
+            let entries = source["entries"].as_array().unwrap();
+            assert_eq!(values.len(), entries.len(), "{label}_array_count");
+            for (value, expected) in values.iter().zip(entries) {
+                assert_retained(value, expected, label);
+            }
+        }
+        Input::Object(values) => {
+            assert_eq!(source["kind"], "object", "{label}");
+            let entries = source["entries"].as_array().unwrap();
+            assert_eq!(values.len(), entries.len(), "{label}_object_count");
+            for ((key, value), entry) in values.iter().zip(entries) {
+                assert_eq!(
+                    *key,
+                    entry[0]
+                        .as_str()
+                        .unwrap()
+                        .encode_utf16()
+                        .collect::<Vec<_>>(),
+                    "{label}_key_order"
+                );
+                assert_retained(value, &entry[1], label);
+            }
+        }
+    }
+}
 fn assert_order(order: &Order, source: &Value) {
     assert_eq!(
         source["entries"].as_array().unwrap().len(),
@@ -338,7 +382,7 @@ fn assert_order(order: &Order, source: &Value) {
     );
     assert!(order.time_in_force.is_none(), "order_native_time_in_force");
     assert_eq!(source_field(source, "timeInForce")["kind"], "undefined");
-    assert_json(
+    assert_retained(
         order.info.as_ref().unwrap(),
         source_field(source, "info"),
         "order_native_info",
@@ -551,8 +595,16 @@ fn actual_typescript_mapper_batch() {
     let order = map_order(raw.as_object().unwrap(), |ms| ms).unwrap();
     raw["extra"]["marker"] = json!("changed-after-map");
     assert_eq!(
-        order.info.as_ref().unwrap()["extra"]["marker"],
-        "raw-extra",
+        order
+            .info
+            .as_ref()
+            .unwrap()
+            .get("extra")
+            .unwrap()
+            .get("marker")
+            .unwrap()
+            .text_equals("raw-extra"),
+        true,
         "order_native_owned_info"
     );
     assert_eq!(

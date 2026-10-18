@@ -173,7 +173,10 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
         native.positions()[0].margin_type,
         Some(safe_cex_types::MarginType::Isolated)
     );
-    assert_eq!(native.positions()[0].info, Some(serde_json::Value::Null));
+    assert_eq!(
+        native.positions()[0].info,
+        Some(safe_cex_types::retained_json::RetainedJsonInput::Null)
+    );
     assert!(
         facade
             .call_method(
@@ -187,7 +190,7 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
         "explicit null is still refused as a numeric patch"
     );
     assert_eq!(native.positions()[0].leverage, 10.0);
-    for (value, expected) in [(42.0, json!(42.0)), (f64::NAN, json!(null))] {
+    for value in [42.0, f64::NAN] {
         facade
             .call_method(
                 "updatePosition",
@@ -198,9 +201,15 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
             )
             .unwrap();
         assert_eq!(
-            native.positions()[0].info,
-            Some(expected),
-            "opaque info keeps its JSON policy"
+            native.positions()[0]
+                .info
+                .as_ref()
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            value.to_bits(),
+            "opaque info retains native numeric bits"
         );
     }
     // An absent position remains absent: the numeric fix does not turn update into insertion.
