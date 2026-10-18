@@ -1,6 +1,7 @@
 //! E2E calls the production PhemexExchange through the typed Exchange contract.
 #[path = "support/binding_harness.rs"]
 mod support;
+use safe_cex_exchange::js_runtime::value::{Js, from_json};
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -684,7 +685,10 @@ fn dispose_runs_source_super_cleanup() {
         h.venue().base().is_disposed(),
         "source super call sets shared state"
     );
-    h.venue().base().emit("update", json!({})).unwrap();
+    h.venue()
+        .base()
+        .emit("update", from_json(&json!({})))
+        .unwrap();
     assert_eq!(
         observed.get(),
         0,

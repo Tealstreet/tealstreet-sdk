@@ -808,10 +808,25 @@ fn real_private_fill_frame_emits_native_fill() {
         json!({"s":"v1.fill","f":{"i":"BTC_USDT_Perp","ib":true,"s":"0.125","p":"50001","ti":"native-fill-42","co":"71","oi":"0xabcdef"}}),
     );
     assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0]["id"], "native-fill-42");
-    assert_eq!(fills.borrow()[0]["orderId"], "71");
-    assert_eq!(fills.borrow()[0]["symbol"], SYMBOL);
-    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(0.125));
+    assert!(fills.borrow()[0].get("id").unwrap().strict_equals(
+        &safe_cex_exchange::js_runtime::value::Js::str("native-fill-42")
+    ));
+    assert!(
+        fills.borrow()[0]
+            .get("orderId")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("71"))
+    );
+    assert!(
+        fills.borrow()[0]
+            .get("symbol")
+            .unwrap()
+            .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(SYMBOL))
+    );
+    assert_eq!(
+        fills.borrow()[0].get("amount").unwrap().as_f64(),
+        Some(0.125)
+    );
     h.venue().dispose().unwrap();
 }
 #[test]

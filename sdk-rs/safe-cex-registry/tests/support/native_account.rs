@@ -37,6 +37,7 @@ impl Account {
         )
         .await
         .map(crate::support::boundary_json)
+        .map_err(crate::support::boundary_json)
     }
     pub async fn ok(&self, method: &str, args: Value) -> Value {
         self.call(method, args)

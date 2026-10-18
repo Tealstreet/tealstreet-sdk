@@ -2,9 +2,9 @@
 #[path = "support/binding_harness.rs"]
 #[allow(dead_code)]
 mod support;
+use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_exchange::websocket::WsEvent;
 use safe_cex_types::ExchangeName;
-use serde_json::Value;
 use std::{cell::RefCell, rc::Rc};
 use support::{harness, options};
 
@@ -17,9 +17,11 @@ fn abnormal_closes_reconnect_at_the_minimum_delay_without_a_failure_pause() {
     let sink = logs.clone();
     h.venue().base().on(
         "log",
-        Rc::new(move |_, value: &Value| {
-            sink.borrow_mut()
-                .push(value.as_str().unwrap_or_default().to_owned());
+        Rc::new(move |_, value: &Js| {
+            sink.borrow_mut().push(
+                String::from_utf16(value.as_str().expect("source log message"))
+                    .expect("fixture log UTF16"),
+            );
             Ok(())
         }),
     );
