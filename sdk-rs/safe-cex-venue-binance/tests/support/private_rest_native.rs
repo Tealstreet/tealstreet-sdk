@@ -111,7 +111,7 @@ fn native_non_array_order_diagnostics_keep_unpaired_units_and_stringify_values()
         let EventValue::Array(rows) = rows else {
             panic!("native orders array")
         };
-        assert!(rows.borrow().is_empty());
+        assert!(rows.is_empty());
         assert_eq!(expected["rows"], 0);
         assert_eq!(expected["errors"], 0);
         assert_eq!(json!(*messages.borrow()), expected["log"]);
@@ -154,8 +154,8 @@ fn native_order_alias_lookup_does_not_traverse_unread_array_children() {
     let EventValue::Array(rows) = rows else {
         panic!("native orders array")
     };
-    assert_eq!(rows.borrow().len(), 1);
-    let row = rows.borrow()[0].clone().unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = EventValue::Array(rows.clone()).get("0").unwrap();
     assert!(row.get("id").unwrap().is_undefined());
     assert!(matches!(row.get("remaining").unwrap(), EventValue::Number(n) if n.is_nan()));
     let info = row.get("info").unwrap();
@@ -290,7 +290,7 @@ fn native_pm_order_errors_report_retained_cause_message_units() {
             }),
         );
         let rows = run(&runtime, owner.invoke(Method::Orders, vec![])).unwrap();
-        assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+        assert!(matches!(rows, EventValue::Array(ref rows) if rows.is_empty()));
         let mut expected_units = "Exchange Error: ".encode_utf16().collect::<Vec<_>>();
         expected_units.extend(
             expected["message"]
@@ -335,7 +335,7 @@ fn native_pm_repeated_error_warning_retains_message_units() {
         for _ in 0..2 {
             let rows = run(&runtime, owner.invoke(Method::Orders, vec![]))
                 .expect("source returns cached rows after each malformed snapshot");
-            assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+            assert!(matches!(rows, EventValue::Array(ref rows) if rows.is_empty()));
         }
         assert_eq!(logs.borrow().len(), 1);
         assert_eq!(json!(units(&logs.borrow()[0][0])), expected["log"][0]);

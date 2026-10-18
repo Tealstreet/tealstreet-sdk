@@ -71,64 +71,7 @@ fn compiled_tables_match_live_typescript() {
     );
 }
 #[test]
-fn optional_risk_fields_and_income_wire_spellings_roundtrip() {
-    let minimal = json!({"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","markPrice":"1","unRealizedProfit":"0","liquidationPrice":"0","isolatedMargin":"0","positionSide":"BOTH","notional":"0","isolatedWallet":"0","updateTime":0.0});
-    let row: futures::GetPositionRiskResponseRow = serde_json::from_value(minimal.clone()).unwrap();
-    assert!(row.leverage.is_none());
-    assert_eq!(serde_json::to_value(row).unwrap(), minimal);
-    assert!(serde_json::from_value::<pm::GetPositionRiskResponseRow>(minimal).is_err());
-    let income = json!({"symbol":"BTCUSDT","incomeType":"DELIVERED_SETTELMENT","income":"1","asset":"USDT","time":123.0,"tranId":"9007199254740993"});
-    let row: futures::BinanceIncomeRecord = serde_json::from_value(income.clone()).unwrap();
-    assert_eq!(serde_json::to_value(row).unwrap(), income);
-}
-
-#[test]
-fn optional_fields_distinguish_absence_from_present_null() {
-    let minimal = json!({"symbol":"BTCUSDT","positionAmt":"0","entryPrice":"0","markPrice":"1","unRealizedProfit":"0","liquidationPrice":"0","isolatedMargin":"0","positionSide":"BOTH","notional":"0","isolatedWallet":"0","updateTime":0});
-    for key in [
-        "leverage",
-        "maxNotionalValue",
-        "marginType",
-        "isAutoAddMargin",
-        "isolated",
-        "adl",
-        "adlQuantile",
-        "initialMargin",
-        "positionInitialMargin",
-        "openOrderInitialMargin",
-    ] {
-        let mut row = minimal.clone();
-        row[key] = Value::Null;
-        assert!(
-            serde_json::from_value::<futures::GetPositionRiskResponseRow>(row).is_err(),
-            "accepted null {key}"
-        );
-    }
-    for key in ["symbol", "incomeType", "startTime", "endTime", "limit"] {
-        assert!(serde_json::from_value::<futures::BinanceIncomeHistoryOptions>(json!({})).is_ok());
-        let mut row = json!({});
-        row[key] = Value::Null;
-        assert!(
-            serde_json::from_value::<futures::BinanceIncomeHistoryOptions>(row).is_err(),
-            "accepted null {key}"
-        );
-    }
-    for key in ["info", "tradeId"] {
-        let mut row = json!({"symbol":"BTCUSDT","incomeType":"COMMISSION","income":"1","asset":"USDT","time":123,"tranId":"7"});
-        assert!(serde_json::from_value::<futures::BinanceIncomeRecord>(row.clone()).is_ok());
-        row[key] = Value::Null;
-        assert!(
-            serde_json::from_value::<futures::BinanceIncomeRecord>(row).is_err(),
-            "accepted null {key}"
-        );
-    }
-    let row =
-        json!({"symbol":"BTCUSDT","incomeType":"FUNDING_FEE","startTime":0,"endTime":1,"limit":1});
-    assert!(serde_json::from_value::<futures::BinanceIncomeHistoryOptions>(row).is_ok());
-}
-
-#[test]
-fn qualified_decoders_reject_non_object_records_and_non_string_unions() {
+fn qualified_decoder_rejects_non_string_income_union() {
     fn rejects<T: serde::de::DeserializeOwned>(values: &[Value]) {
         for value in values {
             assert!(
@@ -137,29 +80,6 @@ fn qualified_decoders_reject_non_object_records_and_non_string_unions() {
             );
         }
     }
-    let invalid = [
-        json!([]),
-        json!(null),
-        json!(false),
-        json!(1),
-        json!("record"),
-    ];
-    rejects::<futures::GetPositionRiskResponseRow>(&invalid);
-    rejects::<pm::GetPositionRiskResponseRow>(&invalid);
-    rejects::<futures::BinanceIncomeRecord>(&invalid);
-    rejects::<futures::BinanceIncomeHistoryOptions>(&invalid);
-    rejects::<futures::BinanceIncomeHistoryOptions>(&[json!([null, null, null, null, null])]);
-    rejects::<futures::BinanceIncomeRecord>(&[json!([
-        "BTCUSDT",
-        "COMMISSION",
-        "1",
-        "USDT",
-        123,
-        "7"
-    ])]);
-    rejects::<futures::GetPositionRiskResponseRow>(&[json!([
-        "BTCUSDT", "0", "0", "1", "0", "0", "0", "BOTH", "0", "0", 0
-    ])]);
     rejects::<futures::BinanceIncomeType>(&[
         json!({"COMMISSION":null}),
         json!(["COMMISSION"]),

@@ -26,7 +26,7 @@ fn error(message: impl AsRef<str>) -> Thrown {
 }
 fn fields(value: &Js) -> Result<Vec<Js>, Thrown> {
     value
-        .array_items()
+        .array_items()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))?
         .into_iter()
         .map(|v| Ok(v.unwrap_or(Js::Undefined)))

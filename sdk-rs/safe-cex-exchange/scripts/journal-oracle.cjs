@@ -75,4 +75,29 @@ async function buildCases() {
  }
  assert.equal(out.length,12,'BUILD source case floor');return out;
 }
-buildCases().then(buildCases=>process.stdout.write(JSON.stringify({cases,direct,fundingRows,buildCases}))).catch(e=>{console.error(e);process.exitCode=1;});
+const orderingCases=[];
+for(const count of [24,32,64,128])for(let seed=1;seed<=32;seed++){
+ let state=seed;
+ const next=()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state;};
+ const fills=Array.from({length:count},(_,i)=>fill('buy',1,i+1,next()%3,
+  next()%3===0?undefined:String(next()%100),{orderId:String(i)}));
+ const result=api.reconstructPositionIntervals(fills);
+ assert.equal(result.length,1,'INTERVAL mixed IDs retain the open position');
+ assert.equal(result[0].maxSize,count,'INTERVAL mixed IDs retain every fill');
+ orderingCases.push({fills,intervals:observe(result)});
+}
+const nonfiniteCases=[];
+for(const count of [24,32,64,128])for(let seed=1;seed<=32;seed++){
+ let state=seed;
+ const next=()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state;};
+ const closingTimes=Array.from({length:count},()=>next()%3===0?NaN:next()%1000);
+ const fills=[
+  ...closingTimes.map((_,i)=>fill('buy',1,1,-1,String(i),{symbol:`CLOSE${i}`})),
+  ...closingTimes.map((at,i)=>fill('sell',1,2,at,String(i+count),{symbol:`CLOSE${i}`})),
+ ];
+ const result=api.reconstructPositionIntervals(fills);
+ assert.equal(result.length,count,'INTERVAL retains all nonfinite closes');
+ nonfiniteCases.push({fills:fills.map(row=>({...row,timestamp:0})),
+  timestamps:fills.map(row=>observe(row.timestamp)),intervals:observe(result)});
+}
+buildCases().then(buildCases=>process.stdout.write(JSON.stringify({cases,direct,fundingRows,buildCases,orderingCases,nonfiniteCases}))).catch(e=>{console.error(e);process.exitCode=1;});

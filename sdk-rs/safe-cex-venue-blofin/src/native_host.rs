@@ -827,7 +827,7 @@ impl PublicStreamHost for PublicHost {
                 };
                 let added = data
                     .get("added")?
-                    .array_values()
+                    .array_values()?
                     .unwrap_or_default()
                     .iter()
                     .filter_map(|row| row.get("id").ok())

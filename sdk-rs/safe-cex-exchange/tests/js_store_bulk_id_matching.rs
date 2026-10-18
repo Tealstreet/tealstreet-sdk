@@ -117,6 +117,7 @@ fn bulk_remove_selector_ids_match_source_property_keys_and_early_returns() {
             .get("orders")
             .unwrap()
             .array_values()
+            .expect("fixture array property reads")
             .unwrap()
             .iter()
             .map(|row| row.get("id").unwrap().to_display())

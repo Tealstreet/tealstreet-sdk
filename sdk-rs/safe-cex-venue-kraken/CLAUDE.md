@@ -617,3 +617,10 @@ a lone-unit unknown field through both real public sockets. The maintained
 onMessage oracle observes dispatch for all four source classes before JSON
 projection. These are socket ingress checks, not acceptance of every typed REST
 or utility projection in this crate.
+
+`NUMERIC_CHANGES_ALIAS_REVIEW.md` records the exact borrowed sequence decoder.
+`numeric-changes-contracts.mjs` authenticates its compiler identity and executes
+separate static text, qualified, borrowed Value and owned Value routes. Keep the
+general borrowed/owned guards intact. The constructed native socket witnesses
+and `numeric-changes-controls.py` observe both real ticker publication families;
+registered parity controls require named native identity/order/route failures.

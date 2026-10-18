@@ -9,7 +9,15 @@ fn observe(value: &Js) -> Value {
         return json!({"$bits":format!("{:016x}", number.to_bits())});
     }
     if value.is_array() {
-        return Value::Array(value.array_values().unwrap().iter().map(observe).collect());
+        return Value::Array(
+            value
+                .array_values()
+                .unwrap()
+                .expect("native array")
+                .iter()
+                .map(observe)
+                .collect(),
+        );
     }
     if value.is_object() {
         return Value::Object(

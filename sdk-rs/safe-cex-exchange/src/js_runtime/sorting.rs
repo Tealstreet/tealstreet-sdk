@@ -2,7 +2,7 @@
 use super::value::Thrown;
 use std::cmp::Ordering;
 
-pub(super) fn stable_sort<T: Clone>(
+pub(crate) fn stable_sort<T: Clone>(
     values: &mut [T],
     mut compare: impl FnMut(&T, &T) -> Result<Ordering, Thrown>,
 ) -> Result<(), Thrown> {

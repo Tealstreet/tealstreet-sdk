@@ -111,9 +111,14 @@ fn current_reads_the_live_exchange_and_store_slots() {
         rt.current("positions")
             .unwrap()
             .array_values()
+            .expect("fixture array property reads")
             .unwrap()
             .len(),
-        actual.array_values().unwrap().len()
+        actual
+            .array_values()
+            .expect("fixture array property reads")
+            .unwrap()
+            .len()
     );
     store
         .call_method(

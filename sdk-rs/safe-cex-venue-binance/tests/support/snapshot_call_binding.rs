@@ -74,7 +74,7 @@ fn actual_case(fail: bool) -> Case {
         }),
     );
     let rows = run(&runtime, owner.invoke(Method::Orders, vec![])).unwrap();
-    assert!(matches!(rows, EventValue::Array(ref rows) if rows.borrow().is_empty()));
+    assert!(matches!(rows, EventValue::Array(ref rows) if rows.is_empty()));
     let requests = requests.lock().unwrap();
     assert_eq!(
         requests.len(),

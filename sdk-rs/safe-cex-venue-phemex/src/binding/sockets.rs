@@ -540,7 +540,7 @@ impl private::SessionHost for Host {
         Ok(rows(s)?.len())
     }
     fn symbol_at(&mut self, s: &Js, i: usize) -> Result<Option<Js>, Thrown> {
-        Ok(s.array_items()
+        Ok(s.array_items()?
             .ok_or_else(|| Thrown::type_error("symbols.forEach is not a function"))?
             .get(i)
             .cloned()

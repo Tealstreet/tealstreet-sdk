@@ -76,7 +76,7 @@ fn call_async(h: &Realm, callee: V, args: Vec<V>) -> SigningResult<NativePromise
 
 /// The native list body of a bound array method. Array.prototype methods skip
 /// holes; a non-array receiver's own method is not a native body to run here.
-fn list(callee: &V, name: &str) -> SigningResult<Vec<Option<Js>>> {
+fn list(callee: &V, name: &str) -> SigningResult<(Js, usize)> {
     let callee = to_js(callee);
     let receiver = js(callee.get(RECEIVER))?;
     let member = js(callee.get(MEMBER))?;
@@ -86,43 +86,59 @@ fn list(callee: &V, name: &str) -> SigningResult<Vec<Option<Js>>> {
             receiver.type_of()
         ))));
     }
-    receiver.array_items().ok_or_else(|| {
-        to_signing(Thrown::type_error(&format!(
-            "{name} over a non-array {} receiver is not bound",
-            receiver.type_of()
-        )))
-    })
+    let Js::Array(array) = &receiver else {
+        return Err(to_signing(Thrown::type_error(&format!(
+            "{name} over a non-array receiver is not bound"
+        ))));
+    };
+    let length = array.len();
+    Ok((receiver, length))
 }
+
 fn map(_: &Realm, callee: V, f: &mut dyn FnMut(V) -> SigningResult<V>) -> SigningResult<V> {
+    let (receiver, length) = list(&callee, "map")?;
     let mut out = vec![];
-    for item in list(&callee, "map")? {
-        out.push(match item {
-            Some(item) => Some(to_js(&f(to_account(&item))?)),
-            None => None,
+    for index in 0..length {
+        out.push(if receiver.has_index(index) {
+            Some(to_js(&f(to_account(&js(
+                receiver.get(&index.to_string())
+            )?))?))
+        } else {
+            None
         });
     }
     Ok(to_account(&Js::holey_array(out)))
 }
 fn filter(_: &Realm, callee: V, f: &mut dyn FnMut(V) -> SigningResult<bool>) -> SigningResult<V> {
+    let (receiver, length) = list(&callee, "filter")?;
     let mut out = vec![];
-    for item in list(&callee, "filter")?.into_iter().flatten() {
-        if f(to_account(&item))? {
-            out.push(item);
+    for index in 0..length {
+        if receiver.has_index(index) {
+            let item = js(receiver.get(&index.to_string()))?;
+            if f(to_account(&item))? {
+                out.push(item);
+            }
         }
     }
     Ok(to_account(&Js::array(out)))
 }
 fn some(_: &Realm, callee: V, f: &mut dyn FnMut(V) -> SigningResult<V>) -> SigningResult<V> {
-    for item in list(&callee, "some")?.into_iter().flatten() {
-        if f(to_account(&item))?.truthy() {
+    let (receiver, length) = list(&callee, "some")?;
+    for index in 0..length {
+        if receiver.has_index(index)
+            && f(to_account(&js(receiver.get(&index.to_string()))?))?.truthy()
+        {
             return Ok(V::Boolean(true));
         }
     }
     Ok(V::Boolean(false))
 }
 fn for_each(_: &Realm, callee: V, f: &mut dyn FnMut(V) -> SigningResult<V>) -> SigningResult<V> {
-    for item in list(&callee, "forEach")?.into_iter().flatten() {
-        f(to_account(&item))?;
+    let (receiver, length) = list(&callee, "forEach")?;
+    for index in 0..length {
+        if receiver.has_index(index) {
+            f(to_account(&js(receiver.get(&index.to_string()))?))?;
+        }
     }
     Ok(V::Undefined)
 }
