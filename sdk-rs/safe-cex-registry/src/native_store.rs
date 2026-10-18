@@ -35,15 +35,18 @@ impl WorkerPortTimers for NativeStoreTimers {
         let sleep = self.runtime.sleep(delay);
         let runtime = self.runtime.clone();
         self.runtime
-            .spawn_local(Box::pin(async move {
-                match sleep.await {
-                    Ok(()) => callback(),
-                    Err(error) => runtime.report_exception(
-                        &error,
-                        &json!({"module":"native account Store timer"}).into(),
-                    ),
-                }
-            }))
+            .spawn_classified(
+                safe_cex_exchange::runtime::RuntimeTaskKind::Timer,
+                Box::pin(async move {
+                    match sleep.await {
+                        Ok(()) => callback(),
+                        Err(error) => runtime.report_exception(
+                            &error,
+                            &json!({"module":"native account Store timer"}).into(),
+                        ),
+                    }
+                }),
+            )
             .into()
     }
     fn clear_timeout(&self, timer: &Self::Timer) {
