@@ -1930,3 +1930,5 @@ native and typed slots share live order, unsubscription and first-error behavior
 StoreUpdateThrottle accepts a retained argument type while its existing StoreFrame
 constructor remains available. Native account delivery retains the Js argument
 through bursts and projects only when leading/trailing delivery actually runs.
+See [the delivery review](NATIVE_STORE_DELIVERY_REVIEW.md) for compiled controls,
+receipt-qualified replay results, and the separate Bybit options decode timeout.
